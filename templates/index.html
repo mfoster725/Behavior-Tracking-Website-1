@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Behavior Tracking System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Behavior Tracking System</h1>
+            <nav>
+                <button class="nav-btn active" data-view="period-entry">Period Entry</button>
+                <button class="nav-btn" data-view="entry">Daily Entry</button>
+                <button class="nav-btn" data-view="summary">Summary</button>
+                <button class="nav-btn" data-view="frenzy">Frenzy Stats</button>
+                <button class="nav-btn" data-view="import">Import Data</button>
+            </nav>
+        </header>
+
+        <!-- Period-Based Entry View -->
+        <div id="period-entry-view" class="view active">
+            <div class="form-section">
+                <h2>Period-Based Data Entry</h2>
+                <div class="period-selector">
+                    <div class="form-group">
+                        <label for="entry-date-input">Date:</label>
+                        <input type="date" id="entry-date-input" value="{{ date.today().isoformat() if date else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="period-select">Period:</label>
+                        <select id="period-select">
+                            <option value="">Select Period</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="location-input">Location:</label>
+                        <input type="text" id="location-input" placeholder="e.g., English, Math">
+                    </div>
+                    <button id="add-student-btn-period" class="btn-secondary">Add Student</button>
+                </div>
+
+                <div id="no-period-selected" class="info-message" style="display: none; padding: 40px; text-align: center; background: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                    <p>Please select a date and period to begin data entry.</p>
+                </div>
+
+                <div id="students-grid-container" style="display: none;">
+                    <div class="grid-header">
+                        <div class="grid-controls">
+                            <button id="save-period-btn" class="btn-primary">Save Period Data</button>
+                            <button id="clear-period-btn" class="btn-secondary">Clear All</button>
+                        </div>
+                    </div>
+                    <div id="students-grid" class="students-grid">
+                        <div id="students-header" class="students-header"></div>
+                        <div id="categories-grid" class="categories-grid"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Entry View -->
+        <div id="entry-view" class="view">
+            <div class="form-section">
+                <h2>Daily Overview Entry</h2>
+                <div class="daily-selector">
+                    <div class="form-group">
+                        <label for="daily-date-input">Date:</label>
+                        <input type="date" id="daily-date-input" value="{{ date.today().isoformat() if date else '' }}">
+                    </div>
+                    <button id="add-student-btn" class="btn-secondary">Add Student</button>
+                </div>
+
+                <div id="daily-no-students" class="info-message" style="display: none; padding: 40px; text-align: center;">
+                    <p>No students found. Click "Add Student" to create one.</p>
+                </div>
+
+                <div id="daily-grid-container" style="display: none;">
+                    <div class="grid-controls">
+                        <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
+                        <button id="clear-daily-all-btn" class="btn-secondary">Clear All</button>
+                    </div>
+                    <div id="daily-grid" class="daily-grid">
+                        <div id="daily-header" class="daily-header"></div>
+                        <div id="daily-body" class="daily-body"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary View -->
+        <div id="summary-view" class="view">
+            <div class="form-section">
+                <h2>Summary & Reports</h2>
+                <div class="form-group">
+                    <label for="summary-student-select">Student:</label>
+                    <select id="summary-student-select">
+                        <option value="">All Students</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="quarter-select">Quarter:</label>
+                    <select id="quarter-select">
+                        <option value="all">All Year</option>
+                        <option value="1">Quarter 1</option>
+                        <option value="2">Quarter 2</option>
+                        <option value="3">Quarter 3</option>
+                        <option value="4">Quarter 4</option>
+                    </select>
+                </div>
+                <button id="load-summary-btn" class="btn-primary">Load Summary</button>
+                
+                <div id="summary-results"></div>
+            </div>
+        </div>
+
+        <!-- Frenzy Stats View -->
+        <div id="frenzy-view" class="view">
+            <div class="form-section">
+                <h2>Frenzy Statistics</h2>
+                <div class="form-group">
+                    <label for="frenzy-student-select">Student:</label>
+                    <select id="frenzy-student-select">
+                        <option value="">All Students</option>
+                    </select>
+                </div>
+                <button id="load-frenzy-stats-btn" class="btn-primary">Load Statistics</button>
+                
+                <div id="frenzy-results"></div>
+            </div>
+        </div>
+
+        <!-- Import View -->
+        <div id="import-view" class="view">
+            <div class="form-section">
+                <h2>Import CSV Data</h2>
+                <p>Import your existing CSV files to migrate data into the new system.</p>
+                
+                <div class="form-group">
+                    <label for="csv-file-type">File Type:</label>
+                    <select id="csv-file-type">
+                        <option value="point_card">Point Card CSV</option>
+                        <option value="frenzy">Frenzy CSV</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="csv-file">Select CSV File:</label>
+                    <input type="file" id="csv-file" accept=".csv">
+                </div>
+                
+                <button id="import-csv-btn" class="btn-primary">Import CSV</button>
+                
+                <div id="import-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Student Modal -->
+    <div id="student-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Add New Student</h2>
+            <div class="form-group">
+                <label for="student-name">Name:</label>
+                <input type="text" id="student-name" required>
+            </div>
+            <div class="form-group">
+                <label for="student-email">Email:</label>
+                <input type="email" id="student-email">
+            </div>
+            <button id="save-student-btn" class="btn-primary">Save Student</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
+
