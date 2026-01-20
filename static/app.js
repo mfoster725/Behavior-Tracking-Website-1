@@ -18,6 +18,26 @@ const STANDARD_PERIODS = [
     { time: 'PM Bus', location: 'Bus' }
 ];
 
+// Schedule periods for the schedules tab - automatically loaded in teacher and student schedule tables
+const SCHEDULE_PERIODS = [
+    'AM Bus',
+    '7:45-8:30',
+    '8:30-9:00',
+    '9:00-9:30',
+    '9:30-10:00',
+    '10:00-10:30',
+    '10:30-11:00',
+    '11:00-11:30',
+    '11:30-12:00',
+    '12:00-12:30',
+    '12:30-1:00',
+    '1:00-1:30',
+    '1:30-2:00',
+    '2:00-2:30',
+    '2:30-2:45',
+    'PM Bus'
+];
+
 const INFRACTION_TYPES = {
     general: ['Lang', 'NFD', 'Off Task', 'MYOB', 'Self Control', 'Shutdown', 'Volume', 'Attention Seeking', 'Refusal', 'Personal Space'],
     harmful: ['Walk', 'Aggression', 'Property Destruction', 'Sexual Reference', 'Threat', 'Disrespectful']
@@ -26,15 +46,240 @@ const INFRACTION_TYPES = {
 let currentStudentId = null;
 let currentDate = new Date().toISOString().split('T')[0];
 let currentPeriod = null;
+let currentClass = ''; // Track selected class for period entry
 let currentLocation = '';
 let allStudents = [];
+let filteredStudentsForPeriod = []; // Students filtered by staff member and period for period entry view
+let allStaffMembers = []; // Store staff users for team member dropdowns
 let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
+let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
+let dailyEntrySearchQuery = ''; // Current search text for daily entry
+let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
+let filteredDailyStudents = []; // Filtered list of students for daily entry display
+let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
+
+// Load submitted students from localStorage or initialize empty
+function loadSubmittedStudents() {
+    try {
+        const stored = localStorage.getItem('submittedStudents');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            // Convert arrays back to Sets
+            const result = {};
+            for (const date in parsed) {
+                result[date] = new Set(parsed[date]);
+            }
+            return result;
+        }
+    } catch (e) {
+        console.error('Error loading submitted students from localStorage:', e);
+    }
+    return {};
+}
+
+function saveSubmittedStudents(submittedStudents) {
+    try {
+        // Convert Sets to arrays for JSON serialization
+        const toSave = {};
+        for (const date in submittedStudents) {
+            toSave[date] = Array.from(submittedStudents[date]);
+        }
+        localStorage.setItem('submittedStudents', JSON.stringify(toSave));
+    } catch (e) {
+        console.error('Error saving submitted students to localStorage:', e);
+    }
+}
+
+let submittedStudents = loadSubmittedStudents(); // Track submitted students by date: submittedStudents[date] = Set of student IDs
+
+// Load quarter dates from localStorage or use defaults
+function loadQuarterDates() {
+    try {
+        const stored = localStorage.getItem('quarterDates');
+        if (stored) {
+            return JSON.parse(stored);
+        }
+    } catch (e) {
+        console.error('Error loading quarter dates from localStorage:', e);
+    }
+    // Default quarter dates (MM/DD/YYYY format)
+    const currentYear = new Date().getFullYear();
+    const nextYear = currentYear + 1;
+    return {
+        '1': { start: `08/01/${currentYear}`, end: `10/31/${currentYear}`, label: 'Quarter 1' },
+        '2': { start: `11/01/${currentYear}`, end: `01/31/${nextYear}`, label: 'Quarter 2' },
+        '3': { start: `02/01/${nextYear}`, end: `04/30/${nextYear}`, label: 'Quarter 3' },
+        '4': { start: `05/01/${nextYear}`, end: `07/31/${nextYear}`, label: 'Quarter 4' }
+    };
+}
+
+// Get current school year (August to August)
+function getCurrentSchoolYear() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1; // JavaScript months are 0-indexed
+    
+    if (month >= 8) {  // August to December
+        return `${year}-${year + 1}`;
+    } else {  // January to July
+        return `${year - 1}-${year}`;
+    }
+}
+
+// Load school year dates - automatically calculated (August to August)
+function loadSchoolYearDates() {
+    const currentSchoolYear = getCurrentSchoolYear();
+    const [startYear, endYear] = currentSchoolYear.split('-').map(Number);
+    return {
+        label: currentSchoolYear,
+        start: `08/01/${startYear}`,
+        end: `07/31/${endYear}`
+    };
+}
+
+// Format month key from "YYYY-MM" to "MonthName YY"
+function formatMonthKey(monthKey) {
+    try {
+        const [year, month] = monthKey.split('-').map(Number);
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const yearShort = String(year).slice(-2);
+        return `${monthNames[month - 1]} ${yearShort}`;
+    } catch (e) {
+        return monthKey; // Return original if parsing fails
+    }
+}
+
+function saveSchoolYearDates(schoolYearDates) {
+    try {
+        localStorage.setItem('schoolYearDates', JSON.stringify(schoolYearDates));
+    } catch (e) {
+        console.error('Error saving school year dates to localStorage:', e);
+    }
+}
+
+// Helper function to convert MM/DD/YYYY to MM-DD format for backend
+function extractMMDD(dateStr) {
+    if (!dateStr) return '';
+    // If already in MM-DD format, return as is
+    if (dateStr.includes('-') && dateStr.length === 5) {
+        return dateStr;
+    }
+    // If in MM/DD/YYYY format, extract MM-DD
+    if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        if (parts.length >= 2) {
+            return `${parts[0]}-${parts[1]}`;
+        }
+    }
+    return dateStr;
+}
+
+function convertSchoolYearDatesForBackend(schoolYearDates) {
+    if (!schoolYearDates) return { start: '08-01', end: '07-31' };
+    
+    return {
+        start: extractMMDD(schoolYearDates.start),
+        end: extractMMDD(schoolYearDates.end)
+    };
+}
+
+// Helper function to convert quarter dates from MM/DD/YYYY to MM-DD format for backend
+function convertQuarterDatesForBackend(quarterDates) {
+    if (!quarterDates) {
+        // Return defaults
+        return {
+            '1': { start: '08-01', end: '10-31', label: 'Quarter 1' },
+            '2': { start: '11-01', end: '01-31', label: 'Quarter 2' },
+            '3': { start: '02-01', end: '04-30', label: 'Quarter 3' },
+            '4': { start: '05-01', end: '07-31', label: 'Quarter 4' }
+        };
+    }
+    
+    const converted = {};
+    for (const [quarter, dates] of Object.entries(quarterDates)) {
+        converted[quarter] = {
+            start: extractMMDD(dates.start),
+            end: extractMMDD(dates.end),
+            label: dates.label || `Quarter ${quarter}`
+        };
+    }
+    return converted;
+}
+
+function saveQuarterDates(quarterDates) {
+    try {
+        localStorage.setItem('quarterDates', JSON.stringify(quarterDates));
+    } catch (e) {
+        console.error('Error saving quarter dates to localStorage:', e);
+    }
+}
+
+function getCurrentQuarter(date) {
+    const quarterDates = loadQuarterDates();
+    const dateObj = new Date(date);
+    const month = dateObj.getMonth() + 1; // 1-12
+    const day = dateObj.getDate();
+    const dateStr = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    for (const [quarter, dates] of Object.entries(quarterDates)) {
+        // Extract MM-DD from MM/DD/YYYY format if needed
+        let start = extractMMDD(dates.start);
+        let end = extractMMDD(dates.end);
+        
+        // Handle quarters that span across years (e.g., Q2: Nov-Jan)
+        if (start <= end) {
+            // Normal quarter within same year
+            if (dateStr >= start && dateStr <= end) {
+                return dates.label;
+            }
+        } else {
+            // Quarter spans across years
+            if (dateStr >= start || dateStr <= end) {
+                return dates.label;
+            }
+        }
+    }
+    
+    return 'Unknown Quarter';
+}
+
+function updateQuarterDisplay() {
+    const quarterValue = document.getElementById('quarter-value');
+    if (quarterValue && currentDate) {
+        quarterValue.textContent = getCurrentQuarter(currentDate);
+    }
+}
+
+let quarterDates = loadQuarterDates();
+
+// Check if user is staff
+function isStaff() {
+    return window.currentUser && window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff;
+}
+
+function isOutsideStaff() {
+    return window.currentUser && window.currentUser.role === 'staff' && window.currentUser.is_outside_staff;
+}
+
+function isStudent() {
+    return window.currentUser && window.currentUser.role === 'student';
+}
+
+function isAdmin() {
+    return window.currentUser && window.currentUser.role === 'admin';
+}
+
+function canEdit() {
+    return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     try {
         console.log('Initializing Behavior Tracking System...');
+        console.log('Current user:', window.currentUser);
         
         // Set default date if not already set
         const dateInput = document.getElementById('date-input');
@@ -55,11 +300,24 @@ document.addEventListener('DOMContentLoaded', () => {
             dailyDateInput.value = new Date().toISOString().split('T')[0];
         }
         
+        // Initialize submitted students tracking for current date if not already loaded
+        if (!submittedStudents[currentDate]) {
+            submittedStudents[currentDate] = new Set();
+        }
+        
         loadStudents();
         setupEventListeners();
         
         // Set up period selector
         setupPeriodSelector();
+        
+        // Update quarter display
+        updateQuarterDisplay();
+        
+        // Load teacher schedule and auto-select period if in period-entry view
+        if (canEdit()) {
+            loadSchedules('teacher');
+        }
         
         console.log('Initialization complete');
     } catch (error) {
@@ -111,16 +369,97 @@ function setupEventListeners() {
         if (periodSelect) {
             periodSelect.addEventListener('change', (e) => {
                 currentPeriod = e.target.value;
+                currentClass = ''; // Reset class selection
                 console.log('Period selected:', currentPeriod);
                 
-                // Auto-fill location based on period
-                const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
+                // Check for multiple classes at this time period
+                const classSelectorGroup = document.getElementById('class-selector-group');
+                const classSelect = document.getElementById('class-select');
                 const locationInput = document.getElementById('location-input');
-                if (locationInput && selectedPeriod) {
-                    locationInput.value = selectedPeriod.location;
-                    currentLocation = selectedPeriod.location;
+                
+                if (teacherScheduleData && teacherScheduleData.length > 0) {
+                    // Find all classes for this time period
+                    const classesForPeriod = teacherScheduleData
+                        .filter(s => s && s.time_period === currentPeriod && s.class_name)
+                        .map(s => s.class_name)
+                        .filter((name, index, self) => self.indexOf(name) === index); // Get unique class names
+                    
+                    if (classesForPeriod.length > 1) {
+                        // Multiple classes - show selector
+                        if (classSelectorGroup) classSelectorGroup.style.display = 'block';
+                        if (classSelect) {
+                            classSelect.innerHTML = '<option value="">Select Class</option>';
+                            classesForPeriod.forEach(className => {
+                                const option = document.createElement('option');
+                                option.value = className;
+                                option.textContent = className;
+                                classSelect.appendChild(option);
+                            });
+                            classSelect.value = '';
+                        }
+                        if (locationInput) {
+                            locationInput.value = '';
+                            currentLocation = '';
+                        }
+                        // Don't load data until class is selected
+                        filteredStudentsForPeriod = [];
+                        renderStudentsGrid();
+                    } else {
+                        // Single class or none - hide selector and auto-fill
+                        if (classSelectorGroup) classSelectorGroup.style.display = 'none';
+                        if (classSelect) classSelect.value = '';
+                        
+                        const scheduleItem = teacherScheduleData.find(s => s && s.time_period === currentPeriod);
+                        if (scheduleItem && scheduleItem.class_name) {
+                            currentClass = scheduleItem.class_name;
+                            if (locationInput) {
+                                locationInput.value = scheduleItem.class_name;
+                                currentLocation = scheduleItem.class_name;
+                            }
+                        } else {
+                            // Fall back to standard periods
+                            const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
+                            if (selectedPeriod) {
+                                currentClass = '';
+                                if (locationInput) {
+                                    locationInput.value = selectedPeriod.location;
+                                    currentLocation = selectedPeriod.location;
+                                }
+                            }
+                        }
+                        
+                        // Load data after setting class
+                        loadPeriodData();
+                    }
+                } else {
+                    // No schedule data - hide selector and use defaults
+                    if (classSelectorGroup) classSelectorGroup.style.display = 'none';
+                    if (classSelect) classSelect.value = '';
+                    const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
+                    if (selectedPeriod && locationInput) {
+                        locationInput.value = selectedPeriod.location;
+                        currentLocation = selectedPeriod.location;
+                    }
+                    loadPeriodData();
+                }
+            });
+        }
+        
+        // Class selector for period entry
+        const classSelect = document.getElementById('class-select');
+        if (classSelect) {
+            classSelect.addEventListener('change', (e) => {
+                currentClass = e.target.value;
+                console.log('Class selected:', currentClass);
+                
+                // Auto-fill location with selected class
+                const locationInput = document.getElementById('location-input');
+                if (locationInput && currentClass) {
+                    locationInput.value = currentClass;
+                    currentLocation = currentClass;
                 }
                 
+                // Reload students for this class
                 loadPeriodData();
             });
         }
@@ -159,9 +498,39 @@ function setupEventListeners() {
             dailyDateInput.addEventListener('change', (e) => {
                 currentDate = e.target.value;
                 console.log('Daily date changed:', currentDate);
+                
+                // Clear submitted students tracking when date changes
+                if (!submittedStudents[currentDate]) {
+                    submittedStudents[currentDate] = new Set();
+                }
+                
+                // Update quarter display
+                updateQuarterDisplay();
+                
                 if (allStudents.length > 0) {
                     loadDailyData();
                 }
+            });
+        }
+
+        // Daily entry search input with autocomplete
+        const dailySearchInput = document.getElementById('daily-search-input');
+        if (dailySearchInput) {
+            setupDailySearchAutocomplete(dailySearchInput);
+            dailySearchInput.addEventListener('input', async (e) => {
+                dailyEntrySearchQuery = e.target.value;
+                console.log('Daily search query changed:', dailyEntrySearchQuery);
+                await loadDailyData();
+            });
+        }
+
+        // Daily entry "managed by me" checkbox
+        const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
+        if (dailyManagedByMeCheckbox) {
+            dailyManagedByMeCheckbox.addEventListener('change', async (e) => {
+                dailyEntryManagedByMe = e.target.checked;
+                console.log('Daily managed by me checkbox changed:', dailyEntryManagedByMe);
+                await loadDailyData();
             });
         }
 
@@ -208,16 +577,24 @@ function setupEventListeners() {
 
         const addStudentBtn = document.getElementById('add-student-btn');
         if (addStudentBtn) {
-            addStudentBtn.addEventListener('click', () => {
+            addStudentBtn.addEventListener('click', async () => {
                 console.log('Add student button clicked');
-                document.getElementById('student-modal').style.display = 'block';
-            });
-        }
-
-        const addStudentBtnPeriod = document.getElementById('add-student-btn-period');
-        if (addStudentBtnPeriod) {
-            addStudentBtnPeriod.addEventListener('click', () => {
-                console.log('Add student button clicked (period view)');
+                // Clear all fields
+                document.getElementById('student-name').value = '';
+                document.getElementById('student-email').value = '';
+                document.getElementById('student-grade').value = '';
+                document.getElementById('student-username').value = '';
+                document.getElementById('student-password').value = '';
+                // Set up team member button handlers
+                setupTeamMemberButtons();
+                
+                // Initialize team member containers with empty rows
+                populateTeamMemberRows('case-manager-container', [], ['case_manager', 'teacher']);
+                populateTeamMemberRows('practitioner-container', [], ['practitioner']);
+                populateTeamMemberRows('professional-container', [], ['professional']);
+                populateTeamMemberRows('group-leader-container', [], ['group_leader']);
+                populateTeamMemberRows('paraprofessional-container', [], ['paraprofessional']);
+                
                 document.getElementById('student-modal').style.display = 'block';
             });
         }
@@ -241,6 +618,94 @@ function setupEventListeners() {
         } else {
             console.warn('load-summary-btn not found');
         }
+        
+        const printSummaryBtn = document.getElementById('print-summary-btn');
+        if (printSummaryBtn) {
+            printSummaryBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Print summary button clicked');
+                console.log('Button disabled?', printSummaryBtn.disabled);
+                if (printSummaryBtn.disabled) {
+                    alert('Please load summary data first before generating PDF.');
+                    return;
+                }
+                console.log('Calling showPdfTableSelectionModal...');
+                const pdfModalFunc = window.showPdfTableSelectionModal || showPdfTableSelectionModal;
+                console.log('Function exists?', typeof pdfModalFunc);
+                if (typeof pdfModalFunc === 'function') {
+                    try {
+                        pdfModalFunc('summary');
+                    } catch (error) {
+                        console.error('Error in print summary handler:', error);
+                        alert('Error opening PDF options: ' + (error.message || 'Unknown error'));
+                    }
+                } else {
+                    console.error('showPdfTableSelectionModal is not a function');
+                    alert('PDF modal function not available. Please refresh the page.');
+                }
+            });
+        } else {
+            console.warn('print-summary-btn not found');
+        }
+        
+        const compareCaseManagersBtn = document.getElementById('compare-case-managers-btn');
+        if (compareCaseManagersBtn) {
+            compareCaseManagersBtn.addEventListener('click', () => {
+                console.log('Compare case managers button clicked');
+                loadCaseManagerComparison();
+            });
+        } else {
+            console.warn('compare-case-managers-btn not found');
+        }
+        
+        // Make period and timeframe dropdowns mutually exclusive for summary
+        const summaryPeriodSelect = document.getElementById('summary-period-select');
+        const summaryTimeframeSelect = document.getElementById('quarter-select');
+        if (summaryPeriodSelect && summaryTimeframeSelect) {
+            summaryPeriodSelect.addEventListener('change', () => {
+                if (summaryPeriodSelect.value) {
+                    summaryTimeframeSelect.value = '';
+                }
+            });
+            summaryTimeframeSelect.addEventListener('change', () => {
+                if (summaryTimeframeSelect.value) {
+                    summaryPeriodSelect.value = '';
+                }
+            });
+        }
+        
+        const managedByMeCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+        if (managedByMeCheckbox) {
+            managedByMeCheckbox.addEventListener('change', async () => {
+                console.log('Managed by me checkbox changed:', managedByMeCheckbox.checked);
+                const summarySelect = document.getElementById('summary-student-select');
+                const currentSelection = summarySelect ? summarySelect.value : null;
+                
+                // Reload summary students dropdown with filter
+                await loadStudents(managedByMeCheckbox.checked, true);
+                
+                // If a student was selected, check if it still exists in the filtered list
+                if (currentSelection && summarySelect) {
+                    const optionExists = Array.from(summarySelect.options).some(opt => opt.value === currentSelection);
+                    if (!optionExists) {
+                        // Selected student is no longer in the filtered list, clear selection
+                        summarySelect.value = '';
+                        console.log('Cleared student selection - student not in filtered list');
+                    }
+                }
+            });
+        }
+        
+        const showPointCardBtn = document.getElementById('show-point-card-btn');
+        if (showPointCardBtn) {
+            showPointCardBtn.addEventListener('click', () => {
+                console.log('Show point card data button clicked');
+                loadPointCardData();
+            });
+        } else {
+            console.warn('show-point-card-btn not found');
+        }
 
         const loadFrenzyStatsBtn = document.getElementById('load-frenzy-stats-btn');
         if (loadFrenzyStatsBtn) {
@@ -251,6 +716,74 @@ function setupEventListeners() {
         } else {
             console.warn('load-frenzy-stats-btn not found');
         }
+        
+        const printFrenzyBtn = document.getElementById('print-frenzy-btn');
+        if (printFrenzyBtn) {
+            printFrenzyBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Print frenzy stats button clicked');
+                console.log('Button disabled?', printFrenzyBtn.disabled);
+                if (printFrenzyBtn.disabled) {
+                    alert('Please load frenzy statistics data first before generating PDF.');
+                    return;
+                }
+                console.log('Calling showPdfTableSelectionModal...');
+                const pdfModalFunc = window.showPdfTableSelectionModal || showPdfTableSelectionModal;
+                console.log('Function exists?', typeof pdfModalFunc);
+                if (typeof pdfModalFunc === 'function') {
+                    try {
+                        pdfModalFunc('frenzy');
+                    } catch (error) {
+                        console.error('Error in print frenzy handler:', error);
+                        alert('Error opening PDF options: ' + (error.message || 'Unknown error'));
+                    }
+                } else {
+                    console.error('showPdfTableSelectionModal is not a function');
+                    alert('PDF modal function not available. Please refresh the page.');
+                }
+            });
+        } else {
+            console.warn('print-frenzy-btn not found');
+        }
+        
+        // Make period and timeframe dropdowns mutually exclusive for frenzy
+        const frenzyPeriodSelect = document.getElementById('frenzy-period-select');
+        const frenzyTimeframeSelect = document.getElementById('frenzy-timeframe-select');
+        if (frenzyPeriodSelect && frenzyTimeframeSelect) {
+            frenzyPeriodSelect.addEventListener('change', () => {
+                if (frenzyPeriodSelect.value) {
+                    frenzyTimeframeSelect.value = '';
+                }
+            });
+            frenzyTimeframeSelect.addEventListener('change', () => {
+                if (frenzyTimeframeSelect.value) {
+                    frenzyPeriodSelect.value = '';
+                }
+            });
+        }
+        
+        const frenzyManagedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+        if (frenzyManagedByMeCheckbox) {
+            frenzyManagedByMeCheckbox.addEventListener('change', async () => {
+                console.log('Frenzy managed by me checkbox changed:', frenzyManagedByMeCheckbox.checked);
+                const frenzySelect = document.getElementById('frenzy-student-select');
+                const currentSelection = frenzySelect ? frenzySelect.value : null;
+                
+                // Reload students - update all dropdowns (summary and frenzy share the same source)
+                await loadStudents(frenzyManagedByMeCheckbox.checked, false);
+                
+                // If a student was selected, check if it still exists in the filtered list
+                if (currentSelection && frenzySelect) {
+                    const optionExists = Array.from(frenzySelect.options).some(opt => opt.value === currentSelection);
+                    if (!optionExists) {
+                        // Selected student is no longer in the filtered list, clear selection
+                        frenzySelect.value = '';
+                        console.log('Cleared frenzy student selection - student not in filtered list');
+                    }
+                }
+            });
+        }
 
         const importCsvBtn = document.getElementById('import-csv-btn');
         if (importCsvBtn) {
@@ -260,6 +793,105 @@ function setupEventListeners() {
             });
         } else {
             console.warn('import-csv-btn not found');
+        }
+
+        // Admin panel buttons
+        const addStaffBtn = document.getElementById('add-staff-btn');
+        if (addStaffBtn) {
+            addStaffBtn.addEventListener('click', () => {
+                document.getElementById('staff-modal').style.display = 'block';
+            });
+        }
+
+        const addOutsideStaffBtn = document.getElementById('add-outside-staff-btn');
+        if (addOutsideStaffBtn) {
+            addOutsideStaffBtn.addEventListener('click', () => {
+                document.getElementById('outside-staff-modal').style.display = 'block';
+            });
+        }
+
+        const addAdminBtn = document.getElementById('add-admin-btn');
+        if (addAdminBtn) {
+            addAdminBtn.addEventListener('click', () => {
+                document.getElementById('admin-modal').style.display = 'block';
+            });
+        }
+
+        const createStaffAccountBtn = document.getElementById('create-staff-account-btn');
+        if (createStaffAccountBtn) {
+            createStaffAccountBtn.addEventListener('click', () => {
+                document.getElementById('staff-modal').style.display = 'block';
+            });
+        }
+        
+        const saveQuarterDatesBtn = document.getElementById('save-quarter-dates-btn');
+        if (saveQuarterDatesBtn) {
+            saveQuarterDatesBtn.addEventListener('click', saveQuarterDatesConfig);
+        }
+        
+
+        const createAdminAccountBtn = document.getElementById('create-admin-account-btn');
+        if (createAdminAccountBtn) {
+            createAdminAccountBtn.addEventListener('click', () => {
+                document.getElementById('admin-modal').style.display = 'block';
+            });
+        }
+
+        const saveStaffUserBtn = document.getElementById('save-staff-user-btn');
+        if (saveStaffUserBtn) {
+            saveStaffUserBtn.addEventListener('click', () => {
+                saveStaffUser();
+            });
+        }
+
+        const saveOutsideStaffUserBtn = document.getElementById('save-outside-staff-user-btn');
+        if (saveOutsideStaffUserBtn) {
+            saveOutsideStaffUserBtn.addEventListener('click', () => {
+                saveOutsideStaffUser();
+            });
+        }
+
+        const saveAdminUserBtn = document.getElementById('save-admin-user-btn');
+        if (saveAdminUserBtn) {
+            saveAdminUserBtn.addEventListener('click', () => {
+                saveAdminUser();
+            });
+        }
+
+        const saveEditUserBtn = document.getElementById('save-edit-user-btn');
+        if (saveEditUserBtn) {
+            saveEditUserBtn.addEventListener('click', () => {
+                saveEditUser();
+            });
+        }
+
+        // Handle role change in edit user modal
+        const editUserRoleSelect = document.getElementById('edit-user-role');
+        if (editUserRoleSelect) {
+            editUserRoleSelect.addEventListener('change', (e) => {
+                const teamSection = document.getElementById('edit-user-team-section');
+                const gradeGroup = document.getElementById('edit-user-grade-group');
+                const studentId = document.getElementById('edit-user-student-id').value;
+                const selectedRole = e.target.value;
+                
+                // Show team section and grade for students
+                if (selectedRole === 'Student') {
+                    if (studentId) {
+                        teamSection.style.display = 'block';
+                    }
+                    gradeGroup.style.display = 'block';
+                } else {
+                    teamSection.style.display = 'none';
+                    gradeGroup.style.display = 'none';
+                }
+            });
+        }
+
+        const refreshUsersBtn = document.getElementById('refresh-users-btn');
+        if (refreshUsersBtn) {
+            refreshUsersBtn.addEventListener('click', () => {
+                loadUsers();
+            });
         }
 
         // Modal close
@@ -276,6 +908,24 @@ function setupEventListeners() {
             if (e.target.id === 'student-modal') {
                 document.getElementById('student-modal').style.display = 'none';
             }
+            if (e.target.id === 'info-modal') {
+                closeInfoModal();
+            }
+            if (e.target.id === 'staff-modal') {
+                document.getElementById('staff-modal').style.display = 'none';
+            }
+            if (e.target.id === 'outside-staff-modal') {
+                document.getElementById('outside-staff-modal').style.display = 'none';
+            }
+            if (e.target.id === 'admin-modal') {
+                document.getElementById('admin-modal').style.display = 'none';
+            }
+            if (e.target.id === 'edit-user-modal') {
+                document.getElementById('edit-user-modal').style.display = 'none';
+            }
+            if (e.target.id === 'pdf-table-selection-modal') {
+                closePdfTableSelectionModal();
+            }
         });
 
         console.log('Event listeners set up successfully');
@@ -285,7 +935,7 @@ function setupEventListeners() {
     }
 }
 
-function switchView(viewName) {
+async function switchView(viewName) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     
@@ -299,16 +949,182 @@ function switchView(viewName) {
         navButton.classList.add('active');
     }
     
-    // If switching to period entry view, reload data
-    if (viewName === 'period-entry' && currentPeriod) {
-        loadPeriodData();
+    // If switching to period entry view, load teacher schedule and auto-select period
+    if (viewName === 'period-entry') {
+        // Load teacher schedule if user is staff/admin
+        if (canEdit()) {
+            loadSchedules('teacher');
+        }
+        // If period is already selected, reload data
+        if (currentPeriod) {
+            loadPeriodData();
+        }
     }
     
     // If switching to daily entry view, reload data
     if (viewName === 'entry') {
+        // Ensure staff members are loaded for search functionality
+        if (allStaffMembers.length === 0) {
+            await loadUsers();
+        }
+        // Ensure filteredDailyStudents is initialized
+        if (!filteredDailyStudents || filteredDailyStudents.length === 0) {
+            filteredDailyStudents = [...allStudents];
+        }
         loadDailyData();
     }
+    
+    // If switching to summary view, reload summary data
+    if (viewName === 'summary') {
+        // Automatically check the "Show students managed by me" checkbox
+        const summaryManagedByMeCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+        if (summaryManagedByMeCheckbox && !summaryManagedByMeCheckbox.checked) {
+            summaryManagedByMeCheckbox.checked = true;
+            // Trigger the change event to update the student list
+            summaryManagedByMeCheckbox.dispatchEvent(new Event('change'));
+        }
+        
+        // Check if summary has been loaded before (has student/quarter selected)
+        const summaryStudentSelect = document.getElementById('summary-student-select');
+        const quarterSelect = document.getElementById('quarter-select');
+        if (summaryStudentSelect && quarterSelect) {
+            // Reload summary if there's a quarter selected
+            if (quarterSelect.value) {
+                loadSummary();
+            }
+        }
+    }
+    
+    // If switching to frenzy view, reload frenzy stats if timeframe is selected
+    if (viewName === 'frenzy') {
+        // Automatically check the "Show students managed by me" checkbox
+        const frenzyManagedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+        if (frenzyManagedByMeCheckbox && !frenzyManagedByMeCheckbox.checked) {
+            frenzyManagedByMeCheckbox.checked = true;
+            // Trigger the change event to update the student list
+            frenzyManagedByMeCheckbox.dispatchEvent(new Event('change'));
+        }
+        
+        const timeframeSelect = document.getElementById('frenzy-timeframe-select');
+        if (timeframeSelect && timeframeSelect.value) {
+            loadFrenzyStats();
+        }
+    }
+    
+    // If switching to users view, load users
+    if (viewName === 'users') {
+        loadUsers();
+    }
+    
+    // If switching to admin view, load users and stats
+    if (viewName === 'admin') {
+        loadUsers();
+        loadQuarterConfig();
+        loadSchoolYearConfig();
+    }
+    
+    // If switching to schedules view, initialize schedules
+    if (viewName === 'schedules') {
+        // Load students to ensure dropdown is up to date
+        loadStudents();
+        // Load users to populate staff members for dropdown
+        loadUsers().then(() => {
+            // Update staff datalist after users are loaded
+            updateStaffDatalist();
+        });
+        // Load teacher schedule if user is staff or admin
+        // Use setTimeout to ensure DOM is ready after view is activated
+        setTimeout(() => {
+            if (canEdit()) {
+                // Always render teacher schedule immediately with default periods
+                // This ensures the periods are shown even before API call completes
+                renderTeacherSchedule();
+                // Also try to load from API (will update if saved data exists)
+                loadSchedules('teacher');
+            }
+            // Always render student schedule table with default periods, even if no student is selected
+            // This ensures the table is visible with the three columns (Time, Class, Staff)
+            renderStudentSchedule();
+            // If a student is selected, also try to load from API (will update if saved data exists)
+            if (currentScheduleStudentId) {
+                loadSchedules('student', currentScheduleStudentId);
+            }
+        }, 0);
+    }
 }
+
+function loadQuarterConfig() {
+    const container = document.getElementById('quarter-config');
+    if (!container) return;
+    
+    const quarters = loadQuarterDates();
+    
+    let html = '';
+    for (const [quarter, dates] of Object.entries(quarters)) {
+        html += `
+            <div style="display: grid; grid-template-columns: 150px 1fr 1fr; gap: 10px; align-items: center; padding: 10px; background: white; border-radius: 4px;">
+                <label style="font-weight: 600;">${dates.label}:</label>
+                <div>
+                    <label style="font-size: 12px; color: #666;">Start Date (MM/DD/YYYY):</label>
+                    <input type="text" id="quarter-${quarter}-start" value="${dates.start || ''}" 
+                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+                </div>
+                <div>
+                    <label style="font-size: 12px; color: #666;">End Date (MM/DD/YYYY):</label>
+                    <input type="text" id="quarter-${quarter}-end" value="${dates.end || ''}" 
+                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function saveQuarterDatesConfig() {
+    const newQuarterDates = {};
+    
+    for (let i = 1; i <= 4; i++) {
+        const startInput = document.getElementById(`quarter-${i}-start`);
+        const endInput = document.getElementById(`quarter-${i}-end`);
+        
+        if (!startInput || !endInput) continue;
+        
+        const start = startInput.value.trim();
+        const end = endInput.value.trim();
+        
+        // Validate MM/DD/YYYY format
+        const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
+        if (!datePattern.test(start) || !datePattern.test(end)) {
+            showMessage(`Invalid date format for Quarter ${i}. Use MM/DD/YYYY format (e.g., 08/01/2025).`, 'error');
+            return;
+        }
+        
+        // Validate that dates are valid
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+            showMessage(`Invalid dates for Quarter ${i}. Please check that the dates are valid.`, 'error');
+            return;
+        }
+        
+        newQuarterDates[i] = {
+            start: start,
+            end: end,
+            label: `Quarter ${i}`
+        };
+    }
+    
+    // Save to localStorage
+    saveQuarterDates(newQuarterDates);
+    quarterDates = newQuarterDates;
+    
+    // Update the quarter display if on daily entry view
+    updateQuarterDisplay();
+    
+    showMessage('Quarter dates saved successfully!', 'success');
+}
+
 
 function setupPeriodSelector() {
     const periodSelect = document.getElementById('period-select');
@@ -317,42 +1133,207 @@ function setupPeriodSelector() {
         STANDARD_PERIODS.forEach(period => {
             const option = document.createElement('option');
             option.value = period.time;
-            option.textContent = `${period.time} - ${period.location}`;
+            option.textContent = period.time;
             periodSelect.appendChild(option);
         });
     }
 }
 
-async function loadStudents() {
+// Function to parse time string (e.g., "7:45-8:30" or "1:00-1:30") and return start and end times in minutes
+function parseTimeRange(timeStr) {
+    // Handle special cases like "AM Bus" and "PM Bus"
+    if (timeStr === 'AM Bus' || timeStr === 'PM Bus') {
+        return null; // These don't have specific time ranges
+    }
+    
+    // Parse format like "7:45-8:30" or "1:00-1:30" (12-hour format, PM times don't have PM marker)
+    const parts = timeStr.split('-');
+    if (parts.length !== 2) return null;
+    
+    const parseTime = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        let hour24 = hours;
+        // Convert 12-hour format to 24-hour format
+        // Schedule uses 12-hour format without AM/PM markers
+        // Morning times: 7:00-11:59 are AM (no conversion)
+        // Noon: 12:00 is 12:00 PM = 12:00 (no conversion)
+        // Afternoon times: 1:00-2:45 are PM (add 12 hours)
+        if (hours >= 1 && hours <= 2) {
+            // Times 1:00-2:45 in the schedule are PM (afternoon)
+            hour24 = hours + 12; // 1:00 PM = 13:00, 2:00 PM = 14:00
+        }
+        // Hours 7-11 stay as is (AM), hour 12 stays as 12 (noon)
+        return hour24 * 60 + minutes; // Convert to minutes since midnight
+    };
+    
     try {
-        const response = await fetch('/api/students');
-        allStudents = await response.json();
+        const start = parseTime(parts[0].trim());
+        const end = parseTime(parts[1].trim());
+        return { start, end };
+    } catch (e) {
+        return null;
+    }
+}
+
+// Function to get current period based on current time and user's schedule
+function getCurrentPeriodFromSchedule() {
+    // Only for staff/admin users who have a teacher schedule
+    if (!canEdit()) {
+        console.log('getCurrentPeriodFromSchedule: user cannot edit');
+        return null;
+    }
+    if (!teacherScheduleData || teacherScheduleData.length === 0) {
+        console.log('getCurrentPeriodFromSchedule: no schedule data', teacherScheduleData);
+        return null;
+    }
+    
+    const now = new Date();
+    const currentHours = now.getHours();
+    const currentMinutes = now.getMinutes();
+    const currentTimeInMinutes = currentHours * 60 + currentMinutes;
+    console.log('getCurrentPeriodFromSchedule: current time', currentHours + ':' + currentMinutes, '(', currentTimeInMinutes, 'minutes)');
+    console.log('getCurrentPeriodFromSchedule: schedule data', teacherScheduleData);
+    
+    // Find the period that matches the current time
+    for (const scheduleItem of teacherScheduleData) {
+        if (!scheduleItem || !scheduleItem.time_period) continue;
+        
+        const timeRange = parseTimeRange(scheduleItem.time_period);
+        if (timeRange) {
+            // Check if current time falls within this period's time range
+            if (currentTimeInMinutes >= timeRange.start && currentTimeInMinutes < timeRange.end) {
+                return scheduleItem.time_period;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Function to auto-select period based on current time
+function autoSelectCurrentPeriod() {
+    console.log('autoSelectCurrentPeriod called');
+    const periodSelect = document.getElementById('period-select');
+    if (!periodSelect) {
+        console.log('period-select element not found');
+        return;
+    }
+    
+    // Get the current period from schedule
+    const currentPeriodTime = getCurrentPeriodFromSchedule();
+    console.log('getCurrentPeriodFromSchedule returned:', currentPeriodTime);
+    if (currentPeriodTime) {
+        // Check if this period exists in the dropdown
+        const option = Array.from(periodSelect.options).find(opt => opt.value === currentPeriodTime);
+        if (option) {
+            periodSelect.value = currentPeriodTime;
+            currentPeriod = currentPeriodTime;
+            
+            // Trigger change event to load data and handle class selector
+            // The change handler will check for multiple classes and show selector if needed
+            periodSelect.dispatchEvent(new Event('change'));
+            console.log('Auto-selected period:', currentPeriodTime, 'based on current time');
+        } else {
+            console.log('Period', currentPeriodTime, 'not found in dropdown options');
+        }
+    } else {
+        console.log('No matching period found for current time');
+    }
+}
+
+async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false) {
+    try {
+        let url = '/api/students';
+        if (filterManagedByMe) {
+            url += '?managed_by_me=true';
+        }
+        
+        const response = await fetch(url);
+        const studentsData = await response.json();
+        
+        // Ensure we have valid data and sort by name for consistency
+        const studentsList = Array.isArray(studentsData) ? studentsData.sort((a, b) => {
+            const nameA = (a.name || '').toLowerCase();
+            const nameB = (b.name || '').toLowerCase();
+            return nameA.localeCompare(nameB);
+        }) : [];
+        
+        // Only update allStudents if not filtering for summary only
+        if (!updateSummaryOnly) {
+            allStudents = studentsList;
+            // Initialize filteredDailyStudents to all students if no filters are active
+            if (!dailyEntrySearchQuery && !dailyEntryManagedByMe) {
+                filteredDailyStudents = [...allStudents];
+            } else {
+                // Re-filter if filters are active
+                await filterDailyStudents();
+            }
+        }
         
         const select = document.getElementById('student-select');
         const summarySelect = document.getElementById('summary-student-select');
         const frenzySelect = document.getElementById('frenzy-student-select');
+        const scheduleSelect = document.getElementById('schedule-student-select');
         
-        [select, summarySelect, frenzySelect].forEach(sel => {
+        // Determine which selects to update
+        const selectsToUpdate = updateSummaryOnly 
+            ? [summarySelect].filter(s => s !== null)
+            : [select, summarySelect, frenzySelect, scheduleSelect].filter(s => s !== null);
+        
+        selectsToUpdate.forEach(sel => {
             if (sel) {
-                sel.innerHTML = '<option value="">Select Student</option>';
-                allStudents.forEach(student => {
-                    const option = document.createElement('option');
-                    option.value = student.id;
-                    option.textContent = student.name;
-                    sel.appendChild(option);
+                // Store the currently selected value to restore it after repopulation
+                const currentValue = sel.value;
+                
+                // Use appropriate default option text based on the select element
+                const defaultText = sel.id === 'summary-student-select' || sel.id === 'frenzy-student-select' 
+                    ? 'All Students' 
+                    : 'Select Student';
+                sel.innerHTML = `<option value="">${defaultText}</option>`;
+                
+                // Populate with students (use filtered list for summary, allStudents for others)
+                const studentsToUse = (updateSummaryOnly && sel.id === 'summary-student-select') 
+                    ? studentsList 
+                    : allStudents;
+                
+                studentsToUse.forEach(student => {
+                    if (student && student.id && student.name) {
+                        const option = document.createElement('option');
+                        option.value = student.id;
+                        option.textContent = student.name;
+                        sel.appendChild(option);
+                    }
                 });
+                
+                // Restore the previously selected value if it still exists
+                if (currentValue && Array.from(sel.options).some(opt => opt.value === currentValue)) {
+                    sel.value = currentValue;
+                } else if (sel.id === 'schedule-student-select' && currentScheduleStudentId) {
+                    // If schedule dropdown and selected student no longer exists, clear selection
+                    sel.value = '';
+                    currentScheduleStudentId = null;
+                    // Clear the student schedule display
+                    studentScheduleData = [];
+                    renderStudentSchedule();
+                }
             }
         });
         
-        // If period is selected, reload the grid
-        if (currentPeriod) {
+        // If period is selected, reload the grid (only if not summary-only update)
+        if (!updateSummaryOnly && currentPeriod) {
             loadPeriodData();
         }
         
-        // If in daily view, reload that grid
-        const entryView = document.getElementById('entry-view');
-        if (entryView && entryView.classList.contains('active')) {
-            loadDailyData();
+        // If in daily view, reload that grid (only if not summary-only update)
+        if (!updateSummaryOnly) {
+            const entryView = document.getElementById('entry-view');
+            if (entryView && entryView.classList.contains('active')) {
+                // Ensure filteredDailyStudents is initialized
+                if (!filteredDailyStudents || filteredDailyStudents.length === 0) {
+                    filteredDailyStudents = [...allStudents];
+                }
+                loadDailyData();
+            }
         }
     } catch (error) {
         console.error('Error loading students:', error);
@@ -373,6 +1354,30 @@ async function loadPeriodData() {
     if (container) container.style.display = 'block';
     if (noSelect) noSelect.style.display = 'none';
 
+    // For staff/admin in period entry view, load filtered students based on schedule
+    if (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) {
+        try {
+            let url = `/api/students/by-staff-period?period=${encodeURIComponent(currentPeriod)}`;
+            if (currentClass) {
+                url += `&class_name=${encodeURIComponent(currentClass)}`;
+            }
+            const response = await fetch(url);
+            if (response.ok) {
+                filteredStudentsForPeriod = await response.json();
+                console.log(`Loaded ${filteredStudentsForPeriod.length} students for period ${currentPeriod}${currentClass ? `, class ${currentClass}` : ''}`);
+            } else {
+                console.error('Error loading filtered students:', response.statusText);
+                filteredStudentsForPeriod = [];
+            }
+        } catch (error) {
+            console.error('Error loading filtered students:', error);
+            filteredStudentsForPeriod = [];
+        }
+    } else {
+        // For other views or students, use all students
+        filteredStudentsForPeriod = allStudents;
+    }
+
     // Load existing data for this period
     try {
         const response = await fetch(`/api/period-data?date=${currentDate}&period=${encodeURIComponent(currentPeriod)}`);
@@ -391,89 +1396,365 @@ async function loadPeriodData() {
     renderStudentsGrid();
 }
 
-function createPointButtons(studentId, category, currentValue) {
-    const buttons = [];
-    for (let i = 0; i <= 2; i++) {
-        const isSelected = currentValue === i ? 'selected' : '';
-        buttons.push(`<button type="button" class="point-btn ${isSelected}" data-value="${i}" onclick="selectPoint(${studentId}, '${category}', ${i}, this)">${i}</button>`);
-    }
-    return buttons.join('');
+function updatePeriodPercentageRow() {
+    // Update percentage cells for all students in the period entry
+    // Use filtered students for period entry view, otherwise use all students
+    const studentsToUpdate = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
+        ? filteredStudentsForPeriod 
+        : allStudents;
+    studentsToUpdate.forEach((student) => {
+        const data = periodData[student.id] || {};
+        const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
+        const categoryShort = ['s', 't', 'a', 'r'];
+        
+        let totalPoints = 0;
+        let countedCategories = 0;
+        
+        // Update each category percentage
+        categoryShort.forEach((catShort, catIndex) => {
+            const catFull = categories[catIndex];
+            const cell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="${catShort}"]`);
+            
+            if (cell) {
+                const value = data[catFull];
+                if (value !== null && value !== undefined) {
+                    const percentage = ((value / 2) * 100).toFixed(0);
+                    cell.textContent = `${percentage}%`;
+                    totalPoints += value;
+                    countedCategories++;
+                } else {
+                    cell.textContent = '-';
+                }
+            }
+        });
+        
+        // Update overall percentage
+        const overallCell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="overall"]`);
+        if (overallCell) {
+            if (countedCategories > 0) {
+                const maxPossible = countedCategories * 2;
+                const overallPercentage = ((totalPoints / maxPossible) * 100).toFixed(0);
+                overallCell.textContent = `${overallPercentage}%`;
+            } else {
+                overallCell.textContent = '-';
+            }
+        }
+    });
 }
 
 function renderStudentsGrid() {
-    const headerRow = document.getElementById('students-header');
+    const header = document.getElementById('students-header');
     const grid = document.getElementById('categories-grid');
-    if (!grid || !headerRow) return;
+    if (!grid || !header) return;
     
-    headerRow.innerHTML = '';
+    header.innerHTML = '';
     grid.innerHTML = '';
 
-    if (!allStudents || allStudents.length === 0) {
-        grid.innerHTML = '<div class="info-message" style="padding: 20px; text-align: center; grid-column: 1/-1;">No students found. Click "Add Student" to create one.</div>';
+    // Use filtered students for period entry view, otherwise use all students
+    const studentsToDisplay = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
+        ? filteredStudentsForPeriod 
+        : allStudents;
+
+    if (!studentsToDisplay || studentsToDisplay.length === 0) {
+        const message = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active'))
+            ? 'No students found for this period. Make sure students have you assigned in their schedule for this time period.'
+            : 'No students found. Click "Add Student" to create one.';
+        grid.innerHTML = `<div class="info-message" style="padding: 20px; text-align: center; grid-column: 1/-1;">${message}</div>`;
         return;
     }
 
-    // Create student headers
-    allStudents.forEach(student => {
-        const header = document.createElement('div');
-        header.className = 'student-header';
-        header.textContent = student.name;
-        headerRow.appendChild(header);
+    // Reuse the same grid structure as daily grid
+    const spacerWidth = '7px';
+    const studentColumns = studentsToDisplay.map((_, index) => {
+        if (index === studentsToDisplay.length - 1) {
+            return 'repeat(4, 40px) 40px';
+        } else {
+            return `repeat(4, 40px) 40px ${spacerWidth}`;
+        }
+    }).join(' ');
+    
+    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    grid.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+
+    // 1. Period/Location Header
+    const periodHeader = document.createElement('div');
+    periodHeader.className = 'daily-header-cell daily-header-period';
+    periodHeader.textContent = currentPeriod || 'Period';
+    header.appendChild(periodHeader);
+
+    const periodSpacer = document.createElement('div');
+    periodSpacer.style.background = '#e9ecef';
+    header.appendChild(periodSpacer);
+
+    // Helper function to get background color from card_color (opaque, similar to STAR colors)
+    const getCardColor = (cardColor) => {
+        if (!cardColor) return null;
+        const colors = {
+            'yellow': '#FEF3C7',  // Light yellow, similar to Relationships (R) color
+            'green': '#D1FAE5',   // Light green, similar to Accountability (A) color
+            'blue': '#DBEAFE'     // Light blue, similar to Teamwork (T) color
+        };
+        return colors[cardColor.toLowerCase()] || null;
+    };
+    
+    // 2. Student Names Header
+    studentsToDisplay.forEach((student, index) => {
+        const studentHeader = document.createElement('div');
+        studentHeader.className = 'daily-header-cell daily-header-student';
+        studentHeader.textContent = student.name;
+        studentHeader.style.gridColumn = 'span 5';
+        
+        // Apply card color background
+        const bgColor = getCardColor(student.card_color);
+        if (bgColor) {
+            studentHeader.style.backgroundColor = bgColor;
+        }
+        
+        header.appendChild(studentHeader);
+        
+        if (index < studentsToDisplay.length - 1) {
+            const spacerHeader = document.createElement('div');
+            spacerHeader.style.background = '#e9ecef';
+            header.appendChild(spacerHeader);
+        }
     });
 
-    // Create category rows
-    const categories = [
-        { name: 'Safety', key: 'safety' },
-        { name: 'Teamwork', key: 'teamwork' },
-        { name: 'Accountability', key: 'accountability' },
-        { name: 'Relationships', key: 'relationships' }
-    ];
+    // 3. Category Labels (S, T, A, R, I)
+    const categoryLabels = ['S', 'T', 'A', 'R', 'I'];
+    const emptyCell = document.createElement('div');
+    emptyCell.className = 'star-category-header';
+    emptyCell.style.background = '#f8f9fa';
+    header.appendChild(emptyCell);
+    
+    const emptySpacerCell = document.createElement('div');
+    emptySpacerCell.style.background = '#e9ecef';
+    header.appendChild(emptySpacerCell);
+    
+    studentsToDisplay.forEach((student, index) => {
+        const categoryKeys = ['s', 't', 'a', 'r', 'i'];
+        categoryLabels.forEach((label, labelIndex) => {
+            const catHeader = document.createElement('div');
+            catHeader.className = 'star-category-header';
+            catHeader.textContent = label;
+            catHeader.dataset.category = categoryKeys[labelIndex];
+            header.appendChild(catHeader);
+        });
+        
+        if (index < studentsToDisplay.length - 1) {
+            const spacerSubHeader = document.createElement('div');
+            spacerSubHeader.style.background = '#e9ecef';
+            header.appendChild(spacerSubHeader);
+        }
+    });
 
-    categories.forEach(category => {
-        // Category name cell (sticky)
-        const categoryName = document.createElement('div');
-        categoryName.className = 'category-name';
-        categoryName.textContent = category.name;
-        categoryName.dataset.category = category.key;
-        grid.appendChild(categoryName);
+    // 4. Data Row
+    // Period Name cell
+    const periodCell = document.createElement('div');
+    periodCell.className = 'daily-period-cell';
+    periodCell.textContent = currentPeriod || '';
+    grid.appendChild(periodCell);
 
-        // Student cells for this category
-        allStudents.forEach(student => {
-            const data = periodData[student.id] || {};
-            const value = data[`${category.key}_points`] !== undefined ? data[`${category.key}_points`] : '';
+    const rowSpacer = document.createElement('div');
+    rowSpacer.style.background = '#e9ecef';
+    grid.appendChild(rowSpacer);
 
+    // Data cells for each student
+    studentsToDisplay.forEach((student, studentIndex) => {
+        const data = periodData[student.id] || {};
+        const categories = [
+            { full: 'safety', short: 's' },
+            { full: 'teamwork', short: 't' },
+            { full: 'accountability', short: 'a' },
+            { full: 'relationships', short: 'r' }
+        ];
+        
+        categories.forEach(cat => {
             const cell = document.createElement('div');
-            cell.className = 'student-cell';
-            cell.dataset.category = category.key;
-            cell.innerHTML = `
-                <div class="points-buttons" data-student-id="${student.id}" data-category="${category.key}">
-                    ${createPointButtons(student.id, category.key, value)}
-                </div>
-            `;
+            cell.className = 'daily-data-cell';
+            cell.style.padding = '2px';
+            cell.style.display = 'flex';
+            cell.style.justifyContent = 'center';
+            cell.style.alignItems = 'center';
+            
+            const select = document.createElement('select');
+            select.className = 'daily-input';
+            select.dataset.studentId = student.id;
+            select.dataset.category = cat.short;
+            
+            if (isStudent()) select.disabled = true;
+            
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = '-';
+            select.appendChild(emptyOption);
+            
+            [2, 1, 0].forEach(val => {
+                const option = document.createElement('option');
+                option.value = val;
+                option.textContent = val;
+                if (data[`${cat.full}_points`] === val) option.selected = true;
+                select.appendChild(option);
+            });
+            
+            select.addEventListener('change', (e) => {
+                const val = e.target.value === '' ? null : parseInt(e.target.value);
+                if (!periodData[student.id]) {
+                    periodData[student.id] = { student_id: student.id };
+                }
+                periodData[student.id][`${cat.full}_points`] = val;
+                
+                // Update percentage row in real-time
+                updatePeriodPercentageRow();
+                
+                // Update "I" box highlight based on STAR values
+                updateInfoButtonHighlight(student.id, currentPeriod);
+                
+                // Auto-advance to next input (skipping Info column), unless this was triggered by backspace
+                if (!e.isBackspaceClear) {
+                    moveToNextInput(select);
+                }
+            });
+            
+            select.addEventListener('keydown', handleDailyInputKeydown);
+            
+            cell.appendChild(select);
             grid.appendChild(cell);
         });
-    });
-}
 
-function selectPoint(studentId, category, value, buttonElement) {
-    // Remove selected class from all buttons in this group
-    const buttonGroup = buttonElement.parentElement;
-    buttonGroup.querySelectorAll('.point-btn').forEach(btn => {
-        btn.classList.remove('selected');
+        // Info Button
+        const infoCell = document.createElement('div');
+        infoCell.className = 'daily-data-cell daily-info-cell';
+        infoCell.style.padding = '2px';
+        infoCell.style.display = 'flex';
+        infoCell.style.justifyContent = 'center';
+        infoCell.style.alignItems = 'center';
+        
+        const infoButton = document.createElement('button');
+        infoButton.className = 'info-btn';
+        infoButton.textContent = 'I';
+        infoButton.dataset.studentId = student.id;
+        infoButton.dataset.period = currentPeriod;
+        infoButton.dataset.studentName = student.name;
+        infoButton.dataset.info = data.info || '';
+        
+        if (isStudent()) infoButton.disabled = false;
+        
+        if (data.info) {
+            try {
+                const parsed = JSON.parse(data.info);
+                if (hasInfoData(parsed)) infoButton.classList.add('has-data');
+            } catch (e) {
+                if (data.info.trim()) infoButton.classList.add('has-data');
+            }
+        }
+        
+        infoButton.addEventListener('click', showInfoModal);
+        infoCell.appendChild(infoButton);
+        grid.appendChild(infoCell);
+        
+        if (studentIndex < studentsToDisplay.length - 1) {
+            const spacerCell = document.createElement('div');
+            spacerCell.style.background = '#e9ecef';
+            grid.appendChild(spacerCell);
+        }
     });
     
-    // Add selected class to clicked button
-    buttonElement.classList.add('selected');
+    // Add percentage row
+    const percentLabel = document.createElement('div');
+    percentLabel.className = 'daily-period-cell';
+    percentLabel.textContent = 'Percent';
+    percentLabel.style.fontWeight = '600';
+    percentLabel.style.borderTop = '2px solid #000';
+    percentLabel.style.background = '#f8f9fa';
+    grid.appendChild(percentLabel);
     
-    // Update period data
-    if (!periodData[studentId]) {
-        periodData[studentId] = { student_id: studentId };
-    }
-    periodData[studentId][`${category}_points`] = value;
+    const percentSpacer = document.createElement('div');
+    percentSpacer.style.background = '#e9ecef';
+    percentSpacer.style.borderTop = '2px solid #000';
+    grid.appendChild(percentSpacer);
+    
+    // Calculate and display percentage for each student
+    studentsToDisplay.forEach((student, studentIndex) => {
+        const data = periodData[student.id] || {};
+        const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
+        const categoryShort = ['s', 't', 'a', 'r'];
+        
+        let totalPoints = 0;
+        let countedCategories = 0;
+        
+        // Calculate percentages for each category
+        categoryShort.forEach((catShort, catIndex) => {
+            const catFull = categories[catIndex];
+            const cell = document.createElement('div');
+            cell.className = 'daily-data-cell daily-percent-cell period-percent-cell';
+            cell.dataset.studentId = student.id;
+            cell.dataset.category = catShort;
+            cell.style.padding = '8px';
+            cell.style.display = 'flex';
+            cell.style.justifyContent = 'center';
+            cell.style.alignItems = 'center';
+            cell.style.borderTop = '2px solid #000';
+            cell.style.fontWeight = '700';
+            cell.style.fontSize = '11px';
+            cell.style.background = '#f8f9fa';
+            
+            const value = data[catFull];
+            if (value !== null && value !== undefined) {
+                const percentage = ((value / 2) * 100).toFixed(0);
+                cell.textContent = `${percentage}%`;
+                totalPoints += value;
+                countedCategories++;
+                
+                // Color code based on category
+                if (catShort === 's') cell.style.color = '#B91C1C';
+                else if (catShort === 't') cell.style.color = '#1E40AF';
+                else if (catShort === 'a') cell.style.color = '#047857';
+                else if (catShort === 'r') cell.style.color = '#B45309';
+            } else {
+                cell.textContent = '-';
+            }
+            
+            grid.appendChild(cell);
+        });
+        
+        // Overall percentage in Info column
+        const overallCell = document.createElement('div');
+        overallCell.className = 'daily-data-cell daily-percent-cell period-percent-cell';
+        overallCell.dataset.studentId = student.id;
+        overallCell.dataset.category = 'overall';
+        overallCell.style.padding = '8px';
+        overallCell.style.display = 'flex';
+        overallCell.style.justifyContent = 'center';
+        overallCell.style.alignItems = 'center';
+        overallCell.style.borderTop = '2px solid #000';
+        overallCell.style.fontWeight = '700';
+        overallCell.style.fontSize = '11px';
+        overallCell.style.background = '#f8f9fa';
+        overallCell.style.color = '#667eea';
+        
+        if (countedCategories > 0) {
+            const maxPossible = countedCategories * 2;
+            const overallPercentage = ((totalPoints / maxPossible) * 100).toFixed(0);
+            overallCell.textContent = `${overallPercentage}%`;
+        } else {
+            overallCell.textContent = '-';
+        }
+        
+        grid.appendChild(overallCell);
+        
+        if (studentIndex < studentsToDisplay.length - 1) {
+            const spacerCell = document.createElement('div');
+            spacerCell.style.background = '#e9ecef';
+            spacerCell.style.borderTop = '2px solid #000';
+            grid.appendChild(spacerCell);
+        }
+    });
+    
+    // Update "I" box highlights for all students on initial load
+    studentsToDisplay.forEach(student => {
+        updateInfoButtonHighlight(student.id, currentPeriod);
+    });
 }
-
-// Make function globally accessible for inline handlers
-window.selectPoint = selectPoint;
 
 async function savePeriodData() {
     if (!currentDate || !currentPeriod) {
@@ -484,21 +1765,33 @@ async function savePeriodData() {
     const locationInput = document.getElementById('location-input');
     const location = locationInput ? locationInput.value || currentPeriod : currentPeriod;
 
-    // Prepare data for all students
+    // For period entry view, only save data for filtered students
+    const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
+        ? filteredStudentsForPeriod 
+        : allStudents;
+    const allowedStudentIds = new Set(studentsToSave.map(s => s.id));
+
+    // Prepare data for students (filtered if in period entry view)
     const studentsData = [];
     Object.keys(periodData).forEach(studentId => {
-        const data = periodData[studentId];
+        const studentIdInt = parseInt(studentId);
+        // Only include students who are in the allowed list
+        if (!allowedStudentIds.has(studentIdInt)) {
+            return;
+        }
+        const data = periodData[studentIdInt];
         if (data.safety_points !== undefined || data.teamwork_points !== undefined || 
             data.accountability_points !== undefined || data.relationships_points !== undefined) {
             studentsData.push({
-                student_id: parseInt(studentId),
+                student_id: studentIdInt,
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
                 safety_points: data.safety_points || 0,
                 teamwork_points: data.teamwork_points || 0,
                 accountability_points: data.accountability_points || 0,
-                relationships_points: data.relationships_points || 0
+                relationships_points: data.relationships_points || 0,
+                info: data.info || ''
             });
         }
     });
@@ -524,6 +1817,8 @@ async function savePeriodData() {
             showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
             // Reload to get updated data
             loadPeriodData();
+            // Refresh summary if it's currently displayed
+            refreshSummaryIfActive();
         } else {
             throw new Error('Failed to save');
         }
@@ -541,12 +1836,100 @@ function clearPeriodData() {
 }
 
 // Daily Overview Functions
+async function filterDailyStudents() {
+    // Initialize with all students if no filters
+    if (!dailyEntrySearchQuery && !dailyEntryManagedByMe) {
+        filteredDailyStudents = [...allStudents];
+        return;
+    }
+    
+    let studentsToFilter = [...allStudents];
+    
+    // Apply "managed by me" filter if checked
+    if (dailyEntryManagedByMe) {
+        try {
+            const response = await fetch('/api/students?managed_by_me=true');
+            if (response.ok) {
+                const managedStudents = await response.json();
+                const managedStudentIds = new Set(managedStudents.map(s => s.id));
+                studentsToFilter = studentsToFilter.filter(s => managedStudentIds.has(s.id));
+            }
+        } catch (error) {
+            console.error('Error loading managed students:', error);
+        }
+    }
+    
+    // Apply search filter if query provided
+    if (dailyEntrySearchQuery && dailyEntrySearchQuery.trim()) {
+        const query = dailyEntrySearchQuery.trim().toLowerCase();
+        
+        // First, try to find if query matches a staff name
+        // Check if any staff member name contains the query
+        const matchingStaff = allStaffMembers.filter(staff => {
+            const staffName = (staff.name || staff.username || '').toLowerCase();
+            return staffName.includes(query);
+        });
+        
+        if (matchingStaff.length > 0) {
+            // Search by staff name - get all students with this staff member
+            try {
+                const staffName = matchingStaff[0].name || matchingStaff[0].username;
+                console.log('Searching by staff name:', staffName);
+                console.log('All staff members:', allStaffMembers);
+                const response = await fetch(`/api/students/by-staff-name?staff_name=${encodeURIComponent(staffName)}`);
+                if (response.ok) {
+                    const staffStudents = await response.json();
+                    console.log('Found students for staff:', staffStudents);
+                    console.log('Number of students found:', staffStudents.length);
+                    if (staffStudents.length > 0) {
+                        const staffStudentIds = new Set(staffStudents.map(s => s.id));
+                        // Intersect with current filter (if managed by me is also checked)
+                        studentsToFilter = studentsToFilter.filter(s => staffStudentIds.has(s.id));
+                        console.log('Filtered students after staff search:', studentsToFilter.length);
+                    } else {
+                        console.warn('No students found for staff member:', staffName);
+                        // If no students found, show empty result (don't fall back to student search)
+                        studentsToFilter = [];
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.error('Error response from staff search API:', response.status, errorText);
+                    // Fall back to student name search
+                    studentsToFilter = studentsToFilter.filter(s => 
+                        (s.name || '').toLowerCase().includes(query)
+                    );
+                }
+            } catch (error) {
+                console.error('Error searching by staff name:', error);
+                // Fall back to student name search
+                studentsToFilter = studentsToFilter.filter(s => 
+                    (s.name || '').toLowerCase().includes(query)
+                );
+            }
+        } else {
+            // Search by student name
+            studentsToFilter = studentsToFilter.filter(s => 
+                (s.name || '').toLowerCase().includes(query)
+            );
+        }
+    }
+    
+    filteredDailyStudents = studentsToFilter;
+}
+
 async function loadDailyData() {
-    if (!currentDate || !allStudents || allStudents.length === 0) {
+    // Ensure staff members are loaded for search functionality
+    if (allStaffMembers.length === 0) {
+        await loadUsers();
+    }
+    // Filter students first
+    await filterDailyStudents();
+    
+    if (!currentDate || !filteredDailyStudents || filteredDailyStudents.length === 0) {
         const container = document.getElementById('daily-grid-container');
         const noStudents = document.getElementById('daily-no-students');
         if (container) container.style.display = 'none';
-        if (noStudents) noStudents.style.display = allStudents.length === 0 ? 'block' : 'none';
+        if (noStudents) noStudents.style.display = (filteredDailyStudents.length === 0 && allStudents.length > 0) ? 'block' : (allStudents.length === 0 ? 'block' : 'none');
         return;
     }
 
@@ -555,32 +1938,74 @@ async function loadDailyData() {
     if (container) container.style.display = 'block';
     if (noStudents) noStudents.style.display = 'none';
 
+    // Initialize submitted students tracking for current date if needed
+    if (!submittedStudents[currentDate]) {
+        submittedStudents[currentDate] = new Set();
+    }
+
     // Load existing data for all periods
     dailyData = {};
     
     try {
-        // Load data for each student for the current date
-        const promises = allStudents.map(student => 
-            fetch(`/api/daily-records?student_id=${student.id}&start_date=${currentDate}&end_date=${currentDate}`)
-                .then(response => response.json())
-        );
+        // Load data for each student for the current date (skip submitted students)
+        const promises = filteredDailyStudents.map(student => {
+            // Skip loading data for students who have been submitted today
+            if (submittedStudents[currentDate].has(student.id)) {
+                console.log(`Skipping data load for submitted student: ${student.name}`);
+                return Promise.resolve(null);
+            }
+            
+            return fetch(`/api/daily-records?student_id=${student.id}&start_date=${currentDate}&end_date=${currentDate}`)
+                .then(response => response.json());
+        });
         
         const results = await Promise.all(promises);
         
+        // Initialize attendance data for current date if not exists
+        if (!attendanceData[currentDate]) {
+            attendanceData[currentDate] = {};
+        }
+        
         results.forEach((records, index) => {
-            const studentId = allStudents[index].id;
+            const studentId = filteredDailyStudents[index].id;
+            
+            // Skip if this student was submitted (records will be null)
+            if (records === null) {
+                return;
+            }
+            
             dailyData[studentId] = {};
             
             if (records && records.length > 0) {
                 const record = records[0];
+                
+                // Load attendance status - prefer attendance_status, fallback to present boolean for backward compatibility
+                if (record.attendance_status) {
+                    attendanceData[currentDate][studentId] = record.attendance_status;
+                } else if (record.present !== undefined) {
+                    // Migration: convert old present boolean to new attendance_status
+                    attendanceData[currentDate][studentId] = record.present ? 'present' : 'unexcused';
+                } else {
+                    // Default to present if not set
+                    if (!attendanceData[currentDate][studentId]) {
+                        attendanceData[currentDate][studentId] = 'present';
+                    }
+                }
+                
                 record.periods.forEach(period => {
                     dailyData[studentId][period.time_range] = {
                         s: period.safety_points,
                         t: period.teamwork_points,
                         a: period.accountability_points,
-                        r: period.relationships_points
+                        r: period.relationships_points,
+                        info: period.info || ''
                     };
                 });
+            } else {
+                // No records exist, default to present
+                if (!attendanceData[currentDate][studentId]) {
+                    attendanceData[currentDate][studentId] = 'present';
+                }
             }
         });
     } catch (error) {
@@ -588,6 +2013,59 @@ async function loadDailyData() {
     }
 
     renderDailyGrid();
+}
+
+function calculateStudentPercentages(studentId) {
+    // Check attendance status
+    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+    
+    // If excused, exclude from calculations (return '-')
+    if (attendance === 'excused') {
+        return { s: '-', t: '-', a: '-', r: '-', overall: '-' };
+    }
+    
+    // If unexcused, return 0% for all
+    if (attendance === 'unexcused') {
+        return { s: '0', t: '0', a: '0', r: '0', overall: '0' };
+    }
+    
+    // Normal calculation for present
+    const studentData = dailyData[studentId] || {};
+    let totals = { s: 0, t: 0, a: 0, r: 0 };
+    let counts = { s: 0, t: 0, a: 0, r: 0 };
+    
+    // Calculate totals and counts for each category
+    Object.values(studentData).forEach(periodData => {
+        ['s', 't', 'a', 'r'].forEach(category => {
+            if (periodData[category] !== null && periodData[category] !== undefined) {
+                totals[category] += periodData[category];
+                counts[category]++;
+            }
+        });
+    });
+    
+    // Calculate percentages (max 2 points per period per category)
+    const percentages = {};
+    ['s', 't', 'a', 'r'].forEach(category => {
+        if (counts[category] > 0) {
+            const maxPossible = counts[category] * 2;
+            percentages[category] = ((totals[category] / maxPossible) * 100).toFixed(0);
+        } else {
+            percentages[category] = '-';
+        }
+    });
+    
+    // Calculate overall percentage
+    const totalPoints = totals.s + totals.t + totals.a + totals.r;
+    const totalCounts = counts.s + counts.t + counts.a + counts.r;
+    if (totalCounts > 0) {
+        const maxPossible = totalCounts * 2;
+        percentages.overall = ((totalPoints / maxPossible) * 100).toFixed(0);
+    } else {
+        percentages.overall = '-';
+    }
+    
+    return percentages;
 }
 
 function renderDailyGrid() {
@@ -598,19 +2076,22 @@ function renderDailyGrid() {
     header.innerHTML = '';
     body.innerHTML = '';
 
-    if (!allStudents || allStudents.length === 0) {
+    // Use filtered students for display
+    const studentsToDisplay = filteredDailyStudents && filteredDailyStudents.length > 0 ? filteredDailyStudents : allStudents;
+    
+    if (!studentsToDisplay || studentsToDisplay.length === 0) {
         return;
     }
 
-    // Calculate grid columns: Period + spacer + (4 columns per student + 1 spacer between)
+    // Calculate grid columns: Period + spacer + (5 columns per student: S, T, A, R, I + 1 spacer between)
     const spacerWidth = '7px'; // 1/4 of original 27px
-    const studentColumns = allStudents.map((_, index) => {
-        if (index === allStudents.length - 1) {
-            // Last student - no spacer after
-            return 'repeat(4, 40px)';
+    const studentColumns = studentsToDisplay.map((_, index) => {
+        if (index === studentsToDisplay.length - 1) {
+            // Last student - no spacer after (4 STAR columns + 1 Info column)
+            return 'repeat(4, 40px) 40px';
         } else {
-            // Add spacer after student
-            return `repeat(4, 40px) ${spacerWidth}`;
+            // Add spacer after student (4 STAR columns + 1 Info column + spacer)
+            return `repeat(4, 40px) 40px ${spacerWidth}`;
         }
     }).join(' ');
     
@@ -628,17 +2109,130 @@ function renderDailyGrid() {
     periodSpacer.style.background = '#e9ecef';
     header.appendChild(periodSpacer);
 
-    // Student headers (each spans 4 columns for S, T, A, R, plus spacer spans)
-    allStudents.forEach((student, index) => {
+    // Helper function to get background color from card_color (opaque, similar to STAR colors)
+    const getCardColor = (cardColor) => {
+        if (!cardColor) return null;
+        const colors = {
+            'yellow': '#FEF3C7',  // Light yellow, similar to Relationships (R) color
+            'green': '#D1FAE5',   // Light green, similar to Accountability (A) color
+            'blue': '#DBEAFE'     // Light blue, similar to Teamwork (T) color
+        };
+        return colors[cardColor.toLowerCase()] || null;
+    };
+    
+    // Student headers (each spans 5 columns for S, T, A, R, I, plus spacer spans)
+    studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.textContent = student.name;
-        studentHeader.style.gridColumn = 'span 4';
+        studentHeader.style.gridColumn = 'span 5';
         studentHeader.dataset.studentIndex = index;
+        studentHeader.style.display = 'flex';
+        studentHeader.style.flexDirection = 'column';
+        studentHeader.style.gap = '8px';
+        studentHeader.style.padding = '12px 8px';
+        
+        // Apply card color background
+        const bgColor = getCardColor(student.card_color);
+        if (bgColor) {
+            studentHeader.style.backgroundColor = bgColor;
+        }
+        
+        // Student name
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = student.name;
+        nameSpan.style.fontWeight = '600';
+        studentHeader.appendChild(nameSpan);
+        
+        // Attendance dropdown (only for staff/admin)
+        if (canEdit()) {
+            const attendanceContainer = document.createElement('div');
+            attendanceContainer.style.display = 'flex';
+            attendanceContainer.style.alignItems = 'center';
+            attendanceContainer.style.gap = '6px';
+            
+            const attendanceLabel = document.createElement('label');
+            attendanceLabel.textContent = 'Attendance:';
+            attendanceLabel.style.fontSize = '11px';
+            attendanceLabel.style.color = '#666';
+            attendanceLabel.style.fontWeight = '400';
+            attendanceContainer.appendChild(attendanceLabel);
+            
+            const attendanceSelect = document.createElement('select');
+            attendanceSelect.className = 'attendance-select';
+            attendanceSelect.dataset.studentId = student.id;
+            attendanceSelect.style.padding = '4px 8px';
+            attendanceSelect.style.fontSize = '11px';
+            attendanceSelect.style.border = '1px solid #ddd';
+            attendanceSelect.style.borderRadius = '4px';
+            attendanceSelect.style.background = 'white';
+            attendanceSelect.style.cursor = 'pointer';
+            
+            // Initialize attendance data for current date if not exists
+            if (!attendanceData[currentDate]) {
+                attendanceData[currentDate] = {};
+            }
+            if (!attendanceData[currentDate][student.id]) {
+                attendanceData[currentDate][student.id] = 'present';
+            }
+            
+            const currentAttendance = attendanceData[currentDate][student.id];
+            
+            ['present', 'excused', 'unexcused'].forEach(status => {
+                const option = document.createElement('option');
+                option.value = status;
+                option.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+                if (status === currentAttendance) {
+                    option.selected = true;
+                }
+                attendanceSelect.appendChild(option);
+            });
+            
+            attendanceSelect.addEventListener('change', (e) => {
+                if (!attendanceData[currentDate]) {
+                    attendanceData[currentDate] = {};
+                }
+                const newStatus = e.target.value;
+                attendanceData[currentDate][student.id] = newStatus;
+                
+                // If "unexcused" is selected, set all STAR points to 0 for all periods
+                if (newStatus === 'unexcused') {
+                    // Initialize dailyData for this student if needed
+                    if (!dailyData[student.id]) {
+                        dailyData[student.id] = {};
+                    }
+                    
+                    // Set all STAR points to 0 for all periods
+                    STANDARD_PERIODS.forEach(period => {
+                        if (!dailyData[student.id][period.time]) {
+                            dailyData[student.id][period.time] = { s: null, t: null, a: null, r: null, info: '' };
+                        }
+                        dailyData[student.id][period.time].s = 0;
+                        dailyData[student.id][period.time].t = 0;
+                        dailyData[student.id][period.time].a = 0;
+                        dailyData[student.id][period.time].r = 0;
+                    });
+                    
+                    // Update all input selects to show 0
+                    document.querySelectorAll(`.daily-input[data-student-id="${student.id}"]`).forEach(select => {
+                        const category = select.dataset.category;
+                        if (category && ['s', 't', 'a', 'r'].includes(category)) {
+                            select.value = '0';
+                        }
+                    });
+                    
+                    // Update percentage row
+                    updateDailyPercentageRow();
+                }
+            });
+            
+            attendanceContainer.appendChild(attendanceSelect);
+            studentHeader.appendChild(attendanceContainer);
+        }
+        
         header.appendChild(studentHeader);
         
         // Add spacer cell after each student (except the last)
-        if (index < allStudents.length - 1) {
+        if (index < studentsToDisplay.length - 1) {
             const spacerHeader = document.createElement('div');
             spacerHeader.style.background = '#e9ecef';
             spacerHeader.style.gridColumn = 'span 1';
@@ -646,8 +2240,8 @@ function renderDailyGrid() {
         }
     });
 
-    // Sub-headers for S, T, A, R under each student
-    const categoryLabels = ['S', 'T', 'A', 'R'];
+    // Sub-headers for S, T, A, R, I under each student
+    const categoryLabels = ['S', 'T', 'A', 'R', 'I'];
     const subHeaderRow = document.createElement('div');
     subHeaderRow.style.display = 'contents';
     
@@ -662,9 +2256,9 @@ function renderDailyGrid() {
     emptySpacerCell.style.background = '#e9ecef';
     header.appendChild(emptySpacerCell);
     
-    // S, T, A, R headers for each student
-    allStudents.forEach((student, index) => {
-        const categoryKeys = ['s', 't', 'a', 'r'];
+    // S, T, A, R, I headers for each student
+    studentsToDisplay.forEach((student, index) => {
+        const categoryKeys = ['s', 't', 'a', 'r', 'i'];
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
@@ -675,7 +2269,7 @@ function renderDailyGrid() {
         });
         
         // Add spacer cell after each student (except the last)
-        if (index < allStudents.length - 1) {
+        if (index < studentsToDisplay.length - 1) {
             const spacerSubHeader = document.createElement('div');
             spacerSubHeader.style.background = '#e9ecef';
             spacerSubHeader.style.gridColumn = 'span 1';
@@ -698,9 +2292,9 @@ function renderDailyGrid() {
         periodRowSpacer.dataset.periodIndex = periodIndex;
         body.appendChild(periodRowSpacer);
 
-        // For each student, create 4 cells (S, T, A, R)
-        allStudents.forEach((student, studentIndex) => {
-            const studentData = dailyData[student.id]?.[period.time] || { s: null, t: null, a: null, r: null };
+        // For each student, create 5 cells (S, T, A, R, I)
+        studentsToDisplay.forEach((student, studentIndex) => {
+            const studentData = dailyData[student.id]?.[period.time] || { s: null, t: null, a: null, r: null, info: '' };
             
             ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
                 const cell = document.createElement('div');
@@ -717,6 +2311,11 @@ function renderDailyGrid() {
                 select.dataset.studentId = student.id;
                 select.dataset.period = period.time;
                 select.dataset.category = category;
+                
+                // Disable for students
+                if (isStudent()) {
+                    select.disabled = true;
+                }
                 
                 // Add empty option
                 const emptyOption = document.createElement('option');
@@ -742,8 +2341,51 @@ function renderDailyGrid() {
                 body.appendChild(cell);
             });
             
+            // Add Info button cell
+            const infoCell = document.createElement('div');
+            infoCell.className = 'daily-data-cell daily-info-cell';
+            infoCell.style.padding = '2px';
+            infoCell.style.display = 'flex';
+            infoCell.style.justifyContent = 'center';
+            infoCell.style.alignItems = 'center';
+            infoCell.dataset.studentIndex = studentIndex;
+            infoCell.dataset.periodIndex = periodIndex;
+            
+            const infoButton = document.createElement('button');
+            infoButton.className = 'info-btn';
+            infoButton.textContent = 'I';
+            infoButton.dataset.studentId = student.id;
+            infoButton.dataset.period = period.time;
+            infoButton.dataset.studentName = student.name;
+            infoButton.dataset.info = studentData.info || '';
+            
+            // Disable for students (view only)
+            if (isStudent()) {
+                infoButton.disabled = false; // Allow viewing but not editing
+            }
+            
+            // Add visual indicator if there's data
+            if (studentData.info) {
+                try {
+                    const parsedInfo = JSON.parse(studentData.info);
+                    if (hasInfoData(parsedInfo)) {
+                        infoButton.classList.add('has-data');
+                    }
+                } catch (e) {
+                    // If it's plain text and not empty
+                    if (studentData.info.trim()) {
+                        infoButton.classList.add('has-data');
+                    }
+                }
+            }
+            
+            infoButton.addEventListener('click', showInfoModal);
+            
+            infoCell.appendChild(infoButton);
+            body.appendChild(infoCell);
+            
             // Add spacer cell after each student (except the last)
-            if (studentIndex < allStudents.length - 1) {
+            if (studentIndex < studentsToDisplay.length - 1) {
                 const spacerCell = document.createElement('div');
                 spacerCell.style.background = '#e9ecef';
                 spacerCell.dataset.periodIndex = periodIndex;
@@ -751,6 +2393,217 @@ function renderDailyGrid() {
             }
         });
     });
+    
+    // Add percentage row for each student
+    // Empty cell for period column
+    const percentPeriodCell = document.createElement('div');
+    percentPeriodCell.className = 'daily-period-cell';
+    percentPeriodCell.textContent = 'Percent';
+    percentPeriodCell.style.fontWeight = '600';
+    percentPeriodCell.style.borderTop = '2px solid #000';
+    percentPeriodCell.style.background = '#f8f9fa';
+    body.appendChild(percentPeriodCell);
+    
+    // Add spacer after period column
+    const percentSpacer = document.createElement('div');
+    percentSpacer.style.background = '#e9ecef';
+    percentSpacer.style.borderTop = '2px solid #000';
+    body.appendChild(percentSpacer);
+    
+    // For each student, add percentage cells
+    studentsToDisplay.forEach((student, studentIndex) => {
+        const percentages = calculateStudentPercentages(student.id);
+        
+        // Add percentage cells for S, T, A, R
+        ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
+            const percentCell = document.createElement('div');
+            percentCell.className = 'daily-data-cell daily-percent-cell';
+            percentCell.dataset.studentId = student.id;
+            percentCell.dataset.category = category;
+            percentCell.style.padding = '8px';
+            percentCell.style.display = 'flex';
+            percentCell.style.justifyContent = 'center';
+            percentCell.style.alignItems = 'center';
+            percentCell.style.borderTop = '2px solid #000';
+            percentCell.style.fontWeight = '700';
+            percentCell.style.fontSize = '11px';
+            percentCell.style.background = '#f8f9fa';
+            
+            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
+            percentCell.textContent = percentText;
+            
+            // Color code based on category
+            if (percentages[category] !== '-') {
+                if (category === 's') percentCell.style.color = '#B91C1C';
+                else if (category === 't') percentCell.style.color = '#1E40AF';
+                else if (category === 'a') percentCell.style.color = '#047857';
+                else if (category === 'r') percentCell.style.color = '#B45309';
+            }
+            
+            body.appendChild(percentCell);
+        });
+        
+        // Add overall percentage in Info column
+        const overallPercentCell = document.createElement('div');
+        overallPercentCell.className = 'daily-data-cell daily-percent-cell';
+        overallPercentCell.dataset.studentId = student.id;
+        overallPercentCell.dataset.category = 'overall';
+        overallPercentCell.style.padding = '8px';
+        overallPercentCell.style.display = 'flex';
+        overallPercentCell.style.justifyContent = 'center';
+        overallPercentCell.style.alignItems = 'center';
+        overallPercentCell.style.borderTop = '2px solid #000';
+        overallPercentCell.style.fontWeight = '700';
+        overallPercentCell.style.fontSize = '11px';
+        overallPercentCell.style.background = '#f8f9fa';
+        overallPercentCell.style.color = '#667eea';
+        
+        const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
+        overallPercentCell.textContent = overallText;
+        
+        body.appendChild(overallPercentCell);
+        
+        // Add spacer cell after each student (except the last)
+        if (studentIndex < studentsToDisplay.length - 1) {
+            const spacerCell = document.createElement('div');
+            spacerCell.style.background = '#e9ecef';
+            spacerCell.style.borderTop = '2px solid #000';
+            body.appendChild(spacerCell);
+        }
+    });
+    
+    // Add submit button row for each student (staff only)
+    if (canEdit()) {
+        // Empty cell for period column
+        const submitPeriodCell = document.createElement('div');
+        submitPeriodCell.className = 'daily-period-cell';
+        submitPeriodCell.style.borderTop = '2px solid #e0e0e0';
+        body.appendChild(submitPeriodCell);
+        
+        // Add spacer after period column
+        const submitSpacer = document.createElement('div');
+        submitSpacer.style.background = '#e9ecef';
+        submitSpacer.style.borderTop = '2px solid #e0e0e0';
+        body.appendChild(submitSpacer);
+        
+        // For each student, add submit button spanning STAR columns (4 columns)
+        studentsToDisplay.forEach((student, studentIndex) => {
+            const submitCell = document.createElement('div');
+            submitCell.className = 'daily-data-cell daily-submit-cell';
+            submitCell.style.gridColumn = 'span 4'; // Span S, T, A, R columns
+            submitCell.style.padding = '8px';
+            submitCell.style.display = 'flex';
+            submitCell.style.justifyContent = 'center';
+            submitCell.style.alignItems = 'center';
+            submitCell.style.borderTop = '2px solid #e0e0e0';
+            
+            // Apply card color background
+            const bgColor = getCardColor(student.card_color);
+            if (bgColor) {
+                submitCell.style.backgroundColor = bgColor;
+            }
+            
+            const submitButton = document.createElement('button');
+            submitButton.className = 'student-submit-btn';
+            submitButton.textContent = `Submit ${student.name}`;
+            submitButton.dataset.studentId = student.id;
+            submitButton.dataset.studentName = student.name;
+            submitButton.addEventListener('click', submitStudentData);
+            
+            submitCell.appendChild(submitButton);
+            body.appendChild(submitCell);
+            
+            // Empty cell for Info column
+            const emptyInfoCell = document.createElement('div');
+            emptyInfoCell.className = 'daily-data-cell';
+            emptyInfoCell.style.borderTop = '2px solid #e0e0e0';
+            body.appendChild(emptyInfoCell);
+            
+            // Add spacer cell after each student (except the last)
+            if (studentIndex < studentsToDisplay.length - 1) {
+                const spacerCell = document.createElement('div');
+                spacerCell.style.background = '#e9ecef';
+                spacerCell.style.borderTop = '2px solid #e0e0e0';
+                body.appendChild(spacerCell);
+            }
+        });
+    }
+    
+    // Update "I" box highlights for all students and periods on initial load
+    studentsToDisplay.forEach(student => {
+        STANDARD_PERIODS.forEach(period => {
+            updateInfoButtonHighlight(student.id, period.time);
+        });
+    });
+}
+
+function updateDailyPercentageRow() {
+    // Get all percentage cells
+    const allPercentCells = document.querySelectorAll('.daily-percent-cell:not(.period-percent-cell)');
+    
+    if (allPercentCells.length === 0) {
+        console.log('No percentage cells found');
+        return;
+    }
+    
+    // Update each cell based on its student ID and category
+    allPercentCells.forEach(cell => {
+        const studentId = parseInt(cell.dataset.studentId);
+        const category = cell.dataset.category;
+        
+        if (!studentId || !category) {
+            return;
+        }
+        
+        // Calculate percentages for this student
+        const percentages = calculateStudentPercentages(studentId);
+        
+        // Update the cell text
+        if (category === 'overall') {
+            const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
+            cell.textContent = overallText;
+        } else {
+            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
+            cell.textContent = percentText;
+        }
+    });
+}
+
+function updateInfoButtonHighlight(studentId, period) {
+    // Determine if we're in Daily Entry or Period Entry view
+    const isDailyEntry = document.getElementById('entry-view')?.classList.contains('active');
+    const isPeriodEntry = document.getElementById('period-entry-view')?.classList.contains('active');
+    
+    let hasZero = false;
+    
+    if (isDailyEntry) {
+        // Check dailyData structure: dailyData[studentId][period] with s, t, a, r
+        const studentData = dailyData[studentId];
+        if (studentData && studentData[period]) {
+            const periodData = studentData[period];
+            // Check if any STAR value is 0
+            hasZero = periodData.s === 0 || periodData.t === 0 || periodData.a === 0 || periodData.r === 0;
+        }
+    } else if (isPeriodEntry) {
+        // Check periodData structure: periodData[studentId] with safety_points, teamwork_points, etc.
+        const data = periodData[studentId];
+        if (data) {
+            // Check if any STAR value is 0
+            hasZero = data.safety_points === 0 || data.teamwork_points === 0 || 
+                     data.accountability_points === 0 || data.relationships_points === 0;
+        }
+    }
+    
+    // Find the corresponding "I" button
+    const infoButton = document.querySelector(`.info-btn[data-student-id="${studentId}"][data-period="${period || currentPeriod}"]`);
+    
+    if (infoButton) {
+        if (hasZero) {
+            infoButton.classList.add('has-zero');
+        } else {
+            infoButton.classList.remove('has-zero');
+        }
+    }
 }
 
 function handleDailyInputChange(e) {
@@ -765,25 +2618,44 @@ function handleDailyInputChange(e) {
         dailyData[studentId] = {};
     }
     if (!dailyData[studentId][period]) {
-        dailyData[studentId][period] = { s: null, t: null, a: null, r: null };
+        dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
     }
     dailyData[studentId][period][category] = value;
     
-    // Auto-advance to next input
-    moveToNextInput(select);
+    // Update percentage row in real-time
+    updateDailyPercentageRow();
+    
+    // Update "I" box highlight based on STAR values
+    if (period) {
+        updateInfoButtonHighlight(studentId, period);
+    }
+    
+    // Auto-advance to next input, unless this was triggered by backspace
+    if (!e.isBackspaceClear) {
+        moveToNextInput(select);
+    }
 }
 
 function handleDailyInputKeydown(e) {
     const select = e.target;
     
-    // Handle backspace to clear value
+    // Handle backspace
     if (e.key === 'Backspace') {
         e.preventDefault();
-        select.value = '';
         
-        // Trigger change event to update data
-        const event = new Event('change', { bubbles: true });
-        select.dispatchEvent(event);
+        // If value is already empty, move to previous input (left)
+        if (select.value === '') {
+            moveToPreviousInput(select);
+        } else {
+            // If value is not empty, clear it and trigger change event
+            select.value = '';
+            const event = new Event('change', { bubbles: true });
+            event.isBackspaceClear = true; // Flag to prevent auto-advance
+            select.dispatchEvent(event);
+            
+            // Move to previous input (left) after clearing
+            moveToPreviousInput(select);
+        }
     }
     // Handle number keys 0, 1, 2
     else if (e.key >= '0' && e.key <= '2') {
@@ -862,19 +2734,23 @@ async function saveDailyAllData() {
                     frenzy: false,
                     notes: '',
                     reminders: '',
+                    info: data.info || '',
                     infractions: []
                 });
             }
         });
 
         if (periods.length > 0) {
+            // Get attendance status for this student
+            const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+            
             const promise = fetch('/api/daily-records', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     student_id: parseInt(studentId),
                     date: currentDate,
-                    present: true,
+                    attendance_status: attendance,
                     periods: periods,
                     frenzies: []
                 })
@@ -887,9 +2763,110 @@ async function saveDailyAllData() {
         await Promise.all(savePromises);
         showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
         loadDailyData(); // Reload to confirm
+        // Refresh summary if it's currently displayed
+        refreshSummaryIfActive();
     } catch (error) {
         console.error('Error saving daily data:', error);
         showMessage('Error saving data. Please try again.', 'error');
+    }
+}
+
+async function submitStudentData(e) {
+    const button = e.target;
+    const studentId = parseInt(button.dataset.studentId);
+    const studentName = button.dataset.studentName;
+    
+    if (!currentDate) {
+        alert('Please select a date');
+        return;
+    }
+
+    // Check if there's data for this student
+    if (!dailyData[studentId] || Object.keys(dailyData[studentId]).length === 0) {
+        alert(`No data to submit for ${studentName}`);
+        return;
+    }
+
+    // Prepare periods data for this student
+    const periods = [];
+    
+    Object.keys(dailyData[studentId]).forEach(periodTime => {
+        const data = dailyData[studentId][periodTime];
+        const periodInfo = STANDARD_PERIODS.find(p => p.time === periodTime);
+        
+        // Only save if at least one value is not null
+        if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
+            periods.push({
+                time_range: periodTime,
+                location: periodInfo ? periodInfo.location : periodTime,
+                safety_points: data.s !== null ? data.s : 0,
+                teamwork_points: data.t !== null ? data.t : 0,
+                accountability_points: data.a !== null ? data.a : 0,
+                relationships_points: data.r !== null ? data.r : 0,
+                points_possible: 4,
+                reset: false,
+                frenzy: false,
+                notes: '',
+                reminders: '',
+                info: data.info || '',
+                infractions: []
+            });
+        }
+    });
+
+    if (periods.length === 0) {
+        alert(`No data to submit for ${studentName}`);
+        return;
+    }
+
+    // Disable button during submission
+    button.disabled = true;
+    button.textContent = `Submitting...`;
+
+    // Get attendance status
+    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+
+    try {
+        const response = await fetch('/api/daily-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: studentId,
+                date: currentDate,
+                attendance_status: attendance,
+                periods: periods,
+                frenzies: []
+            })
+        });
+
+        if (response.ok) {
+            // Mark this student as submitted for the current date
+            if (!submittedStudents[currentDate]) {
+                submittedStudents[currentDate] = new Set();
+            }
+            submittedStudents[currentDate].add(studentId);
+            
+            // Save to localStorage for persistence
+            saveSubmittedStudents(submittedStudents);
+            
+            // Clear this student's data from dailyData
+            delete dailyData[studentId];
+            
+            // Show success message
+            showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            
+            // Reload the grid to show cleared data
+            renderDailyGrid();
+        } else {
+            throw new Error('Failed to submit data');
+        }
+    } catch (error) {
+        console.error('Error submitting student data:', error);
+        showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+        
+        // Re-enable button
+        button.disabled = false;
+        button.textContent = `Submit ${studentName}`;
     }
 }
 
@@ -1191,6 +3168,8 @@ async function saveDailyRecord() {
 
         if (response.ok) {
             showMessage('Record saved successfully!', 'success');
+            // Refresh summary if it's currently displayed
+            refreshSummaryIfActive();
         } else {
             throw new Error('Failed to save record');
         }
@@ -1203,9 +3182,30 @@ async function saveDailyRecord() {
 async function saveStudent() {
     const name = document.getElementById('student-name').value;
     const email = document.getElementById('student-email').value;
+    const grade = document.getElementById('student-grade').value;
+    const username = document.getElementById('student-username').value;
+    const password = document.getElementById('student-password').value;
+    
+    // Get values from team member containers as arrays
+    const caseManager = getSelectedTeamMembers('case-manager-container');
+    const practitioner = getSelectedTeamMembers('practitioner-container');
+    const professional = getSelectedTeamMembers('professional-container');
+    const groupLeader = getSelectedTeamMembers('group-leader-container');
+    const paraprofessional = getSelectedTeamMembers('paraprofessional-container');
 
-    if (!name) {
+    // Validation
+    if (!name || !name.trim()) {
         alert('Please enter a student name');
+        return;
+    }
+
+    if (!username || !username.trim()) {
+        alert('Please enter a username');
+        return;
+    }
+
+    if (!password || password.length < 6) {
+        alert('Password must be at least 6 characters long');
         return;
     }
 
@@ -1213,15 +3213,47 @@ async function saveStudent() {
         const response = await fetch('/api/students', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email })
+            body: JSON.stringify({
+                name: name.trim(),
+                email: email.trim(),
+                grade: grade,
+                username: username.trim(),
+                password: password,
+                case_manager: caseManager,
+                practitioner: practitioner,
+                professional: professional,
+                group_leader: groupLeader,
+                paraprofessional: paraprofessional
+            })
         });
+
+        const data = await response.json();
 
         if (response.ok) {
             document.getElementById('student-modal').style.display = 'none';
+            
+            // Clear all fields
             document.getElementById('student-name').value = '';
             document.getElementById('student-email').value = '';
+            document.getElementById('student-grade').value = '';
+            document.getElementById('student-username').value = '';
+            document.getElementById('student-password').value = '';
+            // Clear team member containers
+            document.getElementById('case-manager-container').innerHTML = '';
+            document.getElementById('practitioner-container').innerHTML = '';
+            document.getElementById('professional-container').innerHTML = '';
+            document.getElementById('group-leader-container').innerHTML = '';
+            document.getElementById('paraprofessional-container').innerHTML = '';
+            
             await loadStudents();
-            showMessage('Student added successfully!', 'success');
+            showMessage('Student and user account created successfully!', 'success');
+            
+            // Reload users list if in users view
+            const usersView = document.getElementById('users-view');
+            if (usersView && usersView.classList.contains('active')) {
+                loadUsers();
+            }
+            
             // Reload grid if in period entry view
             if (currentPeriod) {
                 renderStudentsGrid();
@@ -1231,158 +3263,2547 @@ async function saveStudent() {
             if (entryView && entryView.classList.contains('active')) {
                 renderDailyGrid();
             }
+        } else {
+            throw new Error(data.error || 'Failed to create student');
         }
     } catch (error) {
         console.error('Error saving student:', error);
-        showMessage('Error adding student. Please try again.', 'error');
+        showMessage(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Helper function to refresh summary if it's currently active
+function refreshSummaryIfActive() {
+    const summaryView = document.getElementById('summary-view');
+    if (summaryView && summaryView.classList.contains('active')) {
+        const quarterSelect = document.getElementById('quarter-select');
+        if (quarterSelect && quarterSelect.value) {
+            loadSummary();
+        }
     }
 }
 
 async function loadSummary() {
     const studentId = document.getElementById('summary-student-select').value;
-    const quarter = document.getElementById('quarter-select').value;
+    const periodSelect = document.getElementById('summary-period-select');
+    const timeframeSelect = document.getElementById('quarter-select');
+    const period = periodSelect ? periodSelect.value : '';
+    const timeframe = timeframeSelect ? timeframeSelect.value : '';
+    const managedByMeCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    const managedByMe = managedByMeCheckbox ? managedByMeCheckbox.checked : false;
 
-    let url = `/api/summary?quarter=${quarter}`;
+    // Get quarter and school year dates from localStorage
+    const quarterDates = loadQuarterDates();
+    const schoolYearDates = loadSchoolYearDates();
+    // Convert to MM-DD format for backend
+    const quarterDatesForBackend = convertQuarterDatesForBackend(quarterDates);
+    const schoolYearDatesForBackend = convertSchoolYearDatesForBackend(schoolYearDates);
+
+    let url = `/api/summary`;
+    const params = [];
+    
+    // If period is selected, use period and ignore timeframe
+    if (period) {
+        params.push(`period=${encodeURIComponent(period)}`);
+    } else if (timeframe) {
+        // Only use timeframe if period is not selected
+        params.push(`timeframe=${timeframe}`);
+        // Add school year parameter for month comparison
+        if (timeframe === 'month') {
+            const schoolYearSelect = document.getElementById('summary-school-year-select');
+            const selectedSchoolYear = schoolYearSelect ? schoolYearSelect.value : getCurrentSchoolYear();
+            if (selectedSchoolYear) {
+                params.push(`school_year=${encodeURIComponent(selectedSchoolYear)}`);
+            }
+        }
+    }
+    
     if (studentId) {
-        url += `&student_id=${studentId}`;
+        params.push(`student_id=${studentId}`);
+    }
+    if (managedByMe) {
+        params.push(`managed_by_me=true`);
+    }
+    // Send quarter and school year dates to backend
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+    
+    if (params.length > 0) {
+        url += '?' + params.join('&');
     }
 
     try {
         const response = await fetch(url);
         const data = await response.json();
+        
+        // Store summary data globally for modal access
+        window.currentSummaryData = data;
+        
+        // Enable Print button
+        const printSummaryBtn = document.getElementById('print-summary-btn');
+        if (printSummaryBtn) {
+            printSummaryBtn.disabled = false;
+        }
+        
+        // Get timeframe label
+        let timeframeLabel = 'All Time';
+        if (period) {
+            // Period labels
+            if (period === 'weekly') {
+                timeframeLabel = 'Weekly';
+            } else if (period === '30day') {
+                timeframeLabel = '30 Day';
+            } else if (period === 'current_year') {
+                timeframeLabel = 'Current Year';
+            } else if (period === 'quarter1') {
+                timeframeLabel = 'Quarter 1';
+            } else if (period === 'quarter2') {
+                timeframeLabel = 'Quarter 2';
+            } else if (period === 'quarter3') {
+                timeframeLabel = 'Quarter 3';
+            } else if (period === 'quarter4') {
+                timeframeLabel = 'Quarter 4';
+            } else if (period === 'all_time') {
+                timeframeLabel = 'All Time';
+            } else if (period === 'previous_years') {
+                timeframeLabel = 'Previous Years';
+            }
+        } else if (timeframe === 'weekly') {
+            timeframeLabel = 'Weekly';
+        } else if (timeframe === '30day') {
+            timeframeLabel = '30 Day';
+        } else if (timeframe === '30day_to_30day') {
+            timeframeLabel = '30 Day to 30 Day';
+        } else if (timeframe === 'month') {
+            timeframeLabel = 'Month to Month';
+        } else if (timeframe === 'quarter') {
+            timeframeLabel = 'Quarter to Quarter';
+        } else if (timeframe === 'year') {
+            timeframeLabel = 'Year to Year';
+        }
 
         const container = document.getElementById('summary-results');
-        container.innerHTML = `
-            <div class="summary-card">
-                <h3>Summary - ${quarter === 'all' ? 'All Year' : `Quarter ${quarter}`}</h3>
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <label>Total Days</label>
-                        <div class="value">${data.total_days}</div>
+        
+        // Check if comparison mode
+        if (data.comparison_mode && data.periods) {
+            // Display comparison table
+            const periods = Object.keys(data.periods);
+            if (periods.length === 0) {
+                container.innerHTML = `<div class="summary-card"><h3>Summary - ${timeframeLabel}</h3><p>No data available for comparison.</p></div>`;
+                return;
+            }
+            
+            // Build comparison table
+            let html = `
+                <div class="summary-card">
+                    <h3>Summary - ${timeframeLabel} Comparison</h3>`;
+            
+            // Add school year dropdown for month comparison
+            if (timeframe === 'month' && data.available_school_years && data.available_school_years.length > 0) {
+                const currentSchoolYear = data.selected_school_year || getCurrentSchoolYear();
+                html += `
+                    <div class="form-group" style="margin-top: 15px; margin-bottom: 15px;">
+                        <label for="summary-school-year-select" style="display: inline-block; margin-right: 10px;">School Year:</label>
+                        <select id="summary-school-year-select" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                `;
+                data.available_school_years.forEach(sy => {
+                    html += `<option value="${sy}" ${sy === currentSchoolYear ? 'selected' : ''}>${sy}</option>`;
+                });
+                html += `
+                        </select>
                     </div>
-                    <div class="stat-item">
-                        <label>Safety Average</label>
-                        <div class="value">${data.averages.safety}</div>
+                `;
+            }
+            
+            // Add data points warning for 30day_to_30day comparison
+            if (timeframe === '30day_to_30day' && data.periods) {
+                const periodKeys = Object.keys(data.periods);
+                periodKeys.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    if (periodData.available_data_points !== undefined) {
+                        const dataPoints = periodData.available_data_points;
+                        const hasFull30 = periodData.has_full_30_days || false;
+                        const statusColor = hasFull30 ? '#10b981' : '#f59e0b';
+                        const statusText = hasFull30 ? 'Complete (30/30 data points)' : `Incomplete (${dataPoints}/30 data points)`;
+                        html += `<p style="margin-bottom: 15px; padding: 10px; background: ${hasFull30 ? '#d1fae5' : '#fef3c7'}; border-left: 4px solid ${statusColor}; border-radius: 4px;">
+                            <strong>${periodKey} - Data Points:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText}</span>
+                        </p>`;
+                    }
+                });
+            }
+            
+            html += `
+                    <div style="overflow-x: auto; margin-top: 20px; max-height: 80vh; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+            `;
+            
+            // Add period headers
+            periods.forEach(periodKey => {
+                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+            });
+            
+            html += `</tr></thead><tbody>`;
+            
+            // Data Points row (only for 30day and 30day_to_30day comparisons)
+            if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
+                    const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
+                    const displayText = hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`;
+                    html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
+                });
+                html += `</tr>`;
+            }
+            
+            // Total Days
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_days}</td>`;
+            });
+            html += `</tr>`;
+            
+            // Infractions
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+            periods.forEach((periodKey, periodIndex) => {
+                const periodData = data.periods[periodKey];
+                const totalInfractions = Object.values(periodData.infractions || {}).reduce((sum, count) => sum + count, 0);
+                const hasInfractions = totalInfractions > 0;
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        <span>${totalInfractions}</span>
+                        ${hasInfractions ? `<button onclick="showInfractionsSummary(${periodIndex}, '${period.replace(/'/g, "\\'")}')" class="btn-secondary" style="padding: 4px 8px; font-size: 12px; cursor: pointer;">View Details</button>` : ''}
                     </div>
-                    <div class="stat-item">
-                        <label>Teamwork Average</label>
-                        <div class="value">${data.averages.teamwork}</div>
-                    </div>
-                    <div class="stat-item">
-                        <label>Accountability Average</label>
-                        <div class="value">${data.averages.accountability}</div>
-                    </div>
-                    <div class="stat-item">
-                        <label>Relationships Average</label>
-                        <div class="value">${data.averages.relationships}</div>
-                    </div>
-                    <div class="stat-item">
-                        <label>Overall Average</label>
-                        <div class="value">${data.averages.overall}</div>
+                </td>`;
+            });
+            html += `</tr>`;
+            
+            // Reminders
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.additional_info.total_reminders || 0}</td>`;
+            });
+            html += `</tr>`;
+            
+            // Resets
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.additional_info.total_resets || 0}</td>`;
+            });
+            html += `</tr>`;
+            
+            html += `</tbody></table></div>`;
+            
+            // STAR Percentages section - Separate Table
+            html += `
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">STAR Percentages</h4>
+                <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                        <thead style="position: sticky; top: 0; z-index: 20;">
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+            `;
+            
+            // Add period headers
+            periods.forEach(periodKey => {
+                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+            });
+            
+            html += `</tr></thead><tbody>`;
+            
+            // Safety
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety (S)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${periodData.percentages.safety}%</td>`;
+            });
+            html += `</tr>`;
+            
+            // Teamwork
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork (T)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${periodData.percentages.teamwork}%</td>`;
+            });
+            html += `</tr>`;
+            
+            // Accountability
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability (A)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${periodData.percentages.accountability}%</td>`;
+            });
+            html += `</tr>`;
+            
+            // Relationships
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${periodData.percentages.relationships}%</td>`;
+            });
+            html += `</tr>`;
+            
+            // Overall
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 700; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall Average</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 700; font-size: 18px; background: #f0f0f0; color: #667eea;">${periodData.percentages.overall}%</td>`;
+            });
+            html += `</tr>`;
+            
+            html += `</tbody></table></div>`;
+            
+            // Day of Week Statistics section - Separate Table
+            html += `
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics</h4>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label for="summary-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
+                    <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                        <input type="text" id="summary-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="table-column-search-dropdown"></div>
                     </div>
                 </div>
-                <h4 style="margin-top: 20px;">Infractions</h4>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Count</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Object.entries(data.infractions).map(([type, count]) => `
+                <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                    <table id="summary-day-of-week-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                        <thead style="position: sticky; top: 0; z-index: 20;">
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+            `;
+            
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            
+            // First header row with timeframe names
+            periods.forEach((periodKey, periodIndex) => {
+                html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
+            });
+            
+            html += `</tr><tr style="background: #f8f9fa;">`;
+            
+            // Second header row with day names
+            periods.forEach((periodKey, periodIndex) => {
+                weekdays.forEach((day, dayIndex) => {
+                    html += `<th class="summary-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${day}</th>`;
+                });
+            });
+            
+            html += `</tr></thead><tbody>`;
+            
+            // Overall % row
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
+            periods.forEach((periodKey, periodIndex) => {
+                weekdays.forEach((day, dayIndex) => {
+                    const periodData = data.periods[periodKey];
+                    const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                    const overallPercent = dayData ? dayData.percentages.overall : 0;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
+                });
+            });
+            html += `</tr>`;
+            
+            // Total Days row
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+            periods.forEach((periodKey, periodIndex) => {
+                weekdays.forEach((day, dayIndex) => {
+                    const periodData = data.periods[periodKey];
+                    const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                    const totalDays = dayData ? dayData.total_days : 0;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
+                });
+            });
+            html += `</tr>`;
+            
+            // Total Infractions row
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+            periods.forEach((periodKey, periodIndex) => {
+                weekdays.forEach((day, dayIndex) => {
+                    const periodData = data.periods[periodKey];
+                    const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                    const totalInfractions = dayData ? dayData.total_infractions : 0;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
+                });
+            });
+            html += `</tr>`;
+            
+            html += `</tbody></table></div>`;
+            
+            // Class Statistics section - Separate Table
+            const allClasses = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_class) {
+                    Object.keys(periodData.by_class).forEach(className => {
+                        allClasses.add(className);
+                    });
+                }
+            });
+            const sortedClasses = Array.from(allClasses).sort();
+            
+            if (sortedClasses.length > 0) {
+                html += `
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label for="summary-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
+                        <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                            <input type="text" id="summary-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="table-column-search-dropdown"></div>
+                        </div>
+                    </div>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table id="summary-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                `;
+                
+                // First header row with timeframe names
+                periods.forEach((periodKey, periodIndex) => {
+                    html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
+                });
+                
+                html += `</tr><tr style="background: #f8f9fa;">`;
+                
+                // Second header row with class names
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        html += `<th class="summary-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${className}</th>`;
+                    });
+                });
+                
+                html += `</tr></thead><tbody>`;
+                
+                // Overall % row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
+                        const overallPercent = classData ? classData.percentages.overall : 0;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Total Days row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
+                        const totalDays = classData ? classData.total_days : 0;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Total Infractions row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
+                        const totalInfractions = classData ? classData.total_infractions : 0;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                html += `</tbody></table></div>`;
+            }
+            
+            html += `</div>`;
+            container.innerHTML = html;
+            
+            // Initialize Day of Week searchable dropdown
+            const summaryDaySearchInput = document.getElementById('summary-day-search');
+            if (summaryDaySearchInput) {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                setupTableColumnSearch(summaryDaySearchInput, weekdays, '#summary-day-of-week-table', (selectedValue) => {
+                    const table = document.querySelector('#summary-day-of-week-table');
+                    if (!table) return;
+                    
+                    // Get all day header cells (second row) - process in order
+                    const dayHeaders = Array.from(table.querySelectorAll('thead tr:last-child th.summary-day-header'));
+                    const dataRows = table.querySelectorAll('tbody tr');
+                    
+                    // Track visible columns per period
+                    const visibleCountsByPeriod = {};
+                    
+                    dayHeaders.forEach((headerCell) => {
+                        const periodIndex = parseInt(headerCell.getAttribute('data-period-index'));
+                        const day = headerCell.getAttribute('data-day');
+                        const columnIndex = parseInt(headerCell.getAttribute('data-column-index'));
+                        const headerText = day || headerCell.textContent.trim();
+                        const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                        
+                        if (!visibleCountsByPeriod[periodIndex]) {
+                            visibleCountsByPeriod[periodIndex] = 0;
+                        }
+                        if (shouldShow) {
+                            visibleCountsByPeriod[periodIndex]++;
+                        }
+                        
+                        headerCell.style.display = shouldShow ? '' : 'none';
+                        
+                        // When filtering is active, shift all visible headers to the right by 1 column
+                        // This fixes alignment issue where headers appear 1 column too far left
+                        if (selectedValue && shouldShow) {
+                            // Approximate column width based on min-width (120px) + border/padding
+                            // Shift right by 1 column width to correct alignment
+                            headerCell.style.position = 'relative';
+                            headerCell.style.left = '400px';
+                        } else {
+                            // Reset positioning when no filter is active
+                            headerCell.style.position = '';
+                            headerCell.style.left = '';
+                        }
+                        
+                        // Hide/show corresponding data cells using data attributes for precise matching
+                        dataRows.forEach(row => {
+                            const matchingCells = row.querySelectorAll(`td.summary-day-data[data-period-index="${periodIndex}"][data-day="${day}"][data-column-index="${columnIndex}"]`);
+                            matchingCells.forEach(cell => {
+                                cell.style.display = shouldShow ? '' : 'none';
+                            });
+                        });
+                    });
+                    
+                    // Update timeframe header colspans
+                    const timeframeHeaders = table.querySelectorAll('thead tr:first-child th.summary-timeframe-header');
+                    timeframeHeaders.forEach((timeframeHeader) => {
+                        const periodIndex = parseInt(timeframeHeader.getAttribute('data-period-index'));
+                        const visibleCount = visibleCountsByPeriod[periodIndex] || 0;
+                        if (visibleCount > 0) {
+                            timeframeHeader.setAttribute('colspan', visibleCount);
+                            timeframeHeader.style.display = '';
+                        } else {
+                            timeframeHeader.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            // Initialize Class searchable dropdown
+            const summaryClassSearchInput = document.getElementById('summary-class-search');
+            if (summaryClassSearchInput && sortedClasses.length > 0) {
+                setupTableColumnSearch(summaryClassSearchInput, sortedClasses, '#summary-class-table', (selectedValue) => {
+                    const table = document.querySelector('#summary-class-table');
+                    if (!table) return;
+                    
+                    // Get all class header cells (second row)
+                    const classHeaders = table.querySelectorAll('thead tr:last-child th.summary-class-header');
+                    const dataRows = table.querySelectorAll('tbody tr');
+                    
+                    // Track visible columns per period
+                    const visibleCountsByPeriod = {};
+                    
+                    classHeaders.forEach((headerCell) => {
+                        const periodIndex = parseInt(headerCell.getAttribute('data-period-index'));
+                        const className = headerCell.getAttribute('data-class');
+                        const columnIndex = parseInt(headerCell.getAttribute('data-column-index'));
+                        const headerText = className || headerCell.textContent.trim();
+                        const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                        
+                        headerCell.style.display = shouldShow ? '' : 'none';
+                        
+                        // When filtering is active, shift all visible headers to the right by 1 column
+                        if (selectedValue && shouldShow) {
+                            headerCell.style.position = 'relative';
+                            headerCell.style.left = '400px';
+                        } else {
+                            headerCell.style.position = '';
+                            headerCell.style.left = '';
+                        }
+                        
+                        if (!visibleCountsByPeriod[periodIndex]) {
+                            visibleCountsByPeriod[periodIndex] = 0;
+                        }
+                        if (shouldShow) {
+                            visibleCountsByPeriod[periodIndex]++;
+                        }
+                        
+                        // Hide/show corresponding data cells using data attributes for precise matching
+                        dataRows.forEach(row => {
+                            const matchingCells = row.querySelectorAll(`td.summary-class-data[data-period-index="${periodIndex}"][data-class="${className}"][data-column-index="${columnIndex}"]`);
+                            matchingCells.forEach(cell => {
+                                cell.style.display = shouldShow ? '' : 'none';
+                            });
+                        });
+                    });
+                    
+                    // Update timeframe header colspans
+                    const timeframeHeaders = table.querySelectorAll('thead tr:first-child th.summary-timeframe-header');
+                    timeframeHeaders.forEach((timeframeHeader) => {
+                        const periodIndex = parseInt(timeframeHeader.getAttribute('data-period-index'));
+                        const visibleCount = visibleCountsByPeriod[periodIndex] || 0;
+                        if (visibleCount > 0) {
+                            timeframeHeader.setAttribute('colspan', visibleCount);
+                            timeframeHeader.style.display = '';
+                        } else {
+                            timeframeHeader.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            // Add event listener for school year dropdown (month comparison only)
+            if (timeframe === 'month') {
+                const schoolYearSelect = document.getElementById('summary-school-year-select');
+                if (schoolYearSelect) {
+                    schoolYearSelect.addEventListener('change', () => {
+                        loadSummary();
+                    });
+                }
+            }
+        } else {
+            // Single summary mode (30day, alltime)
+            const numPeriods = data.totals && data.totals.possible ? data.totals.possible / 4 : 0;
+            const maxPerCategory = numPeriods * 2;
+            
+            let safetyPercent = 0, teamworkPercent = 0, accountabilityPercent = 0, relationshipsPercent = 0, overallPercent = 0;
+            
+            if (maxPerCategory > 0) {
+                safetyPercent = ((data.totals.safety / maxPerCategory) * 100).toFixed(0);
+                teamworkPercent = ((data.totals.teamwork / maxPerCategory) * 100).toFixed(0);
+                accountabilityPercent = ((data.totals.accountability / maxPerCategory) * 100).toFixed(0);
+                relationshipsPercent = ((data.totals.relationships / maxPerCategory) * 100).toFixed(0);
+                
+                // Overall is average of all four categories
+                overallPercent = ((parseFloat(safetyPercent) + parseFloat(teamworkPercent) + parseFloat(accountabilityPercent) + parseFloat(relationshipsPercent)) / 4).toFixed(0);
+            }
+
+            // Add data points info for 30day period
+            let dataPointsInfo = '';
+            if ((period === '30day' || timeframe === '30day') && data.available_data_points !== undefined) {
+                const dataPoints = data.available_data_points;
+                const hasFull30 = data.has_full_30_days || false;
+                const statusColor = hasFull30 ? '#10b981' : '#f59e0b';
+                const statusText = hasFull30 ? 'Complete (30/30 data points)' : `Incomplete (${dataPoints}/30 data points)`;
+                dataPointsInfo = `<p style="margin-bottom: 15px; padding: 10px; background: ${hasFull30 ? '#d1fae5' : '#fef3c7'}; border-left: 4px solid ${statusColor}; border-radius: 4px;">
+                    <strong>Data Points:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText}</span>
+                </p>`;
+            }
+
+            container.innerHTML = `
+                <div class="summary-card">
+                    <h3>Summary - ${timeframeLabel}</h3>
+                    <p style="margin-bottom: 15px;"><strong>Total Days:</strong> ${data.total_days}</p>
+                    ${dataPointsInfo}
+                    
+                    <h4 style="margin-bottom: 15px;">STAR Averages</h4>
+                    <table class="star-averages-table" style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                        <thead>
                             <tr>
-                                <td>${type}</td>
-                                <td>${count}</td>
+                                <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid #ddd; text-align: center;">Safety (S)</th>
+                                <th style="padding: 12px; background: #DBEAFE; color: #1E40AF; border: 1px solid #ddd; text-align: center;">Teamwork (T)</th>
+                                <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid #ddd; text-align: center;">Accountability (A)</th>
+                                <th style="padding: 12px; background: #FEF3C7; color: #B45309; border: 1px solid #ddd; text-align: center;">Relationships (R)</th>
+                                <th style="padding: 12px; background: #f8f9fa; color: #333; border: 1px solid #ddd; text-align: center; font-weight: 700;">Overall Average</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${safetyPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${teamworkPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${accountabilityPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${relationshipsPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 28px; font-weight: 700; background: #f0f0f0; color: #667eea;">${overallPercent}%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <h4 style="margin-top: 20px;">Infractions</h4>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Category</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.additional_info ? `
+                                <!-- Infractions -->
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                        ${Object.keys(data.additional_info.infractions || {}).length > 0 ? 
+                                            `<div style="display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
+                                                <div style="flex: 1;">
+                                                    ${Object.entries(data.additional_info.infractions).map(([type, count]) => 
+                                                        `<div style="margin: 4px 0;">${type.replace(/</g, '&lt;').replace(/>/g, '&gt;')}: ${count}</div>`
+                                                    ).join('')}
+                                                </div>
+                                                <button onclick="showInfractionsSummarySingle()" class="btn-secondary" style="padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;">View Sorted Summary</button>
+                                            </div>`
+                                            : '<span style="color: #999; font-style: italic;">None</span>'
+                                        }
+                                    </td>
+                                </tr>
+                                
+                                <!-- Reminders -->
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                        Total: ${data.additional_info.total_reminders || 0}
+                                    </td>
+                                </tr>
+                                
+                                <!-- Resets -->
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                        Total: ${data.additional_info.total_resets || 0}
+                                    </td>
+                                </tr>
+                                
+                            ` : `
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;"><span style="color: #999; font-style: italic;">None</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;">Total: 0</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
+                                    <td style="padding: 12px; border: 1px solid #ddd;">Total: 0</td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                    
+                    ${data.by_day_of_week ? `
+                    <h4 style="margin-top: 30px;">Day of Week Statistics</h4>
+                    <div style="overflow-x: auto; margin-top: 15px;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+                            <thead>
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${(() => {
+                                    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                                    const getDayData = (day) => data.by_day_of_week[day] || {
+                                        total_days: 0,
+                                        percentages: { safety: 0, teamwork: 0, accountability: 0, relationships: 0, overall: 0 },
+                                        total_infractions: 0,
+                                        total_reminders: 0,
+                                        total_resets: 0
+                                    };
+                                    
+                                    return `
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_days || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 226, 226, 0.2);">${getDayData(day).percentages.safety || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(219, 234, 254, 0.2);">${getDayData(day).percentages.teamwork || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(209, 250, 229, 0.2);">${getDayData(day).percentages.accountability || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 243, 199, 0.2);">${getDayData(day).percentages.relationships || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: #f0f0f0;">${getDayData(day).percentages.overall || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_infractions || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_reminders || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_resets || 0}</td>`).join('')}
+                                        </tr>
+                                    `;
+                                })()}
+                            </tbody>
+                        </table>
+                    </div>
+                    ` : ''}
+                    
+                    ${data.by_class ? `
+                    <h4 style="margin-top: 30px;">Class Statistics</h4>
+                    <div style="overflow-x: auto; margin-top: 15px;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+                            <thead>
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                                    ${Object.keys(data.by_class).sort().map(className => 
+                                        `<th style="padding: 12px; border: 1px solid #ddd; text-align: center;">${className}</th>`
+                                    ).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${(() => {
+                                    const classes = Object.keys(data.by_class).sort();
+                                    const getClassData = (className) => data.by_class[className] || {
+                                        total_days: 0,
+                                        percentages: { safety: 0, teamwork: 0, accountability: 0, relationships: 0, overall: 0 },
+                                        total_infractions: 0,
+                                        total_reminders: 0,
+                                        total_resets: 0
+                                    };
+                                    
+                                    return `
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_days || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 226, 226, 0.2);">${getClassData(className).percentages.safety || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(219, 234, 254, 0.2);">${getClassData(className).percentages.teamwork || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(209, 250, 229, 0.2);">${getClassData(className).percentages.accountability || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 243, 199, 0.2);">${getClassData(className).percentages.relationships || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: #f0f0f0;">${getClassData(className).percentages.overall || 0}%</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_infractions || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_reminders || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_resets || 0}</td>`).join('')}
+                                        </tr>
+                                    `;
+                                })()}
+                            </tbody>
+                        </table>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        // Show "Show Point Card Data" button if a specific student is selected
+        const showPointCardBtn = document.getElementById('show-point-card-btn');
+        if (studentId) {
+            showPointCardBtn.style.display = 'inline-block';
+            showPointCardBtn.dataset.studentId = studentId;
+            showPointCardBtn.dataset.timeframe = timeframe;
+        } else {
+            showPointCardBtn.style.display = 'none';
+        }
+        
+        // Hide point card data container
+        document.getElementById('point-card-data-container').style.display = 'none';
     } catch (error) {
         console.error('Error loading summary:', error);
         showMessage('Error loading summary. Please try again.', 'error');
+        // Disable Print button on error
+        const printSummaryBtn = document.getElementById('print-summary-btn');
+        if (printSummaryBtn) {
+            printSummaryBtn.disabled = true;
+        }
+    }
+}
+
+async function loadCaseManagerComparison() {
+    const periodSelect = document.getElementById('summary-period-select');
+    const timeframe = periodSelect ? periodSelect.value : '';
+    
+    if (!timeframe) {
+        showMessage('Please select a timeframe first.', 'error');
+        return;
+    }
+    
+    // Get quarter and school year dates from localStorage
+    const quarterDates = loadQuarterDates();
+    const schoolYearDates = loadSchoolYearDates();
+    // Convert to MM-DD format for backend
+    const quarterDatesForBackend = convertQuarterDatesForBackend(quarterDates);
+    const schoolYearDatesForBackend = convertSchoolYearDatesForBackend(schoolYearDates);
+    
+    let url = `/api/case-manager-comparison`;
+    const params = [];
+    
+    params.push(`timeframe=${encodeURIComponent(timeframe)}`);
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+    
+    if (params.length > 0) {
+        url += '?' + params.join('&');
+    }
+    
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        // Get timeframe label
+        let timeframeLabel = 'All Time';
+        if (timeframe === 'weekly') {
+            timeframeLabel = 'Weekly';
+        } else if (timeframe === '30day') {
+            timeframeLabel = '30 Day';
+        } else if (timeframe === 'current_year') {
+            timeframeLabel = 'Current Year';
+        } else if (timeframe === 'quarter1') {
+            timeframeLabel = 'Quarter 1';
+        } else if (timeframe === 'quarter2') {
+            timeframeLabel = 'Quarter 2';
+        } else if (timeframe === 'quarter3') {
+            timeframeLabel = 'Quarter 3';
+        } else if (timeframe === 'quarter4') {
+            timeframeLabel = 'Quarter 4';
+        } else if (timeframe === 'all_time') {
+            timeframeLabel = 'All Time';
+        } else if (timeframe === 'previous_years') {
+            timeframeLabel = 'Previous Years';
+        }
+        
+        renderCaseManagerComparison(data, timeframeLabel);
+    } catch (error) {
+        console.error('Error loading case manager comparison:', error);
+        showMessage('Error loading case manager comparison. Please try again.', 'error');
+    }
+}
+
+function renderCaseManagerComparison(data, timeframeLabel) {
+    const container = document.getElementById('summary-results');
+    
+    if (!data.case_managers || Object.keys(data.case_managers).length === 0) {
+        container.innerHTML = `
+            <div class="summary-card">
+                <h3>Case Manager Comparison - ${timeframeLabel}</h3>
+                <p>No case managers with data found for the selected timeframe.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const sortedManagers = data.sorted_managers || [];
+    const caseManagers = data.case_managers || {};
+    
+    // Get all unique infraction types across all case managers
+    const allInfractionTypes = new Set();
+    sortedManagers.forEach(cmName => {
+        const cmData = caseManagers[cmName];
+        if (cmData && cmData.infractions) {
+            Object.keys(cmData.infractions).forEach(type => allInfractionTypes.add(type));
+        }
+    });
+    const sortedInfractionTypes = Array.from(allInfractionTypes).sort();
+    
+    // Build table rows
+    let tableRows = '';
+    
+    // STAR percentages rows
+    tableRows += `
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(254, 226, 226, 0.3);">Safety %</td>
+            ${sortedManagers.map(cmName => {
+                const percent = caseManagers[cmName].star_percentages.safety;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+            }).join('')}
+        </tr>
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(219, 234, 254, 0.3);">Teamwork %</td>
+            ${sortedManagers.map(cmName => {
+                const percent = caseManagers[cmName].star_percentages.teamwork;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+            }).join('')}
+        </tr>
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(209, 250, 229, 0.3);">Accountability %</td>
+            ${sortedManagers.map(cmName => {
+                const percent = caseManagers[cmName].star_percentages.accountability;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+            }).join('')}
+        </tr>
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(254, 243, 199, 0.3);">Relationships %</td>
+            ${sortedManagers.map(cmName => {
+                const percent = caseManagers[cmName].star_percentages.relationships;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+            }).join('')}
+        </tr>
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 700; background: #f0f0f0; font-size: 16px;">Overall STAR %</td>
+            ${sortedManagers.map(cmName => {
+                const percent = caseManagers[cmName].star_percentages.overall;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 700; font-size: 16px;">${percent}%</td>`;
+            }).join('')}
+        </tr>
+    `;
+    
+    // Infraction rows
+    sortedInfractionTypes.forEach(infractionType => {
+        tableRows += `
+            <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">${infractionType.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                ${sortedManagers.map(cmName => {
+                    const count = caseManagers[cmName].infractions[infractionType] || 0;
+                    return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${count}</td>`;
+                }).join('')}
+            </tr>
+        `;
+    });
+    
+    // Student count and total days rows
+    tableRows += `
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Student Count</td>
+            ${sortedManagers.map(cmName => {
+                const count = caseManagers[cmName].student_count || 0;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${count}</td>`;
+            }).join('')}
+        </tr>
+        <tr>
+            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Days</td>
+            ${sortedManagers.map(cmName => {
+                const days = caseManagers[cmName].total_days || 0;
+                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${days}</td>`;
+            }).join('')}
+        </tr>
+    `;
+    
+    container.innerHTML = `
+        <div class="summary-card">
+            <h3>Case Manager Comparison - ${timeframeLabel}</h3>
+            <p style="margin-bottom: 15px; color: #666;">Case managers ordered by highest to lowest Overall STAR %</p>
+            <div style="overflow-x: auto; margin-top: 20px;">
+                <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                    <thead>
+                        <tr style="background: #f8f9fa;">
+                            <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; background: #f8f9fa; z-index: 10;">Metric</th>
+                            ${sortedManagers.map(cmName => 
+                                `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; min-width: 120px;">${cmName.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`
+                            ).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+    
+    // Hide point card data container
+    document.getElementById('point-card-data-container').style.display = 'none';
+}
+
+async function loadPointCardData() {
+    const showPointCardBtn = document.getElementById('show-point-card-btn');
+    const studentId = showPointCardBtn.dataset.studentId;
+    const timeframe = showPointCardBtn.dataset.timeframe;
+    
+    if (!studentId) {
+        showMessage('Please select a student first', 'error');
+        return;
+    }
+    
+    const container = document.getElementById('point-card-data-container');
+    container.innerHTML = '<div class="loading">Loading point card data...</div>';
+    container.style.display = 'block';
+    
+    try {
+        // Get date range based on timeframe
+        let startDate, endDate;
+        const currentYear = new Date().getFullYear();
+        const quarterDates = loadQuarterDates();
+        const schoolYearDates = loadSchoolYearDates();
+        
+        if (timeframe === 'alltime') {
+            // For all time, get all records (no date filter)
+            startDate = null;
+            endDate = null;
+        } else if (timeframe === '30day') {
+            // For 30 day, we'll fetch all and filter on frontend or use a wide range
+            // Since we need the most recent 30 days with data, we'll fetch a wide range
+            const today = new Date();
+            const pastDate = new Date(today);
+            pastDate.setDate(pastDate.getDate() - 90); // Get last 90 days to ensure we have 30 days with data
+            startDate = pastDate.toISOString().split('T')[0];
+            endDate = today.toISOString().split('T')[0];
+        } else if (timeframe === 'month') {
+            // For month to month, get all records (no date filter, will be grouped by month)
+            startDate = null;
+            endDate = null;
+        } else if (timeframe === 'quarter') {
+            // For quarter to quarter, get all records within any quarter period
+            // We'll need to fetch a wide range that covers all quarters
+            startDate = `${currentYear - 1}-01-01`;
+            endDate = `${currentYear + 1}-12-31`;
+        } else if (timeframe === 'year') {
+            // For year to year, get all records within school year periods
+            // Calculate based on school year dates (MM/DD/YYYY format)
+            if (schoolYearDates.start && schoolYearDates.end) {
+                // Parse MM/DD/YYYY format
+                const startParts = schoolYearDates.start.split('/');
+                const endParts = schoolYearDates.end.split('/');
+                if (startParts.length === 3 && endParts.length === 3) {
+                    // Convert to YYYY-MM-DD format for API
+                    startDate = `${startParts[2]}-${startParts[0]}-${startParts[1]}`;
+                    endDate = `${endParts[2]}-${endParts[0]}-${endParts[1]}`;
+                } else {
+                    // Fallback: try to parse as MM-DD format (old format)
+                    const syStart = schoolYearDates.start.split('-');
+                    const syEnd = schoolYearDates.end.split('-');
+                    if (syStart.length >= 2 && syEnd.length >= 2) {
+                        if (parseInt(syStart[0]) <= parseInt(syEnd[0])) {
+                            startDate = `${currentYear}-${syStart[0]}-${syStart[1]}`;
+                            endDate = `${currentYear}-${syEnd[0]}-${syEnd[1]}`;
+                        } else {
+                            startDate = `${currentYear}-${syStart[0]}-${syStart[1]}`;
+                            endDate = `${currentYear + 1}-${syEnd[0]}-${syEnd[1]}`;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Default to all time
+            startDate = null;
+            endDate = null;
+        }
+        
+        // Fetch records
+        let fetchUrl = `/api/daily-records?student_id=${studentId}`;
+        if (startDate) {
+            fetchUrl += `&start_date=${startDate}`;
+        }
+        if (endDate) {
+            fetchUrl += `&end_date=${endDate}`;
+        }
+        const response = await fetch(fetchUrl);
+        const records = await response.json();
+        
+        if (!records || records.length === 0) {
+            container.innerHTML = '<div class="info-message">No point card data found for this period.</div>';
+            return;
+        }
+        
+        // Sort records by date (newest first)
+        records.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        // Get student name
+        const student = allStudents.find(s => s.id === parseInt(studentId));
+        const studentName = student ? student.name : 'Student';
+        
+        // Build HTML
+        let html = `
+            <div class="point-card-header">
+                <h3>Point Card Data - ${studentName}</h3>
+                <p>${timeframe === 'alltime' ? 'All Time' : timeframe === '30day' ? '30 Day' : timeframe === 'month' ? 'Month to Month' : timeframe === 'quarter' ? 'Quarter to Quarter' : timeframe === 'year' ? 'Year to Year' : 'All Time'}</p>
+                <div class="point-card-search" style="margin-top: 15px;">
+                    <input type="text" id="point-card-search-input" placeholder="🔍 Search dates, times, locations, STAR values, or info..." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;">
+                    <p style="font-size: 12px; color: #666; margin-top: 8px;">Search by date, time period, location, STAR values (0-2), or info data</p>
+                </div>
+            </div>
+        `;
+        
+        records.forEach(record => {
+            // Parse date without timezone issues (YYYY-MM-DD format)
+            const [year, month, day] = record.date.split('-').map(Number);
+            const date = new Date(year, month - 1, day); // month is 0-indexed
+            // Format as "Day of Week, Month Day, Year" (e.g., "Monday, January 8, 2026")
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            const formattedDate = date.toLocaleDateString('en-US', options);
+            
+            html += `
+                <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}">
+                    <div class="point-card-day-header">
+                        <h4>${formattedDate}</h4>
+                        <button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${studentName}">Edit</button>
+                    </div>
+                    <div class="point-card-grid" id="point-card-grid-${record.id}">
+                        ${renderPointCardGrid(record)}
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+        
+        // Add event listeners to edit buttons
+        container.querySelectorAll('.edit-day-btn').forEach(btn => {
+            btn.addEventListener('click', editPointCardDay);
+        });
+        
+        // Add event listeners to info view buttons
+        container.querySelectorAll('.info-view-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const recordId = e.target.dataset.recordId;
+                const periodIndex = parseInt(e.target.dataset.periodIndex);
+                // Find the record and period data
+                const record = records.find(r => r.id === parseInt(recordId));
+                if (record && record.periods && record.periods[periodIndex]) {
+                    const period = record.periods[periodIndex];
+                    showInfoViewPopup(period.info, period.time_range, period.location);
+                }
+            });
+        });
+        
+        // Add search functionality
+        const searchInput = document.getElementById('point-card-search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                filterPointCardData(e.target.value, records);
+            });
+        }
+        
+        // Store records for filtering
+        window.currentPointCardRecords = records;
+        
+    } catch (error) {
+        console.error('Error loading point card data:', error);
+        container.innerHTML = '<div class="error">Error loading point card data. Please try again.</div>';
+    }
+}
+
+function filterPointCardData(searchQuery, records) {
+    const query = searchQuery.toLowerCase().trim();
+    
+    // If search is empty, show all days
+    if (!query) {
+        document.querySelectorAll('.point-card-day').forEach(day => {
+            day.style.display = 'block';
+        });
+        return;
+    }
+    
+    // Filter each day
+    records.forEach(record => {
+        const dayElement = document.querySelector(`.point-card-day[data-date="${record.date}"]`);
+        if (!dayElement) return;
+        
+        // Parse date without timezone issues
+        const [year, month, day] = record.date.split('-').map(Number);
+        const date = new Date(year, month - 1, day); // month is 0-indexed
+        // Format as "Day of Week, Month Day, Year" for searching
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const formattedDate = date.toLocaleDateString('en-US', options).toLowerCase();
+        const shortDate = record.date.toLowerCase(); // YYYY-MM-DD format
+        // Also support MM/DD/YYYY format
+        const mmddyyyy = `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`;
+        
+        // Check if date matches
+        let dateMatches = formattedDate.includes(query) || shortDate.includes(query) || mmddyyyy.includes(query);
+        
+        // Check if any period matches
+        let periodMatches = false;
+        if (record.periods && record.periods.length > 0) {
+            periodMatches = record.periods.some(period => {
+                // Check time
+                const timeMatches = period.time_range && period.time_range.toLowerCase().includes(query);
+                
+                // Check location
+                const locationMatches = period.location && period.location.toLowerCase().includes(query);
+                
+                // Check STAR values
+                const safetyMatches = period.safety_points !== null && period.safety_points !== undefined && period.safety_points.toString().includes(query);
+                const teamworkMatches = period.teamwork_points !== null && period.teamwork_points !== undefined && period.teamwork_points.toString().includes(query);
+                const accountabilityMatches = period.accountability_points !== null && period.accountability_points !== undefined && period.accountability_points.toString().includes(query);
+                const relationshipsMatches = period.relationships_points !== null && period.relationships_points !== undefined && period.relationships_points.toString().includes(query);
+                
+                // Check info data
+                let infoMatches = false;
+                if (period.info && period.info.trim() !== '') {
+                    try {
+                        const infoData = JSON.parse(period.info);
+                        const infoString = JSON.stringify(infoData).toLowerCase();
+                        infoMatches = infoString.includes(query);
+                    } catch (e) {
+                        // If not JSON, treat as plain text
+                        infoMatches = period.info.toLowerCase().includes(query);
+                    }
+                }
+                
+                return timeMatches || locationMatches || safetyMatches || teamworkMatches || 
+                       accountabilityMatches || relationshipsMatches || infoMatches;
+            });
+        }
+        
+        // Show/hide day based on matches
+        if (dateMatches || periodMatches) {
+            dayElement.style.display = 'block';
+            
+            // If periods match, highlight matching rows
+            if (periodMatches && !dateMatches) {
+                highlightMatchingRows(dayElement, query, record);
+            } else {
+                clearHighlights(dayElement);
+            }
+        } else {
+            dayElement.style.display = 'none';
+        }
+    });
+}
+
+function highlightMatchingRows(dayElement, query, record) {
+    const table = dayElement.querySelector('.point-card-table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach((row, index) => {
+        if (index >= record.periods.length) return;
+        
+        const period = record.periods[index];
+        
+        // Check if this row matches the query
+        const timeMatches = period.time_range && period.time_range.toLowerCase().includes(query);
+        const locationMatches = period.location && period.location.toLowerCase().includes(query);
+        const safetyMatches = period.safety_points !== null && period.safety_points !== undefined && period.safety_points.toString().includes(query);
+        const teamworkMatches = period.teamwork_points !== null && period.teamwork_points !== undefined && period.teamwork_points.toString().includes(query);
+        const accountabilityMatches = period.accountability_points !== null && period.accountability_points !== undefined && period.accountability_points.toString().includes(query);
+        const relationshipsMatches = period.relationships_points !== null && period.relationships_points !== undefined && period.relationships_points.toString().includes(query);
+        
+        let infoMatches = false;
+        if (period.info && period.info.trim() !== '') {
+            try {
+                const infoData = JSON.parse(period.info);
+                const infoString = JSON.stringify(infoData).toLowerCase();
+                infoMatches = infoString.includes(query);
+            } catch (e) {
+                infoMatches = period.info.toLowerCase().includes(query);
+            }
+        }
+        
+        const rowMatches = timeMatches || locationMatches || safetyMatches || teamworkMatches || 
+                          accountabilityMatches || relationshipsMatches || infoMatches;
+        
+        if (rowMatches) {
+            row.style.backgroundColor = '#fffbea'; // Light yellow highlight
+            row.style.border = '2px solid #fbbf24';
+        } else {
+            row.style.backgroundColor = '';
+            row.style.border = '';
+            row.style.opacity = '0.5';
+        }
+    });
+}
+
+function clearHighlights(dayElement) {
+    const table = dayElement.querySelector('.point-card-table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        row.style.backgroundColor = '';
+        row.style.border = '';
+        row.style.opacity = '';
+    });
+}
+
+function renderPointCardGrid(record) {
+    if (!record.periods || record.periods.length === 0) {
+        return '<p>No period data available for this day.</p>';
+    }
+    
+    // Calculate totals for percentages
+    let totals = { s: 0, t: 0, a: 0, r: 0 };
+    let counts = { s: 0, t: 0, a: 0, r: 0 };
+    
+    record.periods.forEach(period => {
+        if (period.safety_points !== null && period.safety_points !== undefined) {
+            totals.s += period.safety_points;
+            counts.s++;
+        }
+        if (period.teamwork_points !== null && period.teamwork_points !== undefined) {
+            totals.t += period.teamwork_points;
+            counts.t++;
+        }
+        if (period.accountability_points !== null && period.accountability_points !== undefined) {
+            totals.a += period.accountability_points;
+            counts.a++;
+        }
+        if (period.relationships_points !== null && period.relationships_points !== undefined) {
+            totals.r += period.relationships_points;
+            counts.r++;
+        }
+    });
+    
+    // Calculate percentages
+    const sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
+    const tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
+    const aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
+    const rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
+    
+    const totalPoints = totals.s + totals.t + totals.a + totals.r;
+    const totalCounts = counts.s + counts.t + counts.a + counts.r;
+    const overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
+    
+    let html = `
+        <table class="point-card-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Location</th>
+                    <th style="background: #FEE2E2; color: #B91C1C;">S</th>
+                    <th style="background: #DBEAFE; color: #1E40AF;">T</th>
+                    <th style="background: #D1FAE5; color: #047857;">A</th>
+                    <th style="background: #FEF3C7; color: #B45309;">R</th>
+                    <th style="background: #E5E7EB; color: #374151;">Info</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    record.periods.forEach((period, periodIndex) => {
+        const hasInfo = period.info && period.info.trim() !== '';
+        let infoButtonHtml = '-';
+        if (hasInfo) {
+            // Store data in a way that's safe for HTML attributes
+            const recordId = record.id;
+            const periodIndexStr = periodIndex.toString();
+            infoButtonHtml = `<button class="info-view-btn" data-record-id="${recordId}" data-period-index="${periodIndexStr}" style="background: #9333EA; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">View Info</button>`;
+        }
+        
+        html += `
+            <tr>
+                <td>${period.time_range}</td>
+                <td>${period.location}</td>
+                <td style="background: rgba(254, 226, 226, 0.3); text-align: center;">${period.safety_points !== null && period.safety_points !== undefined ? period.safety_points : '-'}</td>
+                <td style="background: rgba(219, 234, 254, 0.3); text-align: center;">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</td>
+                <td style="background: rgba(209, 250, 229, 0.3); text-align: center;">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</td>
+                <td style="background: rgba(254, 243, 199, 0.3); text-align: center;">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</td>
+                <td style="background: rgba(229, 231, 235, 0.3); text-align: center;">${infoButtonHtml}</td>
+            </tr>
+        `;
+    });
+    
+    // Add percentage row
+    html += `
+            <tr style="border-top: 2px solid #000; font-weight: 700;">
+                <td colspan="2" style="text-align: right; padding-right: 10px; background: #f8f9fa;">Percent:</td>
+                <td style="background: rgba(254, 226, 226, 0.5); text-align: center; color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</td>
+                <td style="background: rgba(219, 234, 254, 0.5); text-align: center; color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</td>
+                <td style="background: rgba(209, 250, 229, 0.5); text-align: center; color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</td>
+                <td style="background: rgba(254, 243, 199, 0.5); text-align: center; color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</td>
+                <td style="background: #f8f9fa; text-align: center; color: #667eea; font-size: 13px;">${overallPercent !== '-' ? overallPercent + '%' : '-'}</td>
+            </tr>
+            </tbody>
+        </table>
+    `;
+    
+    return html;
+}
+
+async function editPointCardDay(e) {
+    const button = e.target;
+    const recordId = button.dataset.recordId;
+    const date = button.dataset.date;
+    const studentId = button.dataset.studentId;
+    const studentName = button.dataset.studentName;
+    
+    // Fetch the full record data
+    try {
+        const response = await fetch(`/api/daily-records?student_id=${studentId}&start_date=${date}&end_date=${date}`);
+        const records = await response.json();
+        
+        if (!records || records.length === 0) {
+            showMessage('Record not found', 'error');
+            return;
+        }
+        
+        const record = records[0];
+        
+        // Create edit modal or inline edit view
+        showEditPointCardModal(record, studentId, studentName, date);
+        
+    } catch (error) {
+        console.error('Error loading record for editing:', error);
+        showMessage('Error loading record. Please try again.', 'error');
+    }
+}
+
+function showEditPointCardModal(record, studentId, studentName, date) {
+    // Create a modal for editing
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'edit-point-card-modal';
+    modal.style.display = 'block';
+    
+    // Format date as "Day of Week, Month Day, Year" (parse without timezone issues)
+    const [year, month, day] = date.split('-').map(Number);
+    const dateObj = new Date(year, month - 1, day); // month is 0-indexed
+    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    const formattedDate = dateObj.toLocaleDateString('en-US', options);
+    
+    let modalContent = `
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <span class="close" onclick="document.getElementById('edit-point-card-modal').remove()">&times;</span>
+            <h2>Edit Point Card Data - ${studentName}</h2>
+            <h3>${formattedDate}</h3>
+            
+            <div class="edit-point-card-grid" style="margin-top: 20px;">
+                <table class="point-card-edit-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">Time</th>
+                            <th style="padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">Location</th>
+                            <th style="padding: 10px; background: #FEE2E2; color: #B91C1C; border: 1px solid #ddd;">S</th>
+                            <th style="padding: 10px; background: #DBEAFE; color: #1E40AF; border: 1px solid #ddd;">T</th>
+                            <th style="padding: 10px; background: #D1FAE5; color: #047857; border: 1px solid #ddd;">A</th>
+                            <th style="padding: 10px; background: #FEF3C7; color: #B45309; border: 1px solid #ddd;">R</th>
+                            <th style="padding: 10px; background: #E5E7EB; color: #374151; border: 1px solid #ddd;">Info</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    
+    record.periods.forEach((period, index) => {
+        const hasInfo = period.info && period.info.trim() !== '';
+        
+        modalContent += `
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">${period.time_range}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${period.location}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 226, 226, 0.3);">
+                    <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
+                        <option value="">-</option>
+                        <option value="2" ${period.safety_points === 2 ? 'selected' : ''}>2</option>
+                        <option value="1" ${period.safety_points === 1 ? 'selected' : ''}>1</option>
+                        <option value="0" ${period.safety_points === 0 ? 'selected' : ''}>0</option>
+                    </select>
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(219, 234, 254, 0.3);">
+                    <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
+                        <option value="">-</option>
+                        <option value="2" ${period.teamwork_points === 2 ? 'selected' : ''}>2</option>
+                        <option value="1" ${period.teamwork_points === 1 ? 'selected' : ''}>1</option>
+                        <option value="0" ${period.teamwork_points === 0 ? 'selected' : ''}>0</option>
+                    </select>
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(209, 250, 229, 0.3);">
+                    <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
+                        <option value="">-</option>
+                        <option value="2" ${period.accountability_points === 2 ? 'selected' : ''}>2</option>
+                        <option value="1" ${period.accountability_points === 1 ? 'selected' : ''}>1</option>
+                        <option value="0" ${period.accountability_points === 0 ? 'selected' : ''}>0</option>
+                    </select>
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 243, 199, 0.3);">
+                    <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
+                        <option value="">-</option>
+                        <option value="2" ${period.relationships_points === 2 ? 'selected' : ''}>2</option>
+                        <option value="1" ${period.relationships_points === 1 ? 'selected' : ''}>1</option>
+                        <option value="0" ${period.relationships_points === 0 ? 'selected' : ''}>0</option>
+                    </select>
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(229, 231, 235, 0.3); text-align: center;">
+                    <button class="info-btn-small" data-period-index="${index}" style="padding: 4px 8px; font-size: 11px;">${hasInfo ? 'Edit' : 'Add'}</button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    modalContent += `
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn-primary" onclick="saveEditedPointCard(${record.id}, ${studentId}, '${date}')">Save Changes</button>
+                <button class="btn-secondary" onclick="document.getElementById('edit-point-card-modal').remove()">Cancel</button>
+            </div>
+        </div>
+    `;
+    
+    modal.innerHTML = modalContent;
+    document.body.appendChild(modal);
+    
+    // Store the record data for saving
+    window.editingPointCardRecord = record;
+}
+
+async function saveEditedPointCard(recordId, studentId, date) {
+    const modal = document.getElementById('edit-point-card-modal');
+    const record = window.editingPointCardRecord;
+    
+    if (!record) {
+        showMessage('Error: Record data not found', 'error');
+        return;
+    }
+    
+    // Collect updated values from the form
+    const updatedPeriods = record.periods.map((period, index) => {
+        const safetySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="safety"]`);
+        const teamworkSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="teamwork"]`);
+        const accountabilitySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="accountability"]`);
+        const relationshipsSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="relationships"]`);
+        
+        return {
+            time_range: period.time_range,
+            location: period.location,
+            safety_points: safetySelect.value === '' ? null : parseInt(safetySelect.value),
+            teamwork_points: teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value),
+            accountability_points: accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value),
+            relationships_points: relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value),
+            points_possible: 4,
+            reset: period.reset || false,
+            frenzy: period.frenzy || false,
+            notes: period.notes || '',
+            reminders: period.reminders || '',
+            info: period.info || '',
+            infractions: period.infractions || []
+        };
+    });
+    
+    try {
+        const response = await fetch('/api/daily-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: studentId,
+                date: date,
+                present: true,
+                periods: updatedPeriods,
+                frenzies: []
+            })
+        });
+        
+        if (response.ok) {
+            showMessage('Point card data updated successfully!', 'success');
+            modal.remove();
+            
+            // Reload point card data to show changes
+            loadPointCardData();
+        } else {
+            throw new Error('Failed to save changes');
+        }
+    } catch (error) {
+        console.error('Error saving edited point card:', error);
+        showMessage('Error saving changes. Please try again.', 'error');
     }
 }
 
 async function loadFrenzyStats() {
     const studentId = document.getElementById('frenzy-student-select').value;
+    const periodSelect = document.getElementById('frenzy-period-select');
+    const timeframeSelect = document.getElementById('frenzy-timeframe-select');
+    const period = periodSelect ? periodSelect.value : '';
+    const timeframe = timeframeSelect ? timeframeSelect.value : '';
+    const managedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+    const managedByMe = managedByMeCheckbox ? managedByMeCheckbox.checked : false;
+
+    // Get quarter and school year dates from localStorage
+    const quarterDates = loadQuarterDates();
+    const schoolYearDates = loadSchoolYearDates();
+    // Convert to MM-DD format for backend
+    const quarterDatesForBackend = convertQuarterDatesForBackend(quarterDates);
+    const schoolYearDatesForBackend = convertSchoolYearDatesForBackend(schoolYearDates);
 
     let url = '/api/frenzy-stats';
+    const params = [];
+    // If period is selected, use period and ignore timeframe
+    if (period) {
+        params.push(`period=${encodeURIComponent(period)}`);
+    } else if (timeframe) {
+        // Only use timeframe if period is not selected
+        params.push(`timeframe=${timeframe}`);
+    }
+    
     if (studentId) {
-        url += `?student_id=${studentId}`;
+        params.push(`student_id=${studentId}`);
+    }
+    if (managedByMe) {
+        params.push(`managed_by_me=true`);
+    }
+    // Add school year parameter for month comparison
+    if (timeframe === 'month') {
+        const schoolYearSelect = document.getElementById('frenzy-school-year-select');
+        const selectedSchoolYear = schoolYearSelect ? schoolYearSelect.value : getCurrentSchoolYear();
+        if (selectedSchoolYear) {
+            params.push(`school_year=${encodeURIComponent(selectedSchoolYear)}`);
+        }
+    }
+    // Send quarter and school year dates to backend
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+    
+    if (params.length > 0) {
+        url += '?' + params.join('&');
     }
 
     try {
         const response = await fetch(url);
         const data = await response.json();
 
+        // Store frenzy stats data globally for PDF generation
+        window.currentFrenzyStatsData = data;
+
+        // Enable Print button
+        const printFrenzyBtn = document.getElementById('print-frenzy-btn');
+        if (printFrenzyBtn) {
+            printFrenzyBtn.disabled = false;
+        }
+
         const container = document.getElementById('frenzy-results');
-        container.innerHTML = `
-            <div class="summary-card">
-                <h3>Frenzy Statistics</h3>
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <label>Total Frenzies</label>
-                        <div class="value">${data.total_count}</div>
+        
+        // Get timeframe label
+        let timeframeLabel = 'All Time';
+        if (period) {
+            // Period labels
+            if (period === '30day') {
+                timeframeLabel = '30 Day';
+            } else if (period === 'current_year') {
+                timeframeLabel = 'Current Year';
+            } else if (period === 'quarter1') {
+                timeframeLabel = 'Quarter 1';
+            } else if (period === 'quarter2') {
+                timeframeLabel = 'Quarter 2';
+            } else if (period === 'quarter3') {
+                timeframeLabel = 'Quarter 3';
+            } else if (period === 'quarter4') {
+                timeframeLabel = 'Quarter 4';
+            } else if (period === 'all_time') {
+                timeframeLabel = 'All Time';
+            } else if (period === 'previous_years') {
+                timeframeLabel = 'Previous Years';
+            }
+        } else if (timeframe === '30day') {
+            timeframeLabel = '30 Day';
+        } else if (timeframe === '30day_to_30day') {
+            timeframeLabel = '30 Day to 30 Day';
+        } else if (timeframe === 'month') {
+            timeframeLabel = 'Month to Month';
+        } else if (timeframe === 'quarter') {
+            timeframeLabel = 'Quarter to Quarter';
+        } else if (timeframe === 'year') {
+            timeframeLabel = 'Year to Year';
+        }
+        
+        // Check if comparison mode
+        if (data.comparison_mode && data.periods) {
+            // Display comparison table
+            const periods = Object.keys(data.periods);
+            if (periods.length === 0) {
+                container.innerHTML = `<div class="summary-card"><h3>Frenzy Statistics - ${timeframeLabel}</h3><p>No data available for comparison.</p></div>`;
+                return;
+            }
+            
+            // Build comparison table
+            let html = `
+                <div class="summary-card">
+                    <h3>Frenzy Statistics - ${timeframeLabel} Comparison</h3>`;
+            
+            // Add school year dropdown for month comparison
+            if (timeframe === 'month' && data.available_school_years && data.available_school_years.length > 0) {
+                const currentSchoolYear = data.selected_school_year || getCurrentSchoolYear();
+                html += `
+                    <div class="form-group" style="margin-top: 15px; margin-bottom: 15px;">
+                        <label for="frenzy-school-year-select" style="display: inline-block; margin-right: 10px;">School Year:</label>
+                        <select id="frenzy-school-year-select" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                `;
+                data.available_school_years.forEach(sy => {
+                    html += `<option value="${sy}" ${sy === currentSchoolYear ? 'selected' : ''}>${sy}</option>`;
+                });
+                html += `
+                        </select>
                     </div>
-                    <div class="stat-item">
-                        <label>Total Duration</label>
-                        <div class="value">${data.total_duration} min</div>
+                `;
+            }
+            
+            // Add data points warning for 30day_to_30day comparison
+            if (timeframe === '30day_to_30day' && data.periods) {
+                const periodKeys = Object.keys(data.periods);
+                periodKeys.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    if (periodData.available_data_points !== undefined) {
+                        const dataPoints = periodData.available_data_points;
+                        const hasFull30 = periodData.has_full_30_days || false;
+                        const statusColor = hasFull30 ? '#10b981' : '#f59e0b';
+                        const statusText = hasFull30 ? 'Complete (30/30 data points)' : `Incomplete (${dataPoints}/30 data points)`;
+                        html += `<p style="margin-bottom: 15px; padding: 10px; background: ${hasFull30 ? '#d1fae5' : '#fef3c7'}; border-left: 4px solid ${statusColor}; border-radius: 4px;">
+                            <strong>${periodKey} - Data Points:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText}</span>
+                        </p>`;
+                    }
+                });
+            }
+            
+            html += `
+                    <div style="overflow-x: auto; margin-top: 20px; max-height: 80vh; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+            `;
+            
+            // Add period headers
+            periods.forEach(periodKey => {
+                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+            });
+            
+            html += `</tr></thead><tbody>`;
+            
+            // Data Points row (only for 30day and 30day_to_30day comparisons)
+            if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
+                    const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
+                    const displayText = hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`;
+                    html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
+                });
+                html += `</tr>`;
+            }
+            
+            // Total Frenzies
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Frenzies</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_count || 0}</td>`;
+            });
+            html += `</tr>`;
+            
+            // Total Duration
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Duration (min)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_duration || 0}</td>`;
+            });
+            html += `</tr>`;
+            
+            // Average Duration
+            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Average Duration (min)</td>`;
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.avg_duration ? periodData.avg_duration.toFixed(1) : '0.0'}</td>`;
+            });
+            html += `</tr>`;
+            
+            html += `</tbody></table></div>`;
+            
+            // By Day of Week section - Separate Table (weekdays only)
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const allDays = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_day) {
+                    Object.keys(periodData.by_day).forEach(day => {
+                        // Only include weekdays
+                        if (weekdays.includes(day)) {
+                            allDays.add(day);
+                        }
+                    });
+                }
+            });
+            const sortedDays = weekdays.filter(d => allDays.has(d));
+            
+            if (sortedDays.length > 0) {
+                html += `
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics</h4>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label for="frenzy-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
+                        <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                            <input type="text" id="frenzy-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="table-column-search-dropdown"></div>
+                        </div>
                     </div>
-                    <div class="stat-item">
-                        <label>Average Duration</label>
-                        <div class="value">${data.avg_duration.toFixed(1)} min</div>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table id="frenzy-day-of-week-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                `;
+                
+                // First header row with timeframe names
+                periods.forEach((periodKey, periodIndex) => {
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
+                });
+                
+                html += `</tr><tr style="background: #f8f9fa;">`;
+                
+                // Second header row with day names
+                periods.forEach((periodKey, periodIndex) => {
+                    weekdays.forEach((day, dayIndex) => {
+                        html += `<th class="frenzy-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${day}</th>`;
+                    });
+                });
+                
+                html += `</tr></thead><tbody>`;
+                
+                // Count row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    weekdays.forEach((day, dayIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.count || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    weekdays.forEach((day, dayIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.duration || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Avg Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    weekdays.forEach((day, dayIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.avg_duration ? dayData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                html += `</tbody></table></div>`;
+            }
+            
+            // By Class section - Separate Table
+            const allClasses = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_location) {
+                    Object.keys(periodData.by_location).forEach(className => {
+                        allClasses.add(className);
+                    });
+                }
+            });
+            const sortedClasses = Array.from(allClasses).sort();
+            
+            html += `
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>`;
+            
+            if (sortedClasses.length > 0) {
+                html += `
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label for="frenzy-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
+                        <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                            <input type="text" id="frenzy-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="table-column-search-dropdown"></div>
+                        </div>
                     </div>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table id="frenzy-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                `;
+                
+                // First header row with timeframe names
+                periods.forEach((periodKey, periodIndex) => {
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
+                });
+                
+                html += `</tr><tr style="background: #f8f9fa;">`;
+                
+                // Second header row with class names
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        html += `<th class="frenzy-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${className}</th>`;
+                    });
+                });
+                
+                html += `</tr></thead><tbody>`;
+                
+                // Count row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.count || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.duration || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Avg Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedClasses.forEach((className, classIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.avg_duration ? classData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                html += `</tbody></table></div>`;
+            } else {
+                html += `
+                    <div style="padding: 20px; text-align: center; background: #f8f9fa; border-radius: 4px; margin-top: 10px;">
+                        <p style="color: #999; font-style: italic;">No class data available for the selected timeframe.</p>
+                    </div>`;
+            }
+            
+            // By Purpose section - Separate Table
+            const allPurposes = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_purpose) {
+                    Object.keys(periodData.by_purpose).forEach(purpose => allPurposes.add(purpose));
+                }
+            });
+            const sortedPurposes = Array.from(allPurposes).sort();
+            
+            if (sortedPurposes.length > 0) {
+                html += `
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Purpose Statistics</h4>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label for="frenzy-purpose-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Purpose:</label>
+                        <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                            <input type="text" id="frenzy-purpose-search" placeholder="Type to search purpose name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="table-column-search-dropdown"></div>
+                        </div>
+                    </div>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table id="frenzy-purpose-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                `;
+                
+                // First header row with timeframe names
+                periods.forEach((periodKey, periodIndex) => {
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedPurposes.length}">${periodKey}</th>`;
+                });
+                
+                html += `</tr><tr style="background: #f8f9fa;">`;
+                
+                // Second header row with purpose names
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedPurposes.forEach((purpose, purposeIndex) => {
+                        html += `<th class="frenzy-purpose-header" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`;
+                    });
+                });
+                
+                html += `</tr></thead><tbody>`;
+                
+                // Count row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedPurposes.forEach((purpose, purposeIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.count || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedPurposes.forEach((purpose, purposeIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.duration || 0}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                // Avg Duration row
+                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                periods.forEach((periodKey, periodIndex) => {
+                    sortedPurposes.forEach((purpose, purposeIndex) => {
+                        const periodData = data.periods[periodKey];
+                        const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.avg_duration ? purposeData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                    });
+                });
+                html += `</tr>`;
+                
+                html += `</tbody></table></div>`;
+            }
+            
+            html += `</div>`;
+            container.innerHTML = html;
+            
+            // Initialize Day of Week searchable dropdown
+            const frenzyDaySearchInput = document.getElementById('frenzy-day-search');
+            if (frenzyDaySearchInput) {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                setupTableColumnSearch(frenzyDaySearchInput, weekdays, '#frenzy-day-of-week-table', (selectedValue) => {
+                    const table = document.querySelector('#frenzy-day-of-week-table');
+                    if (!table) return;
+                    
+                    // Get all day header cells (second row)
+                    const dayHeaders = table.querySelectorAll('thead tr:last-child th.frenzy-day-header');
+                    const dataRows = table.querySelectorAll('tbody tr');
+                    
+                    // Track visible columns per period
+                    const visibleCountsByPeriod = {};
+                    
+                    dayHeaders.forEach((headerCell) => {
+                        const periodIndex = parseInt(headerCell.getAttribute('data-period-index'));
+                        const day = headerCell.getAttribute('data-day');
+                        const columnIndex = parseInt(headerCell.getAttribute('data-column-index'));
+                        const headerText = day || headerCell.textContent.trim();
+                        const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                        
+                        headerCell.style.display = shouldShow ? '' : 'none';
+                        
+                        // When filtering is active, shift all visible headers to the right by 1 column
+                        if (selectedValue && shouldShow) {
+                            headerCell.style.position = 'relative';
+                            headerCell.style.left = '400px';
+                        } else {
+                            headerCell.style.position = '';
+                            headerCell.style.left = '';
+                        }
+                        
+                        if (!visibleCountsByPeriod[periodIndex]) {
+                            visibleCountsByPeriod[periodIndex] = 0;
+                        }
+                        if (shouldShow) {
+                            visibleCountsByPeriod[periodIndex]++;
+                        }
+                        
+                        // Hide/show corresponding data cells using data attributes for precise matching
+                        dataRows.forEach(row => {
+                            const matchingCells = row.querySelectorAll(`td.frenzy-day-data[data-period-index="${periodIndex}"][data-day="${day}"][data-column-index="${columnIndex}"]`);
+                            matchingCells.forEach(cell => {
+                                cell.style.display = shouldShow ? '' : 'none';
+                            });
+                        });
+                    });
+                    
+                    // Update timeframe header colspans
+                    const timeframeHeaders = table.querySelectorAll('thead tr:first-child th.frenzy-timeframe-header');
+                    timeframeHeaders.forEach((timeframeHeader) => {
+                        const periodIndex = parseInt(timeframeHeader.getAttribute('data-period-index'));
+                        const visibleCount = visibleCountsByPeriod[periodIndex] || 0;
+                        if (visibleCount > 0) {
+                            timeframeHeader.setAttribute('colspan', visibleCount);
+                            timeframeHeader.style.display = '';
+                        } else {
+                            timeframeHeader.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            // Initialize Class searchable dropdown
+            const frenzyClassSearchInput = document.getElementById('frenzy-class-search');
+            if (frenzyClassSearchInput && sortedClasses.length > 0) {
+                setupTableColumnSearch(frenzyClassSearchInput, sortedClasses, '#frenzy-class-table', (selectedValue) => {
+                    const table = document.querySelector('#frenzy-class-table');
+                    if (!table) return;
+                    
+                    // Get all class header cells (second row)
+                    const classHeaders = table.querySelectorAll('thead tr:last-child th.frenzy-class-header');
+                    const dataRows = table.querySelectorAll('tbody tr');
+                    
+                    // Track visible columns per period
+                    const visibleCountsByPeriod = {};
+                    
+                    classHeaders.forEach((headerCell) => {
+                        const periodIndex = parseInt(headerCell.getAttribute('data-period-index'));
+                        const className = headerCell.getAttribute('data-class');
+                        const columnIndex = parseInt(headerCell.getAttribute('data-column-index'));
+                        const headerText = className || headerCell.textContent.trim();
+                        const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                        
+                        headerCell.style.display = shouldShow ? '' : 'none';
+                        
+                        // When filtering is active, shift all visible headers to the right by 1 column
+                        if (selectedValue && shouldShow) {
+                            headerCell.style.position = 'relative';
+                            headerCell.style.left = '400px';
+                        } else {
+                            headerCell.style.position = '';
+                            headerCell.style.left = '';
+                        }
+                        
+                        if (!visibleCountsByPeriod[periodIndex]) {
+                            visibleCountsByPeriod[periodIndex] = 0;
+                        }
+                        if (shouldShow) {
+                            visibleCountsByPeriod[periodIndex]++;
+                        }
+                        
+                        // Hide/show corresponding data cells using data attributes for precise matching
+                        dataRows.forEach(row => {
+                            const matchingCells = row.querySelectorAll(`td.frenzy-class-data[data-period-index="${periodIndex}"][data-class="${className}"][data-column-index="${columnIndex}"]`);
+                            matchingCells.forEach(cell => {
+                                cell.style.display = shouldShow ? '' : 'none';
+                            });
+                        });
+                    });
+                    
+                    // Update timeframe header colspans
+                    const timeframeHeaders = table.querySelectorAll('thead tr:first-child th.frenzy-timeframe-header');
+                    timeframeHeaders.forEach((timeframeHeader) => {
+                        const periodIndex = parseInt(timeframeHeader.getAttribute('data-period-index'));
+                        const visibleCount = visibleCountsByPeriod[periodIndex] || 0;
+                        if (visibleCount > 0) {
+                            timeframeHeader.setAttribute('colspan', visibleCount);
+                            timeframeHeader.style.display = '';
+                        } else {
+                            timeframeHeader.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            // Initialize Purpose searchable dropdown
+            const frenzyPurposeSearchInput = document.getElementById('frenzy-purpose-search');
+            if (frenzyPurposeSearchInput && sortedPurposes.length > 0) {
+                setupTableColumnSearch(frenzyPurposeSearchInput, sortedPurposes, '#frenzy-purpose-table', (selectedValue) => {
+                    const table = document.querySelector('#frenzy-purpose-table');
+                    if (!table) return;
+                    
+                    // Get all purpose header cells (second row)
+                    const purposeHeaders = table.querySelectorAll('thead tr:last-child th.frenzy-purpose-header');
+                    const dataRows = table.querySelectorAll('tbody tr');
+                    
+                    // Track visible columns per period
+                    const visibleCountsByPeriod = {};
+                    
+                    purposeHeaders.forEach((headerCell) => {
+                        const periodIndex = parseInt(headerCell.getAttribute('data-period-index'));
+                        const purpose = headerCell.getAttribute('data-purpose');
+                        const columnIndex = parseInt(headerCell.getAttribute('data-column-index'));
+                        const headerText = purpose || headerCell.textContent.trim();
+                        const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                        
+                        headerCell.style.display = shouldShow ? '' : 'none';
+                        
+                        // When filtering is active, shift all visible headers to the right by 1 column
+                        if (selectedValue && shouldShow) {
+                            headerCell.style.position = 'relative';
+                            headerCell.style.left = '400px';
+                        } else {
+                            headerCell.style.position = '';
+                            headerCell.style.left = '';
+                        }
+                        
+                        if (!visibleCountsByPeriod[periodIndex]) {
+                            visibleCountsByPeriod[periodIndex] = 0;
+                        }
+                        if (shouldShow) {
+                            visibleCountsByPeriod[periodIndex]++;
+                        }
+                        
+                        // Hide/show corresponding data cells using data attributes for precise matching
+                        dataRows.forEach(row => {
+                            const matchingCells = row.querySelectorAll(`td.frenzy-purpose-data[data-period-index="${periodIndex}"][data-purpose="${purpose.replace(/"/g, '\\"')}"][data-column-index="${columnIndex}"]`);
+                            matchingCells.forEach(cell => {
+                                cell.style.display = shouldShow ? '' : 'none';
+                            });
+                        });
+                    });
+                    
+                    // Update timeframe header colspans
+                    const timeframeHeaders = table.querySelectorAll('thead tr:first-child th.frenzy-timeframe-header');
+                    timeframeHeaders.forEach((timeframeHeader) => {
+                        const periodIndex = parseInt(timeframeHeader.getAttribute('data-period-index'));
+                        const visibleCount = visibleCountsByPeriod[periodIndex] || 0;
+                        if (visibleCount > 0) {
+                            timeframeHeader.setAttribute('colspan', visibleCount);
+                            timeframeHeader.style.display = '';
+                        } else {
+                            timeframeHeader.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            // Add event listener for school year dropdown (month comparison only)
+            if (timeframe === 'month') {
+                const schoolYearSelect = document.getElementById('frenzy-school-year-select');
+                if (schoolYearSelect) {
+                    schoolYearSelect.addEventListener('change', () => {
+                        loadFrenzyStats();
+                    });
+                }
+            }
+        } else {
+            // Single summary mode (30day, alltime)
+            container.innerHTML = `
+                <div class="summary-card">
+                    <h3>Frenzy Statistics - ${timeframeLabel}</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <label>Total Frenzies</label>
+                            <div class="value">${data.total_count || 0}</div>
+                        </div>
+                        <div class="stat-item">
+                            <label>Total Duration</label>
+                            <div class="value">${data.total_duration || 0} min</div>
+                        </div>
+                        <div class="stat-item">
+                            <label>Average Duration</label>
+                            <div class="value">${data.avg_duration ? data.avg_duration.toFixed(1) : '0.0'} min</div>
+                        </div>
+                    </div>
+                    <h4 style="margin-top: 20px;">By Day of Week</h4>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Metric</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${(() => {
+                                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                                const getDayData = (day) => data.by_day && data.by_day[day] ? data.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
+                                const hasData = weekdays.some(day => getDayData(day).count > 0);
+                                
+                                if (hasData) {
+                                    return `
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
+                                        </tr>
+                                    `;
+                                } else {
+                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by day</td></tr>';
+                                }
+                            })()}
+                        </tbody>
+                    </table>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>
+                    ${data.by_location && Object.keys(data.by_location).length > 0 ? `
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label for="frenzy-single-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
+                        <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                            <input type="text" id="frenzy-single-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="table-column-search-dropdown"></div>
+                        </div>
+                    </div>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table id="frenzy-single-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Class</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Count</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Total Duration</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Avg Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${Object.entries(data.by_location).sort((a, b) => a[0].localeCompare(b[0])).map(([className, stats]) => `
+                                    <tr>
+                                        <td class="frenzy-single-class-name" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${className}</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.count || 0}</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.duration || 0} min</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ` : `
+                    <div style="padding: 20px; text-align: center; background: #f8f9fa; border-radius: 4px; margin-top: 10px;">
+                        <p style="color: #999; font-style: italic;">No class data available for the selected timeframe.</p>
+                    </div>
+                    `}
+                    <h4 style="margin-top: 20px;">By Purpose</h4>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Purpose</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Count</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Total Duration</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Avg Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.entries(data.by_purpose || {}).length > 0 ? 
+                                Object.entries(data.by_purpose).map(([purpose, stats]) => `
+                                    <tr>
+                                        <td style="padding: 12px; border: 1px solid #ddd;">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.count}</td>
+                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.duration} min</td>
+                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
+                                    </tr>
+                                `).join('') 
+                                : '<tr><td colspan="4" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by purpose</td></tr>'
+                            }
+                        </tbody>
+                    </table>
+                    ${(() => {
+                        // Check if all purposes in all_purposes are already in by_purpose
+                        const purposesInTable = new Set(Object.keys(data.by_purpose || {}));
+                        const allPurposesList = (data.all_purposes || []).filter(p => p && p.trim());
+                        const uniquePurposes = [...new Set(allPurposesList.map(p => p.trim()))];
+                        const purposesNotInTable = uniquePurposes.filter(p => !purposesInTable.has(p));
+                        
+                        // Only show "All Purposes" section if there are purposes not already in the table
+                        if (purposesNotInTable.length > 0) {
+                            return `
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">All Purposes</h4>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Purpose</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${purposesNotInTable.map(purpose => `
+                                    <tr>
+                                        <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${(purpose || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                            `;
+                        }
+                        return '';
+                    })()}
+                    <h4 style="margin-top: 20px;">Results of Behavior</h4>
+                    <div style="overflow-x: auto; margin-top: 10px; max-height: 300px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead style="position: sticky; top: 0; z-index: 20;">
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${(data.all_results && data.all_results.length > 0) ? 
+                                    data.all_results.map(result => 
+                                        `<tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; white-space: pre-wrap;">${(result || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                        </tr>`
+                                    ).join('') 
+                                    : '<tr><td style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999; font-style: italic;">None</td></tr>'
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <h4 style="margin-top: 30px;">Additional Information</h4>
+                    <h5 style="margin-top: 15px; margin-bottom: 10px; color: #667eea;">Day of Week Comparison</h5>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                        <thead>
+                            <tr style="background: #f8f9fa;">
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Metric</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
+                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${(() => {
+                                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                                const getDayData = (day) => data.by_day && data.by_day[day] ? data.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
+                                const hasData = weekdays.some(day => getDayData(day).count > 0);
+                                
+                                if (hasData) {
+                                    return `
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
+                                        </tr>
+                                    `;
+                                } else {
+                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by day</td></tr>';
+                                }
+                            })()}
+                        </tbody>
+                    </table>
                 </div>
-                <h4 style="margin-top: 20px;">By Day of Week</h4>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Day</th>
-                            <th>Count</th>
-                            <th>Total Duration</th>
-                            <th>Avg Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Object.entries(data.by_day).map(([day, stats]) => `
-                            <tr>
-                                <td>${day}</td>
-                                <td>${stats.count}</td>
-                                <td>${stats.duration} min</td>
-                                <td>${stats.avg_duration.toFixed(1)} min</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-                <h4 style="margin-top: 20px;">By Location</h4>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Location</th>
-                            <th>Count</th>
-                            <th>Total Duration</th>
-                            <th>Avg Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Object.entries(data.by_location).map(([loc, stats]) => `
-                            <tr>
-                                <td>${loc}</td>
-                                <td>${stats.count}</td>
-                                <td>${stats.duration} min</td>
-                                <td>${stats.avg_duration.toFixed(1)} min</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+            `;
+            
+            // Initialize Class searchable dropdown for single mode
+            const frenzySingleClassSearchInput = document.getElementById('frenzy-single-class-search');
+            if (frenzySingleClassSearchInput && data.by_location && Object.keys(data.by_location).length > 0) {
+                const sortedClasses = Object.keys(data.by_location).sort();
+                setupTableColumnSearch(frenzySingleClassSearchInput, sortedClasses, '#frenzy-single-class-table', (selectedValue) => {
+                    const table = document.querySelector('#frenzy-single-class-table');
+                    if (!table) return;
+                    
+                    const classRows = table.querySelectorAll('tbody tr');
+                    classRows.forEach(row => {
+                        const classNameCell = row.querySelector('td.frenzy-single-class-name');
+                        if (classNameCell) {
+                            const className = classNameCell.getAttribute('data-class') || classNameCell.textContent.trim();
+                            const shouldShow = !selectedValue || className.toLowerCase().includes(selectedValue.toLowerCase());
+                            row.style.display = shouldShow ? '' : 'none';
+                        }
+                    });
+                });
+            }
+        }
     } catch (error) {
         console.error('Error loading frenzy stats:', error);
         showMessage('Error loading frenzy statistics. Please try again.', 'error');
+        // Disable Print button on error
+        const printFrenzyBtn = document.getElementById('print-frenzy-btn');
+        if (printFrenzyBtn) {
+            printFrenzyBtn.disabled = true;
+        }
     }
 }
 
@@ -1431,3 +5852,4829 @@ function showMessage(message, type) {
     setTimeout(() => msgDiv.remove(), 5000);
 }
 
+// Info Modal Functions
+const INFRACTION_OPTIONS = [
+    'Aggression', 'Attention Seeking', 'Disrespectful', 'Language', 'MYOB', 'NFD',
+    'Property Destruction', 'Off Task', 'Personal Space', 'Refusal', 'Self Control',
+    'Sexual Reference', 'Shutdown', 'Threat', 'Volume', 'Walk Out'
+];
+
+const PURPOSE_OPTIONS = [
+    'Obtain Peer Attention', 'Obtain Staff Attention', 'Obtain Item/Activity',
+    'Avoid Peer', 'Avoid Staff', 'Avoid Task/Activity'
+];
+
+// Function to create a new infraction row
+function createInfractionRow(infractionType = '', count = '', isReadOnly = false) {
+    const row = document.createElement('div');
+    row.className = 'form-group infraction-group';
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.marginBottom = '10px';
+    
+    const select = document.createElement('select');
+    select.className = 'info-infraction-select';
+    select.style.flex = '1';
+    select.disabled = isReadOnly;
+    
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Select Infraction';
+    select.appendChild(option);
+    
+    INFRACTION_OPTIONS.forEach(type => {
+        const opt = document.createElement('option');
+        opt.value = type;
+        opt.textContent = type;
+        if (type === infractionType) {
+            opt.selected = true;
+        }
+        select.appendChild(opt);
+    });
+    
+    const countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.className = 'info-infraction-count';
+    countInput.min = '0';
+    countInput.placeholder = '#';
+    countInput.style.width = '60px';
+    countInput.value = count;
+    countInput.disabled = isReadOnly;
+    
+    // Auto-set count to 1 when infraction is selected (if count is empty)
+    select.addEventListener('change', function() {
+        if (this.value && (!countInput.value || countInput.value === '0')) {
+            countInput.value = '1';
+        }
+    });
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'delete-btn';
+    removeBtn.textContent = '×';
+    removeBtn.style.padding = '4px 8px';
+    removeBtn.style.fontSize = '14px';
+    removeBtn.disabled = isReadOnly;
+    removeBtn.onclick = function() {
+        row.remove();
+    };
+    
+    row.appendChild(select);
+    row.appendChild(countInput);
+    if (!isReadOnly) {
+        row.appendChild(removeBtn);
+    }
+    
+    return row;
+}
+
+// Function to create a new purpose row
+function createPurposeRow(purpose = '', isReadOnly = false) {
+    const row = document.createElement('div');
+    row.className = 'form-group purpose-row';
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.marginBottom = '10px';
+    
+    const select = document.createElement('select');
+    select.className = 'info-purpose-select';
+    select.style.flex = '1';
+    select.disabled = isReadOnly;
+    
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Select Purpose';
+    select.appendChild(option);
+    
+    PURPOSE_OPTIONS.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        if (p === purpose) {
+            opt.selected = true;
+        }
+        select.appendChild(opt);
+    });
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'delete-btn';
+    removeBtn.textContent = '×';
+    removeBtn.style.padding = '4px 8px';
+    removeBtn.style.fontSize = '14px';
+    removeBtn.disabled = isReadOnly;
+    removeBtn.onclick = function() {
+        row.remove();
+    };
+    
+    row.appendChild(select);
+    if (!isReadOnly) {
+        row.appendChild(removeBtn);
+    }
+    
+    return row;
+}
+
+async function showInfoModal(event) {
+    const button = event.target;
+    const studentId = button.dataset.studentId;
+    const period = button.dataset.period;
+    const studentName = button.dataset.studentName;
+    const currentInfo = button.dataset.info || '';
+    
+    const modal = document.getElementById('info-modal');
+    const modalTitle = document.getElementById('info-modal-title');
+    
+    const viewOnly = isStudent() ? ' (View Only)' : '';
+    modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
+    
+    // Parse existing info (stored as JSON string)
+    let infoData = {};
+    if (currentInfo) {
+        try {
+            infoData = JSON.parse(currentInfo);
+        } catch (e) {
+            // If it's old plain text data, put it in notes
+            infoData = { notes: currentInfo };
+        }
+    }
+    
+    // Populate form fields and disable for students
+    const isReadOnly = isStudent();
+    
+    // Get student's card color
+    const studentIdInt = parseInt(studentId);
+    const student = allStudents.find(s => s.id === studentIdInt);
+    const cardColor = student?.card_color || null;
+    
+    // Basic fields
+    document.getElementById('info-notes').value = infoData.notes || '';
+    document.getElementById('info-notes').disabled = isReadOnly;
+    
+    // Alternate Location
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    alternateLocationInput.value = infoData.alternate_location || '';
+    alternateLocationInput.disabled = isReadOnly;
+    
+    // Load alternate locations from API and add default locations
+    if (!isReadOnly) {
+        // Default locations that should always be available
+        const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+        
+        try {
+            const response = await fetch('/api/schedules/all-locations');
+            if (response.ok) {
+                const apiLocations = await response.json();
+                // Combine default locations with API locations, removing duplicates
+                const allLocations = [...new Set([...defaultLocations, ...apiLocations])].sort();
+                const datalist = document.getElementById('alternate-location-options');
+                datalist.innerHTML = '';
+                allLocations.forEach(location => {
+                    const option = document.createElement('option');
+                    option.value = location;
+                    datalist.appendChild(option);
+                });
+                
+                // Store locations for autocomplete matching
+                alternateLocationInput.dataset.locations = JSON.stringify(allLocations);
+            } else {
+                // If API fails, at least use default locations
+                const datalist = document.getElementById('alternate-location-options');
+                datalist.innerHTML = '';
+                defaultLocations.forEach(location => {
+                    const option = document.createElement('option');
+                    option.value = location;
+                    datalist.appendChild(option);
+                });
+                alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
+            }
+        } catch (error) {
+            console.error('Error loading alternate locations:', error);
+            // If API fails, at least use default locations
+            const datalist = document.getElementById('alternate-location-options');
+            datalist.innerHTML = '';
+            defaultLocations.forEach(location => {
+                const option = document.createElement('option');
+                option.value = location;
+                datalist.appendChild(option);
+            });
+            alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
+        }
+        
+        // Set up autocomplete behavior - auto-select top matching result on Enter
+        alternateLocationInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const inputValue = this.value.trim();
+                const locationsStr = this.dataset.locations;
+                
+                if (locationsStr && inputValue) {
+                    const locations = JSON.parse(locationsStr);
+                    // Find first matching location (case-insensitive, starts with or exact match)
+                    const match = locations.find(loc => {
+                        const locLower = loc.toLowerCase();
+                        const inputLower = inputValue.toLowerCase();
+                        return locLower === inputLower || locLower.startsWith(inputLower);
+                    });
+                    
+                    if (match) {
+                        this.value = match;
+                        // Trigger input event to ensure value is set
+                        this.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+                // Blur to confirm selection
+                this.blur();
+            }
+        });
+        
+        // Auto-select top matching result as user types
+        alternateLocationInput.addEventListener('input', function(e) {
+            // Don't interfere if user is selecting text or using arrow keys
+            if (this.selectionStart !== this.selectionEnd) return;
+            
+            const inputValue = this.value;
+            if (!inputValue) return;
+            
+            const locationsStr = this.dataset.locations;
+            if (!locationsStr) return;
+            
+            const locations = JSON.parse(locationsStr);
+            
+            // Find first matching location (case-insensitive)
+            const match = locations.find(loc => 
+                loc.toLowerCase().startsWith(inputValue.toLowerCase())
+            );
+            
+            if (match && match.toLowerCase() !== inputValue.toLowerCase()) {
+                // Store cursor position before we modify the value
+                const cursorPos = this.selectionStart;
+                
+                // Only auto-complete if cursor is at the end
+                if (cursorPos === inputValue.length) {
+                    // Set the full match and highlight the completion part
+                    this.value = match;
+                    this.setSelectionRange(inputValue.length, match.length);
+                }
+            }
+        });
+    }
+    
+    // Reminders
+    const reminder1 = document.getElementById('info-reminder-1');
+    const reminder2 = document.getElementById('info-reminder-2');
+    const reminder3 = document.getElementById('info-reminder-3');
+    const resetCheckbox = document.getElementById('info-reset');
+    const resetWarning = document.getElementById('info-reset-warning');
+    
+    // Determine which reminders to show based on card color
+    // Default to yellow behavior (3 reminders) if no color set
+    const effectiveColor = cardColor || 'yellow';
+    
+    // Show/hide reminder checkboxes based on card color
+    if (effectiveColor === 'blue') {
+        // Blue: Show only reminder 1
+        reminder1.style.display = 'inline';
+        reminder2.style.display = 'none';
+        reminder3.style.display = 'none';
+    } else if (effectiveColor === 'green') {
+        // Green: Show only reminders 1 and 2
+        reminder1.style.display = 'inline';
+        reminder2.style.display = 'inline';
+        reminder3.style.display = 'none';
+    } else {
+        // Yellow or default: Show all 3 reminders
+        reminder1.style.display = 'inline';
+        reminder2.style.display = 'inline';
+        reminder3.style.display = 'inline';
+    }
+    
+    reminder1.checked = infoData.reminder1 || false;
+    reminder1.disabled = isReadOnly;
+    reminder2.checked = infoData.reminder2 || false;
+    reminder2.disabled = isReadOnly;
+    reminder3.checked = infoData.reminder3 || false;
+    reminder3.disabled = isReadOnly;
+    resetCheckbox.checked = infoData.reset || false;
+    resetCheckbox.disabled = isReadOnly;
+    
+    // Show/hide reset warning based on current state
+    resetWarning.style.display = resetCheckbox.checked ? 'inline' : 'none';
+    
+    // Event listeners for reminder checkboxes - show warning based on card color
+    if (!isReadOnly) {
+        // Remove old listeners by cloning and replacing
+        const newReminder1 = reminder1.cloneNode(true);
+        const newReminder2 = reminder2.cloneNode(true);
+        const newReminder3 = reminder3.cloneNode(true);
+        const newResetCheckbox = resetCheckbox.cloneNode(true);
+        
+        reminder1.parentNode.replaceChild(newReminder1, reminder1);
+        reminder2.parentNode.replaceChild(newReminder2, reminder2);
+        reminder3.parentNode.replaceChild(newReminder3, reminder3);
+        resetCheckbox.parentNode.replaceChild(newResetCheckbox, resetCheckbox);
+        
+        // Update references to new elements
+        const currentReminder1 = newReminder1;
+        const currentReminder2 = newReminder2;
+        const currentReminder3 = newReminder3;
+        const currentResetCheckbox = newResetCheckbox;
+        
+        // Function to show warning based on card color when appropriate reminder is checked
+        const checkRemindersAndShowWarning = () => {
+            if (effectiveColor === 'blue') {
+                // Blue: Show warning when reminder 1 is checked
+                if (currentReminder1.checked) {
+                    resetWarning.style.display = 'inline';
+                } else {
+                    resetWarning.style.display = 'none';
+                }
+            } else if (effectiveColor === 'green') {
+                // Green: Show warning when reminder 2 is checked
+                if (currentReminder2.checked) {
+                    resetWarning.style.display = 'inline';
+                } else {
+                    resetWarning.style.display = 'none';
+                }
+            } else {
+                // Yellow or default: Show warning when reminder 3 is checked
+                if (currentReminder3.checked) {
+                    resetWarning.style.display = 'inline';
+                } else {
+                    resetWarning.style.display = 'none';
+                }
+            }
+        };
+        
+        // Add event listeners to show warning when appropriate reminder is checked
+        currentReminder1.addEventListener('change', checkRemindersAndShowWarning);
+        currentReminder2.addEventListener('change', checkRemindersAndShowWarning);
+        currentReminder3.addEventListener('change', checkRemindersAndShowWarning);
+        
+        // Reset checkbox warning toggle
+        currentResetCheckbox.addEventListener('change', function() {
+            resetWarning.style.display = this.checked ? 'inline' : 'none';
+            // Also show/hide Frenzy warnings (both in Frenzy line and Reset line) when reset is checked
+            const frenzyWarning = document.getElementById('info-frenzy-warning');
+            const resetFrenzyWarning = document.getElementById('info-reset-frenzy-warning');
+            if (frenzyWarning) {
+                frenzyWarning.style.display = this.checked ? 'inline' : 'none';
+            }
+            if (resetFrenzyWarning) {
+                resetFrenzyWarning.style.display = this.checked ? 'inline' : 'none';
+            }
+        });
+        
+        // Check initial state to show warning if appropriate reminder is already checked
+        checkRemindersAndShowWarning();
+    }
+    
+    // Infractions - handle backward compatibility and populate dynamic rows
+    const infractionsContainer = document.getElementById('infractions-container');
+    infractionsContainer.innerHTML = '';
+    
+    let infractions = [];
+    if (infoData.infractions && Array.isArray(infoData.infractions)) {
+        // New format
+        infractions = infoData.infractions;
+    } else {
+        // Backward compatibility - convert old format to array
+        if (infoData.infraction1) {
+            infractions.push({
+                type: infoData.infraction1,
+                count: infoData.infraction1Count || '1'
+            });
+        }
+        if (infoData.infraction2) {
+            infractions.push({
+                type: infoData.infraction2,
+                count: infoData.infraction2Count || '1'
+            });
+        }
+    }
+    
+    // Always show at least one empty row if no infractions
+    if (infractions.length === 0) {
+        infractions.push({ type: '', count: '' });
+    }
+    
+    infractions.forEach(inf => {
+        const row = createInfractionRow(inf.type, inf.count || '', isReadOnly);
+        infractionsContainer.appendChild(row);
+    });
+    
+    // Purposes - handle backward compatibility and populate dynamic rows
+    const purposesContainer = document.getElementById('purposes-container');
+    purposesContainer.innerHTML = '';
+    
+    let purposes = [];
+    if (infoData.purposes && Array.isArray(infoData.purposes)) {
+        // New format
+        purposes = infoData.purposes;
+    } else {
+        // Backward compatibility - convert old format to array
+        if (infoData.purpose1) {
+            purposes.push(infoData.purpose1);
+        }
+        if (infoData.purpose2) {
+            purposes.push(infoData.purpose2);
+        }
+    }
+    
+    // Always show at least one empty row if no purposes
+    if (purposes.length === 0) {
+        purposes.push('');
+    }
+    
+    purposes.forEach(purpose => {
+        const row = createPurposeRow(purpose, isReadOnly);
+        purposesContainer.appendChild(row);
+    });
+    
+    // Add button event listeners
+    const addInfractionBtn = document.getElementById('add-infraction-btn');
+    const addPurposeBtn = document.getElementById('add-purpose-btn');
+    
+    // Remove old listeners by replacing buttons
+    const newAddInfractionBtn = addInfractionBtn.cloneNode(true);
+    const newAddPurposeBtn = addPurposeBtn.cloneNode(true);
+    addInfractionBtn.parentNode.replaceChild(newAddInfractionBtn, addInfractionBtn);
+    addPurposeBtn.parentNode.replaceChild(newAddPurposeBtn, addPurposeBtn);
+    
+    if (!isReadOnly) {
+        newAddInfractionBtn.addEventListener('click', function() {
+            const row = createInfractionRow('', '', false);
+            infractionsContainer.appendChild(row);
+        });
+        
+        newAddPurposeBtn.addEventListener('click', function() {
+            const row = createPurposeRow('', false);
+            purposesContainer.appendChild(row);
+        });
+    } else {
+        newAddInfractionBtn.style.display = 'none';
+        newAddPurposeBtn.style.display = 'none';
+    }
+    
+    // Other fields
+    const frenzyCheckbox = document.getElementById('info-frenzy');
+    const frenzyWarning = document.getElementById('info-frenzy-warning');
+    frenzyCheckbox.checked = infoData.frenzy || false;
+    frenzyCheckbox.disabled = isReadOnly;
+    
+    // Show/hide frenzy warnings (both in Frenzy line and Reset line) based on reset checkbox state
+    const resetFrenzyWarning = document.getElementById('info-reset-frenzy-warning');
+    if (frenzyWarning) {
+        frenzyWarning.style.display = resetCheckbox.checked ? 'inline' : 'none';
+    }
+    if (resetFrenzyWarning) {
+        resetFrenzyWarning.style.display = resetCheckbox.checked ? 'inline' : 'none';
+    }
+    
+    document.getElementById('info-duration').value = infoData.duration || '';
+    document.getElementById('info-duration').disabled = isReadOnly;
+    document.getElementById('info-results').value = infoData.results || '';
+    document.getElementById('info-results').disabled = isReadOnly;
+    
+    // Store context for saving
+    modal.dataset.studentId = studentId;
+    modal.dataset.period = period;
+    
+    modal.style.display = 'block';
+}
+
+function closeInfoModal() {
+    const modal = document.getElementById('info-modal');
+    modal.style.display = 'none';
+}
+
+function saveInfoModal() {
+    // Students cannot save
+    if (isStudent()) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
+    
+    const modal = document.getElementById('info-modal');
+    const studentId = modal.dataset.studentId;
+    const period = modal.dataset.period;
+    
+    // Collect all form data
+    const infoData = {
+        notes: document.getElementById('info-notes').value,
+        reminder1: document.getElementById('info-reminder-1').checked,
+        reminder2: document.getElementById('info-reminder-2').checked,
+        reminder3: document.getElementById('info-reminder-3').checked,
+        reset: document.getElementById('info-reset').checked,
+        alternate_location: document.getElementById('info-alternate-location').value || '',
+        frenzy: document.getElementById('info-frenzy').checked,
+        duration: document.getElementById('info-duration').value,
+        results: document.getElementById('info-results').value
+    };
+    
+    // Collect infractions from dynamic rows
+    const infractions = [];
+    const infractionRows = document.querySelectorAll('#infractions-container .infraction-group');
+    infractionRows.forEach(row => {
+        const select = row.querySelector('.info-infraction-select');
+        const countInput = row.querySelector('.info-infraction-count');
+        if (select && select.value) {
+            infractions.push({
+                type: select.value,
+                count: countInput.value || '1'
+            });
+        }
+    });
+    infoData.infractions = infractions;
+    
+    // Collect purposes from dynamic rows
+    const purposes = [];
+    const purposeRows = document.querySelectorAll('#purposes-container .purpose-row');
+    purposeRows.forEach(row => {
+        const select = row.querySelector('.info-purpose-select');
+        if (select && select.value) {
+            purposes.push(select.value);
+        }
+    });
+    infoData.purposes = purposes;
+    
+    // Convert to JSON string
+    const infoString = JSON.stringify(infoData);
+    
+    // Update dailyData
+    if (!dailyData[studentId]) {
+        dailyData[studentId] = {};
+    }
+    if (!dailyData[studentId][period]) {
+        dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
+    }
+    dailyData[studentId][period].info = infoString;
+
+    // Update periodData if current view is period-entry
+    if (periodData[studentId] !== undefined || document.getElementById('period-entry-view').classList.contains('active')) {
+        if (!periodData[studentId]) {
+            periodData[studentId] = { student_id: studentId };
+        }
+        periodData[studentId].info = infoString;
+    }
+    
+    // Update the button's data attribute
+    const button = document.querySelector(`button.info-btn[data-student-id="${studentId}"][data-period="${period}"]`);
+    if (button) {
+        button.dataset.info = infoString;
+        // Add visual indicator if there's data
+        if (hasInfoData(infoData)) {
+            button.classList.add('has-data');
+        } else {
+            button.classList.remove('has-data');
+        }
+    }
+    
+    closeInfoModal();
+    showMessage('Information saved!', 'success');
+}
+
+// Helper function to check if info data has any content
+function hasInfoData(infoData) {
+    // Check new format
+    const hasInfractions = (infoData.infractions && Array.isArray(infoData.infractions) && infoData.infractions.length > 0) ||
+                          (infoData.infraction1 || infoData.infraction2); // Backward compatibility
+    const hasPurposes = (infoData.purposes && Array.isArray(infoData.purposes) && infoData.purposes.length > 0) ||
+                       (infoData.purpose1 || infoData.purpose2); // Backward compatibility
+    
+    return infoData.notes || 
+           infoData.reminder1 || infoData.reminder2 || infoData.reminder3 ||
+           infoData.reset || 
+           hasInfractions ||
+           infoData.frenzy ||
+           hasPurposes ||
+           infoData.duration ||
+           infoData.results ||
+           infoData.alternate_location;
+}
+
+// Function to show info popup in summary view (read-only)
+function showInfoViewPopup(infoDataString, time, location) {
+    // Parse the info data
+    let infoData = {};
+    if (infoDataString) {
+        try {
+            infoData = JSON.parse(infoDataString);
+        } catch (e) {
+            // If it's old plain text data, put it in notes
+            infoData = { notes: infoDataString };
+        }
+    }
+    
+    // Create modal HTML
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'info-view-modal';
+    modal.style.display = 'block';
+    
+    // Build the content HTML
+    let contentHtml = `
+        <div class="modal-content info-modal-large" style="max-width: 700px;">
+            <span class="close" onclick="document.getElementById('info-view-modal').remove()">&times;</span>
+            <h2>Additional Information</h2>
+            <p style="color: #666; margin-bottom: 20px;"><strong>Time:</strong> ${time || 'N/A'} | <strong>Location:</strong> ${location || 'N/A'}</p>
+            
+            <div class="info-form-grid" style="pointer-events: none;">
+                <!-- Notes -->
+                <div class="form-group">
+                    <label>Notes:</label>
+                    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+
+                <!-- Reminders -->
+                <div class="form-group">
+                    <label>Reminders:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                        Reminders: ${(infoData.reminder1 ? 1 : 0) + (infoData.reminder2 ? 1 : 0) + (infoData.reminder3 ? 1 : 0)}
+                    </div>
+                </div>
+
+                <!-- Reset -->
+                <div class="form-group">
+                    <label>Reset:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.reset ? '✓ Yes' : '✗ No'}</div>
+                </div>
+
+                <!-- Alternate Location -->
+                ${infoData.alternate_location ? `
+                <div class="form-group">
+                    <label>Alternate Location:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${(infoData.alternate_location || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+                ` : ''}
+
+                <!-- Infractions -->
+                <div class="form-group infraction-group">
+                    <label>Infractions:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                        ${(() => {
+                            let infractionsHtml = '';
+                            if (infoData.infractions && Array.isArray(infoData.infractions)) {
+                                // New format
+                                if (infoData.infractions.length > 0) {
+                                    infractionsHtml = infoData.infractions.map(inf => 
+                                        `${(inf.type || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')} (Count: ${inf.count || 1})`
+                                    ).join('<br>');
+                                } else {
+                                    infractionsHtml = 'None';
+                                }
+                            } else {
+                                // Backward compatibility
+                                const infractions = [];
+                                if (infoData.infraction1) {
+                                    infractions.push(`${(infoData.infraction1 || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')} (Count: ${infoData.infraction1Count || 1})`);
+                                }
+                                if (infoData.infraction2) {
+                                    infractions.push(`${(infoData.infraction2 || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')} (Count: ${infoData.infraction2Count || 1})`);
+                                }
+                                infractionsHtml = infractions.length > 0 ? infractions.join('<br>') : 'None';
+                            }
+                            return infractionsHtml;
+                        })()}
+                    </div>
+                </div>
+
+                <!-- Frenzy -->
+                <div class="form-group">
+                    <label>Frenzy:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
+                </div>
+
+                <!-- Purposes -->
+                <div class="form-group">
+                    <label>Purposes:</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                        ${(() => {
+                            let purposesHtml = '';
+                            if (infoData.purposes && Array.isArray(infoData.purposes)) {
+                                // New format
+                                if (infoData.purposes.length > 0) {
+                                    purposesHtml = infoData.purposes.map(p => 
+                                        (p || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                                    ).join('<br>');
+                                } else {
+                                    purposesHtml = 'None';
+                                }
+                            } else {
+                                // Backward compatibility
+                                const purposes = [];
+                                if (infoData.purpose1) purposes.push(infoData.purpose1);
+                                if (infoData.purpose2) purposes.push(infoData.purpose2);
+                                purposesHtml = purposes.length > 0 
+                                    ? purposes.map(p => (p || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('<br>')
+                                    : 'None';
+                            }
+                            return purposesHtml;
+                        })()}
+                    </div>
+                </div>
+
+                <!-- Duration -->
+                <div class="form-group">
+                    <label>Duration (minutes):</label>
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.duration || 'None'}</div>
+                </div>
+
+                <!-- Results of Behavior -->
+                <div class="form-group">
+                    <label>Results of Behavior:</label>
+                    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.results || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+            </div>
+
+            <div class="modal-buttons" style="margin-top: 20px;">
+                <button onclick="document.getElementById('info-view-modal').remove()" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    `;
+    
+    modal.innerHTML = contentHtml;
+    document.body.appendChild(modal);
+    
+    // Close modal when clicking outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+// Make functions globally accessible
+window.showInfoModal = showInfoModal;
+window.closeInfoModal = closeInfoModal;
+window.saveInfoModal = saveInfoModal;
+window.showInfoViewPopup = showInfoViewPopup;
+
+// Schedule Management Functions
+let teacherScheduleData = [];
+let studentScheduleData = [];
+let currentScheduleStudentId = null;
+
+function loadSchedules(type, studentId = null) {
+    let url = `/api/schedules?schedule_type=${type}`;
+    if (studentId) {
+        url += `&student_id=${studentId}`;
+    }
+    
+    return fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (type === 'teacher') {
+                teacherScheduleData = data;
+                renderTeacherSchedule();
+                // Auto-select current period if we're in period-entry view
+                if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+                    setTimeout(() => {
+                        autoSelectCurrentPeriod();
+                    }, 100);
+                }
+            } else {
+                studentScheduleData = data;
+                renderStudentSchedule();
+            }
+            return data;
+        })
+        .catch(error => {
+            console.error('Error loading schedules:', error);
+            throw error;
+        });
+}
+
+function renderTeacherSchedule() {
+    const tbody = document.getElementById('teacher-schedule-body');
+    if (!tbody) {
+        console.warn('Teacher schedule tbody not found');
+        return;
+    }
+
+    // Ensure teacherScheduleData is an array
+    if (!Array.isArray(teacherScheduleData)) {
+        teacherScheduleData = [];
+    }
+
+    tbody.innerHTML = '';
+
+    // Group schedules by time_period to handle multiple classes per time
+    const schedulesByTime = {};
+    teacherScheduleData.forEach(schedule => {
+        const time = schedule.time_period;
+        if (!schedulesByTime[time]) {
+            schedulesByTime[time] = [];
+        }
+        schedulesByTime[time].push(schedule);
+    });
+
+    // Always show all periods from SCHEDULE_PERIODS
+    // For each time period, create one row with all classes in the same cell
+    SCHEDULE_PERIODS.forEach(time => {
+        const savedSchedules = schedulesByTime[time] || [];
+        
+        if (savedSchedules.length > 0) {
+            // Create one row with the first schedule data (will load all classes into same cell)
+            const row = document.createElement('tr');
+            const firstSchedule = savedSchedules[0];
+            row.innerHTML = `
+                <td class="time-cell">
+                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+                </td>
+                <td class="classes-cell">
+                    <div class="classes-container">
+                    </div>
+                </td>
+                <td class="actions-cell">
+                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+                </td>
+            `;
+            
+            // Add all classes to the container
+            const classesContainer = row.querySelector('.classes-container');
+            savedSchedules.forEach(schedule => {
+                if (schedule.class_name) {
+                    addClassInputGroup(classesContainer, schedule.class_name);
+                }
+            });
+            
+            // If no classes, add one empty input
+            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(classesContainer);
+            }
+            
+            // Store reference and setup buttons
+            row.dataset.timePeriod = time;
+            setupScheduleRowButtons(row, time, tbody);
+            
+            tbody.appendChild(row);
+        } else {
+            // Show one empty row for this time period
+            addScheduleRow('teacher', time, null);
+        }
+    });
+}
+
+function setupStaffAutocomplete(input) {
+    if (!input) return;
+    
+    const wrapper = input.closest('.staff-autocomplete-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.staff-autocomplete-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    let selectedIndex = -1;
+    
+    // Get staff names for autocomplete
+    const getStaffNames = () => {
+        return allStaffMembers.map(staff => staff.name || staff.username || '').filter(name => name);
+    };
+    
+    // Filter options based on input
+    const filterOptions = (query) => {
+        if (!query) return getStaffNames();
+        const lowerQuery = query.toLowerCase();
+        return getStaffNames().filter(name => 
+            name.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    // Show dropdown with filtered options
+    const showDropdown = (options) => {
+        if (!options || options.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        options.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'staff-autocomplete-item';
+            item.textContent = option;
+            item.dataset.value = option;
+            item.addEventListener('click', () => {
+                input.value = option;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+                input.blur();
+            });
+            item.addEventListener('mouseenter', () => {
+                selectedIndex = index;
+                updateHighlight();
+            });
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+        selectedIndex = -1;
+        updateHighlight();
+    };
+    
+    // Hide dropdown
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+        selectedIndex = -1;
+    };
+    
+    // Update highlighted item
+    const updateHighlight = () => {
+        const items = dropdown.querySelectorAll('.staff-autocomplete-item');
+        items.forEach((item, index) => {
+            if (index === selectedIndex) {
+                item.classList.add('highlighted');
+            } else {
+                item.classList.remove('highlighted');
+            }
+        });
+    };
+    
+    // Event listeners
+    input.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('focus', () => {
+        const query = input.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('blur', (e) => {
+        // Delay to allow click events on dropdown items
+        setTimeout(() => {
+            if (!dropdown.contains(document.activeElement)) {
+                hideDropdown();
+            }
+        }, 200);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (!isDropdownVisible) return;
+        
+        const items = dropdown.querySelectorAll('.staff-autocomplete-item');
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight();
+            items[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight();
+            if (selectedIndex >= 0) {
+                items[selectedIndex].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // If no item is selected, select the top option (index 0)
+            const indexToSelect = selectedIndex >= 0 ? selectedIndex : 0;
+            const selectedItem = items[indexToSelect];
+            if (selectedItem) {
+                input.value = selectedItem.dataset.value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+            }
+        } else if (e.key === 'Escape') {
+            hideDropdown();
+            input.blur();
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) {
+            hideDropdown();
+        }
+    });
+}
+
+function updateStaffDatalist() {
+    // This function is no longer needed with custom autocomplete,
+    // but keeping it for backwards compatibility
+    // The custom autocomplete uses allStaffMembers directly
+}
+
+function setupDailySearchAutocomplete(input) {
+    if (!input) return;
+    
+    const wrapper = input.closest('.daily-search-autocomplete-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.daily-search-autocomplete-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    let selectedIndex = -1;
+    
+    // Get all options (students and staff)
+    const getAllOptions = () => {
+        const options = [];
+        
+        // Add students
+        allStudents.forEach(student => {
+            if (student && student.name) {
+                options.push({
+                    type: 'student',
+                    name: student.name,
+                    displayText: `Student: ${student.name}`
+                });
+            }
+        });
+        
+        // Add staff
+        allStaffMembers.forEach(staff => {
+            const staffName = staff.name || staff.username || '';
+            if (staffName) {
+                options.push({
+                    type: 'staff',
+                    name: staffName,
+                    displayText: `Staff: ${staffName}`
+                });
+            }
+        });
+        
+        return options;
+    };
+    
+    // Filter options based on input (only show when user starts typing)
+    const filterOptions = (query) => {
+        if (!query || !query.trim()) return []; // Only show when user starts typing
+        const lowerQuery = query.trim().toLowerCase();
+        return getAllOptions().filter(option => 
+            option.name.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    // Show dropdown with filtered options
+    const showDropdown = (options) => {
+        if (!options || options.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        options.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'daily-search-autocomplete-item';
+            
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'item-label';
+            labelSpan.textContent = option.type === 'student' ? 'Student:' : 'Staff:';
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = option.name;
+            
+            item.appendChild(labelSpan);
+            item.appendChild(nameSpan);
+            item.dataset.value = option.name;
+            item.dataset.type = option.type;
+            
+            item.addEventListener('click', () => {
+                input.value = option.name;
+                dailyEntrySearchQuery = option.name;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+                input.blur();
+            });
+            item.addEventListener('mouseenter', () => {
+                selectedIndex = index;
+                updateHighlight();
+            });
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+        selectedIndex = -1;
+        updateHighlight();
+    };
+    
+    // Hide dropdown
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+        selectedIndex = -1;
+    };
+    
+    // Update highlighted item
+    const updateHighlight = () => {
+        const items = dropdown.querySelectorAll('.daily-search-autocomplete-item');
+        items.forEach((item, index) => {
+            if (index === selectedIndex) {
+                item.classList.add('highlighted');
+            } else {
+                item.classList.remove('highlighted');
+            }
+        });
+    };
+    
+    // Event listeners
+    input.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('focus', () => {
+        const query = input.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('blur', (e) => {
+        // Delay to allow click events on dropdown items
+        setTimeout(() => {
+            if (!dropdown.contains(document.activeElement)) {
+                hideDropdown();
+            }
+        }, 200);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (!isDropdownVisible) return;
+        
+        const items = dropdown.querySelectorAll('.daily-search-autocomplete-item');
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight();
+            items[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight();
+            if (selectedIndex >= 0) {
+                items[selectedIndex].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // If no item is selected, select the top option (index 0)
+            const indexToSelect = selectedIndex >= 0 ? selectedIndex : 0;
+            const selectedItem = items[indexToSelect];
+            if (selectedItem) {
+                input.value = selectedItem.dataset.value;
+                dailyEntrySearchQuery = selectedItem.dataset.value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+            }
+        } else if (e.key === 'Escape') {
+            hideDropdown();
+            input.blur();
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) {
+            hideDropdown();
+        }
+    });
+}
+
+function setupTableColumnSearch(input, options, tableSelector, columnFilterCallback) {
+    if (!input) return;
+    
+    const wrapper = input.closest('.table-column-search-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.table-column-search-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    let selectedIndex = -1;
+    
+    // Filter options based on input (partial matching)
+    const filterOptions = (query) => {
+        if (!query || !query.trim()) return options; // Show all when empty
+        const lowerQuery = query.trim().toLowerCase();
+        return options.filter(option => 
+            option.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    // Show dropdown with filtered options
+    const showDropdown = (filteredOptions) => {
+        if (!filteredOptions || filteredOptions.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        filteredOptions.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'table-column-search-item';
+            item.textContent = option;
+            item.dataset.value = option;
+            
+            item.addEventListener('click', () => {
+                input.value = option;
+                filterColumns(option);
+                hideDropdown();
+                input.blur();
+            });
+            
+            item.addEventListener('mouseenter', () => {
+                selectedIndex = index;
+                updateHighlight();
+            });
+            
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+        selectedIndex = -1;
+        updateHighlight();
+    };
+    
+    // Hide dropdown
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+        selectedIndex = -1;
+    };
+    
+    // Update highlighted item
+    const updateHighlight = () => {
+        const items = dropdown.querySelectorAll('.table-column-search-item');
+        items.forEach((item, index) => {
+            if (index === selectedIndex) {
+                item.classList.add('highlighted');
+            } else {
+                item.classList.remove('highlighted');
+            }
+        });
+    };
+    
+    // Filter table columns based on selected value
+    const filterColumns = (selectedValue) => {
+        if (columnFilterCallback) {
+            columnFilterCallback(selectedValue);
+        } else {
+            // Default column filtering logic
+            const table = document.querySelector(tableSelector);
+            if (!table) return;
+            
+            // Find all header cells (skip the first "Metric" column)
+            const headerCells = table.querySelectorAll('thead th');
+            const dataRows = table.querySelectorAll('tbody tr');
+            
+            headerCells.forEach((headerCell, index) => {
+                if (index === 0) return; // Skip the first "Metric" column
+                
+                const headerText = headerCell.textContent.trim();
+                const shouldShow = !selectedValue || headerText.toLowerCase().includes(selectedValue.toLowerCase());
+                
+                // Hide/show header column
+                headerCell.style.display = shouldShow ? '' : 'none';
+                
+                // Hide/show corresponding data cells in all rows
+                dataRows.forEach(row => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells[index]) {
+                        cells[index].style.display = shouldShow ? '' : 'none';
+                    }
+                });
+            });
+        }
+    };
+    
+    // Event listeners
+    input.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const filteredOptions = filterOptions(query);
+        showDropdown(filteredOptions);
+        
+        // Filter columns in real-time as user types
+        filterColumns(query);
+    });
+    
+    input.addEventListener('focus', () => {
+        const query = input.value;
+        const filteredOptions = filterOptions(query);
+        showDropdown(filteredOptions);
+    });
+    
+    input.addEventListener('blur', (e) => {
+        // Delay to allow click events on dropdown items
+        setTimeout(() => {
+            if (!dropdown.contains(document.activeElement)) {
+                hideDropdown();
+            }
+        }, 200);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (!isDropdownVisible && e.key !== 'Enter') return;
+        
+        const items = dropdown.querySelectorAll('.table-column-search-item');
+        if (items.length === 0 && e.key === 'Enter') {
+            // If no dropdown but Enter pressed, filter with current input
+            filterColumns(input.value);
+            return;
+        }
+        
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight();
+            items[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight();
+            if (selectedIndex >= 0) {
+                items[selectedIndex].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // If no item is selected, select the top option (index 0)
+            const indexToSelect = selectedIndex >= 0 ? selectedIndex : 0;
+            const selectedItem = items[indexToSelect];
+            if (selectedItem) {
+                input.value = selectedItem.dataset.value;
+                filterColumns(selectedItem.dataset.value);
+                hideDropdown();
+            } else {
+                // If no item selected but Enter pressed, filter with current input
+                filterColumns(input.value);
+            }
+        } else if (e.key === 'Escape') {
+            hideDropdown();
+            input.blur();
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) {
+            hideDropdown();
+        }
+    });
+}
+
+function renderStudentSchedule() {
+    const tbody = document.getElementById('student-schedule-body');
+    const container = document.getElementById('student-schedule-container');
+    if (!tbody || !container) {
+        console.warn('Student schedule elements not found');
+        return;
+    }
+
+    // Ensure studentScheduleData is an array
+    if (!Array.isArray(studentScheduleData)) {
+        studentScheduleData = [];
+    }
+
+    container.style.display = 'block';
+    tbody.innerHTML = '';
+
+    // Always show all periods from SCHEDULE_PERIODS
+    // If saved data exists for a period, use it; otherwise show empty row
+    SCHEDULE_PERIODS.forEach(time => {
+        const savedSchedule = studentScheduleData.find(s => s && s.time_period === time);
+        addScheduleRow('student', time, savedSchedule || null);
+    });
+}
+
+// Helper function to add a class input group to the classes container
+function addClassInputGroup(container, value = '') {
+    const group = document.createElement('div');
+    group.className = 'class-input-group';
+    group.innerHTML = `
+        <input type="text" value="${value}" class="class-input" placeholder="Enter class/activity">
+        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">×</button>
+    `;
+    
+    // Add delete button event listener
+    const deleteBtn = group.querySelector('.btn-delete-class');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            const container = group.parentElement;
+            group.remove();
+            // If this was the last class input, ensure at least one remains
+            if (container && container.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(container);
+            }
+        });
+    }
+    
+    container.appendChild(group);
+    return group;
+}
+
+// Helper function to setup button event listeners for a teacher schedule row
+function setupScheduleRowButtons(row, timePeriod, tbody) {
+    // Add event listener for "Add Class" button
+    const addClassBtn = row.querySelector('.btn-add-class');
+    if (addClassBtn) {
+        // Remove existing listener if any, then add new one
+        const newAddClassBtn = addClassBtn.cloneNode(true);
+        addClassBtn.parentNode.replaceChild(newAddClassBtn, addClassBtn);
+        newAddClassBtn.addEventListener('click', () => {
+            // Add a new class input group within the same cell
+            const classesContainer = row.querySelector('.classes-container');
+            if (classesContainer) {
+                addClassInputGroup(classesContainer);
+            }
+        });
+    }
+    
+    // Setup delete button listeners for existing class input groups
+    const deleteButtons = row.querySelectorAll('.btn-delete-class');
+    deleteButtons.forEach(deleteBtn => {
+        deleteBtn.addEventListener('click', () => {
+            const group = deleteBtn.closest('.class-input-group');
+            const container = group?.parentElement;
+            if (group && container) {
+                group.remove();
+                // If this was the last class input, ensure at least one remains
+                if (container.querySelectorAll('.class-input-group').length === 0) {
+                    addClassInputGroup(container);
+                }
+            }
+        });
+    });
+}
+
+function addScheduleRow(type, timePeriod = '', data = null) {
+    const tbody = document.getElementById(`${type}-schedule-body`);
+    if (!tbody) return;
+    
+    const row = document.createElement('tr');
+    
+    if (type === 'teacher') {
+        // Teacher schedule - Class cell contains container for multiple class inputs
+        const initialClassValue = data?.class_name || '';
+        row.innerHTML = `
+            <td class="time-cell">
+                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+            </td>
+            <td class="classes-cell">
+                <div class="classes-container">
+                    ${initialClassValue ? `<div class="class-input-group">
+                        <input type="text" value="${initialClassValue}" class="class-input" placeholder="Enter class/activity">
+                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">×</button>
+                    </div>` : ''}
+                </div>
+            </td>
+            <td class="actions-cell">
+                <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+            </td>
+        `;
+        
+        // If no initial class, add one empty class input group
+        if (!initialClassValue) {
+            const classesContainer = row.querySelector('.classes-container');
+            if (classesContainer) {
+                addClassInputGroup(classesContainer);
+            }
+        }
+        
+        // Store reference to row for button setup
+        row.dataset.timePeriod = timePeriod;
+        
+        // Setup button event listeners for this row
+        setupScheduleRowButtons(row, timePeriod, tbody);
+    } else {
+        // Student schedule - includes staff column with custom autocomplete dropdown
+        const staffValue = data?.staff_name || '';
+        const uniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        row.innerHTML = `
+            <td class="time-cell">
+                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+            </td>
+            <td><input type="text" value="${data?.class_name || ''}" class="class-input" placeholder="Enter class/activity"></td>
+            <td>
+                <div class="staff-autocomplete-wrapper">
+                    <input type="text" value="${staffValue}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${uniqueId}">
+                    <div class="staff-autocomplete-dropdown" id="dropdown-${uniqueId}"></div>
+                </div>
+            </td>
+        `;
+        
+        // Setup autocomplete for this input
+        setupStaffAutocomplete(row.querySelector('.staff-input'));
+    }
+    
+    tbody.appendChild(row);
+}
+
+async function saveSchedule(type) {
+    const tbody = document.getElementById(`${type}-schedule-body`);
+    if (!tbody) return;
+    
+    const rows = tbody.querySelectorAll('tr');
+    const periods = [];
+    
+    rows.forEach(row => {
+        const timeInput = row.querySelector('.time-input');
+        const staffInput = row.querySelector('.staff-input');
+        
+        const timePeriod = timeInput.value.trim();
+        
+        if (timePeriod) {
+            // For teacher schedules, get all class inputs from the classes container
+            const classesContainer = row.querySelector('.classes-container');
+            if (classesContainer && type === 'teacher') {
+                const classInputs = classesContainer.querySelectorAll('.class-input');
+                classInputs.forEach(classInput => {
+                    const classValue = classInput.value.trim();
+                    if (classValue) { // Only save non-empty classes
+                        periods.push({
+                            time_period: timePeriod,
+                            class_name: classValue,
+                            staff_name: ''
+                        });
+                    }
+                });
+            } else {
+                // For student schedules, use single class input (existing behavior)
+                const classInput = row.querySelector('.class-input');
+                if (classInput) {
+                    periods.push({
+                        time_period: timePeriod,
+                        class_name: classInput.value.trim(),
+                        staff_name: staffInput ? staffInput.value.trim() : ''
+                    });
+                }
+            }
+        }
+    });
+    
+    const payload = {
+        schedule_type: type,
+        periods: periods
+    };
+    
+    if (type === 'student' && currentScheduleStudentId) {
+        payload.student_id = currentScheduleStudentId;
+    }
+    
+    try {
+        const response = await fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (response.ok) {
+            showMessage(`${type === 'teacher' ? 'Teacher' : 'Student'} schedule saved successfully!`, 'success');
+            loadSchedules(type, currentScheduleStudentId);
+        } else {
+            // Try to get error message from response
+            let errorMessage = 'Error saving schedule. Please try again.';
+            try {
+                const errorData = await response.json();
+                if (errorData.error) {
+                    errorMessage = errorData.error;
+                }
+            } catch (e) {
+                // If response is not JSON, use status text
+                errorMessage = `Error saving schedule: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+        }
+    } catch (error) {
+        console.error('Error saving schedule:', error);
+        showMessage(error.message || 'Error saving schedule. Please try again.', 'error');
+    }
+}
+
+// User Management Functions
+async function loadUsers() {
+    try {
+        const response = await fetch('/api/users');
+        const users = await response.json();
+        
+        // Store staff members for dropdowns
+        allStaffMembers = users.filter(u => u.role === 'staff' || u.role === 'admin');
+        
+        // Update staff datalist for schedule dropdowns
+        updateStaffDatalist();
+        
+        const adminTbody = document.getElementById('admin-users-table-body');
+        const staffTbody = document.getElementById('staff-users-table-body');
+        const studentTbody = document.getElementById('student-users-table-body');
+        const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
+        
+        if (!adminTbody || !staffTbody || !studentTbody) return;
+        
+        adminTbody.innerHTML = '';
+        staffTbody.innerHTML = '';
+        studentTbody.innerHTML = '';
+        if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
+        
+        if (users.length === 0) {
+            studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            return;
+        }
+        
+        // Separate users by role
+        const adminUsers = users.filter(u => u.role === 'admin');
+        const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
+        const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
+        const studentUsers = users.filter(u => u.role === 'student');
+        
+        // Helper function to get display role
+        const getDisplayRole = (user) => {
+            if (user.role === 'admin') return 'Admin';
+            if (user.role === 'staff') return user.designation || 'Staff';
+            return 'Student';
+        };
+        
+        // Populate Admin table
+        if (adminUsers.length === 0) {
+            adminTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
+        } else {
+            adminUsers.forEach(user => {
+                const row = createAdminStaffRow(user, getDisplayRole(user));
+                adminTbody.appendChild(row);
+            });
+        }
+        
+        // Populate Staff table
+        if (staffUsers.length === 0) {
+            staffTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+        } else {
+            staffUsers.forEach(user => {
+                const row = createAdminStaffRow(user, getDisplayRole(user));
+                staffTbody.appendChild(row);
+            });
+        }
+        
+        // Populate Outside Staff table
+        if (outsideStaffTbody) {
+            if (outsideStaffUsers.length === 0) {
+                outsideStaffTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
+            } else {
+                outsideStaffUsers.forEach(user => {
+                    const row = createOutsideStaffRow(user);
+                    outsideStaffTbody.appendChild(row);
+                });
+            }
+        }
+        
+        // Populate Student table
+        if (studentUsers.length === 0) {
+            studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+        } else {
+            studentUsers.forEach(user => {
+                const row = createStudentRow(user);
+                studentTbody.appendChild(row);
+            });
+        }
+        
+        // Load admin stats if on admin panel
+        if (isAdmin()) {
+            loadAdminStats(users);
+        }
+    } catch (error) {
+        console.error('Error loading users:', error);
+        showMessage('Error loading users. Please try again.', 'error');
+    }
+}
+
+function createAdminStaffRow(user, displayRole) {
+    const row = document.createElement('tr');
+    row.dataset.userId = user.id;
+    
+    const name = user.name || user.username;
+    
+    const canDelete = isAdmin() && user.id !== window.currentUser.id;
+    const canEdit = isAdmin() || user.id === window.currentUser.id;
+    
+    // Password visibility: Admin sees all, staff/admin see their own
+    const canSeePassword = isAdmin() || user.id === window.currentUser.id;
+    
+    const userDesignation = user.designation ? `'${user.designation}'` : 'null';
+    const grade = user.grade ? `'${user.grade}'` : 'null';
+    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    
+    row.innerHTML = `
+        <td><strong>${name}</strong></td>
+        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${displayRole}</td>
+        <td>${user.username}</td>
+        <td id="password-cell-${user.id}">
+            ${canSeePassword ? `
+                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+            ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="actions-cell">
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
+        </td>
+    `;
+    
+    return row;
+}
+
+function createStudentRow(user) {
+    const row = document.createElement('tr');
+    row.dataset.userId = user.id;
+    
+    // Use the name from User table if available, otherwise fall back to student_name or username
+    const name = user.name || user.student_name || user.username;
+    const grade = user.grade || '-';
+    
+    // Helper function to get staff name by username
+    const getStaffNameByUsername = (username) => {
+        if (!username || username === '-') return null;
+        const staff = allStaffMembers.find(s => s.username === username);
+        return staff ? (staff.name || staff.username) : username;
+    };
+    
+    // Helper function to format team members array for display
+    const formatTeamMembers = (usernames) => {
+        if (!usernames || (Array.isArray(usernames) && usernames.length === 0)) {
+            return '-';
+        }
+        // Handle both array and single value for backward compatibility
+        const usernameList = Array.isArray(usernames) ? usernames : [usernames];
+        const names = usernameList.map(u => getStaffNameByUsername(u)).filter(n => n !== null);
+        if (names.length === 0) return '-';
+        return names.join('<br>');
+    };
+    
+    // Team members - display names instead of usernames
+    let caseManager = '-';
+    let practitioner = '-';
+    let professional = '-';
+    let groupLeader = '-';
+    let paraprofessional = '-';
+    
+    if (user.team_members) {
+        caseManager = formatTeamMembers(user.team_members.case_manager);
+        practitioner = formatTeamMembers(user.team_members.practitioner);
+        professional = formatTeamMembers(user.team_members.professional);
+        groupLeader = formatTeamMembers(user.team_members.group_leader);
+        paraprofessional = formatTeamMembers(user.team_members.paraprofessional);
+    }
+    
+    const canDelete = isAdmin();
+    const canEdit = isAdmin() || isStaff();
+    
+    // Password visibility: Admin and staff can see/edit all student passwords, students see their own
+    const canSeePassword = isAdmin() || isStaff() || user.id === window.currentUser.id;
+    
+    const userDesignation = user.designation ? `'${user.designation}'` : 'null';
+    const gradeValue = user.grade ? `'${user.grade}'` : 'null';
+    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    
+    const cardColor = user.card_color || '-';
+    const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
+    
+    row.innerHTML = `
+        <td><strong>${name}</strong></td>
+        <td>${grade}</td>
+        <td>${cardColorDisplay}</td>
+        <td style="font-size: 13px;">${caseManager}</td>
+        <td style="font-size: 13px;">${practitioner}</td>
+        <td style="font-size: 13px;">${professional}</td>
+        <td style="font-size: 13px;">${groupLeader}</td>
+        <td style="font-size: 13px;">${paraprofessional}</td>
+        <td>${user.username}</td>
+        <td id="password-cell-${user.id}">
+            ${canSeePassword ? `
+                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+            ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="actions-cell">
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
+        </td>
+    `;
+    
+    return row;
+}
+
+function createOutsideStaffRow(user) {
+    const row = document.createElement('tr');
+    row.dataset.userId = user.id;
+    
+    const name = user.name || user.username;
+    const district = user.district || '-';
+    
+    // Format assigned students for display
+    let studentsAssignedDisplay = 'No students assigned';
+    if (user.assigned_students && user.assigned_students.length > 0) {
+        if (user.assigned_students.length <= 3) {
+            studentsAssignedDisplay = user.assigned_students.map(s => s.name).join(', ');
+        } else {
+            studentsAssignedDisplay = `${user.assigned_students.length} students (${user.assigned_students.slice(0, 2).map(s => s.name).join(', ')}, ...)`;
+        }
+    }
+    
+    const canDelete = isAdmin() && user.id !== window.currentUser.id;
+    const canEdit = isAdmin();
+    const canSeePassword = isAdmin();
+    
+    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const userDistrict = user.district ? `'${user.district.replace(/'/g, "\\'")}'` : 'null';
+    
+    row.innerHTML = `
+        <td><strong>${name}</strong></td>
+        <td>${district}</td>
+        <td style="cursor: pointer; color: #1976d2; text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
+            ${studentsAssignedDisplay}
+        </td>
+        <td>${user.username}</td>
+        <td id="password-cell-${user.id}">
+            ${canSeePassword ? `
+                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+            ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="actions-cell">
+            ${canEdit ? `<button class="btn-secondary" onclick="editOutsideStaffUser(${user.id}, ${userName}, '${user.username}', ${userDistrict})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
+        </td>
+    `;
+    
+    return row;
+}
+
+async function resetAndViewPassword(userId, username) {
+    // Confirm before resetting
+    if (!confirm(`This will reset the password for ${username}. Continue?`)) {
+        return;
+    }
+    
+    // Generate a simple, memorable password (username + 2024)
+    const newPassword = username + '2024';
+    
+    try {
+        const response = await fetch('/api/users', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: userId,
+                password: newPassword
+            })
+        });
+        
+        if (response.ok) {
+            // Update the password cell to show the new password
+            const cell = document.getElementById(`password-cell-${userId}`);
+            if (cell) {
+                cell.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; font-weight: bold; color: #2e7d32; font-size: 14px;">${newPassword}</code>
+                        <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyToClipboard('${newPassword}', this)">📋 Copy</button>
+                        <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${userId}, '${username}')">Reset Again</button>
+                    </div>
+                `;
+            }
+            showMessage(`Password reset to: ${newPassword}`, 'success');
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to reset password');
+        }
+    } catch (error) {
+        console.error('Error resetting password:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+function copyToClipboard(text, buttonElement) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = buttonElement.textContent;
+        buttonElement.textContent = '✓ Copied!';
+        buttonElement.style.background = '#4caf50';
+        buttonElement.style.color = 'white';
+        
+        setTimeout(() => {
+            buttonElement.textContent = originalText;
+            buttonElement.style.background = '';
+            buttonElement.style.color = '';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor) {
+    // Check permissions
+    if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
+        alert('You can only edit student accounts or your own account');
+        return;
+    }
+    
+    // Map system role to display role for the dropdown
+    let displayRole;
+    if (role === 'admin') {
+        displayRole = 'Admin';
+    } else if (role === 'staff' && designation) {
+        displayRole = designation;
+    } else if (role === 'student') {
+        displayRole = 'Student';
+    } else {
+        displayRole = role;
+    }
+    
+    // Populate the modal
+    document.getElementById('edit-user-id').value = userId;
+    document.getElementById('edit-user-student-id').value = studentId || '';
+    document.getElementById('edit-user-name').value = name || '';
+    document.getElementById('edit-user-username').value = username;
+    document.getElementById('edit-user-role').value = displayRole;
+    document.getElementById('edit-user-original-role').value = role;
+    document.getElementById('edit-user-password').value = '';
+    document.getElementById('edit-user-password-confirm').value = '';
+    
+    // Set grade if student
+    if (role === 'student' && grade) {
+        document.getElementById('edit-user-grade').value = grade;
+    }
+    
+    // Set card color if student
+    if (role === 'student') {
+        const cardColorSelect = document.getElementById('edit-user-card-color');
+        if (cardColorSelect) {
+            cardColorSelect.value = cardColor || '';
+        }
+    }
+    
+    // Check if staff is editing their own account
+    const isStaffEditingSelf = isStaff() && !isAdmin() && userId === window.currentUser.id;
+    
+    // Disable fields for staff editing themselves (they can only change password)
+    const nameInput = document.getElementById('edit-user-name');
+    const usernameInput = document.getElementById('edit-user-username');
+    const roleSelect = document.getElementById('edit-user-role');
+    
+    if (isStaffEditingSelf) {
+        nameInput.disabled = true;
+        nameInput.title = 'Staff can only change their own password';
+        usernameInput.disabled = true;
+        usernameInput.title = 'Staff can only change their own password';
+        roleSelect.disabled = true;
+        roleSelect.title = 'Staff can only change their own password';
+    } else {
+        nameInput.disabled = false;
+        nameInput.title = '';
+        usernameInput.disabled = false;
+        usernameInput.title = '';
+        
+        // Disable role dropdown for staff editing students (they can't change roles)
+        if (isStaff() && !isAdmin()) {
+            roleSelect.disabled = true;
+            roleSelect.title = 'Only admins can change user roles';
+        } else {
+            roleSelect.disabled = false;
+            roleSelect.title = '';
+        }
+    }
+    
+    // Show/hide grade field based on role
+    const gradeGroup = document.getElementById('edit-user-grade-group');
+    const cardColorGroup = document.getElementById('edit-user-card-color-group');
+    if (role === 'student') {
+        gradeGroup.style.display = 'block';
+        if (cardColorGroup) {
+            cardColorGroup.style.display = 'block';
+        }
+    } else {
+        gradeGroup.style.display = 'none';
+        if (cardColorGroup) {
+            cardColorGroup.style.display = 'none';
+        }
+    }
+    
+    // Show/hide team member section based on role
+    const teamSection = document.getElementById('edit-user-team-section');
+    if (role === 'student' && studentId) {
+        teamSection.style.display = 'block';
+        
+        // Populate staff member dropdowns
+        await populateStaffDropdowns();
+        
+        // Load current team member assignments
+        try {
+            const response = await fetch(`/api/team-members/${studentId}`);
+            const teamMembers = await response.json();
+            
+            // Populate team member rows
+            populateTeamMemberRows('edit-case-manager-container', teamMembers.case_manager || [], ['case_manager', 'teacher']);
+            populateTeamMemberRows('edit-practitioner-container', teamMembers.practitioner || [], ['practitioner']);
+            populateTeamMemberRows('edit-professional-container', teamMembers.professional || [], ['professional']);
+            populateTeamMemberRows('edit-group-leader-container', teamMembers.group_leader || [], ['group_leader']);
+            populateTeamMemberRows('edit-paraprofessional-container', teamMembers.paraprofessional || [], ['paraprofessional']);
+        } catch (error) {
+            console.error('Error loading team members:', error);
+        }
+    } else {
+        teamSection.style.display = 'none';
+    }
+    
+    // Show the modal
+    document.getElementById('edit-user-modal').style.display = 'block';
+}
+
+// Function to create a new team member row (similar to createInfractionRow)
+function createTeamMemberRow(containerId, selectedUsername = '', roles = []) {
+    const row = document.createElement('div');
+    row.className = 'form-group team-member-group';
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.marginBottom = '10px';
+    
+    const select = document.createElement('select');
+    select.className = 'team-member-select';
+    select.style.flex = '1';
+    
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select Team Member';
+    select.appendChild(defaultOption);
+    
+    // Add staff members who match the role requirements
+    allStaffMembers.forEach(staff => {
+        const staffName = staff.name || staff.username;
+        
+        // Map designations to their applicable roles
+        const getApplicableRoles = (designation) => {
+            const roleMap = {
+                'Case Manager': ['case_manager', 'teacher'],
+                'Practitioner': ['practitioner', 'group_leader'],
+                'Paraprofessional': ['paraprofessional'],
+                'Professional': ['professional'],
+                'Admin': ['admin']
+            };
+            return roleMap[designation] || [];
+        };
+        
+        let shouldInclude = false;
+        if (!staff.designation) {
+            // Staff without designation can be assigned to any role
+            shouldInclude = true;
+        } else {
+            // Check if staff's designation applies to this role
+            const applicableRoles = getApplicableRoles(staff.designation);
+            shouldInclude = roles.some(role => applicableRoles.includes(role));
+        }
+        
+        if (shouldInclude) {
+            const option = document.createElement('option');
+            option.value = staff.username;
+            const designationText = staff.designation ? ` (${staff.designation})` : ' (No designation)';
+            option.textContent = `${staffName}${designationText}`;
+            if (staff.username === selectedUsername) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        }
+    });
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'delete-btn';
+    removeBtn.textContent = '×';
+    removeBtn.style.padding = '4px 8px';
+    removeBtn.style.fontSize = '14px';
+    removeBtn.onclick = function() {
+        row.remove();
+    };
+    
+    row.appendChild(select);
+    row.appendChild(removeBtn);
+    
+    return row;
+}
+
+// Helper function to get selected team member usernames from a container
+function getSelectedTeamMembers(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    
+    const rows = container.querySelectorAll('.team-member-group');
+    const usernames = [];
+    rows.forEach(row => {
+        const select = row.querySelector('.team-member-select');
+        if (select && select.value) {
+            usernames.push(select.value);
+        }
+    });
+    return usernames;
+}
+
+// Helper function to populate team member rows in a container
+function populateTeamMemberRows(containerId, usernames, roles) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Handle both array and single value for backward compatibility
+    const usernameArray = Array.isArray(usernames) ? usernames : (usernames ? [usernames] : []);
+    
+    // Always show at least one empty row if no team members
+    if (usernameArray.length === 0) {
+        usernameArray.push('');
+    }
+    
+    usernameArray.forEach(username => {
+        const row = createTeamMemberRow(containerId, username, roles);
+        container.appendChild(row);
+    });
+}
+
+// Set up team member add buttons (for both add and edit modals)
+function setupTeamMemberButtons() {
+    // Add Student modal buttons
+    const addButtons = [
+        { id: 'add-case-manager-btn', container: 'case-manager-container', roles: ['case_manager', 'teacher'] },
+        { id: 'add-practitioner-btn', container: 'practitioner-container', roles: ['practitioner'] },
+        { id: 'add-professional-btn', container: 'professional-container', roles: ['professional'] },
+        { id: 'add-group-leader-btn', container: 'group-leader-container', roles: ['group_leader'] },
+        { id: 'add-paraprofessional-btn', container: 'paraprofessional-container', roles: ['paraprofessional'] }
+    ];
+    
+    addButtons.forEach(config => {
+        const btn = document.getElementById(config.id);
+        if (btn) {
+            // Remove old listeners by replacing button
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', function() {
+                const container = document.getElementById(config.container);
+                if (container) {
+                    const row = createTeamMemberRow(config.container, '', config.roles);
+                    container.appendChild(row);
+                }
+            });
+        }
+    });
+    
+    // Edit User modal buttons
+    const editButtons = [
+        { id: 'edit-add-case-manager-btn', container: 'edit-case-manager-container', roles: ['case_manager', 'teacher'] },
+        { id: 'edit-add-practitioner-btn', container: 'edit-practitioner-container', roles: ['practitioner'] },
+        { id: 'edit-add-professional-btn', container: 'edit-professional-container', roles: ['professional'] },
+        { id: 'edit-add-group-leader-btn', container: 'edit-group-leader-container', roles: ['group_leader'] },
+        { id: 'edit-add-paraprofessional-btn', container: 'edit-paraprofessional-container', roles: ['paraprofessional'] }
+    ];
+    
+    editButtons.forEach(config => {
+        const btn = document.getElementById(config.id);
+        if (btn) {
+            // Remove old listeners by replacing button
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', function() {
+                const container = document.getElementById(config.container);
+                if (container) {
+                    const row = createTeamMemberRow(config.container, '', config.roles);
+                    container.appendChild(row);
+                }
+            });
+        }
+    });
+}
+
+async function populateStaffDropdowns() {
+    // This function is now just for setting up button handlers
+    setupTeamMemberButtons();
+}
+
+async function populateAddStudentDropdowns() {
+    // This function is now just for setting up button handlers
+    setupTeamMemberButtons();
+}
+
+async function saveEditUser() {
+    const userId = parseInt(document.getElementById('edit-user-id').value);
+    const studentId = document.getElementById('edit-user-student-id').value;
+    const name = document.getElementById('edit-user-name').value.trim();
+    const username = document.getElementById('edit-user-username').value.trim();
+    const displayRole = document.getElementById('edit-user-role').value;
+    const originalRole = document.getElementById('edit-user-original-role').value;
+    const password = document.getElementById('edit-user-password').value;
+    const passwordConfirm = document.getElementById('edit-user-password-confirm').value;
+    const grade = document.getElementById('edit-user-grade').value;
+    const cardColor = document.getElementById('edit-user-card-color')?.value || '';
+    
+    // Map display role to system role and designation
+    let systemRole;
+    let designation = null;
+    
+    if (displayRole === 'Admin') {
+        systemRole = 'admin';
+    } else if (displayRole === 'Student') {
+        systemRole = 'student';
+    } else {
+        // It's a staff designation (Case Manager, Practitioner, etc.)
+        systemRole = 'staff';
+        designation = displayRole;
+    }
+    
+    // Validation
+    if (!username) {
+        alert('Please enter a username');
+        return;
+    }
+    
+    // Check if role changed and user is not admin
+    if (systemRole !== originalRole && !isAdmin()) {
+        alert('Only admins can change user roles');
+        return;
+    }
+    
+    // Check password if provided
+    if (password) {
+        if (password.length < 6) {
+            alert('Password must be at least 6 characters long');
+            return;
+        }
+        
+        if (password !== passwordConfirm) {
+            alert('Passwords do not match');
+            return;
+        }
+    }
+    
+    // Prepare update data
+    const updateData = {
+        id: userId,
+        name: name || null,
+        username: username
+    };
+    
+    // Check if this is an Outside Staff user (district field visible means it's Outside Staff)
+    const districtInput = document.getElementById('edit-user-district');
+    const districtGroup = districtInput ? districtInput.closest('.form-group') : null;
+    const isOutsideStaffUser = districtGroup && districtGroup.style.display !== 'none';
+    
+    // For Outside Staff, always keep role as 'staff' and don't allow role changes
+    if (isOutsideStaffUser) {
+        updateData.role = 'staff';
+        const district = districtInput.value.trim();
+        updateData.is_outside_staff = true;
+        updateData.district = district || null;
+    } else {
+        // Only include role if admin and it changed (for non-Outside Staff users)
+        if (isAdmin() && systemRole !== originalRole) {
+            updateData.role = systemRole;
+        }
+        
+        // Include designation for regular staff users (not Outside Staff)
+        if (systemRole === 'staff') {
+            updateData.designation = designation;
+            updateData.is_outside_staff = false;
+        }
+    }
+    
+    // Include grade for student users
+    if (systemRole === 'student' && grade) {
+        updateData.grade = grade;
+    }
+    
+    // Include card_color for student users
+    if (systemRole === 'student') {
+        updateData.card_color = cardColor || null;
+    }
+    
+    // Only include password if provided
+    if (password) {
+        updateData.password = password;
+    }
+    
+    try {
+        // Update user account
+        const response = await fetch('/api/users', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to update user');
+        }
+        
+        // Update team members if this is a student account
+        if (systemRole === 'student' && studentId) {
+            const teamMemberData = {
+                case_manager: getSelectedTeamMembers('edit-case-manager-container'),
+                practitioner: getSelectedTeamMembers('edit-practitioner-container'),
+                professional: getSelectedTeamMembers('edit-professional-container'),
+                group_leader: getSelectedTeamMembers('edit-group-leader-container'),
+                paraprofessional: getSelectedTeamMembers('edit-paraprofessional-container')
+            };
+            
+            const teamResponse = await fetch(`/api/team-members/${studentId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(teamMemberData)
+            });
+            
+            if (!teamResponse.ok) {
+                console.error('Failed to update team members');
+            }
+        }
+        
+        showMessage('User updated successfully', 'success');
+        document.getElementById('edit-user-modal').style.display = 'none';
+        await loadUsers();
+        // If a student user was updated, reload students to update all dropdowns
+        if (systemRole === 'student') {
+            await loadStudents();
+        }
+    } catch (error) {
+        console.error('Error updating user:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+async function deleteUser(userId, username, role) {
+    const roleText = role === 'admin' ? 'ADMIN USER' : 
+                     role === 'staff' ? 'STAFF USER' : 'STUDENT USER';
+    
+    if (!confirm(`⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/users?id=${userId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            showMessage(`User "${username}" deleted successfully`, 'success');
+            await loadUsers();
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to delete user');
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        showMessage('Error deleting user: ' + error.message, 'error');
+    }
+}
+
+async function saveStaffUser() {
+    const name = document.getElementById('staff-name').value.trim();
+    const username = document.getElementById('staff-username').value.trim();
+    const password = document.getElementById('staff-password').value;
+    const passwordConfirm = document.getElementById('staff-password-confirm').value;
+    const role = document.getElementById('staff-role').value;
+    
+    if (!name || !username || !password) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert('Password must be at least 6 characters long');
+        return;
+    }
+    
+    if (password !== passwordConfirm) {
+        alert('Passwords do not match');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                username: username,
+                password: password,
+                role: 'staff',
+                designation: role
+            })
+        });
+        
+        if (response.ok) {
+            showMessage('Staff user created successfully', 'success');
+            document.getElementById('staff-modal').style.display = 'none';
+            document.getElementById('staff-name').value = '';
+            document.getElementById('staff-username').value = '';
+            document.getElementById('staff-password').value = '';
+            document.getElementById('staff-password-confirm').value = '';
+            document.getElementById('staff-role').value = 'Case Manager';
+            await loadUsers();
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to create staff user');
+        }
+    } catch (error) {
+        console.error('Error creating staff user:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+async function saveOutsideStaffUser() {
+    const name = document.getElementById('outside-staff-name').value.trim();
+    const username = document.getElementById('outside-staff-username').value.trim();
+    const district = document.getElementById('outside-staff-district').value.trim();
+    const password = document.getElementById('outside-staff-password').value;
+    const passwordConfirm = document.getElementById('outside-staff-password-confirm').value;
+    
+    if (!name || !username || !district || !password) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert('Password must be at least 6 characters long');
+        return;
+    }
+    
+    if (password !== passwordConfirm) {
+        alert('Passwords do not match');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                username: username,
+                password: password,
+                role: 'staff',
+                is_outside_staff: true,
+                district: district
+            })
+        });
+        
+        if (response.ok) {
+            showMessage('Outside Staff user created successfully', 'success');
+            document.getElementById('outside-staff-modal').style.display = 'none';
+            document.getElementById('outside-staff-name').value = '';
+            document.getElementById('outside-staff-username').value = '';
+            document.getElementById('outside-staff-district').value = '';
+            document.getElementById('outside-staff-password').value = '';
+            document.getElementById('outside-staff-password-confirm').value = '';
+            await loadUsers();
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to create Outside Staff user');
+        }
+    } catch (error) {
+        console.error('Error creating Outside Staff user:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+async function saveAdminUser() {
+    const name = document.getElementById('admin-name').value.trim();
+    const username = document.getElementById('admin-username').value.trim();
+    const password = document.getElementById('admin-password').value;
+    const passwordConfirm = document.getElementById('admin-password-confirm').value;
+    
+    if (!name || !username || !password) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert('Password must be at least 6 characters long');
+        return;
+    }
+    
+    if (password !== passwordConfirm) {
+        alert('Passwords do not match');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                username: username,
+                password: password,
+                role: 'admin'
+            })
+        });
+        
+        if (response.ok) {
+            showMessage('Admin user created successfully', 'success');
+            document.getElementById('admin-modal').style.display = 'none';
+            document.getElementById('admin-name').value = '';
+            document.getElementById('admin-username').value = '';
+            document.getElementById('admin-password').value = '';
+            document.getElementById('admin-password-confirm').value = '';
+            await loadUsers();
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to create admin user');
+        }
+    } catch (error) {
+        console.error('Error creating admin user:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+async function manageOutsideStaffStudents(userId, name) {
+    // Fetch assigned students
+    const response = await fetch(`/api/outside-staff/${userId}/students`);
+    const assignedStudents = await response.json();
+    const assignedStudentIds = assignedStudents.map(s => s.id);
+    
+    // Fetch all students
+    const studentsResponse = await fetch('/api/students');
+    const allStudents = await studentsResponse.json();
+    
+    // Create modal content
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    const displayName = name !== 'null' ? name.replace(/\\'/g, "'") : 'User';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+            <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
+            <h2>Manage Students for ${displayName}</h2>
+            <p style="margin-bottom: 15px; color: #666;">Select students to assign to this Outside Staff user:</p>
+            <div class="form-group" style="margin-bottom: 15px;">
+                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div id="student-assignment-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+                ${allStudents.map(student => `
+                    <label class="student-assignment-item" data-student-name="${student.name.toLowerCase()}" style="display: block; padding: 8px; cursor: pointer;">
+                        <input type="checkbox" value="${student.id}" ${assignedStudentIds.includes(student.id) ? 'checked' : ''} style="margin-right: 8px;">
+                        ${student.name}
+                    </label>
+                `).join('')}
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-student-assignments-btn" class="btn-primary">Save Assignments</button>
+                <button onclick="this.closest('.modal').remove()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Add search functionality
+    const searchInput = document.getElementById('student-assignment-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            const items = modal.querySelectorAll('.student-assignment-item');
+            items.forEach(item => {
+                const studentName = item.dataset.studentName;
+                if (query === '' || studentName.includes(query)) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+    }
+    
+    // Handle save
+    document.getElementById('save-student-assignments-btn').addEventListener('click', async () => {
+        const checkboxes = modal.querySelectorAll('input[type="checkbox"]:checked');
+        const selectedStudentIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+        
+        try {
+            // First, get current assignments and unassign all
+            const currentResponse = await fetch(`/api/outside-staff/${userId}/students`);
+            const currentStudents = await currentResponse.json();
+            for (const student of currentStudents) {
+                await fetch(`/api/outside-staff/${userId}/students?student_id=${student.id}`, {
+                    method: 'DELETE'
+                });
+            }
+            
+            // Then assign selected students
+            if (selectedStudentIds.length > 0) {
+                const assignResponse = await fetch(`/api/outside-staff/${userId}/students`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_ids: selectedStudentIds })
+                });
+                
+                if (!assignResponse.ok) {
+                    throw new Error('Failed to assign students');
+                }
+            }
+            
+            showMessage('Student assignments updated successfully', 'success');
+            modal.remove();
+            await loadUsers();
+        } catch (error) {
+            console.error('Error updating student assignments:', error);
+            showMessage('Error: ' + error.message, 'error');
+        }
+    });
+}
+
+function editOutsideStaffUser(userId, name, username, district) {
+    try {
+        document.getElementById('edit-user-id').value = userId;
+        document.getElementById('edit-user-name').value = name !== 'null' ? name.replace(/\\'/g, "'") : '';
+        document.getElementById('edit-user-username').value = username;
+        document.getElementById('edit-user-role').value = 'Staff';
+        document.getElementById('edit-user-original-role').value = 'staff';
+        
+        // Hide the role field for Outside Staff (they can't change their role)
+        const roleFormGroup = document.getElementById('edit-user-role').closest('.form-group');
+        if (roleFormGroup) {
+            roleFormGroup.style.display = 'none';
+        }
+        
+        // Show district field if it exists, or create it
+        let districtGroup = document.getElementById('edit-user-district-group');
+        if (!districtGroup) {
+            // Find the username field and insert district field after it
+            const usernameInput = document.getElementById('edit-user-username');
+            const usernameFormGroup = usernameInput.closest('.form-group');
+            districtGroup = document.createElement('div');
+            districtGroup.id = 'edit-user-district-group';
+            districtGroup.className = 'form-group';
+            districtGroup.innerHTML = `
+                <label for="edit-user-district">District:</label>
+                <input type="text" id="edit-user-district" placeholder="Enter district name">
+            `;
+            if (usernameFormGroup && usernameFormGroup.nextSibling) {
+                usernameFormGroup.parentNode.insertBefore(districtGroup, usernameFormGroup.nextSibling);
+            } else if (usernameFormGroup) {
+                usernameFormGroup.parentNode.appendChild(districtGroup);
+            }
+        }
+        const districtInput = document.getElementById('edit-user-district');
+        if (districtInput) {
+            districtInput.value = district !== 'null' ? district.replace(/\\'/g, "'") : '';
+        }
+        if (districtGroup) {
+            districtGroup.style.display = 'block';
+        }
+        
+        // Hide fields not relevant for Outside Staff
+        const gradeGroup = document.getElementById('edit-user-grade-group');
+        if (gradeGroup) gradeGroup.style.display = 'none';
+        const cardColorGroup = document.getElementById('edit-user-card-color-group');
+        if (cardColorGroup) cardColorGroup.style.display = 'none';
+        const teamSection = document.getElementById('edit-user-team-members-section');
+        if (teamSection) teamSection.style.display = 'none';
+        
+        document.getElementById('edit-user-modal').style.display = 'block';
+    } catch (error) {
+        console.error('Error in editOutsideStaffUser:', error);
+        alert('Error opening edit dialog. Please check the console for details.');
+    }
+}
+
+function loadAdminStats(users) {
+    const statsContainer = document.getElementById('admin-stats');
+    if (!statsContainer) return;
+    
+    const adminCount = users.filter(u => u.role === 'admin').length;
+    const staffCount = users.filter(u => u.role === 'staff').length;
+    const studentCount = users.filter(u => u.role === 'student').length;
+    const totalCount = users.length;
+    
+    statsContainer.innerHTML = `
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #d32f2f;">
+            <div style="font-size: 24px; font-weight: bold; color: #d32f2f;">${adminCount}</div>
+            <div style="color: #666; font-size: 12px;">Admin Users</div>
+        </div>
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #1976d2;">
+            <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${staffCount}</div>
+            <div style="color: #666; font-size: 12px;">Staff Users</div>
+        </div>
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #388e3c;">
+            <div style="font-size: 24px; font-weight: bold; color: #388e3c;">${studentCount}</div>
+            <div style="color: #666; font-size: 12px;">Student Users</div>
+        </div>
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #667eea;">
+            <div style="font-size: 24px; font-weight: bold; color: #667eea;">${totalCount}</div>
+            <div style="color: #666; font-size: 12px;">Total Users</div>
+        </div>
+    `;
+    
+    // Load system info
+    const systemInfoContainer = document.getElementById('system-info');
+    if (systemInfoContainer) {
+        systemInfoContainer.innerHTML = `
+            <div style="display: grid; gap: 10px;">
+                <div><strong>Current User:</strong> ${window.currentUser.username} (${window.currentUser.role})</div>
+                <div><strong>Database:</strong> SQLite (behavior_tracking.db)</div>
+                <div><strong>Total Students:</strong> ${allStudents.length}</div>
+            </div>
+        `;
+    }
+}
+
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showMessage('Copied to clipboard!', 'success');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
+// Event listeners for schedule management
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize teacher schedule on page load (for staff/admin)
+    // Note: Schedules will be rendered when schedules view is shown
+    // We don't load here to avoid unnecessary API calls if user never visits schedules tab
+    
+    // Schedule student selector
+    const scheduleStudentSelect = document.getElementById('schedule-student-select');
+    if (scheduleStudentSelect) {
+        scheduleStudentSelect.addEventListener('change', (e) => {
+            currentScheduleStudentId = parseInt(e.target.value);
+            if (currentScheduleStudentId) {
+                loadSchedules('student', currentScheduleStudentId);
+            }
+        });
+        // Note: Student dropdown is now populated by loadStudents() function
+    }
+    
+    // Add period buttons
+    const addTeacherPeriodBtn = document.getElementById('add-teacher-period-btn');
+    if (addTeacherPeriodBtn) {
+        addTeacherPeriodBtn.addEventListener('click', () => addScheduleRow('teacher'));
+    }
+    
+    const addStudentPeriodBtn = document.getElementById('add-student-period-btn');
+    if (addStudentPeriodBtn) {
+        addStudentPeriodBtn.addEventListener('click', () => addScheduleRow('student'));
+    }
+    
+    // Save schedule buttons
+    const saveTeacherScheduleBtn = document.getElementById('save-teacher-schedule-btn');
+    if (saveTeacherScheduleBtn) {
+        saveTeacherScheduleBtn.addEventListener('click', () => saveSchedule('teacher'));
+    }
+    
+    const saveStudentScheduleBtn = document.getElementById('save-student-schedule-btn');
+    if (saveStudentScheduleBtn) {
+        saveStudentScheduleBtn.addEventListener('click', () => saveSchedule('student'));
+    }
+    
+    // User management buttons
+    const refreshUsersBtn = document.getElementById('refresh-users-btn');
+    if (refreshUsersBtn) {
+        refreshUsersBtn.addEventListener('click', loadUsers);
+    }
+    
+    // Search functionality for user tables
+    const studentSearch = document.getElementById('student-search');
+    if (studentSearch) {
+        studentSearch.addEventListener('input', (e) => filterUserTable('student', e.target.value));
+    }
+    
+    const staffSearch = document.getElementById('staff-search');
+    if (staffSearch) {
+        staffSearch.addEventListener('input', (e) => filterUserTable('staff', e.target.value));
+    }
+    
+    const adminSearch = document.getElementById('admin-search');
+    if (adminSearch) {
+        adminSearch.addEventListener('input', (e) => filterUserTable('admin', e.target.value));
+    }
+});
+
+function filterUserTable(tableType, searchQuery) {
+    const query = searchQuery.toLowerCase().trim();
+    const tbody = document.getElementById(`${tableType}-users-table-body`);
+    
+    if (!tbody) return;
+    
+    const rows = tbody.getElementsByTagName('tr');
+    
+    for (let row of rows) {
+        // Skip empty state rows
+        if (row.cells.length === 1 && row.cells[0].colSpan > 1) {
+            continue;
+        }
+        
+        let shouldShow = false;
+        
+        if (query === '') {
+            shouldShow = true;
+        } else {
+            // Get text content from all cells except password and actions columns
+            const cells = Array.from(row.cells);
+            const searchableText = cells
+                .filter((cell, index) => {
+                    // Exclude password column and actions column
+                    if (tableType === 'student') {
+                        // For students: exclude password (index 7) and actions (index 8)
+                        return index !== 7 && index !== 8;
+                    } else {
+                        // For admin/staff: exclude password (index 3) and actions (index 4)
+                        return index !== 3 && index !== 4;
+                    }
+                })
+                .map(cell => cell.textContent.toLowerCase())
+                .join(' ');
+            
+            shouldShow = searchableText.includes(query);
+        }
+        
+        row.style.display = shouldShow ? '' : 'none';
+    }
+}
+
+async function removeStudent(userId, studentId, studentName) {
+    // First confirmation - basic warning
+    const firstConfirm = confirm(
+        `⚠️ WARNING: Remove Student\n\n` +
+        `You are about to remove "${studentName}" from the system.\n\n` +
+        `This will:\n` +
+        `• Delete the student's user account\n` +
+        `• Delete the student record\n` +
+        `• Remove all associated data\n\n` +
+        `This action CANNOT be undone!\n\n` +
+        `Are you sure you want to continue?`
+    );
+    
+    if (!firstConfirm) {
+        return; // User cancelled
+    }
+    
+    // Second confirmation - require typing student name
+    const typedName = prompt(
+        `⚠️ FINAL CONFIRMATION\n\n` +
+        `To confirm deletion, please type the student's name exactly:\n\n` +
+        `"${studentName}"\n\n` +
+        `Type the name to confirm:`
+    );
+    
+    if (typedName !== studentName) {
+        if (typedName !== null) { // null means they clicked cancel
+            alert('❌ Deletion cancelled: Name did not match.\n\nThe student was NOT removed.');
+        }
+        return; // User cancelled or name didn't match
+    }
+    
+    // Proceed with deletion
+    try {
+        const response = await fetch(`/api/students/${studentId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            showMessage(`Student "${studentName}" has been removed successfully.`, 'success');
+            
+            // Reload the users list
+            await loadUsers();
+            
+            // Reload students list for other views
+            await loadStudents();
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to remove student');
+        }
+    } catch (error) {
+        console.error('Error removing student:', error);
+        showMessage(`Error: ${error.message}`, 'error');
+    }
+}
+
+function editStudent(studentId, buttonElement) {
+    const row = buttonElement.closest('tr');
+    const editableCells = row.querySelectorAll('.editable-cell');
+    
+    // Check if already in edit mode
+    if (buttonElement.textContent === 'Save') {
+        // Save mode
+        saveStudentInfo(studentId, row, buttonElement);
+        return;
+    }
+    
+    // Enter edit mode
+    editableCells.forEach(cell => {
+        const currentValue = cell.textContent === '-' ? '' : cell.textContent;
+        const field = cell.dataset.field;
+        cell.innerHTML = `<input type="text" class="inline-edit-input" value="${currentValue}" data-field="${field}">`;
+    });
+    
+    buttonElement.textContent = 'Save';
+    buttonElement.style.background = '#28a745';
+}
+
+async function saveStudentInfo(studentId, row, buttonElement) {
+    const inputs = row.querySelectorAll('.inline-edit-input');
+    const data = {};
+    
+    inputs.forEach(input => {
+        const field = input.dataset.field;
+        data[field] = input.value.trim();
+    });
+    
+    try {
+        const response = await fetch(`/api/students/${studentId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            showMessage('Student information updated successfully!', 'success');
+            
+            // Exit edit mode and restore display
+            const editableCells = row.querySelectorAll('.editable-cell');
+            editableCells.forEach(cell => {
+                const input = cell.querySelector('.inline-edit-input');
+                const value = input.value.trim() || '-';
+                cell.textContent = value;
+            });
+            
+            buttonElement.textContent = 'Edit';
+            buttonElement.style.background = '';
+            
+            // Reload to ensure data consistency
+            await loadUsers();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to update student');
+        }
+    } catch (error) {
+        console.error('Error saving student info:', error);
+        showMessage(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Make functions globally accessible
+window.resetPassword = resetPassword;
+window.copyToClipboard = copyToClipboard;
+window.removeStudent = removeStudent;
+window.editStudent = editStudent;
+
+// Infractions Summary Modal Functions
+function showInfractionsSummary(periodIndex, periodName) {
+    if (!window.currentSummaryData || !window.currentSummaryData.periods) {
+        showMessage('Summary data not available', 'error');
+        return;
+    }
+    
+    const periods = Object.keys(window.currentSummaryData.periods);
+    if (periodIndex >= periods.length) {
+        showMessage('Invalid period index', 'error');
+        return;
+    }
+    
+    const periodKey = periods[periodIndex];
+    const periodData = window.currentSummaryData.periods[periodKey];
+    const infractions = periodData.infractions || {};
+    
+    displayInfractionsModal(infractions, periodName || periodKey);
+}
+
+function showInfractionsSummarySingle() {
+    if (!window.currentSummaryData || !window.currentSummaryData.additional_info) {
+        showMessage('Summary data not available', 'error');
+        return;
+    }
+    
+    const infractions = window.currentSummaryData.additional_info.infractions || {};
+    displayInfractionsModal(infractions, 'Summary');
+}
+
+function displayInfractionsModal(infractions, title) {
+    const modal = document.getElementById('infractions-summary-modal');
+    const content = document.getElementById('infractions-summary-content');
+    
+    if (!modal || !content) {
+        showMessage('Modal elements not found', 'error');
+        return;
+    }
+    
+    // Sort infractions by count (descending), then by type name (ascending)
+    const sortedInfractions = Object.entries(infractions)
+        .map(([type, count]) => ({ type, count }))
+        .sort((a, b) => {
+            // First sort by count (descending)
+            if (b.count !== a.count) {
+                return b.count - a.count;
+            }
+            // Then sort by type name (ascending)
+            return a.type.localeCompare(b.type);
+        });
+    
+    if (sortedInfractions.length === 0) {
+        content.innerHTML = '<p style="color: #999; font-style: italic; text-align: center; padding: 20px;">No infractions recorded.</p>';
+    } else {
+        const totalCount = sortedInfractions.reduce((sum, item) => sum + item.count, 0);
+        
+        let html = `
+            <div style="margin-bottom: 20px;">
+                <p style="font-size: 14px; color: #666;"><strong>Total Infractions:</strong> ${totalCount}</p>
+                <p style="font-size: 14px; color: #666;"><strong>Unique Types:</strong> ${sortedInfractions.length}</p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Infraction Type</th>
+                        <th style="padding: 12px; border: 1px solid #ddd; text-align: center; width: 120px;">Count</th>
+                        <th style="padding: 12px; border: 1px solid #ddd; text-align: center; width: 150px;">Percentage</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        sortedInfractions.forEach(item => {
+            const percentage = totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(1) : '0.0';
+            html += `
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #ddd;">${escapeHtml(item.type)}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: 600;">${item.count}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${percentage}%</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                </tbody>
+            </table>
+        `;
+        
+        content.innerHTML = html;
+    }
+    
+    // Update modal title
+    const modalTitle = modal.querySelector('h2');
+    if (modalTitle) {
+        modalTitle.textContent = `Infractions Summary - ${title}`;
+    }
+    
+    modal.style.display = 'block';
+}
+
+function closeInfractionsSummaryModal() {
+    const modal = document.getElementById('infractions-summary-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// PDF Generation Functions
+
+function showPdfTableSelectionModal(type) {
+    console.log('showPdfTableSelectionModal called with type:', type);
+    try {
+        currentPdfType = type;
+        const modal = document.getElementById('pdf-table-selection-modal');
+        const title = document.getElementById('pdf-modal-title');
+        const optionsDiv = document.getElementById('pdf-table-options');
+        
+        console.log('Modal elements check:', { 
+            modal: !!modal, 
+            title: !!title, 
+            optionsDiv: !!optionsDiv,
+            modalId: modal ? modal.id : 'not found',
+            modalDisplay: modal ? window.getComputedStyle(modal).display : 'N/A'
+        });
+        
+        if (!modal) {
+            console.error('PDF modal not found');
+            alert('PDF modal not found. Please refresh the page.');
+            return;
+        }
+        
+        if (!title) {
+            console.error('PDF modal title not found');
+            alert('PDF modal title not found. Please refresh the page.');
+            return;
+        }
+        
+        if (!optionsDiv) {
+            console.error('PDF modal options div not found');
+            alert('PDF modal options div not found. Please refresh the page.');
+            return;
+        }
+        
+        // Set title
+        if (type === 'summary') {
+            title.textContent = 'Select Tables for Summary PDF';
+            try {
+                populateSummaryPdfModal();
+            } catch (error) {
+                console.error('Error populating summary PDF modal:', error);
+                optionsDiv.innerHTML = '<p style="color: #dc3545;">Error loading table options. Please try again.</p>';
+            }
+        } else if (type === 'frenzy') {
+            title.textContent = 'Select Tables for Frenzy Stats PDF';
+            try {
+                populateFrenzyPdfModal();
+            } catch (error) {
+                console.error('Error populating frenzy PDF modal:', error);
+                optionsDiv.innerHTML = '<p style="color: #dc3545;">Error loading table options. Please try again.</p>';
+            }
+        }
+        
+        console.log('Setting modal display to block');
+        modal.style.display = 'block';
+        console.log('Modal display set. Computed display:', window.getComputedStyle(modal).display);
+    } catch (error) {
+        console.error('Error showing PDF table selection modal:', error);
+        alert('Error opening PDF options: ' + (error.message || 'Unknown error'));
+    }
+}
+
+function closePdfTableSelectionModal() {
+    const modal = document.getElementById('pdf-table-selection-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    currentPdfType = null;
+}
+
+function populateSummaryPdfModal() {
+    const optionsDiv = document.getElementById('pdf-table-options');
+    if (!optionsDiv) return;
+    
+    const data = window.currentSummaryData;
+    if (!data) {
+        optionsDiv.innerHTML = '<p style="color: #dc3545;">Please load summary data first.</p>';
+        return;
+    }
+    
+    const isComparison = data.comparison_mode && data.periods;
+    
+    let html = `
+        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+            <input type="checkbox" id="modal-pdf-summary-main" checked disabled>
+            <span>Main Summary Statistics (always included)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+            <input type="checkbox" id="modal-pdf-summary-star" checked>
+            <span>STAR Percentages/Averages</span>
+        </label>
+    `;
+    
+    // Day of Week Statistics
+    let hasDayData = false;
+    if (isComparison) {
+        const periods = Object.keys(data.periods);
+        periods.forEach(periodKey => {
+            if (data.periods[periodKey].by_day && Object.keys(data.periods[periodKey].by_day).length > 0) {
+                hasDayData = true;
+            }
+        });
+    } else {
+        hasDayData = data.by_day && Object.keys(data.by_day).length > 0;
+    }
+    
+    if (hasDayData) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-summary-day" checked>
+                <span>Day of Week Statistics</span>
+            </label>
+        `;
+    }
+    
+    // Class Statistics
+    let hasClassData = false;
+    if (isComparison) {
+        const periods = Object.keys(data.periods);
+        periods.forEach(periodKey => {
+            if (data.periods[periodKey].by_class && Object.keys(data.periods[periodKey].by_class).length > 0) {
+                hasClassData = true;
+            }
+        });
+    } else {
+        hasClassData = data.by_class && Object.keys(data.by_class).length > 0;
+    }
+    
+    if (hasClassData) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-summary-class" checked>
+                <span>Class Statistics</span>
+            </label>
+        `;
+    }
+    
+    // Infractions (only in single mode)
+    if (!isComparison) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-summary-infractions" checked>
+                <span>Infractions</span>
+            </label>
+        `;
+        
+        // Infractions by Day of Week (check if data exists)
+        let hasInfractionsByDay = false;
+        if (data.by_day_of_week) {
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            hasInfractionsByDay = weekdays.some(day => {
+                const dayData = data.by_day_of_week[day];
+                return dayData && dayData.total_infractions > 0;
+            });
+        }
+        
+        if (hasInfractionsByDay) {
+            html += `
+                <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                    <input type="checkbox" id="modal-pdf-summary-infractions-day" checked>
+                    <span>Infractions by Day of Week</span>
+                </label>
+            `;
+        }
+    }
+    
+    optionsDiv.innerHTML = html;
+}
+
+function populateFrenzyPdfModal() {
+    const optionsDiv = document.getElementById('pdf-table-options');
+    if (!optionsDiv) {
+        console.error('pdf-table-options div not found');
+        return;
+    }
+    
+    const data = window.currentFrenzyStatsData;
+    if (!data) {
+        optionsDiv.innerHTML = '<p style="color: #dc3545; padding: 10px;">Please load frenzy statistics data first before generating PDF.</p>';
+        return;
+    }
+    
+    const isComparison = data.comparison_mode && data.periods;
+    
+    let html = `
+        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+            <input type="checkbox" id="modal-pdf-frenzy-main" checked disabled>
+            <span>Main Frenzy Statistics (always included)</span>
+        </label>
+    `;
+    
+    // Day of Week Statistics
+    let hasDayData = false;
+    if (isComparison) {
+        const periods = Object.keys(data.periods);
+        periods.forEach(periodKey => {
+            if (data.periods[periodKey].by_day && Object.keys(data.periods[periodKey].by_day).length > 0) {
+                hasDayData = true;
+            }
+        });
+    } else {
+        hasDayData = data.by_day && Object.keys(data.by_day).length > 0;
+    }
+    
+    if (hasDayData) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-frenzy-day" checked>
+                <span>Day of Week Statistics</span>
+            </label>
+        `;
+    }
+    
+    // Class Statistics
+    let hasClassData = false;
+    if (isComparison) {
+        const periods = Object.keys(data.periods);
+        periods.forEach(periodKey => {
+            if (data.periods[periodKey].by_location && Object.keys(data.periods[periodKey].by_location).length > 0) {
+                hasClassData = true;
+            }
+        });
+    } else {
+        hasClassData = data.by_location && Object.keys(data.by_location).length > 0;
+    }
+    
+    if (hasClassData) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-frenzy-class" checked>
+                <span>Class Statistics</span>
+            </label>
+        `;
+    }
+    
+    // Purpose Statistics
+    let hasPurposeData = false;
+    if (isComparison) {
+        const periods = Object.keys(data.periods);
+        periods.forEach(periodKey => {
+            if (data.periods[periodKey].by_purpose && Object.keys(data.periods[periodKey].by_purpose).length > 0) {
+                hasPurposeData = true;
+            }
+        });
+    } else {
+        hasPurposeData = data.by_purpose && Object.keys(data.by_purpose).length > 0;
+    }
+    
+    if (hasPurposeData) {
+        html += `
+            <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px;">
+                <input type="checkbox" id="modal-pdf-frenzy-purpose" checked>
+                <span>Purpose Statistics</span>
+            </label>
+        `;
+    }
+    
+    optionsDiv.innerHTML = html;
+}
+
+function generatePdfFromModal() {
+    if (currentPdfType === 'summary') {
+        generateSummaryPDF();
+    } else if (currentPdfType === 'frenzy') {
+        generateFrenzyStatsPDF();
+    }
+    closePdfTableSelectionModal();
+}
+
+
+function generateSummaryPDF() {
+    if (!window.currentSummaryData) {
+        alert('Please load summary data first.');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const data = window.currentSummaryData;
+    
+    // Get filter information
+    const studentSelect = document.getElementById('summary-student-select');
+    const studentId = studentSelect ? studentSelect.value : '';
+    const studentName = studentId && studentSelect.options[studentSelect.selectedIndex] ? 
+        studentSelect.options[studentSelect.selectedIndex].text : 'All Students';
+    
+    const periodSelect = document.getElementById('summary-period-select');
+    const timeframeSelect = document.getElementById('quarter-select');
+    const period = periodSelect ? periodSelect.value : '';
+    const timeframe = timeframeSelect ? timeframeSelect.value : '';
+    
+    // Determine timeframe label (reuse logic from loadSummary)
+    let timeframeLabel = 'All Time';
+    if (period) {
+        const periodLabels = {
+            'weekly': 'Weekly',
+            '30day': '30 Day',
+            'current_year': 'Current Year',
+            'quarter1': 'Quarter 1',
+            'quarter2': 'Quarter 2',
+            'quarter3': 'Quarter 3',
+            'quarter4': 'Quarter 4',
+            'all_time': 'All Time',
+            'previous_years': 'Previous Years'
+        };
+        timeframeLabel = periodLabels[period] || period;
+    } else if (timeframe) {
+        const timeframeLabels = {
+            'weekly': 'Weekly',
+            '30day': '30 Day',
+            '30day_to_30day': '30 Day to 30 Day',
+            'month': 'Month to Month',
+            'quarter': 'Quarter to Quarter',
+            'year': 'Year to Year',
+            'alltime': 'All Time'
+        };
+        timeframeLabel = timeframeLabels[timeframe] || timeframe;
+    }
+
+    // Create PDF - use landscape for comparison tables, portrait for single period
+    const isComparison = data.comparison_mode && data.periods;
+    const doc = new jsPDF(isComparison ? 'landscape' : 'portrait', 'pt', 'letter');
+    
+    let yPos = 40;
+    const margin = 40;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const contentWidth = pageWidth - (2 * margin);
+    
+    // Add header
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('Summary Report', margin, yPos);
+    yPos += 25;
+    
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Student: ${studentName}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Timeframe: ${timeframeLabel}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, margin, yPos);
+    yPos += 30;
+
+    if (isComparison) {
+        // Comparison mode - multiple periods
+        const periods = Object.keys(data.periods);
+        
+        // Main summary table
+        const summaryHeaders = ['Metric'];
+        periods.forEach(p => summaryHeaders.push(p));
+        
+        const summaryRows = [];
+        
+        // Data Points row (if applicable)
+        if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
+            const row = ['Data Points'];
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
+                const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
+                row.push(hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`);
+            });
+            summaryRows.push(row);
+        }
+        
+        // Total Days
+        const totalDaysRow = ['Total Days'];
+        periods.forEach(periodKey => {
+            totalDaysRow.push(data.periods[periodKey].total_days.toString());
+        });
+        summaryRows.push(totalDaysRow);
+        
+        // Total Infractions
+        const infractionsRow = ['Total Infractions'];
+        periods.forEach(periodKey => {
+            const periodData = data.periods[periodKey];
+            const totalInfractions = Object.values(periodData.infractions || {}).reduce((sum, count) => sum + count, 0);
+            infractionsRow.push(totalInfractions.toString());
+        });
+        summaryRows.push(infractionsRow);
+        
+        // Reminders
+        const remindersRow = ['Reminders'];
+        periods.forEach(periodKey => {
+            remindersRow.push((data.periods[periodKey].additional_info?.total_reminders || 0).toString());
+        });
+        summaryRows.push(remindersRow);
+        
+        // Resets
+        const resetsRow = ['Resets'];
+        periods.forEach(periodKey => {
+            resetsRow.push((data.periods[periodKey].additional_info?.total_resets || 0).toString());
+        });
+        summaryRows.push(resetsRow);
+        
+        // Add summary table (always included)
+        doc.autoTable({
+            startY: yPos,
+            head: [summaryHeaders],
+            body: summaryRows,
+            theme: 'grid',
+            headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+            bodyStyles: { fontSize: 9 },
+            margin: { left: margin, right: margin },
+            styles: { cellPadding: 6 },
+            didParseCell: function(data) {
+                if (data.row.index >= 0 && data.column.index === 0) {
+                    // Apply gray background to metric column for infractions/reminders/resets rows
+                    const rowText = data.row.raw[0];
+                    if (rowText === 'Total Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                        data.cell.styles.fillColor = [229, 231, 235];
+                    }
+                } else if (data.row.index >= 0 && data.column.index > 0) {
+                    // Apply gray background to data cells for infractions/reminders/resets rows
+                    const rowText = data.row.raw[0];
+                    if (rowText === 'Total Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                        data.cell.styles.fillColor = [229, 231, 235];
+                    }
+                }
+            }
+        });
+        
+        yPos = doc.lastAutoTable.finalY + 20;
+        
+        // Check if STAR Percentages should be included
+        const includeStar = document.getElementById('modal-pdf-summary-star')?.checked !== false;
+        if (includeStar) {
+            // STAR Percentages table
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('STAR Percentages', margin, yPos);
+            yPos += 20;
+        
+        const starHeaders = ['Metric'];
+        periods.forEach(p => starHeaders.push(p));
+        
+        const starRows = [
+            ['Safety (S)'],
+            ['Teamwork (T)'],
+            ['Accountability (A)'],
+            ['Relationships (R)'],
+            ['Overall Average']
+        ];
+        
+        // Add percentage values
+        periods.forEach(periodKey => {
+            const periodData = data.periods[periodKey];
+            starRows[0].push(`${periodData.percentages.safety}%`);
+            starRows[1].push(`${periodData.percentages.teamwork}%`);
+            starRows[2].push(`${periodData.percentages.accountability}%`);
+            starRows[3].push(`${periodData.percentages.relationships}%`);
+            starRows[4].push(`${periodData.percentages.overall}%`);
+        });
+        
+            doc.autoTable({
+                startY: yPos,
+                head: [starHeaders],
+                body: starRows,
+                theme: 'grid',
+                headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                bodyStyles: { fontSize: 9 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 6 },
+                didParseCell: function(data) {
+                    if (data.row.index >= 0 && data.column.index === 0) {
+                        // Apply row colors based on STAR category
+                        const rowIndex = data.row.index;
+                        if (rowIndex === 0) { // Safety
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowIndex === 1) { // Teamwork
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowIndex === 2) { // Accountability
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowIndex === 3) { // Relationships
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowIndex === 4) { // Overall
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                    } else if (data.row.index >= 0 && data.column.index > 0) {
+                        // Apply lighter background to data cells
+                        const rowIndex = data.row.index;
+                        if (rowIndex === 0) { // Safety
+                            data.cell.styles.fillColor = [254, 226, 226];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (rowIndex === 1) { // Teamwork
+                            data.cell.styles.fillColor = [219, 234, 254];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (rowIndex === 2) { // Accountability
+                            data.cell.styles.fillColor = [209, 250, 229];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (rowIndex === 3) { // Relationships
+                            data.cell.styles.fillColor = [254, 243, 199];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (rowIndex === 4) { // Overall
+                            data.cell.styles.fillColor = [240, 240, 240];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        }
+                    }
+                }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Day of Week Statistics should be included (comparison mode)
+        const includeDay = document.getElementById('modal-pdf-summary-day')?.checked === true;
+        if (includeDay) {
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const allDays = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_day_of_week) {
+                    Object.keys(periodData.by_day_of_week).forEach(day => {
+                        if (weekdays.includes(day)) {
+                            allDays.add(day);
+                        }
+                    });
+                }
+            });
+            const sortedDays = weekdays.filter(d => allDays.has(d));
+            
+            if (sortedDays.length > 0) {
+                if (yPos > pageHeight - 150) {
+                    doc.addPage();
+                    yPos = 40;
+                }
+                
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Day of Week Statistics', margin, yPos);
+                yPos += 20;
+                
+                // Create headers: Metric, then each period
+                const dayHeaders = ['Metric'];
+                periods.forEach(p => dayHeaders.push(p));
+                
+                // Build rows for each metric
+                const dayRows = [];
+                
+                // Total Days row
+                const totalDaysRow = ['Total Days'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let totalDays = 0;
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData) {
+                            totalDays += dayData.total_days || 0;
+                        }
+                    });
+                    totalDaysRow.push(totalDays.toString());
+                });
+                dayRows.push(totalDaysRow);
+                
+                // Safety % row
+                const safetyRow = ['Safety %'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let safetyValues = [];
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData && dayData.percentages) {
+                            safetyValues.push(dayData.percentages.safety || 0);
+                        }
+                    });
+                    const avgSafety = safetyValues.length > 0 ? (safetyValues.reduce((a, b) => a + b, 0) / safetyValues.length).toFixed(0) : 0;
+                    safetyRow.push(`${avgSafety}%`);
+                });
+                dayRows.push(safetyRow);
+                
+                // Teamwork % row
+                const teamworkRow = ['Teamwork %'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let teamworkValues = [];
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData && dayData.percentages) {
+                            teamworkValues.push(dayData.percentages.teamwork || 0);
+                        }
+                    });
+                    const avgTeamwork = teamworkValues.length > 0 ? (teamworkValues.reduce((a, b) => a + b, 0) / teamworkValues.length).toFixed(0) : 0;
+                    teamworkRow.push(`${avgTeamwork}%`);
+                });
+                dayRows.push(teamworkRow);
+                
+                // Accountability % row
+                const accountabilityRow = ['Accountability %'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let accountabilityValues = [];
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData && dayData.percentages) {
+                            accountabilityValues.push(dayData.percentages.accountability || 0);
+                        }
+                    });
+                    const avgAccountability = accountabilityValues.length > 0 ? (accountabilityValues.reduce((a, b) => a + b, 0) / accountabilityValues.length).toFixed(0) : 0;
+                    accountabilityRow.push(`${avgAccountability}%`);
+                });
+                dayRows.push(accountabilityRow);
+                
+                // Relationships % row
+                const relationshipsRow = ['Relationships %'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let relationshipsValues = [];
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData && dayData.percentages) {
+                            relationshipsValues.push(dayData.percentages.relationships || 0);
+                        }
+                    });
+                    const avgRelationships = relationshipsValues.length > 0 ? (relationshipsValues.reduce((a, b) => a + b, 0) / relationshipsValues.length).toFixed(0) : 0;
+                    relationshipsRow.push(`${avgRelationships}%`);
+                });
+                dayRows.push(relationshipsRow);
+                
+                // Overall % row
+                const overallRow = ['Overall %'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let overallValues = [];
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData && dayData.percentages) {
+                            overallValues.push(dayData.percentages.overall || 0);
+                        }
+                    });
+                    // Average across all days for this period
+                    const avgOverall = overallValues.length > 0 ? (overallValues.reduce((a, b) => a + b, 0) / overallValues.length).toFixed(0) : 0;
+                    overallRow.push(`${avgOverall}%`);
+                });
+                dayRows.push(overallRow);
+                
+                // Total Infractions row
+                const infractionsRow = ['Total Infractions'];
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    let totalInfractions = 0;
+                    sortedDays.forEach(day => {
+                        const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
+                        if (dayData) {
+                            totalInfractions += dayData.total_infractions || 0;
+                        }
+                    });
+                    infractionsRow.push(totalInfractions.toString());
+                });
+                dayRows.push(infractionsRow);
+                
+                doc.autoTable({
+                    startY: yPos,
+                    head: [dayHeaders],
+                    body: dayRows,
+                    theme: 'grid',
+                    headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                    bodyStyles: { fontSize: 9 },
+                    margin: { left: margin, right: margin },
+                    styles: { cellPadding: 6 },
+                    didParseCell: function(data) {
+                        if (data.row.index >= 0 && data.column.index === 0) {
+                            // Apply row colors based on metric type
+                            const rowText = data.row.raw[0];
+                            if (rowText === 'Safety %') {
+                                data.cell.styles.fillColor = [254, 226, 226];
+                            } else if (rowText === 'Teamwork %') {
+                                data.cell.styles.fillColor = [219, 234, 254];
+                            } else if (rowText === 'Accountability %') {
+                                data.cell.styles.fillColor = [209, 250, 229];
+                            } else if (rowText === 'Relationships %') {
+                                data.cell.styles.fillColor = [254, 243, 199];
+                            } else if (rowText === 'Overall %') {
+                                data.cell.styles.fillColor = [240, 240, 240];
+                            } else if (rowText === 'Total Days' || rowText === 'Total Infractions') {
+                                data.cell.styles.fillColor = [229, 231, 235];
+                            }
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (data.row.index >= 0 && data.column.index > 0) {
+                            // Apply colors to data cells
+                            const rowText = data.row.raw[0];
+                            if (rowText === 'Safety %') {
+                                data.cell.styles.fillColor = [254, 226, 226];
+                            } else if (rowText === 'Teamwork %') {
+                                data.cell.styles.fillColor = [219, 234, 254];
+                            } else if (rowText === 'Accountability %') {
+                                data.cell.styles.fillColor = [209, 250, 229];
+                            } else if (rowText === 'Relationships %') {
+                                data.cell.styles.fillColor = [254, 243, 199];
+                            } else if (rowText === 'Overall %') {
+                                data.cell.styles.fillColor = [240, 240, 240];
+                            } else if (rowText === 'Total Days' || rowText === 'Total Infractions') {
+                                data.cell.styles.fillColor = [229, 231, 235];
+                            }
+                            data.cell.styles.textColor = [0, 0, 0];
+                        }
+                    }
+                });
+                
+                yPos = doc.lastAutoTable.finalY + 20;
+            }
+        }
+        
+        // Check if Infractions by Class should be included (comparison mode)
+        const includeClassInfractions = document.getElementById('modal-pdf-summary-class')?.checked === true;
+        if (includeClassInfractions) {
+            const allClasses = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_class) {
+                    Object.keys(periodData.by_class).forEach(className => {
+                        allClasses.add(className);
+                    });
+                }
+            });
+            const sortedClasses = Array.from(allClasses).sort();
+            
+            if (sortedClasses.length > 0) {
+                // Check if any class has infractions across any period
+                let hasInfractions = false;
+                periods.forEach(periodKey => {
+                    const periodData = data.periods[periodKey];
+                    sortedClasses.forEach(className => {
+                        const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
+                        if (classData && (classData.total_infractions || 0) > 0) {
+                            hasInfractions = true;
+                        }
+                    });
+                });
+                
+                if (hasInfractions) {
+                    if (yPos > pageHeight - 150) {
+                        doc.addPage();
+                        yPos = 40;
+                    }
+                    
+                    doc.setFontSize(14);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Infractions by Class', margin, yPos);
+                    yPos += 25;
+                    
+                    // Create headers: Class, then each period
+                    const classHeaders = ['Class'];
+                    periods.forEach(p => classHeaders.push(p));
+                    
+                    const classRows = [];
+                    sortedClasses.forEach(className => {
+                        const classRow = [className];
+                        let hasClassInfractions = false;
+                        periods.forEach(periodKey => {
+                            const periodData = data.periods[periodKey];
+                            const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
+                            const totalInfractions = classData ? (classData.total_infractions || 0) : 0;
+                            classRow.push(totalInfractions.toString());
+                            if (totalInfractions > 0) {
+                                hasClassInfractions = true;
+                            }
+                        });
+                        if (hasClassInfractions) {
+                            classRows.push(classRow);
+                        }
+                    });
+                    
+                    if (classRows.length > 0) {
+                        doc.autoTable({
+                            startY: yPos,
+                            head: [classHeaders],
+                            body: classRows,
+                            theme: 'grid',
+                            headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                            bodyStyles: { fontSize: 9 },
+                            margin: { left: margin, right: margin },
+                            styles: { cellPadding: 6 },
+                            didParseCell: function(data) {
+                                if (data.row.index >= 0 && data.column.index === 0) {
+                                    // Class name column - gray background
+                                    data.cell.styles.fillColor = [229, 231, 235];
+                                    data.cell.styles.textColor = [0, 0, 0];
+                                } else if (data.row.index >= 0 && data.column.index > 0) {
+                                    // Infractions data cells - gray background
+                                    data.cell.styles.fillColor = [229, 231, 235];
+                                    data.cell.styles.textColor = [0, 0, 0];
+                                }
+                            }
+                        });
+                        
+                        yPos = doc.lastAutoTable.finalY + 20;
+                    }
+                }
+            }
+        }
+        
+    } else {
+        // Single period mode
+        const numPeriods = data.totals && data.totals.possible ? data.totals.possible / 4 : 0;
+        const maxPerCategory = numPeriods * 2;
+        
+        let safetyPercent = 0, teamworkPercent = 0, accountabilityPercent = 0, relationshipsPercent = 0, overallPercent = 0;
+        
+        if (maxPerCategory > 0) {
+            safetyPercent = ((data.totals.safety / maxPerCategory) * 100).toFixed(0);
+            teamworkPercent = ((data.totals.teamwork / maxPerCategory) * 100).toFixed(0);
+            accountabilityPercent = ((data.totals.accountability / maxPerCategory) * 100).toFixed(0);
+            relationshipsPercent = ((data.totals.relationships / maxPerCategory) * 100).toFixed(0);
+            overallPercent = ((parseFloat(safetyPercent) + parseFloat(teamworkPercent) + parseFloat(accountabilityPercent) + parseFloat(relationshipsPercent)) / 4).toFixed(0);
+        }
+        
+        // Check if STAR Averages should be included
+        const includeStar = document.getElementById('modal-pdf-summary-star')?.checked !== false;
+        if (includeStar) {
+            // STAR Averages table
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('STAR Averages', margin, yPos);
+            yPos += 25;
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Category', 'Percentage']],
+                body: [
+                    ['Safety (S)', `${safetyPercent}%`],
+                    ['Teamwork (T)', `${teamworkPercent}%`],
+                    ['Accountability (A)', `${accountabilityPercent}%`],
+                    ['Relationships (R)', `${relationshipsPercent}%`],
+                    ['Overall Average', `${overallPercent}%`]
+                ],
+                theme: 'grid',
+                headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                bodyStyles: { fontSize: 10 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 8 },
+                didParseCell: function(data) {
+                    if (data.row.index >= 0) {
+                        const rowIndex = data.row.index;
+                        // Apply row colors based on STAR category
+                        if (rowIndex === 0) { // Safety
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowIndex === 1) { // Teamwork
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowIndex === 2) { // Accountability
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowIndex === 3) { // Relationships
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowIndex === 4) { // Overall
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
+                        data.cell.styles.textColor = [0, 0, 0];
+                    }
+                }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Class Statistics should be included (single mode)
+        const includeClass = document.getElementById('modal-pdf-summary-class')?.checked === true;
+        if (includeClass && data.by_class && Object.keys(data.by_class).length > 0) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Class Statistics', margin, yPos);
+            yPos += 20;
+            
+            const classes = Object.keys(data.by_class).sort();
+            const classRows = [];
+            classes.forEach(className => {
+                const classData = data.by_class[className];
+                classRows.push([className, `${classData.percentages.overall}%`, classData.total_days || 0]);
+            });
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Class', 'Overall %', 'Total Days']],
+                body: classRows,
+                theme: 'grid',
+                headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                bodyStyles: { fontSize: 9 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 6 }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Day of Week Statistics should be included (single mode)
+        const includeDay = document.getElementById('modal-pdf-summary-day')?.checked === true;
+        if (includeDay && data.by_day_of_week && Object.keys(data.by_day_of_week).length > 0) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Day of Week Statistics', margin, yPos);
+            yPos += 25;
+            
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const dayHeaders = ['Metric'];
+            weekdays.forEach(day => dayHeaders.push(day));
+            
+            const dayRows = [];
+            
+            // Total Days row
+            const totalDaysRow = ['Total Days'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                totalDaysRow.push((dayData ? (dayData.total_days || 0) : 0).toString());
+            });
+            dayRows.push(totalDaysRow);
+            
+            // Safety %
+            const safetyRow = ['Safety %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                safetyRow.push(`${dayData ? (dayData.percentages?.safety || 0) : 0}%`);
+            });
+            dayRows.push(safetyRow);
+            
+            // Teamwork %
+            const teamworkRow = ['Teamwork %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                teamworkRow.push(`${dayData ? (dayData.percentages?.teamwork || 0) : 0}%`);
+            });
+            dayRows.push(teamworkRow);
+            
+            // Accountability %
+            const accountabilityRow = ['Accountability %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                accountabilityRow.push(`${dayData ? (dayData.percentages?.accountability || 0) : 0}%`);
+            });
+            dayRows.push(accountabilityRow);
+            
+            // Relationships %
+            const relationshipsRow = ['Relationships %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                relationshipsRow.push(`${dayData ? (dayData.percentages?.relationships || 0) : 0}%`);
+            });
+            dayRows.push(relationshipsRow);
+            
+            // Overall %
+            const overallRow = ['Overall %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                overallRow.push(`${dayData ? (dayData.percentages?.overall || 0) : 0}%`);
+            });
+            dayRows.push(overallRow);
+            
+            // Infractions
+            const infractionsRow = ['Infractions'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                infractionsRow.push((dayData ? (dayData.total_infractions || 0) : 0).toString());
+            });
+            dayRows.push(infractionsRow);
+            
+            // Reminders
+            const remindersRow = ['Reminders'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                remindersRow.push((dayData ? (dayData.total_reminders || 0) : 0).toString());
+            });
+            dayRows.push(remindersRow);
+            
+            // Resets
+            const resetsRow = ['Resets'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                resetsRow.push((dayData ? (dayData.total_resets || 0) : 0).toString());
+            });
+            dayRows.push(resetsRow);
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [dayHeaders],
+                body: dayRows,
+                theme: 'grid',
+                headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                bodyStyles: { fontSize: 9 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 6 },
+                didParseCell: function(data) {
+                    if (data.row.index >= 0 && data.column.index === 0) {
+                        // Apply row colors based on metric type
+                        const rowText = data.row.raw[0];
+                        if (rowText === 'Safety %') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowText === 'Teamwork %') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowText === 'Accountability %') {
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowText === 'Relationships %') {
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowText === 'Overall %') {
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        } else if (rowText === 'Total Days' || rowText === 'Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                            data.cell.styles.fillColor = [229, 231, 235];
+                        }
+                        data.cell.styles.textColor = [0, 0, 0];
+                    } else if (data.row.index >= 0 && data.column.index > 0) {
+                        // Apply colors to data cells
+                        const rowText = data.row.raw[0];
+                        if (rowText === 'Safety %') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowText === 'Teamwork %') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowText === 'Accountability %') {
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowText === 'Relationships %') {
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowText === 'Overall %') {
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        } else if (rowText === 'Total Days' || rowText === 'Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                            data.cell.styles.fillColor = [229, 231, 235];
+                        }
+                        data.cell.styles.textColor = [0, 0, 0];
+                    }
+                }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Infractions by Class should be included (single mode)
+        const includeInfractionsClass = document.getElementById('modal-pdf-summary-infractions')?.checked === true;
+        if (includeInfractionsClass && data.by_class && Object.keys(data.by_class).length > 0) {
+            // Check if any class has infractions
+            const hasInfractions = Object.values(data.by_class).some(classData => (classData.total_infractions || 0) > 0);
+            
+            if (hasInfractions) {
+                if (yPos > pageHeight - 150) {
+                    doc.addPage();
+                    yPos = 40;
+                }
+                
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Infractions by Class', margin, yPos);
+                yPos += 25;
+                
+                const classes = Object.keys(data.by_class).sort();
+                const classRows = [];
+                classes.forEach(className => {
+                    const classData = data.by_class[className];
+                    const totalInfractions = classData.total_infractions || 0;
+                    if (totalInfractions > 0) {
+                        classRows.push([className, totalInfractions.toString()]);
+                    }
+                });
+                
+                if (classRows.length > 0) {
+                    doc.autoTable({
+                        startY: yPos,
+                        head: [['Class', 'Total Infractions']],
+                        body: classRows,
+                        theme: 'grid',
+                        headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                        bodyStyles: { fontSize: 10 },
+                        margin: { left: margin, right: margin },
+                        styles: { cellPadding: 8 },
+                        didParseCell: function(data) {
+                            if (data.row.index >= 0) {
+                                // Apply gray background to all infractions rows
+                                data.cell.styles.fillColor = [229, 231, 235];
+                                data.cell.styles.textColor = [0, 0, 0];
+                            }
+                        }
+                    });
+                    
+                    yPos = doc.lastAutoTable.finalY + 20;
+                }
+            }
+        }
+        
+        // Check if Infractions should be included
+        const includeInfractions = document.getElementById('modal-pdf-summary-infractions')?.checked === true;
+        if (includeInfractions) {
+            // Infractions
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Infractions', margin, yPos);
+            yPos += 25;
+            
+            const infoRows = [
+                ['Total Days', data.total_days.toString()]
+            ];
+            
+            if (data.additional_info) {
+                if (data.additional_info.infractions && Object.keys(data.additional_info.infractions).length > 0) {
+                    const totalInfractions = Object.values(data.additional_info.infractions).reduce((sum, count) => sum + count, 0);
+                    infoRows.push(['Total Infractions', totalInfractions.toString()]);
+                }
+                infoRows.push(['Reminders', (data.additional_info.total_reminders || 0).toString()]);
+                infoRows.push(['Resets', (data.additional_info.total_resets || 0).toString()]);
+            }
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Category', 'Value']],
+                body: infoRows,
+                theme: 'grid',
+                headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                bodyStyles: { fontSize: 10 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 8 },
+                didParseCell: function(data) {
+                    if (data.row.index >= 0) {
+                        const rowText = data.row.raw[0];
+                        // Apply gray background to Total Infractions, Reminders, and Resets rows
+                        if (rowText === 'Total Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                            data.cell.styles.fillColor = [229, 231, 235];
+                            data.cell.styles.textColor = [0, 0, 0];
+                        }
+                    }
+                }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Infractions by Day of Week should be included
+        const includeInfractionsDay = document.getElementById('modal-pdf-summary-infractions-day')?.checked === true;
+        if (includeInfractionsDay && data.by_day_of_week) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Infractions by Day of Week', margin, yPos);
+            yPos += 25;
+            
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const dayHeaders = ['Metric'];
+            weekdays.forEach(day => dayHeaders.push(day));
+            
+            const dayRows = [];
+            
+            // Total Days row
+            const totalDaysRow = ['Total Days'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                totalDaysRow.push((dayData ? (dayData.total_days || 0) : 0).toString());
+            });
+            dayRows.push(totalDaysRow);
+            
+            // Safety %
+            const safetyRow = ['Safety %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                safetyRow.push(`${dayData ? (dayData.percentages?.safety || 0) : 0}%`);
+            });
+            dayRows.push(safetyRow);
+            
+            // Teamwork %
+            const teamworkRow = ['Teamwork %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                teamworkRow.push(`${dayData ? (dayData.percentages?.teamwork || 0) : 0}%`);
+            });
+            dayRows.push(teamworkRow);
+            
+            // Accountability %
+            const accountabilityRow = ['Accountability %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                accountabilityRow.push(`${dayData ? (dayData.percentages?.accountability || 0) : 0}%`);
+            });
+            dayRows.push(accountabilityRow);
+            
+            // Relationships %
+            const relationshipsRow = ['Relationships %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                relationshipsRow.push(`${dayData ? (dayData.percentages?.relationships || 0) : 0}%`);
+            });
+            dayRows.push(relationshipsRow);
+            
+            // Overall %
+            const overallRow = ['Overall %'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                overallRow.push(`${dayData ? (dayData.percentages?.overall || 0) : 0}%`);
+            });
+            dayRows.push(overallRow);
+            
+            // Infractions
+            const infractionsRow = ['Infractions'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                infractionsRow.push((dayData ? (dayData.total_infractions || 0) : 0).toString());
+            });
+            dayRows.push(infractionsRow);
+            
+            // Reminders
+            const remindersRow = ['Reminders'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                remindersRow.push((dayData ? (dayData.total_reminders || 0) : 0).toString());
+            });
+            dayRows.push(remindersRow);
+            
+            // Resets
+            const resetsRow = ['Resets'];
+            weekdays.forEach(day => {
+                const dayData = data.by_day_of_week[day];
+                resetsRow.push((dayData ? (dayData.total_resets || 0) : 0).toString());
+            });
+            dayRows.push(resetsRow);
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [dayHeaders],
+                body: dayRows,
+                theme: 'grid',
+                headStyles: { fillColor: [64, 64, 64], fontStyle: 'bold', fontSize: 10, textColor: [255, 255, 255] },
+                bodyStyles: { fontSize: 9 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 6 },
+                didParseCell: function(data) {
+                    // Ensure header cells have white text
+                    if (data.section === 'head') {
+                        data.cell.styles.textColor = [255, 255, 255];
+                    }
+                    if (data.row.index >= 0 && data.column.index === 0) {
+                        // Apply row colors based on metric type
+                        const rowText = data.row.raw[0];
+                        if (rowText === 'Safety %') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowText === 'Teamwork %') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowText === 'Accountability %') {
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowText === 'Relationships %') {
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowText === 'Overall %') {
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        } else if (rowText === 'Total Days' || rowText === 'Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                            data.cell.styles.fillColor = [229, 231, 235];
+                        }
+                        data.cell.styles.textColor = [0, 0, 0];
+                    } else if (data.row.index >= 0 && data.column.index > 0) {
+                        // Apply colors to data cells
+                        const rowText = data.row.raw[0];
+                        if (rowText === 'Safety %') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                        } else if (rowText === 'Teamwork %') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                        } else if (rowText === 'Accountability %') {
+                            data.cell.styles.fillColor = [209, 250, 229];
+                        } else if (rowText === 'Relationships %') {
+                            data.cell.styles.fillColor = [254, 243, 199];
+                        } else if (rowText === 'Overall %') {
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        } else if (rowText === 'Total Days' || rowText === 'Infractions' || rowText === 'Reminders' || rowText === 'Resets') {
+                            data.cell.styles.fillColor = [229, 231, 235];
+                        }
+                        data.cell.styles.textColor = [0, 0, 0];
+                    }
+                }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+    }
+    
+    // Add page numbers
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 30, pageHeight - 20);
+    }
+    
+    // Save PDF
+    doc.save(`Summary_${studentName.replace(/[^a-zA-Z0-9]/g, '_')}_${timeframeLabel.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+}
+
+function generateFrenzyStatsPDF() {
+    if (!window.currentFrenzyStatsData) {
+        alert('Please load frenzy statistics data first.');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const data = window.currentFrenzyStatsData;
+    
+    // Get filter information
+    const studentSelect = document.getElementById('frenzy-student-select');
+    const studentId = studentSelect ? studentSelect.value : '';
+    const studentName = studentId && studentSelect.options[studentSelect.selectedIndex] ? 
+        studentSelect.options[studentSelect.selectedIndex].text : 'All Students';
+    
+    const periodSelect = document.getElementById('frenzy-period-select');
+    const timeframeSelect = document.getElementById('frenzy-timeframe-select');
+    const period = periodSelect ? periodSelect.value : '';
+    const timeframe = timeframeSelect ? timeframeSelect.value : '';
+    
+    // Determine timeframe label
+    let timeframeLabel = 'All Time';
+    if (period) {
+        const periodLabels = {
+            '30day': '30 Day',
+            'current_year': 'Current Year',
+            'quarter1': 'Quarter 1',
+            'quarter2': 'Quarter 2',
+            'quarter3': 'Quarter 3',
+            'quarter4': 'Quarter 4',
+            'all_time': 'All Time',
+            'previous_years': 'Previous Years'
+        };
+        timeframeLabel = periodLabels[period] || period;
+    } else if (timeframe) {
+        const timeframeLabels = {
+            '30day': '30 Day',
+            '30day_to_30day': '30 Day to 30 Day',
+            'month': 'Month to Month',
+            'quarter': 'Quarter to Quarter',
+            'year': 'Year to Year',
+            'alltime': 'All Time'
+        };
+        timeframeLabel = timeframeLabels[timeframe] || timeframe;
+    }
+
+    // Create PDF - use landscape for comparison tables
+    const isComparison = data.comparison_mode && data.periods;
+    const doc = new jsPDF(isComparison ? 'landscape' : 'portrait', 'pt', 'letter');
+    
+    let yPos = 40;
+    const margin = 40;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const contentWidth = pageWidth - (2 * margin);
+    
+    // Add header
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('Frenzy Statistics Report', margin, yPos);
+    yPos += 25;
+    
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Student: ${studentName}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Timeframe: ${timeframeLabel}`, margin, yPos);
+    yPos += 20;
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, margin, yPos);
+    yPos += 30;
+
+    if (isComparison) {
+        // Comparison mode - multiple periods
+        const periods = Object.keys(data.periods);
+        
+        // Main statistics table
+        const statsHeaders = ['Metric'];
+        periods.forEach(p => statsHeaders.push(p));
+        
+        const statsRows = [];
+        
+        // Data Points row (if applicable)
+        if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
+            const row = ['Data Points'];
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
+                const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
+                row.push(hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`);
+            });
+            statsRows.push(row);
+        }
+        
+        // Total Frenzies
+        const totalFrenziesRow = ['Total Frenzies'];
+        periods.forEach(periodKey => {
+            totalFrenziesRow.push((data.periods[periodKey].total_count || 0).toString());
+        });
+        statsRows.push(totalFrenziesRow);
+        
+        // Total Duration
+        const totalDurationRow = ['Total Duration (min)'];
+        periods.forEach(periodKey => {
+            totalDurationRow.push((data.periods[periodKey].total_duration || 0).toString());
+        });
+        statsRows.push(totalDurationRow);
+        
+        // Average Duration
+        const avgDurationRow = ['Average Duration (min)'];
+        periods.forEach(periodKey => {
+            const avgDuration = data.periods[periodKey].avg_duration ? data.periods[periodKey].avg_duration.toFixed(1) : '0.0';
+            avgDurationRow.push(avgDuration);
+        });
+        statsRows.push(avgDurationRow);
+        
+        // Add statistics table (always included)
+        doc.autoTable({
+            startY: yPos,
+            head: [statsHeaders],
+            body: statsRows,
+            theme: 'grid',
+            headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+            bodyStyles: { fontSize: 9 },
+            margin: { left: margin, right: margin },
+            styles: { cellPadding: 6 }
+        });
+        
+        yPos = doc.lastAutoTable.finalY + 20;
+        
+        // Check if Day of Week Statistics should be included
+        const includeDay = document.getElementById('modal-pdf-frenzy-day')?.checked === true;
+        if (includeDay) {
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const allDays = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_day) {
+                    Object.keys(periodData.by_day).forEach(day => {
+                        if (weekdays.includes(day)) {
+                            allDays.add(day);
+                        }
+                    });
+                }
+            });
+            const sortedDays = weekdays.filter(d => allDays.has(d));
+            
+            if (sortedDays.length > 0) {
+                if (yPos > pageHeight - 150) {
+                    doc.addPage();
+                    yPos = 40;
+                }
+                
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Day of Week Statistics', margin, yPos);
+                yPos += 20;
+                
+                const dayHeaders = ['Metric'];
+                periods.forEach(p => dayHeaders.push(p));
+                
+                const dayRows = [];
+                sortedDays.forEach(day => {
+                    const countRow = [day + ' - Count'];
+                    const durationRow = [day + ' - Duration (min)'];
+                    periods.forEach(periodKey => {
+                        const periodData = data.periods[periodKey];
+                        const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0};
+                        countRow.push((dayData.count || 0).toString());
+                        durationRow.push((dayData.duration || 0).toString());
+                    });
+                    dayRows.push(countRow);
+                    dayRows.push(durationRow);
+                });
+                
+                doc.autoTable({
+                    startY: yPos,
+                    head: [dayHeaders],
+                    body: dayRows,
+                    theme: 'grid',
+                    headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                    bodyStyles: { fontSize: 9 },
+                    margin: { left: margin, right: margin },
+                    styles: { cellPadding: 6 }
+                });
+                
+                yPos = doc.lastAutoTable.finalY + 20;
+            }
+        }
+        
+        // Check if Class Statistics should be included
+        const includeClass = document.getElementById('modal-pdf-frenzy-class')?.checked === true;
+        if (includeClass) {
+            const allClasses = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_location) {
+                    Object.keys(periodData.by_location).forEach(className => {
+                        allClasses.add(className);
+                    });
+                }
+            });
+            const sortedClasses = Array.from(allClasses).sort();
+            
+            if (sortedClasses.length > 0) {
+                if (yPos > pageHeight - 150) {
+                    doc.addPage();
+                    yPos = 40;
+                }
+                
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Class Statistics', margin, yPos);
+                yPos += 20;
+                
+                const classHeaders = ['Metric'];
+                periods.forEach(p => classHeaders.push(p));
+                
+                const classRows = [];
+                sortedClasses.forEach(className => {
+                    const countRow = [className + ' - Count'];
+                    const durationRow = [className + ' - Duration (min)'];
+                    periods.forEach(periodKey => {
+                        const periodData = data.periods[periodKey];
+                        const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0};
+                        countRow.push((classData.count || 0).toString());
+                        durationRow.push((classData.duration || 0).toString());
+                    });
+                    classRows.push(countRow);
+                    classRows.push(durationRow);
+                });
+                
+                doc.autoTable({
+                    startY: yPos,
+                    head: [classHeaders],
+                    body: classRows,
+                    theme: 'grid',
+                    headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                    bodyStyles: { fontSize: 9 },
+                    margin: { left: margin, right: margin },
+                    styles: { cellPadding: 6 }
+                });
+                
+                yPos = doc.lastAutoTable.finalY + 20;
+            }
+        }
+        
+        // Check if Purpose Statistics should be included
+        const includePurpose = document.getElementById('modal-pdf-frenzy-purpose')?.checked === true;
+        if (includePurpose) {
+            const allPurposes = new Set();
+            periods.forEach(periodKey => {
+                const periodData = data.periods[periodKey];
+                if (periodData.by_purpose) {
+                    Object.keys(periodData.by_purpose).forEach(purpose => {
+                        allPurposes.add(purpose);
+                    });
+                }
+            });
+            const sortedPurposes = Array.from(allPurposes).sort();
+            
+            if (sortedPurposes.length > 0) {
+                if (yPos > pageHeight - 150) {
+                    doc.addPage();
+                    yPos = 40;
+                }
+                
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Purpose Statistics', margin, yPos);
+                yPos += 20;
+                
+                const purposeHeaders = ['Metric'];
+                periods.forEach(p => purposeHeaders.push(p));
+                
+                const purposeRows = [];
+                sortedPurposes.forEach(purpose => {
+                    const countRow = [purpose + ' - Count'];
+                    const durationRow = [purpose + ' - Duration (min)'];
+                    periods.forEach(periodKey => {
+                        const periodData = data.periods[periodKey];
+                        const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0};
+                        countRow.push((purposeData.count || 0).toString());
+                        durationRow.push((purposeData.duration || 0).toString());
+                    });
+                    purposeRows.push(countRow);
+                    purposeRows.push(durationRow);
+                });
+                
+                doc.autoTable({
+                    startY: yPos,
+                    head: [purposeHeaders],
+                    body: purposeRows,
+                    theme: 'grid',
+                    headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                    bodyStyles: { fontSize: 9 },
+                    margin: { left: margin, right: margin },
+                    styles: { cellPadding: 6 }
+                });
+                
+                yPos = doc.lastAutoTable.finalY + 20;
+            }
+        }
+        
+    } else {
+        // Single period mode
+        doc.autoTable({
+            startY: yPos,
+            head: [['Metric', 'Value']],
+            body: [
+                ['Total Frenzies', (data.total_count || 0).toString()],
+                ['Total Duration (min)', (data.total_duration || 0).toString()],
+                ['Average Duration (min)', data.avg_duration ? data.avg_duration.toFixed(1) : '0.0']
+            ],
+            theme: 'grid',
+            headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+            bodyStyles: { fontSize: 10 },
+            margin: { left: margin, right: margin },
+            styles: { cellPadding: 8 }
+        });
+        
+        yPos = doc.lastAutoTable.finalY + 20;
+        
+        // Check if Day of Week Statistics should be included (single mode)
+        const includeDay = document.getElementById('modal-pdf-frenzy-day')?.checked === true;
+        if (includeDay && data.by_day && Object.keys(data.by_day).length > 0) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Day of Week Statistics', margin, yPos);
+            yPos += 20;
+            
+            const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const dayRows = [];
+            weekdays.forEach(day => {
+                if (data.by_day[day]) {
+                    const dayData = data.by_day[day];
+                    dayRows.push([day, (dayData.count || 0).toString(), (dayData.duration || 0).toString()]);
+                }
+            });
+            
+            if (dayRows.length > 0) {
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Day', 'Count', 'Duration (min)']],
+                    body: dayRows,
+                    theme: 'grid',
+                    headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                    bodyStyles: { fontSize: 10 },
+                    margin: { left: margin, right: margin },
+                    styles: { cellPadding: 8 }
+                });
+                
+                yPos = doc.lastAutoTable.finalY + 20;
+            }
+        }
+        
+        // Check if Class Statistics should be included (single mode)
+        const includeClass = document.getElementById('modal-pdf-frenzy-class')?.checked === true;
+        if (includeClass && data.by_location && Object.keys(data.by_location).length > 0) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Class Statistics', margin, yPos);
+            yPos += 20;
+            
+            const classes = Object.keys(data.by_location).sort();
+            const classRows = [];
+            classes.forEach(className => {
+                const classData = data.by_location[className];
+                classRows.push([className, (classData.count || 0).toString(), (classData.duration || 0).toString()]);
+            });
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Class', 'Count', 'Duration (min)']],
+                body: classRows,
+                theme: 'grid',
+                headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                bodyStyles: { fontSize: 10 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 8 }
+            });
+            
+            yPos = doc.lastAutoTable.finalY + 20;
+        }
+        
+        // Check if Purpose Statistics should be included (single mode)
+        const includePurpose = document.getElementById('modal-pdf-frenzy-purpose')?.checked === true;
+        if (includePurpose && data.by_purpose && Object.keys(data.by_purpose).length > 0) {
+            if (yPos > pageHeight - 150) {
+                doc.addPage();
+                yPos = 40;
+            }
+            
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text('Purpose Statistics', margin, yPos);
+            yPos += 20;
+            
+            const purposes = Object.keys(data.by_purpose).sort();
+            const purposeRows = [];
+            purposes.forEach(purpose => {
+                const purposeData = data.by_purpose[purpose];
+                purposeRows.push([purpose, (purposeData.count || 0).toString(), (purposeData.duration || 0).toString()]);
+            });
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Purpose', 'Count', 'Duration (min)']],
+                body: purposeRows,
+                theme: 'grid',
+                headStyles: { fillColor: [248, 249, 250], fontStyle: 'bold', fontSize: 10 },
+                bodyStyles: { fontSize: 10 },
+                margin: { left: margin, right: margin },
+                styles: { cellPadding: 8 }
+            });
+        }
+    }
+    
+    // Add page numbers
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 30, pageHeight - 20);
+    }
+    
+    // Save PDF
+    doc.save(`FrenzyStats_${studentName.replace(/[^a-zA-Z0-9]/g, '_')}_${timeframeLabel.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+}
+
+// Make functions globally accessible
+window.showInfractionsSummary = showInfractionsSummary;
+window.showInfractionsSummarySingle = showInfractionsSummarySingle;
+window.closeInfractionsSummaryModal = closeInfractionsSummaryModal;
+window.generateSummaryPDF = generateSummaryPDF;
+window.generateFrenzyStatsPDF = generateFrenzyStatsPDF;
+window.showPdfTableSelectionModal = showPdfTableSelectionModal;
+window.closePdfTableSelectionModal = closePdfTableSelectionModal;
+window.generatePdfFromModal = generatePdfFromModal;

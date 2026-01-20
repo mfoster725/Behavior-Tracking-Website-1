@@ -91,11 +91,27 @@ The system tracks:
 
 Data is stored in `behavior_tracking.db` (SQLite). The database is created automatically on first run.
 
+## Authentication System
+
+The system includes a comprehensive three-tier authentication system:
+
+- **Student Login**: View-only access to their own data in real-time
+- **Staff Login**: Full access to create/edit all student data
+- **Admin Login**: System management including user account creation
+
+For details, see `AUTHENTICATION_GUIDE.md` and `IMPLEMENTATION_SUMMARY.md`.
+
+**Default Login Credentials:**
+- Admin: username=`admin`, password=`admin123`
+- Staff: username=`staff`, password=`staff123`
+
+⚠️ Change default passwords after first login!
+
 ## Future Enhancements
 
-- CSV import functionality for existing data
+- CSV import functionality (partially implemented)
 - Data export capabilities
 - Advanced reporting and charts
-- User authentication
 - Multi-school support
+- Email-based password reset
 

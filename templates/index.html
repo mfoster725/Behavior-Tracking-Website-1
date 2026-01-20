@@ -5,19 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Behavior Tracking System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- jsPDF library for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Behavior Tracking System</h1>
+            <div class="header-content">
+                <div>
+                    <h1>Behavior Tracking System</h1>
+                    <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
+                </div>
+                <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+            </div>
             <nav>
                 <button class="nav-btn active" data-view="period-entry">Period Entry</button>
                 <button class="nav-btn" data-view="entry">Daily Entry</button>
                 <button class="nav-btn" data-view="summary">Summary</button>
                 <button class="nav-btn" data-view="frenzy">Frenzy Stats</button>
+                {% if user.role in ['staff', 'admin'] %}
+                <button class="nav-btn" data-view="schedules">Schedules</button>
                 <button class="nav-btn" data-view="import">Import Data</button>
+                {% endif %}
+                {% if user.role == 'admin' %}
+                <button class="nav-btn" data-view="admin">Admin Panel</button>
+                {% endif %}
+                {% if user.role in ['staff', 'admin'] %}
+                <button class="nav-btn" data-view="users">User Management</button>
+                {% endif %}
             </nav>
         </header>
+        
+        <script>
+            // Pass user data to JavaScript
+            window.currentUser = {
+                id: {% if user.id is not none %}{{ user.id }}{% else %}null{% endif %},
+                username: {{ user.username|tojson }},
+                name: {{ (user.name|default(user.username))|tojson }},
+                role: {{ user.role|tojson }},
+                studentId: {% if user.student_id is not none %}{{ user.student_id }}{% else %}null{% endif %}
+            };
+        </script>
 
         <!-- Period-Based Entry View -->
         <div id="period-entry-view" class="view active">
@@ -34,11 +63,16 @@
                             <option value="">Select Period</option>
                         </select>
                     </div>
+                    <div class="form-group" id="class-selector-group" style="display: none;">
+                        <label for="class-select">Class:</label>
+                        <select id="class-select">
+                            <option value="">Select Class</option>
+                        </select>
+                    </div>
                     <div class="form-group">
                         <label for="location-input">Location:</label>
                         <input type="text" id="location-input" placeholder="e.g., English, Math">
                     </div>
-                    <button id="add-student-btn-period" class="btn-secondary">Add Student</button>
                 </div>
 
                 <div id="no-period-selected" class="info-message" style="display: none; padding: 40px; text-align: center; background: #f8f9fa; border-radius: 8px; margin: 20px 0;">
@@ -46,15 +80,17 @@
                 </div>
 
                 <div id="students-grid-container" style="display: none;">
+                    {% if user.role == 'staff' %}
                     <div class="grid-header">
                         <div class="grid-controls">
                             <button id="save-period-btn" class="btn-primary">Save Period Data</button>
                             <button id="clear-period-btn" class="btn-secondary">Clear All</button>
                         </div>
                     </div>
-                    <div id="students-grid" class="students-grid">
-                        <div id="students-header" class="students-header"></div>
-                        <div id="categories-grid" class="categories-grid"></div>
+                    {% endif %}
+                    <div id="students-grid" class="daily-grid">
+                        <div id="students-header" class="daily-header"></div>
+                        <div id="categories-grid" class="daily-body"></div>
                     </div>
                 </div>
             </div>
@@ -69,18 +105,39 @@
                         <label for="daily-date-input">Date:</label>
                         <input type="date" id="daily-date-input" value="{{ date.today().isoformat() if date else '' }}">
                     </div>
-                    <button id="add-student-btn" class="btn-secondary">Add Student</button>
+                    <div class="form-group">
+                        <div id="current-quarter-display" class="quarter-display">
+                            <span style="font-weight: 600; color: #667eea;">Current Quarter:</span>
+                            <span id="quarter-value">-</span>
+                        </div>
+                    </div>
                 </div>
+
+                {% if user.role in ['staff', 'admin'] %}
+                <div class="form-group" style="margin-top: 20px;">
+                    <label for="daily-search-input" style="display: block; margin-bottom: 8px;">Search:</label>
+                    <div class="daily-search-autocomplete-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                        <input type="text" id="daily-search-input" placeholder="Search by staff or student name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="daily-search-autocomplete-dropdown"></div>
+                    </div>
+                    <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin-top: 10px;">
+                        <input type="checkbox" id="daily-managed-by-me-checkbox" style="cursor: pointer;">
+                        <span>Show students managed by me</span>
+                    </label>
+                </div>
+                {% endif %}
 
                 <div id="daily-no-students" class="info-message" style="display: none; padding: 40px; text-align: center;">
                     <p>No students found. Click "Add Student" to create one.</p>
                 </div>
 
                 <div id="daily-grid-container" style="display: none;">
+                    {% if user.role == 'staff' %}
                     <div class="grid-controls">
                         <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
                         <button id="clear-daily-all-btn" class="btn-secondary">Clear All</button>
                     </div>
+                    {% endif %}
                     <div id="daily-grid" class="daily-grid">
                         <div id="daily-header" class="daily-header"></div>
                         <div id="daily-body" class="daily-body"></div>
@@ -94,24 +151,52 @@
             <div class="form-section">
                 <h2>Summary & Reports</h2>
                 <div class="form-group">
-                    <label for="summary-student-select">Student:</label>
+                    <label for="summary-student-select" style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;">
+                        <span>Student:</span>
+                        {% if user.role in ['staff', 'admin'] %}
+                        <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; margin-left: 40px;">
+                            <input type="checkbox" id="summary-managed-by-me-checkbox" style="cursor: pointer;">
+                            <span>Show students managed by me</span>
+                        </label>
+                        {% endif %}
+                    </label>
                     <select id="summary-student-select">
                         <option value="">All Students</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="quarter-select">Quarter:</label>
+                    <label for="summary-period-select">Timeframe:</label>
+                    <select id="summary-period-select">
+                        <option value="">Select Timeframe</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="30day">30 Day</option>
+                        <option value="current_year">Current Year</option>
+                        <option value="quarter1">Quarter 1</option>
+                        <option value="quarter2">Quarter 2</option>
+                        <option value="quarter3">Quarter 3</option>
+                        <option value="quarter4">Quarter 4</option>
+                        <option value="all_time">All Time</option>
+                        <option value="previous_years">Previous Years</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="quarter-select">Timeframe Comparison:</label>
                     <select id="quarter-select">
-                        <option value="all">All Year</option>
-                        <option value="1">Quarter 1</option>
-                        <option value="2">Quarter 2</option>
-                        <option value="3">Quarter 3</option>
-                        <option value="4">Quarter 4</option>
+                        <option value="">Select Timeframe Comparison</option>
+                        <option value="30day_to_30day">30 Day to 30 Day</option>
+                        <option value="month">Month to Month</option>
+                        <option value="quarter">Quarter to Quarter</option>
+                        <option value="year">Year to Year</option>
+                        <option value="alltime">All Time</option>
                     </select>
                 </div>
                 <button id="load-summary-btn" class="btn-primary">Load Summary</button>
+                <button type="button" id="print-summary-btn" class="btn-secondary" style="margin-left: 10px;" disabled>Print</button>
+                <button id="compare-case-managers-btn" class="btn-secondary" style="margin-left: 10px;">Compare Case Managers</button>
+                <button id="show-point-card-btn" class="btn-secondary" style="display: none; margin-left: 10px;">Show Point Card Data</button>
                 
                 <div id="summary-results"></div>
+                <div id="point-card-data-container" style="display: none; margin-top: 30px;"></div>
             </div>
         </div>
 
@@ -120,14 +205,275 @@
             <div class="form-section">
                 <h2>Frenzy Statistics</h2>
                 <div class="form-group">
-                    <label for="frenzy-student-select">Student:</label>
+                    <label for="frenzy-student-select" style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;">
+                        <span>Student:</span>
+                        {% if user.role in ['staff', 'admin'] %}
+                        <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; margin-left: 40px;">
+                            <input type="checkbox" id="frenzy-managed-by-me-checkbox" style="cursor: pointer;">
+                            <span>Show students managed by me</span>
+                        </label>
+                        {% endif %}
+                    </label>
                     <select id="frenzy-student-select">
                         <option value="">All Students</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label for="frenzy-period-select">Timeframe:</label>
+                    <select id="frenzy-period-select">
+                        <option value="">Select Timeframe</option>
+                        <option value="30day">30 Day</option>
+                        <option value="current_year">Current Year</option>
+                        <option value="quarter1">Quarter 1</option>
+                        <option value="quarter2">Quarter 2</option>
+                        <option value="quarter3">Quarter 3</option>
+                        <option value="quarter4">Quarter 4</option>
+                        <option value="all_time">All Time</option>
+                        <option value="previous_years">Previous Years</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="frenzy-timeframe-select">Timeframe Comparison:</label>
+                    <select id="frenzy-timeframe-select">
+                        <option value="">Select Timeframe Comparison</option>
+                        <option value="30day_to_30day">30 Day to 30 Day</option>
+                        <option value="month">Month to Month</option>
+                        <option value="quarter">Quarter to Quarter</option>
+                        <option value="year">Year to Year</option>
+                        <option value="alltime">All Time</option>
+                    </select>
+                </div>
                 <button id="load-frenzy-stats-btn" class="btn-primary">Load Statistics</button>
+                <button type="button" id="print-frenzy-btn" class="btn-secondary" style="margin-left: 10px;" disabled>Print</button>
                 
                 <div id="frenzy-results"></div>
+            </div>
+        </div>
+
+        <!-- Schedules View -->
+        <div id="schedules-view" class="view">
+            <div class="form-section">
+                <h2>Schedule Management</h2>
+                
+                <div class="schedules-container">
+                    <!-- Teacher Schedule Section -->
+                    <div class="schedule-section">
+                        <h3>Teacher Schedule</h3>
+                        <h4 style="margin-top: 10px; margin-bottom: 20px; color: #555; font-weight: bold; font-size: 1.17em;">{{ user.name if user.name else user.username }}'s Schedule</h4>
+                        <div id="teacher-schedule-container">
+                            <table class="schedule-table teacher-schedule-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Class</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="teacher-schedule-body">
+                                    <!-- Schedule rows will be added dynamically -->
+                                </tbody>
+                            </table>
+                            <button id="add-teacher-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
+                            <button id="save-teacher-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Teacher Schedule</button>
+                        </div>
+                    </div>
+
+                    <!-- Student Schedule Section -->
+                    <div class="schedule-section">
+                        <h3>Student Schedules</h3>
+                        <div class="form-group" style="max-width: 300px;">
+                            <label for="schedule-student-select">Select Student:</label>
+                            <select id="schedule-student-select">
+                                <option value="">Select Student</option>
+                            </select>
+                        </div>
+                        <div id="student-schedule-container">
+                            <table class="schedule-table student-schedule-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Class</th>
+                                        <th>Staff</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="student-schedule-body">
+                                    <!-- Schedule rows will be added dynamically -->
+                                </tbody>
+                            </table>
+                            <button id="add-student-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
+                            <button id="save-student-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Student Schedule</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Management View -->
+        <div id="users-view" class="view">
+            <div class="form-section">
+                <h2>User Management</h2>
+                <p>View and manage user accounts</p>
+                
+                <!-- Student Users Table -->
+                <div class="user-role-section" style="margin-bottom: 30px;">
+                    <h3 style="color: #388e3c; border-bottom: 2px solid #388e3c; padding-bottom: 10px; margin-bottom: 15px;">
+                        Student Users
+                    </h3>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Grade</th>
+                                <th>Card Color</th>
+                                <th>Case Manager</th>
+                                <th>Practitioner</th>
+                                <th>Professional</th>
+                                <th>Group Leader</th>
+                                <th>Paraprofessional</th>
+                                <th>Username</th>
+                                <th>Password</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="student-users-table-body">
+                            <!-- Student user rows will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Staff Users Table -->
+                <div class="user-role-section" style="margin-bottom: 30px;">
+                    <h3 style="color: #1976d2; border-bottom: 2px solid #1976d2; padding-bottom: 10px; margin-bottom: 15px;">
+                        Staff Users
+                    </h3>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Role</th>
+                                <th>Username</th>
+                                <th>Password</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="staff-users-table-body">
+                            <!-- Staff user rows will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Outside Staff Users Table -->
+                <div class="user-role-section" style="margin-bottom: 30px;">
+                    <h3 style="color: #ff9800; border-bottom: 2px solid #ff9800; padding-bottom: 10px; margin-bottom: 15px;">
+                        Outside Staff Users
+                    </h3>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>District</th>
+                                <th>Students Assigned</th>
+                                <th>Username</th>
+                                <th>Password</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="outside-staff-users-table-body">
+                            <!-- Outside Staff user rows will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Admin Users Table -->
+                <div class="user-role-section">
+                    <h3 style="color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 15px;">
+                        Admin Users
+                    </h3>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Role</th>
+                                <th>Username</th>
+                                <th>Password</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-users-table-body">
+                            <!-- Admin user rows will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="button-group" style="margin-top: 20px; display: flex; gap: 10px;">
+                    {% if user.role in ['staff', 'admin'] and not (user.role == 'staff' and user.is_outside_staff) %}
+                    <button id="add-student-btn" class="btn-primary">Add Student</button>
+                    {% endif %}
+                    {% if user.role == 'admin' %}
+                    <button id="add-staff-btn" class="btn-primary">Add Staff User</button>
+                    <button id="add-outside-staff-btn" class="btn-primary">Add Outside Staff User</button>
+                    <button id="add-admin-btn" class="btn-primary">Add Admin User</button>
+                    {% endif %}
+                    <button id="refresh-users-btn" class="btn-secondary">Refresh List</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Panel View -->
+        <div id="admin-view" class="view">
+            <div class="form-section">
+                <h2>Admin Panel</h2>
+                <p>Administrative functions for managing the system</p>
+                
+                <div class="admin-sections" style="display: grid; gap: 20px; margin-top: 30px;">
+                    <!-- User Statistics -->
+                    <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                        <h3>User Statistics</h3>
+                        <div id="admin-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <!-- Stats will be loaded dynamically -->
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                        <h3>Quick Actions</h3>
+                        <div style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap;">
+                            <button id="create-staff-account-btn" class="btn-primary">Create Staff Account</button>
+                            <button id="create-admin-account-btn" class="btn-primary">Create Admin Account</button>
+                            <button id="view-all-users-btn" class="btn-secondary" onclick="switchView('users')">Manage All Users</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Quarter Configuration -->
+                    <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                        <h3>Quarter Date Configuration</h3>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 15px;">Set the start and end dates for each quarter (MM/DD/YYYY format)</p>
+                        <div id="quarter-config" style="display: grid; gap: 15px; margin-top: 15px;">
+                            <!-- Quarter config will be loaded dynamically -->
+                        </div>
+                        <button id="save-quarter-dates-btn" class="btn-primary" style="margin-top: 15px;">Save Quarter Dates</button>
+                    </div>
+                    
+                    <!-- System Information -->
+                    <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                        <h3>System Information</h3>
+                        <div id="system-info" style="margin-top: 15px;">
+                            <!-- System info will be loaded dynamically -->
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -159,18 +505,424 @@
 
     <!-- Add Student Modal -->
     <div id="student-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px;">
             <span class="close">&times;</span>
             <h2>Add New Student</h2>
-            <div class="form-group">
-                <label for="student-name">Name:</label>
-                <input type="text" id="student-name" required>
+            
+            <div class="form-grid" style="display: grid; gap: 15px;">
+                <!-- Student Information -->
+                <div class="form-section" style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Student Information</h3>
+                    <div class="form-group">
+                        <label for="student-name">Student Name: *</label>
+                        <input type="text" id="student-name" required placeholder="Enter full name">
+                    </div>
+                    <div class="form-group">
+                        <label for="student-email">Email:</label>
+                        <input type="email" id="student-email" placeholder="student@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="student-grade">Grade:</label>
+                        <select id="student-grade">
+                            <option value="">Select Grade</option>
+                            <option value="9">9th Grade</option>
+                            <option value="10">10th Grade</option>
+                            <option value="11">11th Grade</option>
+                            <option value="12">12th Grade</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Login Credentials -->
+                <div class="form-section" style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Login Credentials</h3>
+                    <div class="form-group">
+                        <label for="student-username">Username: *</label>
+                        <input type="text" id="student-username" required placeholder="Enter username">
+                        <small style="color: #666;">Used for student login</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="student-password">Password: *</label>
+                        <input type="password" id="student-password" required placeholder="Minimum 6 characters">
+                        <small style="color: #666;">Student will use this to log in</small>
+                    </div>
+                </div>
+                
+                <!-- Team Members -->
+                <div class="form-section">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Support Team</h3>
+                    <div class="form-group">
+                        <label>Case Manager:</label>
+                        <div id="case-manager-container" class="team-member-container"></div>
+                        <button type="button" id="add-case-manager-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Case Manager</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Practitioner:</label>
+                        <div id="practitioner-container" class="team-member-container"></div>
+                        <button type="button" id="add-practitioner-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Practitioner</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Professional:</label>
+                        <div id="professional-container" class="team-member-container"></div>
+                        <button type="button" id="add-professional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Professional</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Group Leader:</label>
+                        <div id="group-leader-container" class="team-member-container"></div>
+                        <button type="button" id="add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Paraprofessional:</label>
+                        <div id="paraprofessional-container" class="team-member-container"></div>
+                        <button type="button" id="add-paraprofessional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Paraprofessional</button>
+                    </div>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="student-email">Email:</label>
-                <input type="email" id="student-email">
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-student-btn" class="btn-primary">Save Student</button>
+                <button onclick="document.getElementById('student-modal').style.display='none'" class="btn-secondary">Cancel</button>
             </div>
-            <button id="save-student-btn" class="btn-primary">Save Student</button>
+            
+            <p style="margin-top: 15px; font-size: 12px; color: #999;">* Required fields</p>
+        </div>
+    </div>
+
+    <!-- Add Staff User Modal -->
+    <div id="staff-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="document.getElementById('staff-modal').style.display='none'">&times;</span>
+            <h2>Create Staff User</h2>
+            
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="staff-name">Name: *</label>
+                    <input type="text" id="staff-name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="staff-username">Username: *</label>
+                    <input type="text" id="staff-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="staff-password">Password: *</label>
+                    <input type="password" id="staff-password" required placeholder="Minimum 6 characters">
+                </div>
+                <div class="form-group">
+                    <label for="staff-password-confirm">Confirm Password: *</label>
+                    <input type="password" id="staff-password-confirm" required placeholder="Re-enter password">
+                </div>
+                <div class="form-group">
+                    <label for="staff-role">Role: *</label>
+                    <select id="staff-role">
+                        <option value="Case Manager">Case Manager (also counts as Teacher)</option>
+                        <option value="Practitioner">Practitioner (also counts as Group Leader)</option>
+                        <option value="Paraprofessional">Paraprofessional</option>
+                        <option value="Professional">Professional</option>
+                    </select>
+                    <small style="color: #666;">Select the staff member's professional designation</small>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-staff-user-btn" class="btn-primary">Create Staff User</button>
+                <button onclick="document.getElementById('staff-modal').style.display='none'" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Outside Staff User Modal -->
+    <div id="outside-staff-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="document.getElementById('outside-staff-modal').style.display='none'">&times;</span>
+            <h2>Create Outside Staff User</h2>
+            
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="outside-staff-name">Name: *</label>
+                    <input type="text" id="outside-staff-name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="outside-staff-username">Username: *</label>
+                    <input type="text" id="outside-staff-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="outside-staff-district">District: *</label>
+                    <input type="text" id="outside-staff-district" required placeholder="Enter district name">
+                </div>
+                <div class="form-group">
+                    <label for="outside-staff-password">Password: *</label>
+                    <input type="password" id="outside-staff-password" required placeholder="Minimum 6 characters">
+                </div>
+                <div class="form-group">
+                    <label for="outside-staff-password-confirm">Confirm Password: *</label>
+                    <input type="password" id="outside-staff-password-confirm" required placeholder="Re-enter password">
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-outside-staff-user-btn" class="btn-primary">Create Outside Staff User</button>
+                <button onclick="document.getElementById('outside-staff-modal').style.display='none'" class="btn-secondary">Cancel</button>
+            </div>
+            
+            <p style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px; font-size: 12px; color: #1565c0;">
+                <strong>Note:</strong> Outside Staff users can only access students assigned to them by an admin. You can assign students after creating this user.
+            </p>
+        </div>
+    </div>
+
+    <!-- Add Admin User Modal -->
+    <div id="admin-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="document.getElementById('admin-modal').style.display='none'">&times;</span>
+            <h2>Create Admin User</h2>
+            
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="admin-name">Name: *</label>
+                    <input type="text" id="admin-name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="admin-username">Username: *</label>
+                    <input type="text" id="admin-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="admin-password">Password: *</label>
+                    <input type="password" id="admin-password" required placeholder="Minimum 6 characters">
+                </div>
+                <div class="form-group">
+                    <label for="admin-password-confirm">Confirm Password: *</label>
+                    <input type="password" id="admin-password-confirm" required placeholder="Re-enter password">
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-admin-user-btn" class="btn-primary">Create Admin User</button>
+                <button onclick="document.getElementById('admin-modal').style.display='none'" class="btn-secondary">Cancel</button>
+            </div>
+            
+            <p style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; font-size: 12px; color: #856404;">
+                <strong>Warning:</strong> Admin users have full system access including the ability to create and delete other admin accounts.
+            </p>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="edit-user-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="document.getElementById('edit-user-modal').style.display='none'">&times;</span>
+            <h2>Edit User</h2>
+            
+            <input type="hidden" id="edit-user-id">
+            <input type="hidden" id="edit-user-student-id">
+            <input type="hidden" id="edit-user-original-role">
+            
+            <div style="display: grid; gap: 15px;">
+                <!-- Basic Info Section -->
+                <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 15px;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Account Information</h3>
+                    <div class="form-group" id="edit-user-name-group">
+                        <label for="edit-user-name">Name:</label>
+                        <input type="text" id="edit-user-name" placeholder="Enter full name">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-username">Username: *</label>
+                        <input type="text" id="edit-user-username" required placeholder="Enter username">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-role">Role: *</label>
+                        <select id="edit-user-role">
+                            <option value="Admin">Admin</option>
+                            <option value="Case Manager">Case Manager (also counts as Teacher)</option>
+                            <option value="Practitioner">Practitioner (also counts as Group Leader)</option>
+                            <option value="Paraprofessional">Paraprofessional</option>
+                            <option value="Professional">Professional</option>
+                            <option value="Student">Student</option>
+                        </select>
+                        <small style="color: #666;">Admin can change any role. Staff can only edit students.</small>
+                    </div>
+                    <div class="form-group" id="edit-user-grade-group" style="display: none;">
+                        <label for="edit-user-grade">Grade:</label>
+                        <select id="edit-user-grade">
+                            <option value="">Select Grade</option>
+                            <option value="9">9th Grade</option>
+                            <option value="10">10th Grade</option>
+                            <option value="11">11th Grade</option>
+                            <option value="12">12th Grade</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="edit-user-card-color-group" style="display: none;">
+                        <label for="edit-user-card-color">Card Color:</label>
+                        <select id="edit-user-card-color">
+                            <option value="">None</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="green">Green</option>
+                            <option value="blue">Blue</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-password">New Password:</label>
+                        <input type="password" id="edit-user-password" placeholder="Leave blank to keep current password">
+                        <small style="color: #666;">Only enter if you want to change the password</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-user-password-confirm">Confirm New Password:</label>
+                        <input type="password" id="edit-user-password-confirm" placeholder="Re-enter new password">
+                    </div>
+                </div>
+                
+                <!-- Team Members Section (only for students) -->
+                <div id="edit-user-team-section" style="display: none;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Support Team</h3>
+                    <div class="form-group">
+                        <label>Case Manager:</label>
+                        <div id="edit-case-manager-container" class="team-member-container"></div>
+                        <button type="button" id="edit-add-case-manager-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Case Manager</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Practitioner:</label>
+                        <div id="edit-practitioner-container" class="team-member-container"></div>
+                        <button type="button" id="edit-add-practitioner-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Practitioner</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Professional:</label>
+                        <div id="edit-professional-container" class="team-member-container"></div>
+                        <button type="button" id="edit-add-professional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Professional</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Group Leader:</label>
+                        <div id="edit-group-leader-container" class="team-member-container"></div>
+                        <button type="button" id="edit-add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Paraprofessional:</label>
+                        <div id="edit-paraprofessional-container" class="team-member-container"></div>
+                        <button type="button" id="edit-add-paraprofessional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Paraprofessional</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-edit-user-btn" class="btn-primary">Save Changes</button>
+                <button onclick="document.getElementById('edit-user-modal').style.display='none'" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="info-modal" class="modal">
+        <div class="modal-content info-modal-large">
+            <span class="close" onclick="closeInfoModal()">&times;</span>
+            <h2 id="info-modal-title">Additional Information</h2>
+            
+            <div class="info-form-grid">
+                <!-- Notes -->
+                <div class="form-group">
+                    <label for="info-notes">Notes:</label>
+                    <textarea id="info-notes" rows="3" placeholder="Enter notes..."></textarea>
+                </div>
+
+                <!-- Alternate Location -->
+                <div class="form-group">
+                    <label for="info-alternate-location">Alternate Location:</label>
+                    <input type="text" id="info-alternate-location" list="alternate-location-options" autocomplete="on" placeholder="Type or select location...">
+                    <datalist id="alternate-location-options">
+                        <!-- Options will be populated dynamically -->
+                    </datalist>
+                </div>
+
+                <!-- Reminders -->
+                <div class="form-group">
+                    <div class="inline-checkbox-row">
+                        <label>Reminders:</label>
+                        <input type="checkbox" id="info-reminder-1">
+                        <input type="checkbox" id="info-reminder-2">
+                        <input type="checkbox" id="info-reminder-3">
+                        <span id="info-reset-warning" style="color: #dc3545; font-weight: bold; display: none; margin-left: 10px;">Reset?</span>
+                    </div>
+                </div>
+
+                <!-- Reset -->
+                <div class="form-group">
+                    <div class="inline-checkbox-row">
+                        <label>Reset:</label>
+                        <input type="checkbox" id="info-reset">
+                        <span id="info-reset-frenzy-warning" style="color: #dc3545; font-weight: bold; display: none; margin-left: 10px;">Frenzy?</span>
+                    </div>
+                </div>
+
+                <!-- Infractions -->
+                <div class="form-group">
+                    <label>Infractions:</label>
+                    <div id="infractions-container">
+                        <!-- Infraction rows will be added here dynamically -->
+                    </div>
+                    <button type="button" id="add-infraction-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px;">Add Infraction</button>
+                </div>
+
+                <!-- Frenzy -->
+                <div class="form-group">
+                    <div class="inline-checkbox-row">
+                        <label>Frenzy:</label>
+                        <input type="checkbox" id="info-frenzy">
+                        <span id="info-frenzy-warning" style="color: #dc3545; font-weight: bold; display: none; margin-left: 10px;">Frenzy?</span>
+                    </div>
+                </div>
+
+                <!-- Purposes -->
+                <div class="form-group">
+                    <label>Purposes:</label>
+                    <div id="purposes-container">
+                        <!-- Purpose rows will be added here dynamically -->
+                    </div>
+                    <button type="button" id="add-purpose-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px;">Add Purpose</button>
+                </div>
+
+                <!-- Duration -->
+                <div class="form-group">
+                    <label for="info-duration">Duration (minutes):</label>
+                    <input type="number" id="info-duration" min="0" placeholder="Duration in minutes">
+                </div>
+
+                <!-- Results of Behavior -->
+                <div class="form-group">
+                    <label for="info-results">Results of Behavior:</label>
+                    <textarea id="info-results" rows="3" placeholder="Enter results..."></textarea>
+                </div>
+            </div>
+
+            <div class="modal-buttons">
+                <button onclick="saveInfoModal()" class="btn-primary">Save Info</button>
+                <button onclick="closeInfoModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Infractions Summary Modal -->
+    <div id="infractions-summary-modal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <span class="close" onclick="closeInfractionsSummaryModal()">&times;</span>
+            <h2>Infractions Summary</h2>
+            <div id="infractions-summary-content" style="margin-top: 20px;">
+                <!-- Content will be populated dynamically -->
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="closeInfractionsSummaryModal()" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Table Selection Modal -->
+    <div id="pdf-table-selection-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="closePdfTableSelectionModal()">&times;</span>
+            <h2 id="pdf-modal-title">Select Tables for PDF</h2>
+            <div id="pdf-table-options" style="margin-top: 20px;">
+                <!-- Options will be populated dynamically -->
+            </div>
+            <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closePdfTableSelectionModal()" class="btn-secondary">Cancel</button>
+                <button id="generate-pdf-btn" onclick="generatePdfFromModal()" class="btn-primary">Generate PDF</button>
+            </div>
         </div>
     </div>
 
