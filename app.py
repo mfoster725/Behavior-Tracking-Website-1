@@ -12,10 +12,20 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
-# Use instance folder for database (Flask convention)
-instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
-os.makedirs(instance_path, exist_ok=True)
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
+
+# Database configuration: Use PostgreSQL on Render, SQLite locally
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Render provides DATABASE_URL with postgres://, but SQLAlchemy needs postgresql://
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    # Local development: Use instance folder for database (Flask convention)
+    instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+    os.makedirs(instance_path, exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
