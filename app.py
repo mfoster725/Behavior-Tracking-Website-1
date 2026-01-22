@@ -334,6 +334,17 @@ def login():
             
             user = User.query.filter_by(username=username).first()
             
+            # Debug logging for Render
+            if not user:
+                app.logger.warning(f'Login attempt with non-existent username: {username}')
+                # Check total user count for debugging
+                total_users = User.query.count()
+                app.logger.info(f'Total users in database: {total_users}')
+            else:
+                app.logger.info(f'User found: {username}, checking password...')
+                password_check = user.check_password(password)
+                app.logger.info(f'Password check result: {password_check}')
+            
             if user and user.check_password(password):
                 login_user(user)
                 return jsonify({'success': True}), 200
@@ -3157,6 +3168,76 @@ def team_members(student_id):
 @app.route('/test')
 def test():
     return jsonify({'status': 'ok', 'message': 'Server is running'})
+
+@app.route('/setup', methods=['POST'])
+def setup():
+    """
+    One-time setup endpoint to initialize default users on Render.
+    Requires SETUP_TOKEN environment variable for security.
+    """
+    setup_token = os.environ.get('SETUP_TOKEN')
+    if not setup_token:
+        return jsonify({'error': 'Setup not configured. SETUP_TOKEN environment variable required.'}), 403
+    
+    provided_token = request.json.get('token') if request.is_json else request.form.get('token')
+    if provided_token != setup_token:
+        return jsonify({'error': 'Invalid setup token'}), 403
+    
+    try:
+        with app.app_context():
+            # Check if users already exist
+            existing_users = User.query.count()
+            if existing_users > 0:
+                return jsonify({
+                    'message': f'Database already has {existing_users} user(s). Setup skipped.',
+                    'users_exist': True
+                }), 200
+            
+            # Create default admin user
+            admin_user = User(
+                username='admin',
+                role='admin',
+                name='Administrator'
+            )
+            admin_user.set_password('admin123')
+            db.session.add(admin_user)
+            
+            # Create default staff user
+            staff_user = User(
+                username='staff',
+                role='staff',
+                name='Staff User'
+            )
+            staff_user.set_password('staff123')
+            db.session.add(staff_user)
+            
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Default users created successfully!',
+                'users': [
+                    {'username': 'admin', 'password': 'admin123', 'role': 'admin'},
+                    {'username': 'staff', 'password': 'staff123', 'role': 'staff'}
+                ],
+                'warning': 'Please change these default passwords after first login!'
+            }), 201
+    except Exception as e:
+        app.logger.error(f'Setup error: {str(e)}', exc_info=True)
+        return jsonify({'error': f'Setup failed: {str(e)}'}), 500
+
+@app.route('/check-users', methods=['GET'])
+def check_users():
+    """Check if any users exist in the database (for debugging)"""
+    try:
+        user_count = User.query.count()
+        users = User.query.all()
+        user_list = [{'id': u.id, 'username': u.username, 'role': u.role} for u in users]
+        return jsonify({
+            'user_count': user_count,
+            'users': user_list
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Error checking users: {str(e)}'}), 500
 
 if __name__ == '__main__':
     with app.app_context():
