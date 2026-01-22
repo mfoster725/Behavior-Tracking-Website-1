@@ -42,6 +42,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+
 # User loader for Flask-Login
 @login_manager.user_loader
 def load_user(user_id):
@@ -118,6 +119,8 @@ class User(UserMixin, db.Model):
         self.password_hash = generate_password_hash(password)
     
     def check_password(self, password):
+        if not self.password_hash:
+            return False
         return check_password_hash(self.password_hash, password)
     
     def get_designations_list(self):
@@ -258,22 +261,91 @@ class Schedule(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+# Initialize database tables after all models are defined
+def init_db():
+    """Initialize database tables if they don't exist"""
+    try:
+        with app.app_context():
+            db.create_all()
+            # Ensure OutsideStaffStudent table exists
+            try:
+                from sqlalchemy import inspect, text
+                inspector = inspect(db.engine)
+                # Check if outside_staff_students table exists
+                if 'outside_staff_students' not in inspector.get_table_names():
+                    print("Creating outside_staff_students table...")
+                    db.create_all()
+                # Verify columns exist in users table
+                if 'users' in inspector.get_table_names():
+                    columns = [col['name'] for col in inspector.get_columns('users')]
+                    # Check if we're using PostgreSQL or SQLite
+                    is_postgres = 'postgresql' in str(db.engine.url).lower()
+                    
+                    if 'is_outside_staff' not in columns:
+                        print("Adding is_outside_staff column to users table...")
+                        with db.engine.connect() as conn:
+                            if is_postgres:
+                                # PostgreSQL syntax
+                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT FALSE NOT NULL"))
+                            else:
+                                # SQLite syntax
+                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT 0 NOT NULL"))
+                            conn.commit()
+                    if 'district' not in columns:
+                        print("Adding district column to users table...")
+                        with db.engine.connect() as conn:
+                            conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
+                            conn.commit()
+            except Exception as e:
+                print(f"Schema check completed (table may not exist yet or columns already exist): {e}")
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+
+# Initialize database on app startup (only if not already in app context)
+try:
+    with app.app_context():
+        init_db()
+except Exception as e:
+    print(f"Initial database setup error (will retry on first request): {e}")
+
 # Routes
 @app.route('/login', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def login():
     if request.method == 'POST':
-        data = request.json
-        username = data.get('username')
-        password = data.get('password')
-        
-        user = User.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            login_user(user)
-            return jsonify({'success': True}), 200
-        else:
-            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+        try:
+            data = request.json
+            if not data:
+                return jsonify({'success': False, 'error': 'Invalid request. Please provide username and password.'}), 400
+            
+            username = data.get('username')
+            password = data.get('password')
+            
+            if not username or not password:
+                return jsonify({'success': False, 'error': 'Username and password are required.'}), 400
+            
+            # Check database connection
+            try:
+                from sqlalchemy import text
+                db.session.execute(text('SELECT 1'))
+            except Exception as db_error:
+                app.logger.error(f'Database connection error: {str(db_error)}', exc_info=True)
+                return jsonify({'success': False, 'error': f'Database connection error: {str(db_error)}'}), 500
+            
+            user = User.query.filter_by(username=username).first()
+            
+            if user and user.check_password(password):
+                login_user(user)
+                return jsonify({'success': True}), 200
+            else:
+                return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            error_trace = traceback.format_exc()
+            app.logger.error(f'Login error: {str(e)}\n{error_trace}')
+            print(f'Login error: {str(e)}\n{error_trace}')  # Also print to console
+            return jsonify({'success': False, 'error': f'An error occurred during login: {str(e)}'}), 500
     
     return render_template('login.html')
 
@@ -3097,19 +3169,27 @@ if __name__ == '__main__':
             if 'outside_staff_students' not in inspector.get_table_names():
                 print("Creating outside_staff_students table...")
                 db.create_all()
-            # Verify columns exist in users table
-            if 'users' in inspector.get_table_names():
-                columns = [col['name'] for col in inspector.get_columns('users')]
-                if 'is_outside_staff' not in columns:
-                    print("Adding is_outside_staff column to users table...")
-                    with db.engine.connect() as conn:
-                        conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT 0 NOT NULL"))
-                        conn.commit()
-                if 'district' not in columns:
-                    print("Adding district column to users table...")
-                    with db.engine.connect() as conn:
-                        conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
-                        conn.commit()
+                # Verify columns exist in users table
+                if 'users' in inspector.get_table_names():
+                    columns = [col['name'] for col in inspector.get_columns('users')]
+                    # Check if we're using PostgreSQL or SQLite
+                    is_postgres = 'postgresql' in str(db.engine.url).lower()
+                    
+                    if 'is_outside_staff' not in columns:
+                        print("Adding is_outside_staff column to users table...")
+                        with db.engine.connect() as conn:
+                            if is_postgres:
+                                # PostgreSQL syntax
+                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT FALSE NOT NULL"))
+                            else:
+                                # SQLite syntax
+                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT 0 NOT NULL"))
+                            conn.commit()
+                    if 'district' not in columns:
+                        print("Adding district column to users table...")
+                        with db.engine.connect() as conn:
+                            conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
+                            conn.commit()
         except Exception as e:
             print(f"Schema check completed (table may not exist yet or columns already exist): {e}")
         # Migration: Add attendance_status column if it doesn't exist

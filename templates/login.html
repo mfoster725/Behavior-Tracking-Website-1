@@ -171,6 +171,28 @@
                     body: JSON.stringify({ username, password })
                 });
                 
+                // Check if response is ok before parsing JSON
+                if (!response.ok) {
+                    // Try to parse JSON error, but handle non-JSON responses
+                    let errorMessage = 'Login failed. Please try again.';
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.error || errorMessage;
+                    } catch (e) {
+                        // If response is not JSON, use status text
+                        if (response.status === 429) {
+                            errorMessage = 'Too many login attempts. Please wait a minute and try again.';
+                        } else if (response.status === 500) {
+                            errorMessage = 'Server error. Please try again later.';
+                        } else {
+                            errorMessage = `Login failed (${response.status}). Please try again.`;
+                        }
+                    }
+                    errorDiv.textContent = errorMessage;
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -180,7 +202,8 @@
                     errorDiv.style.display = 'block';
                 }
             } catch (error) {
-                errorDiv.textContent = 'An error occurred. Please try again.';
+                console.error('Login error:', error);
+                errorDiv.textContent = 'Network error. Please check your connection and try again.';
                 errorDiv.style.display = 'block';
             }
         });
