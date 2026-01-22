@@ -2,8 +2,9 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from functools import wraps
+from decimal import Decimal
 import os
 import csv
 import json
@@ -261,6 +262,112 @@ class Schedule(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class BankAccount(db.Model):
+    __tablename__ = 'bank_accounts'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    balance = db.Column(db.Numeric(10, 2), default=Decimal('0.00'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    student = db.relationship('Student', backref='bank_account')
+    transactions = db.relationship('Transaction', backref='bank_account', lazy=True, cascade='all, delete-orphan')
+
+class Paycheck(db.Model):
+    __tablename__ = 'paychecks'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    pay_period_start = db.Column(db.Date, nullable=False)  # Monday of the week
+    pay_period_end = db.Column(db.Date, nullable=False)  # Friday of the week
+    average_star_percent = db.Column(db.Numeric(5, 2), nullable=False)  # Average STAR percentage for the week
+    base_pay = db.Column(db.Numeric(10, 2), nullable=False)  # Calculated pay before deductions (average_percent * 100)
+    citation_count = db.Column(db.Integer, default=0, nullable=False)  # Number of infractions
+    citation_deduction = db.Column(db.Numeric(10, 2), default=Decimal('0.00'), nullable=False)  # citation_count * 2
+    final_pay = db.Column(db.Numeric(10, 2), nullable=False)  # base_pay - citation_deduction
+    worksheet_completed = db.Column(db.Boolean, default=False, nullable=False)
+    student_calculated_pay = db.Column(db.Numeric(10, 2), nullable=True)  # Student's calculation
+    student_calculated_citations = db.Column(db.Integer, nullable=True)
+    student_calculated_deduction = db.Column(db.Numeric(10, 2), nullable=True)
+    student_calculated_final = db.Column(db.Numeric(10, 2), nullable=True)
+    is_verified = db.Column(db.Boolean, default=False, nullable=False)
+    deposited_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    student = db.relationship('Student', backref='paychecks')
+    transactions = db.relationship('Transaction', backref='paycheck', lazy=True)
+
+class MarketplaceItem(db.Model):
+    __tablename__ = 'marketplace_items'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    price = db.Column(db.Numeric(10, 2), nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Case manager who created it
+    is_global = db.Column(db.Boolean, default=False, nullable=False)  # If true, visible to all students
+    is_approved_for_global = db.Column(db.Boolean, default=False, nullable=False)  # Admin approval for global
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    creator = db.relationship('User', backref='created_marketplace_items')
+    purchase_orders = db.relationship('PurchaseOrder', backref='item', lazy=True)
+
+class MarketplaceItemRequest(db.Model):
+    __tablename__ = 'marketplace_item_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
+    requested_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    request_type = db.Column(db.String(50), nullable=False)  # 'add_to_global' or 'create_new'
+    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'approved', 'denied'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    
+    # Relationships
+    item = db.relationship('MarketplaceItem', backref='requests')
+    requester = db.relationship('User', foreign_keys=[requested_by_user_id], backref='marketplace_requests')
+    reviewer = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_marketplace_requests')
+
+class PurchaseOrder(db.Model):
+    __tablename__ = 'purchase_orders'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
+    item_price = db.Column(db.Numeric(10, 2), nullable=False)  # Price at time of purchase
+    student_balance_before = db.Column(db.Numeric(10, 2), nullable=False)
+    student_calculated_balance_after = db.Column(db.Numeric(10, 2), nullable=False)  # Student's calculation
+    actual_balance_after = db.Column(db.Numeric(10, 2), nullable=False)  # Actual calculated balance
+    is_calculation_correct = db.Column(db.Boolean, nullable=True)
+    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'approved', 'fulfilled', 'denied'
+    case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Assigned case manager
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    fulfilled_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationships
+    student = db.relationship('Student', backref='purchase_orders')
+    case_manager = db.relationship('User', backref='managed_purchase_orders')
+    transactions = db.relationship('Transaction', backref='purchase_order', lazy=True)
+
+class Transaction(db.Model):
+    __tablename__ = 'transactions'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    bank_account_id = db.Column(db.Integer, db.ForeignKey('bank_accounts.id'), nullable=False)
+    transaction_type = db.Column(db.String(20), nullable=False)  # 'deposit' or 'purchase'
+    amount = db.Column(db.Numeric(10, 2), nullable=False)  # Positive for deposits, negative for purchases
+    paycheck_id = db.Column(db.Integer, db.ForeignKey('paychecks.id'), nullable=True)
+    purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True)
+    balance_after = db.Column(db.Numeric(10, 2), nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    student = db.relationship('Student', backref='transactions')
+
 # Initialize database tables after all models are defined
 def init_db():
     """Initialize database tables if they don't exist"""
@@ -389,7 +496,8 @@ def students():
         student = Student(
             name=data['name'], 
             email=data.get('email'),
-            grade=data.get('grade')
+            grade=data.get('grade'),
+            card_color=data.get('card_color')
         )
         db.session.add(student)
         db.session.flush()  # Get student ID before committing
@@ -2873,7 +2981,20 @@ def manage_users():
     elif request.method == 'POST':
         # Create new user
         data = request.json
-        role = data.get('role')
+        if not data:
+            return jsonify({'error': 'Invalid request. JSON data required.'}), 400
+        
+        # Validate required fields
+        username = data.get('username', '').strip() if data.get('username') else ''
+        password = data.get('password', '')
+        role = data.get('role', '').strip() if data.get('role') else ''
+        
+        if not username:
+            return jsonify({'error': 'Username is required'}), 400
+        if not password:
+            return jsonify({'error': 'Password is required'}), 400
+        if not role:
+            return jsonify({'error': 'Role is required'}), 400
         
         # Permission check: Admin can create anyone, staff can only create students
         if current_user.role == 'admin':
@@ -2888,20 +3009,20 @@ def manage_users():
             return jsonify({'error': 'Permission denied'}), 403
         
         # Check if username already exists
-        if User.query.filter_by(username=data['username']).first():
+        if User.query.filter_by(username=username).first():
             return jsonify({'error': 'Username already exists'}), 400
         
         # Create user
         user = User(
-            name=data.get('name'),
-            username=data['username'],
+            name=data.get('name', '').strip() if data.get('name') else None,
+            username=username,
             role=role,
             designation=data.get('designation'),
             student_id=data.get('student_id'),
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
             district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None
         )
-        user.set_password(data['password'])
+        user.set_password(password)
         
         db.session.add(user)
         db.session.commit()
@@ -3164,6 +3285,843 @@ def team_members(student_id):
         
         db.session.commit()
         return jsonify({'message': 'Team members updated successfully'}), 200
+
+# Bank Account Helper Functions
+def get_student_case_manager(student_id):
+    """Get the case manager user for a student"""
+    case_manager_team_member = TeamMember.query.filter_by(
+        student_id=student_id,
+        role='Case Manager'
+    ).first()
+    
+    if case_manager_team_member and case_manager_team_member.name:
+        # Try to find user by name
+        case_manager_user = User.query.filter_by(
+            name=case_manager_team_member.name,
+            designation='Case Manager'
+        ).first()
+        return case_manager_user
+    return None
+
+def calculate_weekly_star_percent(student_id, start_date, end_date):
+    """Calculate average STAR percentage for a date range"""
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date
+    ).all()
+    
+    if not records:
+        return Decimal('0.00')
+    
+    total_safety = 0
+    total_teamwork = 0
+    total_accountability = 0
+    total_relationships = 0
+    total_possible = 0
+    
+    for record in records:
+        for period in record.periods:
+            total_safety += period.safety_points
+            total_teamwork += period.teamwork_points
+            total_accountability += period.accountability_points
+            total_relationships += period.relationships_points
+            total_possible += period.points_possible
+    
+    if total_possible == 0:
+        return Decimal('0.00')
+    
+    num_periods = total_possible / 4
+    max_per_category = num_periods * 2
+    
+    if max_per_category == 0:
+        return Decimal('0.00')
+    
+    safety_percent = (total_safety / max_per_category * 100)
+    teamwork_percent = (total_teamwork / max_per_category * 100)
+    accountability_percent = (total_accountability / max_per_category * 100)
+    relationships_percent = (total_relationships / max_per_category * 100)
+    
+    overall_percent = (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4
+    return Decimal(str(round(overall_percent, 2)))
+
+def count_weekly_infractions(student_id, start_date, end_date):
+    """Count total infractions for a date range"""
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date
+    ).all()
+    
+    total_count = 0
+    for record in records:
+        for period in record.periods:
+            for infraction in period.infractions:
+                total_count += infraction.count
+    
+    return total_count
+
+def get_or_create_bank_account(student_id):
+    """Get or create a bank account for a student"""
+    account = BankAccount.query.filter_by(student_id=student_id).first()
+    if not account:
+        account = BankAccount(student_id=student_id, balance=Decimal('0.00'))
+        db.session.add(account)
+        db.session.commit()
+    return account
+
+# Bank Account Routes
+@app.route('/api/bank-account/<int:student_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_bank_account(student_id):
+    """Get student's bank account balance and transaction history"""
+    if not has_student_access(current_user, student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    account = get_or_create_bank_account(student_id)
+    transactions = Transaction.query.filter_by(student_id=student_id).order_by(Transaction.created_at.desc()).limit(50).all()
+    
+    return jsonify({
+        'balance': float(account.balance),
+        'transactions': [{
+            'id': t.id,
+            'type': t.transaction_type,
+            'amount': float(t.amount),
+            'balance_after': float(t.balance_after),
+            'description': t.description,
+            'created_at': t.created_at.isoformat()
+        } for t in transactions]
+    })
+
+@app.route('/api/paychecks/<int:student_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_paychecks(student_id):
+    """Get all paychecks for a student"""
+    if not has_student_access(current_user, student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    paychecks = Paycheck.query.filter_by(student_id=student_id).order_by(Paycheck.created_at.desc()).all()
+    
+    return jsonify([{
+        'id': p.id,
+        'pay_period_start': p.pay_period_start.isoformat(),
+        'pay_period_end': p.pay_period_end.isoformat(),
+        'average_star_percent': float(p.average_star_percent),
+        'base_pay': float(p.base_pay),
+        'citation_count': p.citation_count,
+        'citation_deduction': float(p.citation_deduction),
+        'final_pay': float(p.final_pay),
+        'worksheet_completed': p.worksheet_completed,
+        'is_verified': p.is_verified,
+        'deposited_at': p.deposited_at.isoformat() if p.deposited_at else None,
+        'created_at': p.created_at.isoformat()
+    } for p in paychecks])
+
+@app.route('/api/paycheck/<int:paycheck_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_paycheck(paycheck_id):
+    """Get specific paycheck details"""
+    paycheck = Paycheck.query.get_or_404(paycheck_id)
+    
+    if not has_student_access(current_user, paycheck.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    return jsonify({
+        'id': paycheck.id,
+        'student_id': paycheck.student_id,
+        'pay_period_start': paycheck.pay_period_start.isoformat(),
+        'pay_period_end': paycheck.pay_period_end.isoformat(),
+        'average_star_percent': float(paycheck.average_star_percent),
+        'base_pay': float(paycheck.base_pay),
+        'citation_count': paycheck.citation_count,
+        'citation_deduction': float(paycheck.citation_deduction),
+        'final_pay': float(paycheck.final_pay),
+        'worksheet_completed': paycheck.worksheet_completed,
+        'student_calculated_pay': float(paycheck.student_calculated_pay) if paycheck.student_calculated_pay else None,
+        'student_calculated_citations': paycheck.student_calculated_citations,
+        'student_calculated_deduction': float(paycheck.student_calculated_deduction) if paycheck.student_calculated_deduction else None,
+        'student_calculated_final': float(paycheck.student_calculated_final) if paycheck.student_calculated_final else None,
+        'is_verified': paycheck.is_verified,
+        'deposited_at': paycheck.deposited_at.isoformat() if paycheck.deposited_at else None,
+        'created_at': paycheck.created_at.isoformat()
+    })
+
+@app.route('/api/paycheck/generate', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+@staff_required
+def generate_paychecks():
+    """Manually trigger paycheck generation"""
+    data = request.json or {}
+    target_date = data.get('date')  # Optional: specific Monday date to generate for
+    
+    if target_date:
+        target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+    else:
+        # Default to previous Monday
+        today = date.today()
+        days_since_monday = (today.weekday()) % 7
+        if days_since_monday == 0:  # Today is Monday
+            target_date = today - timedelta(days=7)
+        else:
+            target_date = today - timedelta(days=days_since_monday)
+    
+    # Calculate Monday-Friday range
+    pay_period_start = target_date  # Monday
+    pay_period_end = target_date + timedelta(days=4)  # Friday
+    
+    # Get all students
+    students = Student.query.all()
+    generated_count = 0
+    
+    for student in students:
+        # Check if paycheck already exists for this period
+        existing = Paycheck.query.filter_by(
+            student_id=student.id,
+            pay_period_start=pay_period_start,
+            pay_period_end=pay_period_end
+        ).first()
+        
+        if existing:
+            continue
+        
+        # Calculate STAR percent and infractions
+        avg_star_percent = calculate_weekly_star_percent(student.id, pay_period_start, pay_period_end)
+        citation_count = count_weekly_infractions(student.id, pay_period_start, pay_period_end)
+        
+        # Calculate pay
+        base_pay = avg_star_percent * Decimal('100')
+        citation_deduction = Decimal(str(citation_count * 2))
+        final_pay = base_pay - citation_deduction
+        
+        # Create paycheck
+        paycheck = Paycheck(
+            student_id=student.id,
+            pay_period_start=pay_period_start,
+            pay_period_end=pay_period_end,
+            average_star_percent=avg_star_percent,
+            base_pay=base_pay,
+            citation_count=citation_count,
+            citation_deduction=citation_deduction,
+            final_pay=final_pay
+        )
+        db.session.add(paycheck)
+        generated_count += 1
+    
+    db.session.commit()
+    return jsonify({'message': f'Generated {generated_count} paychecks', 'count': generated_count})
+
+@app.route('/api/paycheck/<int:paycheck_id>/complete-worksheet', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def complete_paycheck_worksheet(paycheck_id):
+    """Student submits completed worksheet - allows unlimited resubmissions until verified"""
+    paycheck = Paycheck.query.get_or_404(paycheck_id)
+    
+    if current_user.role == 'student' and current_user.student_id != paycheck.student_id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    if not has_student_access(current_user, paycheck.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Don't allow resubmission if already verified
+    if paycheck.is_verified:
+        return jsonify({'error': 'This paycheck has already been verified and deposited'}), 400
+    
+    data = request.json
+    student_calculated_pay = Decimal(str(data.get('calculated_pay', 0)))
+    student_calculated_citations = int(data.get('calculated_citations', 0))
+    student_calculated_deduction = Decimal(str(data.get('calculated_deduction', 0)))
+    student_calculated_final = Decimal(str(data.get('calculated_final', 0)))
+    
+    # Update paycheck with student calculations (allows resubmission)
+    paycheck.student_calculated_pay = student_calculated_pay
+    paycheck.student_calculated_citations = student_calculated_citations
+    paycheck.student_calculated_deduction = student_calculated_deduction
+    paycheck.student_calculated_final = student_calculated_final
+    paycheck.worksheet_completed = True
+    
+    db.session.commit()
+    
+    # Auto-verify
+    return verify_paycheck(paycheck_id)
+
+@app.route('/api/paycheck/<int:paycheck_id>/verify', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def verify_paycheck(paycheck_id):
+    """Auto-verify worksheet (if correct, deposit)"""
+    paycheck = Paycheck.query.get_or_404(paycheck_id)
+    
+    if not paycheck.worksheet_completed:
+        return jsonify({'error': 'Worksheet not completed'}), 400
+    
+    # Verify calculations
+    tolerance = Decimal('0.01')  # Allow small rounding differences
+    
+    pay_correct = abs(paycheck.student_calculated_pay - paycheck.base_pay) <= tolerance
+    citations_correct = paycheck.student_calculated_citations == paycheck.citation_count
+    deduction_correct = abs(paycheck.student_calculated_deduction - paycheck.citation_deduction) <= tolerance
+    final_correct = abs(paycheck.student_calculated_final - paycheck.final_pay) <= tolerance
+    
+    if pay_correct and citations_correct and deduction_correct and final_correct:
+        paycheck.is_verified = True
+        paycheck.deposited_at = datetime.utcnow()
+        
+        # Create deposit transaction
+        account = get_or_create_bank_account(paycheck.student_id)
+        account.balance += paycheck.final_pay
+        account.updated_at = datetime.utcnow()
+        
+        transaction = Transaction(
+            student_id=paycheck.student_id,
+            bank_account_id=account.id,
+            transaction_type='deposit',
+            amount=paycheck.final_pay,
+            paycheck_id=paycheck.id,
+            balance_after=account.balance,
+            description=f'Paycheck deposit for {paycheck.pay_period_start} - {paycheck.pay_period_end}'
+        )
+        db.session.add(transaction)
+        db.session.commit()
+        
+        return jsonify({
+            'verified': True,
+            'message': 'Worksheet verified! Deposit completed.',
+            'deposited_amount': float(paycheck.final_pay)
+        })
+    else:
+        errors = []
+        if not pay_correct:
+            errors.append(f'Base pay calculation incorrect. Expected: {paycheck.base_pay}, Got: {paycheck.student_calculated_pay}')
+        if not citations_correct:
+            errors.append(f'Citation count incorrect. Expected: {paycheck.citation_count}, Got: {paycheck.student_calculated_citations}')
+        if not deduction_correct:
+            errors.append(f'Citation deduction incorrect. Expected: {paycheck.citation_deduction}, Got: {paycheck.student_calculated_deduction}')
+        if not final_correct:
+            errors.append(f'Final pay calculation incorrect. Expected: {paycheck.final_pay}, Got: {paycheck.student_calculated_final}')
+        
+        return jsonify({
+            'verified': False,
+            'errors': errors,
+            'message': 'Some calculations are incorrect. Please review and try again.'
+        }), 400
+
+# Marketplace Routes
+@app.route('/api/marketplace-items', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_marketplace_items():
+    """Get marketplace items (filtered by user role and case manager)"""
+    items_query = MarketplaceItem.query.filter_by(is_active=True)
+    
+    if current_user.role == 'student':
+        # Students see global items and items from their case manager
+        student_id = current_user.student_id
+        case_manager = get_student_case_manager(student_id)
+        
+        if case_manager:
+            items_query = items_query.filter(
+                db.or_(
+                    MarketplaceItem.is_global == True,
+                    MarketplaceItem.is_approved_for_global == True,
+                    MarketplaceItem.created_by_user_id == case_manager.id
+                )
+            )
+        else:
+            # Only global items if no case manager
+            items_query = items_query.filter(
+                db.or_(
+                    MarketplaceItem.is_global == True,
+                    MarketplaceItem.is_approved_for_global == True
+                )
+            )
+    elif current_user.role in ['staff', 'admin']:
+        # Staff and admin see all items
+        pass
+    
+    items = items_query.all()
+    
+    return jsonify([{
+        'id': item.id,
+        'name': item.name,
+        'description': item.description,
+        'price': float(item.price),
+        'created_by_user_id': item.created_by_user_id,
+        'is_global': item.is_global,
+        'is_approved_for_global': item.is_approved_for_global,
+        'created_at': item.created_at.isoformat()
+    } for item in items])
+
+@app.route('/api/marketplace-items', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+def create_marketplace_item():
+    """Create new marketplace item (case manager only)"""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    # Check if user is a case manager
+    if current_user.designation != 'Case Manager' and current_user.role != 'admin':
+        return jsonify({'error': 'Only case managers can create marketplace items'}), 403
+    
+    data = request.json
+    name = data.get('name')
+    description = data.get('description', '')
+    price = Decimal(str(data.get('price', 0)))
+    
+    if not name or price <= 0:
+        return jsonify({'error': 'Name and valid price required'}), 400
+    
+    item = MarketplaceItem(
+        name=name,
+        description=description,
+        price=price,
+        created_by_user_id=current_user.id,
+        is_global=data.get('is_global', False)
+    )
+    db.session.add(item)
+    db.session.commit()
+    
+    return jsonify({
+        'id': item.id,
+        'name': item.name,
+        'description': item.description,
+        'price': float(item.price),
+        'created_by_user_id': item.created_by_user_id,
+        'is_global': item.is_global,
+        'created_at': item.created_at.isoformat()
+    }), 201
+
+@app.route('/api/marketplace-items/<int:item_id>', methods=['PUT'])
+@limiter.limit("20 per minute")
+@login_required
+def update_marketplace_item(item_id):
+    """Update marketplace item (creator or admin)"""
+    item = MarketplaceItem.query.get_or_404(item_id)
+    
+    if current_user.role != 'admin' and item.created_by_user_id != current_user.id:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    data = request.json
+    if 'name' in data:
+        item.name = data['name']
+    if 'description' in data:
+        item.description = data['description']
+    if 'price' in data:
+        item.price = Decimal(str(data['price']))
+    if 'is_active' in data:
+        item.is_active = data['is_active']
+    
+    item.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({
+        'id': item.id,
+        'name': item.name,
+        'description': item.description,
+        'price': float(item.price),
+        'is_active': item.is_active,
+        'updated_at': item.updated_at.isoformat()
+    })
+
+@app.route('/api/marketplace-items/<int:item_id>', methods=['DELETE'])
+@limiter.limit("20 per minute")
+@login_required
+def delete_marketplace_item(item_id):
+    """Delete marketplace item (creator or admin)"""
+    item = MarketplaceItem.query.get_or_404(item_id)
+    
+    if current_user.role != 'admin' and item.created_by_user_id != current_user.id:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    # Soft delete by setting is_active to False
+    item.is_active = False
+    item.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'message': 'Item deleted successfully'})
+
+@app.route('/api/marketplace-items/<int:item_id>/request-global', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+def request_global_marketplace_item(item_id):
+    """Request item to be added to global list"""
+    item = MarketplaceItem.query.get_or_404(item_id)
+    
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    # Check if request already exists
+    existing_request = MarketplaceItemRequest.query.filter_by(
+        item_id=item_id,
+        requested_by_user_id=current_user.id,
+        status='pending'
+    ).first()
+    
+    if existing_request:
+        return jsonify({'error': 'Request already pending'}), 400
+    
+    request_obj = MarketplaceItemRequest(
+        item_id=item_id,
+        requested_by_user_id=current_user.id,
+        request_type='add_to_global',
+        status='pending'
+    )
+    db.session.add(request_obj)
+    db.session.commit()
+    
+    return jsonify({
+        'id': request_obj.id,
+        'item_id': request_obj.item_id,
+        'status': request_obj.status,
+        'created_at': request_obj.created_at.isoformat()
+    }), 201
+
+@app.route('/api/marketplace-item-requests', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_marketplace_item_requests():
+    """Get pending requests (admin/case manager)"""
+    if current_user.role == 'admin':
+        requests = MarketplaceItemRequest.query.filter_by(status='pending').all()
+    elif current_user.designation == 'Case Manager':
+        # Case managers see requests for items they created
+        requests = MarketplaceItemRequest.query.join(MarketplaceItem).filter(
+            MarketplaceItemRequest.status == 'pending',
+            MarketplaceItem.created_by_user_id == current_user.id
+        ).all()
+    else:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    return jsonify([{
+        'id': r.id,
+        'item_id': r.item_id,
+        'item_name': r.item.name,
+        'item_description': r.item.description,
+        'item_price': float(r.item.price),
+        'requested_by_user_id': r.requested_by_user_id,
+        'requester_name': r.requester.name if r.requester else None,
+        'request_type': r.request_type,
+        'status': r.status,
+        'created_at': r.created_at.isoformat()
+    } for r in requests])
+
+@app.route('/api/marketplace-item-requests/<int:request_id>/approve', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+@admin_required
+def approve_marketplace_item_request(request_id):
+    """Approve request (admin only)"""
+    request_obj = MarketplaceItemRequest.query.get_or_404(request_id)
+    
+    if request_obj.status != 'pending':
+        return jsonify({'error': 'Request already processed'}), 400
+    
+    request_obj.status = 'approved'
+    request_obj.reviewed_at = datetime.utcnow()
+    request_obj.reviewed_by_user_id = current_user.id
+    
+    # Make item global
+    request_obj.item.is_approved_for_global = True
+    request_obj.item.is_global = True
+    request_obj.item.updated_at = datetime.utcnow()
+    
+    db.session.commit()
+    
+    return jsonify({'message': 'Request approved', 'status': 'approved'})
+
+@app.route('/api/marketplace-item-requests/<int:request_id>/deny', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+@admin_required
+def deny_marketplace_item_request(request_id):
+    """Deny request (admin only)"""
+    request_obj = MarketplaceItemRequest.query.get_or_404(request_id)
+    
+    if request_obj.status != 'pending':
+        return jsonify({'error': 'Request already processed'}), 400
+    
+    request_obj.status = 'denied'
+    request_obj.reviewed_at = datetime.utcnow()
+    request_obj.reviewed_by_user_id = current_user.id
+    
+    db.session.commit()
+    
+    return jsonify({'message': 'Request denied', 'status': 'denied'})
+
+# Purchase Order Routes
+@app.route('/api/purchase-orders', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_purchase_orders():
+    """Get purchase orders (filtered by user role)"""
+    if current_user.role == 'student':
+        orders = PurchaseOrder.query.filter_by(student_id=current_user.student_id).order_by(PurchaseOrder.created_at.desc()).all()
+    elif current_user.designation == 'Case Manager':
+        # Case managers see orders for their students
+        orders = PurchaseOrder.query.filter_by(case_manager_id=current_user.id).order_by(PurchaseOrder.created_at.desc()).all()
+    elif current_user.role == 'admin':
+        orders = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
+    else:
+        orders = []
+    
+    return jsonify([{
+        'id': o.id,
+        'student_id': o.student_id,
+        'student_name': o.student.name,
+        'item_id': o.item_id,
+        'item_name': o.item.name,
+        'item_price': float(o.item_price),
+        'student_balance_before': float(o.student_balance_before),
+        'student_calculated_balance_after': float(o.student_calculated_balance_after),
+        'actual_balance_after': float(o.actual_balance_after),
+        'is_calculation_correct': o.is_calculation_correct,
+        'status': o.status,
+        'case_manager_id': o.case_manager_id,
+        'created_at': o.created_at.isoformat(),
+        'approved_at': o.approved_at.isoformat() if o.approved_at else None,
+        'fulfilled_at': o.fulfilled_at.isoformat() if o.fulfilled_at else None
+    } for o in orders])
+
+@app.route('/api/purchase-orders', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+def create_purchase_order():
+    """Create purchase order (student submits purchase with calculation)"""
+    if current_user.role != 'student':
+        return jsonify({'error': 'Only students can create purchase orders'}), 403
+    
+    data = request.json
+    item_id = data.get('item_id')
+    student_calculated_balance_after = Decimal(str(data.get('calculated_balance_after', 0)))
+    
+    if not item_id:
+        return jsonify({'error': 'Item ID required'}), 400
+    
+    item = MarketplaceItem.query.get_or_404(item_id)
+    if not item.is_active:
+        return jsonify({'error': 'Item is not available'}), 400
+    
+    # Get student's bank account
+    account = get_or_create_bank_account(current_user.student_id)
+    student_balance_before = account.balance
+    
+    # Calculate actual balance after
+    actual_balance_after = student_balance_before - item.price
+    
+    # Verify calculation
+    tolerance = Decimal('0.01')
+    is_calculation_correct = abs(student_calculated_balance_after - actual_balance_after) <= tolerance
+    
+    # Check if balance would be negative
+    if actual_balance_after < 0:
+        return jsonify({'error': 'Insufficient funds'}), 400
+    
+    if not is_calculation_correct:
+        return jsonify({
+            'error': 'Calculation incorrect',
+            'expected': float(actual_balance_after),
+            'got': float(student_calculated_balance_after)
+        }), 400
+    
+    # Get case manager
+    case_manager = get_student_case_manager(current_user.student_id)
+    if not case_manager:
+        return jsonify({'error': 'No case manager assigned'}), 400
+    
+    # Create purchase order
+    order = PurchaseOrder(
+        student_id=current_user.student_id,
+        item_id=item_id,
+        item_price=item.price,
+        student_balance_before=student_balance_before,
+        student_calculated_balance_after=student_calculated_balance_after,
+        actual_balance_after=actual_balance_after,
+        is_calculation_correct=is_calculation_correct,
+        status='pending',
+        case_manager_id=case_manager.id
+    )
+    db.session.add(order)
+    db.session.commit()
+    
+    return jsonify({
+        'id': order.id,
+        'status': order.status,
+        'message': 'Purchase order created successfully'
+    }), 201
+
+@app.route('/api/purchase-orders/<int:order_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_purchase_order(order_id):
+    """Get specific purchase order"""
+    order = PurchaseOrder.query.get_or_404(order_id)
+    
+    if current_user.role == 'student' and order.student_id != current_user.student_id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    if not has_student_access(current_user, order.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    return jsonify({
+        'id': order.id,
+        'student_id': order.student_id,
+        'student_name': order.student.name,
+        'item_id': order.item_id,
+        'item_name': order.item.name,
+        'item_description': order.item.description,
+        'item_price': float(order.item_price),
+        'student_balance_before': float(order.student_balance_before),
+        'student_calculated_balance_after': float(order.student_calculated_balance_after),
+        'actual_balance_after': float(order.actual_balance_after),
+        'is_calculation_correct': order.is_calculation_correct,
+        'status': order.status,
+        'case_manager_id': order.case_manager_id,
+        'case_manager_name': order.case_manager.name if order.case_manager else None,
+        'created_at': order.created_at.isoformat(),
+        'approved_at': order.approved_at.isoformat() if order.approved_at else None,
+        'fulfilled_at': order.fulfilled_at.isoformat() if order.fulfilled_at else None
+    })
+
+@app.route('/api/purchase-orders/<int:order_id>/status', methods=['PUT'])
+@limiter.limit("20 per minute")
+@login_required
+def update_purchase_order_status(order_id):
+    """Update purchase order status (case manager/admin)"""
+    order = PurchaseOrder.query.get_or_404(order_id)
+    
+    if current_user.role == 'admin':
+        pass  # Admin can update any order
+    elif current_user.designation == 'Case Manager' and order.case_manager_id == current_user.id:
+        pass  # Case manager can update their orders
+    else:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    data = request.json
+    new_status = data.get('status')
+    
+    if new_status not in ['pending', 'approved', 'fulfilled', 'denied']:
+        return jsonify({'error': 'Invalid status'}), 400
+    
+    old_status = order.status
+    order.status = new_status
+    
+    if new_status == 'approved' and old_status == 'pending':
+        order.approved_at = datetime.utcnow()
+    elif new_status == 'fulfilled' and old_status == 'approved':
+        order.fulfilled_at = datetime.utcnow()
+        
+        # Create transaction and update balance
+        account = get_or_create_bank_account(order.student_id)
+        account.balance = order.actual_balance_after
+        account.updated_at = datetime.utcnow()
+        
+        transaction = Transaction(
+            student_id=order.student_id,
+            bank_account_id=account.id,
+            transaction_type='purchase',
+            amount=-order.item_price,  # Negative for purchase
+            purchase_order_id=order.id,
+            balance_after=account.balance,
+            description=f'Purchase: {order.item.name}'
+        )
+        db.session.add(transaction)
+    
+    db.session.commit()
+    
+    return jsonify({
+        'id': order.id,
+        'status': order.status,
+        'message': f'Order status updated to {new_status}'
+    })
+
+@app.route('/api/purchase-orders/case-manager/<int:user_id>', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_case_manager_purchase_orders(user_id):
+    """Get orders for a case manager's students"""
+    if current_user.role != 'admin' and current_user.id != user_id:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    orders = PurchaseOrder.query.filter_by(case_manager_id=user_id).order_by(PurchaseOrder.created_at.desc()).all()
+    
+    return jsonify([{
+        'id': o.id,
+        'student_id': o.student_id,
+        'student_name': o.student.name,
+        'item_id': o.item_id,
+        'item_name': o.item.name,
+        'item_price': float(o.item_price),
+        'status': o.status,
+        'created_at': o.created_at.isoformat()
+    } for o in orders])
+
+@app.route('/api/bank-account/search', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def search_bank_accounts():
+    """Search for student bank accounts (same search logic as daily entry)"""
+    query = request.args.get('q', '').strip()
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    
+    # Get all students
+    students_query = Student.query
+    
+    if query:
+        # Search by student name
+        students_by_name = students_query.filter(Student.name.ilike(f'%{query}%')).all()
+        
+        # Also search by staff name (case manager) - similar to daily entry
+        staff_members = User.query.filter(
+            db.or_(
+                User.name.ilike(f'%{query}%'),
+                User.username.ilike(f'%{query}%')
+            )
+        ).all()
+        
+        staff_names = [s.name for s in staff_members if s.name]
+        team_members = TeamMember.query.filter(
+            TeamMember.name.in_(staff_names)
+        ).all() if staff_names else []
+        
+        student_ids_from_staff = list(set([tm.student_id for tm in team_members]))
+        
+        # Combine results
+        all_student_ids = set([s.id for s in students_by_name])
+        all_student_ids.update(student_ids_from_staff)
+        
+        students = Student.query.filter(Student.id.in_(list(all_student_ids))).all() if all_student_ids else []
+    else:
+        students = students_query.all()
+    
+    # Filter by managed by me if requested
+    if managed_by_me and current_user.designation == 'Case Manager':
+        managed_student_ids = [
+            tm.student_id for tm in TeamMember.query.filter_by(
+                role='Case Manager',
+                name=current_user.name
+            ).all()
+        ]
+        students = [s for s in students if s.id in managed_student_ids]
+    
+    # Get bank accounts for these students
+    result = []
+    for student in students:
+        account = BankAccount.query.filter_by(student_id=student.id).first()
+        balance = float(account.balance) if account else 0.0
+        
+        result.append({
+            'student_id': student.id,
+            'student_name': student.name,
+            'balance': balance
+        })
+    
+    return jsonify(result)
 
 @app.route('/test')
 def test():

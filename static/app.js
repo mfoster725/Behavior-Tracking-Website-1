@@ -583,6 +583,7 @@ function setupEventListeners() {
                 document.getElementById('student-name').value = '';
                 document.getElementById('student-email').value = '';
                 document.getElementById('student-grade').value = '';
+                document.getElementById('student-card-color').value = '';
                 document.getElementById('student-username').value = '';
                 document.getElementById('student-password').value = '';
                 // Set up team member button handlers
@@ -799,6 +800,7 @@ function setupEventListeners() {
         const addStaffBtn = document.getElementById('add-staff-btn');
         if (addStaffBtn) {
             addStaffBtn.addEventListener('click', () => {
+                hideModalError('staff-modal');
                 document.getElementById('staff-modal').style.display = 'block';
             });
         }
@@ -806,6 +808,7 @@ function setupEventListeners() {
         const addOutsideStaffBtn = document.getElementById('add-outside-staff-btn');
         if (addOutsideStaffBtn) {
             addOutsideStaffBtn.addEventListener('click', () => {
+                hideModalError('outside-staff-modal');
                 document.getElementById('outside-staff-modal').style.display = 'block';
             });
         }
@@ -820,6 +823,7 @@ function setupEventListeners() {
         const createStaffAccountBtn = document.getElementById('create-staff-account-btn');
         if (createStaffAccountBtn) {
             createStaffAccountBtn.addEventListener('click', () => {
+                hideModalError('staff-modal');
                 document.getElementById('staff-modal').style.display = 'block';
             });
         }
@@ -1035,6 +1039,9 @@ async function switchView(viewName) {
         // Load teacher schedule if user is staff or admin
         // Use setTimeout to ensure DOM is ready after view is activated
         setTimeout(() => {
+            // Fetch all class names from teacher schedules for the dropdown
+            fetchAllTeacherClassNames();
+            
             if (canEdit()) {
                 // Always render teacher schedule immediately with default periods
                 // This ensures the periods are shown even before API call completes
@@ -1050,6 +1057,11 @@ async function switchView(viewName) {
                 loadSchedules('student', currentScheduleStudentId);
             }
         }, 0);
+    }
+    
+    // If switching to bank account view
+    if (viewName === 'bank-account') {
+        handleBankAccountView();
     }
 }
 
@@ -2665,6 +2677,9 @@ function handleDailyInputKeydown(e) {
         // Trigger change event
         const event = new Event('change', { bubbles: true });
         select.dispatchEvent(event);
+        
+        // Move to next input after setting value (works even if clicked first)
+        moveToNextInput(select);
     }
     // Handle arrow keys for navigation
     else if (e.key === 'ArrowRight' || e.key === 'Tab') {
@@ -3183,6 +3198,7 @@ async function saveStudent() {
     const name = document.getElementById('student-name').value;
     const email = document.getElementById('student-email').value;
     const grade = document.getElementById('student-grade').value;
+    const cardColor = document.getElementById('student-card-color')?.value || '';
     const username = document.getElementById('student-username').value;
     const password = document.getElementById('student-password').value;
     
@@ -3217,6 +3233,7 @@ async function saveStudent() {
                 name: name.trim(),
                 email: email.trim(),
                 grade: grade,
+                card_color: cardColor || null,
                 username: username.trim(),
                 password: password,
                 case_manager: caseManager,
@@ -3236,6 +3253,7 @@ async function saveStudent() {
             document.getElementById('student-name').value = '';
             document.getElementById('student-email').value = '';
             document.getElementById('student-grade').value = '';
+            document.getElementById('student-card-color').value = '';
             document.getElementById('student-username').value = '';
             document.getElementById('student-password').value = '';
             // Clear team member containers
@@ -4848,6 +4866,37 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     
     // Store the record data for saving
     window.editingPointCardRecord = record;
+    
+    // Add event listeners to info buttons
+    const infoButtons = modal.querySelectorAll('.info-btn-small');
+    infoButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            const periodIndex = parseInt(button.dataset.periodIndex);
+            const period = record.periods[periodIndex];
+            
+            if (!period) {
+                console.error('Period not found at index:', periodIndex);
+                return;
+            }
+            
+            // Create a synthetic event object that showInfoModal expects
+            const syntheticEvent = {
+                target: {
+                    dataset: {
+                        studentId: studentId,
+                        period: period.time_range,
+                        studentName: studentName,
+                        info: period.info || '',
+                        periodIndex: periodIndex, // Store period index for edit context
+                        isEditPointCard: 'true' // Flag to indicate we're in edit point card context
+                    }
+                }
+            };
+            
+            // Call showInfoModal with the synthetic event
+            showInfoModal(syntheticEvent);
+        });
+    });
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
@@ -6342,6 +6391,14 @@ async function showInfoModal(event) {
     modal.dataset.studentId = studentId;
     modal.dataset.period = period;
     
+    // Store edit point card context if applicable
+    if (button.dataset.isEditPointCard === 'true') {
+        modal.dataset.isEditPointCard = 'true';
+        modal.dataset.periodIndex = button.dataset.periodIndex || '';
+        // Ensure info modal appears above edit point card modal
+        modal.style.zIndex = '2000';
+    }
+    
     modal.style.display = 'block';
 }
 
@@ -6429,6 +6486,23 @@ function saveInfoModal() {
             button.classList.add('has-data');
         } else {
             button.classList.remove('has-data');
+        }
+    }
+    
+    // If we're in edit point card context, update the editing record
+    if (modal.dataset.isEditPointCard === 'true' && window.editingPointCardRecord) {
+        const periodIndex = parseInt(modal.dataset.periodIndex);
+        if (periodIndex !== undefined && window.editingPointCardRecord.periods[periodIndex]) {
+            window.editingPointCardRecord.periods[periodIndex].info = infoString;
+            
+            // Update the button text in the edit modal
+            const editModal = document.getElementById('edit-point-card-modal');
+            if (editModal) {
+                const infoButton = editModal.querySelector(`.info-btn-small[data-period-index="${periodIndex}"]`);
+                if (infoButton) {
+                    infoButton.textContent = hasInfoData(infoData) ? 'Edit' : 'Add';
+                }
+            }
         }
     }
     
@@ -6616,6 +6690,35 @@ window.showInfoViewPopup = showInfoViewPopup;
 let teacherScheduleData = [];
 let studentScheduleData = [];
 let currentScheduleStudentId = null;
+let allTeacherClassNames = []; // Store all class names from all teacher schedules
+
+// Function to fetch all class names from all teacher schedules
+async function fetchAllTeacherClassNames() {
+    try {
+        const response = await fetch('/api/schedules/all-locations');
+        if (response.ok) {
+            const classNames = await response.json();
+            allTeacherClassNames = Array.isArray(classNames) ? classNames : [];
+            console.log('Loaded class names from teacher schedules:', allTeacherClassNames);
+            // Class autocomplete dropdowns will automatically use the updated allTeacherClassNames
+        } else {
+            console.error('Failed to fetch teacher class names:', response.statusText);
+            allTeacherClassNames = [];
+        }
+    } catch (error) {
+        console.error('Error fetching teacher class names:', error);
+        allTeacherClassNames = [];
+    }
+}
+
+// Function to update all class autocomplete dropdowns when class names are loaded
+function updateAllClassAutocompletes() {
+    const tbody = document.getElementById('student-schedule-body');
+    if (!tbody) return;
+    
+    // All class inputs will automatically use the updated allTeacherClassNames
+    // when they are focused or typed in, so no manual update needed
+}
 
 function loadSchedules(type, studentId = null) {
     let url = `/api/schedules?schedule_type=${type}`;
@@ -6820,6 +6923,146 @@ function setupStaffAutocomplete(input) {
         if (!isDropdownVisible) return;
         
         const items = dropdown.querySelectorAll('.staff-autocomplete-item');
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight();
+            items[selectedIndex].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight();
+            if (selectedIndex >= 0) {
+                items[selectedIndex].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // If no item is selected, select the top option (index 0)
+            const indexToSelect = selectedIndex >= 0 ? selectedIndex : 0;
+            const selectedItem = items[indexToSelect];
+            if (selectedItem) {
+                input.value = selectedItem.dataset.value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+            }
+        } else if (e.key === 'Escape') {
+            hideDropdown();
+            input.blur();
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) {
+            hideDropdown();
+        }
+    });
+}
+
+function setupClassAutocomplete(input) {
+    if (!input) return;
+    
+    const wrapper = input.closest('.class-autocomplete-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.class-autocomplete-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    let selectedIndex = -1;
+    
+    // Get class names for autocomplete
+    const getClassNames = () => {
+        return allTeacherClassNames.filter(name => name);
+    };
+    
+    // Filter options based on input
+    const filterOptions = (query) => {
+        if (!query) return getClassNames();
+        const lowerQuery = query.toLowerCase();
+        return getClassNames().filter(name => 
+            name.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    // Show dropdown with filtered options
+    const showDropdown = (options) => {
+        if (!options || options.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        options.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'class-autocomplete-item';
+            item.textContent = option;
+            item.dataset.value = option;
+            item.addEventListener('click', () => {
+                input.value = option;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                hideDropdown();
+                input.blur();
+            });
+            item.addEventListener('mouseenter', () => {
+                selectedIndex = index;
+                updateHighlight();
+            });
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+        selectedIndex = -1;
+        updateHighlight();
+    };
+    
+    // Hide dropdown
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+        selectedIndex = -1;
+    };
+    
+    // Update highlighted item
+    const updateHighlight = () => {
+        const items = dropdown.querySelectorAll('.class-autocomplete-item');
+        items.forEach((item, index) => {
+            if (index === selectedIndex) {
+                item.classList.add('highlighted');
+            } else {
+                item.classList.remove('highlighted');
+            }
+        });
+    };
+    
+    // Event listeners
+    input.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('focus', () => {
+        const query = input.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    input.addEventListener('blur', (e) => {
+        // Delay to allow click events on dropdown items
+        setTimeout(() => {
+            if (!dropdown.contains(document.activeElement)) {
+                hideDropdown();
+            }
+        }, 200);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (!isDropdownVisible) return;
+        
+        const items = dropdown.querySelectorAll('.class-autocomplete-item');
         if (items.length === 0) return;
         
         if (e.key === 'ArrowDown') {
@@ -7352,11 +7595,17 @@ function addScheduleRow(type, timePeriod = '', data = null) {
         // Student schedule - includes staff column with custom autocomplete dropdown
         const staffValue = data?.staff_name || '';
         const uniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         row.innerHTML = `
             <td class="time-cell">
                 <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
             </td>
-            <td><input type="text" value="${data?.class_name || ''}" class="class-input" placeholder="Enter class/activity"></td>
+            <td>
+                <div class="class-autocomplete-wrapper">
+                    <input type="text" value="${data?.class_name || ''}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
+                    <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
+                </div>
+            </td>
             <td>
                 <div class="staff-autocomplete-wrapper">
                     <input type="text" value="${staffValue}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${uniqueId}">
@@ -7365,8 +7614,11 @@ function addScheduleRow(type, timePeriod = '', data = null) {
             </td>
         `;
         
-        // Setup autocomplete for this input
+        // Setup autocomplete for staff input
         setupStaffAutocomplete(row.querySelector('.staff-input'));
+        
+        // Setup autocomplete for class input
+        setupClassAutocomplete(row.querySelector('.class-input'));
     }
     
     tbody.appendChild(row);
@@ -8228,7 +8480,30 @@ async function deleteUser(userId, username, role) {
     }
 }
 
+// Helper function to show error messages in modals
+function showModalError(modalId, message) {
+    const errorDiv = document.getElementById(modalId + '-error');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+        // Scroll to top of modal to show error
+        errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+// Helper function to hide error messages in modals
+function hideModalError(modalId) {
+    const errorDiv = document.getElementById(modalId + '-error');
+    if (errorDiv) {
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
+    }
+}
+
 async function saveStaffUser() {
+    // Clear any previous errors
+    hideModalError('staff-modal');
+    
     const name = document.getElementById('staff-name').value.trim();
     const username = document.getElementById('staff-username').value.trim();
     const password = document.getElementById('staff-password').value;
@@ -8236,17 +8511,17 @@ async function saveStaffUser() {
     const role = document.getElementById('staff-role').value;
     
     if (!name || !username || !password) {
-        alert('Please fill in all required fields');
+        showModalError('staff-modal', 'Please fill in all required fields');
         return;
     }
     
     if (password.length < 6) {
-        alert('Password must be at least 6 characters long');
+        showModalError('staff-modal', 'Password must be at least 6 characters long');
         return;
     }
     
     if (password !== passwordConfirm) {
-        alert('Passwords do not match');
+        showModalError('staff-modal', 'Passwords do not match');
         return;
     }
     
@@ -8266,6 +8541,7 @@ async function saveStaffUser() {
         if (response.ok) {
             showMessage('Staff user created successfully', 'success');
             document.getElementById('staff-modal').style.display = 'none';
+            hideModalError('staff-modal');
             document.getElementById('staff-name').value = '';
             document.getElementById('staff-username').value = '';
             document.getElementById('staff-password').value = '';
@@ -8278,11 +8554,14 @@ async function saveStaffUser() {
         }
     } catch (error) {
         console.error('Error creating staff user:', error);
-        showMessage('Error: ' + error.message, 'error');
+        showModalError('staff-modal', 'Error: ' + error.message);
     }
 }
 
 async function saveOutsideStaffUser() {
+    // Clear any previous errors
+    hideModalError('outside-staff-modal');
+    
     const name = document.getElementById('outside-staff-name').value.trim();
     const username = document.getElementById('outside-staff-username').value.trim();
     const district = document.getElementById('outside-staff-district').value.trim();
@@ -8290,17 +8569,17 @@ async function saveOutsideStaffUser() {
     const passwordConfirm = document.getElementById('outside-staff-password-confirm').value;
     
     if (!name || !username || !district || !password) {
-        alert('Please fill in all required fields');
+        showModalError('outside-staff-modal', 'Please fill in all required fields');
         return;
     }
     
     if (password.length < 6) {
-        alert('Password must be at least 6 characters long');
+        showModalError('outside-staff-modal', 'Password must be at least 6 characters long');
         return;
     }
     
     if (password !== passwordConfirm) {
-        alert('Passwords do not match');
+        showModalError('outside-staff-modal', 'Passwords do not match');
         return;
     }
     
@@ -8321,6 +8600,7 @@ async function saveOutsideStaffUser() {
         if (response.ok) {
             showMessage('Outside Staff user created successfully', 'success');
             document.getElementById('outside-staff-modal').style.display = 'none';
+            hideModalError('outside-staff-modal');
             document.getElementById('outside-staff-name').value = '';
             document.getElementById('outside-staff-username').value = '';
             document.getElementById('outside-staff-district').value = '';
@@ -8333,7 +8613,7 @@ async function saveOutsideStaffUser() {
         }
     } catch (error) {
         console.error('Error creating Outside Staff user:', error);
-        showMessage('Error: ' + error.message, 'error');
+        showModalError('outside-staff-modal', 'Error: ' + error.message);
     }
 }
 
@@ -10678,3 +10958,874 @@ window.generateFrenzyStatsPDF = generateFrenzyStatsPDF;
 window.showPdfTableSelectionModal = showPdfTableSelectionModal;
 window.closePdfTableSelectionModal = closePdfTableSelectionModal;
 window.generatePdfFromModal = generatePdfFromModal;
+
+// ==================== BANK ACCOUNT FUNCTIONALITY ====================
+
+let currentBankStudentId = null;
+let allMarketplaceItems = [];
+let currentPurchaseItem = null;
+
+// Load bank account data
+async function loadBankAccount(studentId) {
+    if (!studentId) {
+        // Still show UI with default values
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+        
+        // Show empty states
+        const transactionsList = document.getElementById('transactions-list');
+        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        
+        // Load marketplace even without student ID
+        await loadMarketplaceItems();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/bank-account/${studentId}`);
+        if (!response.ok) {
+            // If account doesn't exist, show default UI
+            const balanceAmount = document.getElementById('bank-balance-amount');
+            const studentName = document.getElementById('bank-student-name');
+            if (balanceAmount) balanceAmount.textContent = '$0.00';
+            if (studentName) {
+                // Try to get student name
+                const student = allStudents.find(s => s.id === studentId);
+                if (student) studentName.textContent = student.name;
+                else studentName.textContent = window.currentUser.name || 'Student';
+            }
+            
+            const transactionsList = document.getElementById('transactions-list');
+            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+            
+            await loadMarketplaceItems();
+            return;
+        }
+        
+        const data = await response.json();
+        
+        // Update balance display
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = `$${data.balance.toFixed(2)}`;
+        if (studentName) {
+            const student = allStudents.find(s => s.id === studentId);
+            if (student) studentName.textContent = student.name;
+            else studentName.textContent = window.currentUser.name || 'Student';
+        }
+        
+        // Ensure balance section is visible
+        const balanceSection = document.getElementById('bank-balance-section');
+        if (balanceSection) balanceSection.style.display = 'block';
+        
+        // Load transactions
+        renderTransactions(data.transactions || []);
+        
+        // Load paychecks
+        await loadPaychecks(studentId);
+        
+        // Load marketplace
+        await loadMarketplaceItems();
+        
+        // Load purchase orders if staff
+        if (window.currentUser.role !== 'student') {
+            await loadPurchaseOrders();
+        }
+        
+        currentBankStudentId = studentId;
+    } catch (error) {
+        console.error('Error loading bank account:', error);
+        // Still show UI with default values
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+        
+        const transactionsList = document.getElementById('transactions-list');
+        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        
+        await loadMarketplaceItems();
+    }
+}
+
+// Load paychecks
+async function loadPaychecks(studentId) {
+    if (!studentId) {
+        window.paychecksData = [];
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/paychecks/${studentId}`);
+        if (!response.ok) {
+            window.paychecksData = [];
+            return;
+        }
+        
+        const paychecks = await response.json();
+        
+        // Find current paycheck that needs worksheet (not completed OR completed but not verified)
+        // This allows unlimited retries until verified
+        const currentPaycheck = paychecks.find(p => !p.worksheet_completed || (p.worksheet_completed && !p.is_verified));
+        
+        if (currentPaycheck) {
+            renderPaycheckWorksheet(currentPaycheck);
+        } else {
+            // Hide worksheet if no paycheck needs completion
+            const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+            if (worksheetDiv) worksheetDiv.style.display = 'none';
+        }
+        
+        // Store paychecks for modal
+        window.paychecksData = paychecks || [];
+    } catch (error) {
+        console.error('Error loading paychecks:', error);
+        window.paychecksData = [];
+    }
+}
+
+// Render paycheck worksheet
+function renderPaycheckWorksheet(paycheck) {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (!worksheetDiv) return;
+    
+    worksheetDiv.style.display = 'block';
+    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(1);
+    document.getElementById('worksheet-base-pay').textContent = paycheck.base_pay.toFixed(2);
+    document.getElementById('worksheet-citation-count').textContent = paycheck.citation_count;
+    document.getElementById('worksheet-citation-deduction').textContent = paycheck.citation_deduction.toFixed(2);
+    document.getElementById('worksheet-final-pay').textContent = paycheck.final_pay.toFixed(2);
+    
+    // Store paycheck ID
+    worksheetDiv.dataset.paycheckId = paycheck.id;
+    
+    // Pre-fill inputs if this is a retry (worksheet was completed but not verified)
+    if (paycheck.worksheet_completed && !paycheck.is_verified && paycheck.student_calculated_pay) {
+        document.getElementById('worksheet-calculated-pay').value = paycheck.student_calculated_pay;
+        document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
+        document.getElementById('worksheet-calculated-deduction').value = paycheck.student_calculated_deduction || '';
+        document.getElementById('worksheet-calculated-final').value = paycheck.student_calculated_final || '';
+    } else {
+        // Clear inputs for new worksheet
+        document.getElementById('worksheet-calculated-pay').value = '';
+        document.getElementById('worksheet-calculated-citations').value = '';
+        document.getElementById('worksheet-calculated-deduction').value = '';
+        document.getElementById('worksheet-calculated-final').value = '';
+    }
+    
+    // Clear error/success messages
+    document.getElementById('worksheet-error').style.display = 'none';
+    document.getElementById('worksheet-success').style.display = 'none';
+}
+
+// Submit paycheck worksheet
+async function submitPaycheckWorksheet() {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (!worksheetDiv) return;
+    
+    const paycheckId = worksheetDiv.dataset.paycheckId;
+    if (!paycheckId) return;
+    
+    const calculatedPay = parseFloat(document.getElementById('worksheet-calculated-pay').value);
+    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value);
+    const calculatedDeduction = parseFloat(document.getElementById('worksheet-calculated-deduction').value);
+    const calculatedFinal = parseFloat(document.getElementById('worksheet-calculated-final').value);
+    
+    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal)) {
+        document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
+        document.getElementById('worksheet-error').style.display = 'block';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/paycheck/${paycheckId}/complete-worksheet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                calculated_pay: calculatedPay,
+                calculated_citations: calculatedCitations,
+                calculated_deduction: calculatedDeduction,
+                calculated_final: calculatedFinal
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.verified) {
+            document.getElementById('worksheet-success').textContent = data.message;
+            document.getElementById('worksheet-success').style.display = 'block';
+            document.getElementById('worksheet-error').style.display = 'none';
+            
+            // Reload bank account
+            setTimeout(() => {
+                loadBankAccount(currentBankStudentId);
+            }, 1000);
+        } else {
+            document.getElementById('worksheet-error').textContent = data.message || 'Some calculations are incorrect';
+            document.getElementById('worksheet-error').style.display = 'block';
+            if (data.errors) {
+                document.getElementById('worksheet-error').innerHTML = data.errors.join('<br>');
+            }
+            // Don't hide the worksheet - allow unlimited retries
+            // Clear success message if it was showing
+            document.getElementById('worksheet-success').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error submitting worksheet:', error);
+        document.getElementById('worksheet-error').textContent = 'Error submitting worksheet';
+        document.getElementById('worksheet-error').style.display = 'block';
+    }
+}
+
+// View paychecks modal - filtered by deposited/undeposited
+function viewPaychecksModal(filterType) {
+    const modal = document.getElementById('paychecks-modal');
+    const content = document.getElementById('paychecks-modal-content');
+    
+    if (!window.paychecksData || window.paychecksData.length === 0) {
+        content.innerHTML = '<p>No paychecks found.</p>';
+        modal.style.display = 'block';
+        return;
+    }
+    
+    // Filter paychecks based on type
+    let filteredPaychecks = [];
+    if (filterType === 'deposited') {
+        // Deposited: worksheet completed AND verified
+        filteredPaychecks = window.paychecksData.filter(p => p.is_verified === true);
+    } else if (filterType === 'undeposited') {
+        // Undeposited: worksheet not completed OR not verified
+        filteredPaychecks = window.paychecksData.filter(p => !p.worksheet_completed || !p.is_verified);
+    } else {
+        // Show all if no filter
+        filteredPaychecks = window.paychecksData;
+    }
+    
+    if (filteredPaychecks.length === 0) {
+        const message = filterType === 'deposited' ? 'No deposited paychecks found.' : 'No undeposited paychecks found.';
+        content.innerHTML = `<p>${message}</p>`;
+        modal.style.display = 'block';
+        return;
+    }
+    
+    let html = `<h3 style="margin-bottom: 15px;">${filterType === 'deposited' ? 'Deposited' : 'Undeposited'} Paychecks</h3>`;
+    html += '<table style="width: 100%; border-collapse: collapse;"><thead><tr>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Period</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">STAR %</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Base Pay</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Citations</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Deduction</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Final Pay</th>';
+    html += '<th style="padding: 10px; border: 1px solid #ddd;">Status</th>';
+    html += '</tr></thead><tbody>';
+    
+    filteredPaychecks.forEach(p => {
+        html += '<tr>';
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.pay_period_start} - ${p.pay_period_end}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.average_star_percent}%</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.base_pay.toFixed(2)}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.citation_count}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.citation_deduction.toFixed(2)}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.final_pay.toFixed(2)}</td>`;
+        let status = 'Incomplete';
+        if (p.is_verified) {
+            status = 'Deposited';
+        } else if (p.worksheet_completed) {
+            status = 'Pending Verification';
+        }
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">${status}</td>`;
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    content.innerHTML = html;
+    modal.style.display = 'block';
+}
+
+function closePaychecksModal() {
+    document.getElementById('paychecks-modal').style.display = 'none';
+}
+
+// Load marketplace items
+async function loadMarketplaceItems() {
+    try {
+        const response = await fetch('/api/marketplace-items');
+        if (!response.ok) throw new Error('Failed to load marketplace items');
+        
+        allMarketplaceItems = await response.json();
+        renderMarketplaceItems();
+    } catch (error) {
+        console.error('Error loading marketplace items:', error);
+    }
+}
+
+// Render marketplace items
+function renderMarketplaceItems() {
+    const grid = document.getElementById('marketplace-grid');
+    if (!grid) return;
+    
+    const filter = document.getElementById('marketplace-filter')?.value || 'all';
+    
+    let items = allMarketplaceItems;
+    if (filter === 'global') {
+        items = items.filter(i => i.is_global || i.is_approved_for_global);
+    } else if (filter === 'case-manager') {
+        items = items.filter(i => !i.is_global && !i.is_approved_for_global);
+    }
+    
+    if (items.length === 0) {
+        grid.innerHTML = '<p>No items available.</p>';
+        return;
+    }
+    
+    grid.innerHTML = items.map(item => `
+        <div class="marketplace-item-card" style="background: white; border: 1px solid #ddd; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <h4 style="margin: 0 0 10px 0;">${item.name}</h4>
+            <p style="color: #666; margin: 0 0 15px 0;">${item.description || 'No description'}</p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 1.5em; font-weight: bold; color: #667eea;">$${item.price.toFixed(2)}</span>
+                ${window.currentUser.role === 'student' ? `<button onclick="openPurchaseModal(${item.id})" class="btn-primary" style="background: #10b981; border-color: #10b981;">Purchase</button>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Open purchase modal
+async function openPurchaseModal(itemId) {
+    const item = allMarketplaceItems.find(i => i.id === itemId);
+    if (!item) return;
+    
+    currentPurchaseItem = item;
+    
+    const modal = document.getElementById('purchase-modal');
+    const content = document.getElementById('purchase-modal-content');
+    
+    // Get current balance
+    const balanceResponse = await fetch(`/api/bank-account/${currentBankStudentId}`);
+    const balanceData = await balanceResponse.json();
+    const currentBalance = balanceData.balance;
+    const newBalance = currentBalance - item.price;
+    
+    content.innerHTML = `
+        <div style="margin-bottom: 20px;">
+            <h3>${item.name}</h3>
+            <p>${item.description || 'No description'}</p>
+            <p style="font-size: 1.2em; margin: 15px 0;"><strong>Price: $${item.price.toFixed(2)}</strong></p>
+        </div>
+        <div style="margin-bottom: 20px;">
+            <p>Current Balance: <strong>$${currentBalance.toFixed(2)}</strong></p>
+            <p>Balance After Purchase: <strong>$${newBalance.toFixed(2)}</strong></p>
+        </div>
+        <div class="form-group">
+            <label>Enter calculated balance after purchase:</label>
+            <input type="number" id="purchase-calculated-balance" step="0.01" placeholder="Enter calculated balance" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div id="purchase-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
+        <div style="margin-top: 20px; display: flex; gap: 10px;">
+            <button onclick="submitPurchase()" class="btn-primary" style="background: #10b981; border-color: #10b981;">Submit Purchase</button>
+            <button onclick="closePurchaseModal()" class="btn-secondary">Cancel</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+}
+
+function closePurchaseModal() {
+    document.getElementById('purchase-modal').style.display = 'none';
+    currentPurchaseItem = null;
+}
+
+// Submit purchase
+async function submitPurchase() {
+    if (!currentPurchaseItem || !currentBankStudentId) return;
+    
+    const calculatedBalance = parseFloat(document.getElementById('purchase-calculated-balance').value);
+    
+    if (isNaN(calculatedBalance)) {
+        document.getElementById('purchase-error').textContent = 'Please enter calculated balance';
+        document.getElementById('purchase-error').style.display = 'block';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/purchase-orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                item_id: currentPurchaseItem.id,
+                calculated_balance_after: calculatedBalance
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage('Purchase order created successfully!', 'success');
+            closePurchaseModal();
+            loadBankAccount(currentBankStudentId);
+        } else {
+            document.getElementById('purchase-error').textContent = data.error || 'Error creating purchase order';
+            document.getElementById('purchase-error').style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error submitting purchase:', error);
+        document.getElementById('purchase-error').textContent = 'Error submitting purchase';
+        document.getElementById('purchase-error').style.display = 'block';
+    }
+}
+
+// Load purchase orders
+async function loadPurchaseOrders() {
+    try {
+        const response = await fetch('/api/purchase-orders');
+        if (!response.ok) throw new Error('Failed to load purchase orders');
+        
+        const orders = await response.json();
+        renderPurchaseOrders(orders);
+    } catch (error) {
+        console.error('Error loading purchase orders:', error);
+    }
+}
+
+// Render purchase orders
+function renderPurchaseOrders(orders) {
+    const list = document.getElementById('purchase-orders-list');
+    if (!list) return;
+    
+    const pendingOrders = orders.filter(o => o.status === 'pending');
+    
+    if (pendingOrders.length === 0) {
+        list.innerHTML = '<p>No pending purchase orders.</p>';
+        return;
+    }
+    
+    list.innerHTML = pendingOrders.map(order => `
+        <div class="purchase-order-card" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #ddd;">
+            <h4 style="margin: 0 0 10px 0;">${order.item_name}</h4>
+            <p style="margin: 5px 0;"><strong>Student:</strong> ${order.student_name}</p>
+            <p style="margin: 5px 0;"><strong>Price:</strong> $${order.item_price.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Student's Calculation:</strong> $${order.student_calculated_balance_after.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Actual Balance:</strong> $${order.actual_balance_after.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Correct:</strong> ${order.is_calculation_correct ? 'Yes' : 'No'}</p>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button onclick="updatePurchaseOrderStatus(${order.id}, 'approved')" class="btn-primary" style="background: #10b981; border-color: #10b981;">Approve</button>
+                <button onclick="updatePurchaseOrderStatus(${order.id}, 'denied')" class="btn-secondary" style="background: #dc2626; border-color: #dc2626; color: white;">Deny</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Update purchase order status
+async function updatePurchaseOrderStatus(orderId, status) {
+    try {
+        const response = await fetch(`/api/purchase-orders/${orderId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        
+        if (response.ok) {
+            showMessage(`Purchase order ${status}`, 'success');
+            await loadPurchaseOrders();
+            if (currentBankStudentId) {
+                await loadBankAccount(currentBankStudentId);
+            }
+        } else {
+            const data = await response.json();
+            showMessage(data.error || 'Error updating order', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating purchase order:', error);
+        showMessage('Error updating purchase order', 'error');
+    }
+}
+
+// Render transactions
+function renderTransactions(transactions) {
+    const list = document.getElementById('transactions-list');
+    if (!list) return;
+    
+    if (!transactions || transactions.length === 0) {
+        list.innerHTML = '<p>No transactions yet.</p>';
+        return;
+    }
+    
+    // Separate transactions into deposits and withdrawals
+    const deposits = transactions.filter(t => t.type === 'deposit');
+    const withdrawals = transactions.filter(t => t.type === 'purchase');
+    
+    let html = '';
+    
+    // Deposits section
+    if (deposits.length > 0) {
+        html += '<div style="margin-bottom: 30px;">';
+        html += '<h4 style="margin-bottom: 15px; color: #10b981; font-size: 1.2em;">Deposits</h4>';
+        deposits.forEach(t => {
+            html += `
+                <div style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #ddd; background: #f0fdf4;">
+                    <div>
+                        <strong style="color: #10b981;">Deposit</strong>
+                        <p style="margin: 5px 0; color: #666;">${t.description || ''}</p>
+                        <small style="color: #999;">${new Date(t.created_at).toLocaleDateString()}</small>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.2em; font-weight: bold; color: #10b981;">
+                            +$${Math.abs(t.amount).toFixed(2)}
+                        </div>
+                        <small style="color: #999;">Balance: $${t.balance_after.toFixed(2)}</small>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+    
+    // Withdrawals section
+    if (withdrawals.length > 0) {
+        html += '<div style="margin-bottom: 30px;">';
+        html += '<h4 style="margin-bottom: 15px; color: #000; font-size: 1.2em;">Withdrawals</h4>';
+        withdrawals.forEach(t => {
+            html += `
+                <div style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #ddd;">
+                    <div>
+                        <strong style="color: #000;">Withdrawal</strong>
+                        <p style="margin: 5px 0; color: #666;">${t.description || ''}</p>
+                        <small style="color: #999;">${new Date(t.created_at).toLocaleDateString()}</small>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.2em; font-weight: bold; color: #000;">
+                            -$${Math.abs(t.amount).toFixed(2)}
+                        </div>
+                        <small style="color: #999;">Balance: $${t.balance_after.toFixed(2)}</small>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+    
+    // If no transactions in either category
+    if (deposits.length === 0 && withdrawals.length === 0) {
+        html = '<p>No transactions yet.</p>';
+    }
+    
+    list.innerHTML = html;
+}
+
+// Create marketplace item
+function openCreateItemModal() {
+    document.getElementById('create-item-modal').style.display = 'block';
+    document.getElementById('item-name').value = '';
+    document.getElementById('item-description').value = '';
+    document.getElementById('item-price').value = '';
+}
+
+function closeCreateItemModal() {
+    document.getElementById('create-item-modal').style.display = 'none';
+}
+
+async function saveMarketplaceItem() {
+    const name = document.getElementById('item-name').value.trim();
+    const description = document.getElementById('item-description').value.trim();
+    const price = parseFloat(document.getElementById('item-price').value);
+    
+    if (!name || !price || price <= 0) {
+        showMessage('Please fill in all fields with valid values', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/marketplace-items', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, price })
+        });
+        
+        if (response.ok) {
+            showMessage('Item created successfully', 'success');
+            closeCreateItemModal();
+            await loadMarketplaceItems();
+        } else {
+            const data = await response.json();
+            showMessage(data.error || 'Error creating item', 'error');
+        }
+    } catch (error) {
+        console.error('Error creating item:', error);
+        showMessage('Error creating item', 'error');
+    }
+}
+
+// Bank account search (similar to daily entry)
+function setupBankAccountSearch() {
+    const searchInput = document.getElementById('bank-search-input');
+    if (!searchInput) return;
+    
+    const wrapper = searchInput.closest('.bank-search-autocomplete-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.bank-search-autocomplete-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    
+    const getAllOptions = () => {
+        const options = [];
+        allStudents.forEach(student => {
+            if (student && student.name) {
+                options.push({
+                    type: 'student',
+                    name: student.name,
+                    displayText: `Student: ${student.name}`
+                });
+            }
+        });
+        allStaffMembers.forEach(staff => {
+            const staffName = staff.name || staff.username || '';
+            if (staffName) {
+                options.push({
+                    type: 'staff',
+                    name: staffName,
+                    displayText: `Staff: ${staffName}`
+                });
+            }
+        });
+        return options;
+    };
+    
+    const filterOptions = (query) => {
+        if (!query || !query.trim()) return [];
+        const lowerQuery = query.trim().toLowerCase();
+        return getAllOptions().filter(option => 
+            option.name.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    const showDropdown = (options) => {
+        if (!options || options.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        options.forEach((option) => {
+            const item = document.createElement('div');
+            item.className = 'bank-search-autocomplete-item';
+            item.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;';
+            item.innerHTML = `<span style="font-weight: 600;">${option.type === 'student' ? 'Student:' : 'Staff:'}</span> ${option.name}`;
+            
+            item.addEventListener('click', () => {
+                searchInput.value = option.name;
+                hideDropdown();
+                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+    };
+    
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+    };
+    
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    searchInput.addEventListener('blur', () => {
+        setTimeout(() => hideDropdown(), 200);
+    });
+}
+
+// Switch view handler for bank account
+function handleBankAccountView() {
+    if (window.currentUser.role === 'student') {
+        // Student view - load their own account
+        currentBankStudentId = window.currentUser.studentId;
+        
+        // Always show all sections for students, even if no data yet
+        const balanceSection = document.getElementById('bank-balance-section');
+        const paycheckSection = document.getElementById('bank-paycheck-section');
+        const marketplaceSection = document.getElementById('bank-marketplace-section');
+        const transactionsSection = document.getElementById('bank-transactions-section');
+        
+        if (balanceSection) balanceSection.style.display = 'block';
+        if (paycheckSection) paycheckSection.style.display = 'block';
+        if (marketplaceSection) marketplaceSection.style.display = 'block';
+        if (transactionsSection) transactionsSection.style.display = 'block';
+        
+        // Set default student name if available
+        if (currentBankStudentId) {
+            loadBankAccount(currentBankStudentId);
+        } else {
+            // Still show UI even if studentId is not set
+            const balanceAmount = document.getElementById('bank-balance-amount');
+            const studentName = document.getElementById('bank-student-name');
+            if (balanceAmount) balanceAmount.textContent = '$0.00';
+            if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+            
+            // Load marketplace even without student ID
+            loadMarketplaceItems();
+            
+            // Show empty states
+            const transactionsList = document.getElementById('transactions-list');
+            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        }
+    } else {
+        // Staff view - setup search
+        setupBankAccountSearch();
+        document.getElementById('bank-purchase-orders-section').style.display = 'block';
+        
+        // Setup student select change
+        const studentSelect = document.getElementById('bank-student-select');
+        if (studentSelect) {
+            studentSelect.addEventListener('change', (e) => {
+                const studentId = e.target.value;
+                if (studentId) {
+                    currentBankStudentId = parseInt(studentId);
+                    loadBankAccount(currentBankStudentId);
+                    document.getElementById('bank-balance-section').style.display = 'block';
+                    document.getElementById('bank-paycheck-section').style.display = 'block';
+                    document.getElementById('bank-marketplace-section').style.display = 'block';
+                    document.getElementById('bank-transactions-section').style.display = 'block';
+                }
+            });
+        }
+        
+        // Setup search and filter
+        const searchInput = document.getElementById('bank-search-input');
+        const managedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
+        
+        const performSearch = async () => {
+            const query = searchInput.value.trim();
+            const managedByMe = managedByMeCheckbox.checked;
+            
+            try {
+                const params = new URLSearchParams();
+                if (query) params.append('q', query);
+                if (managedByMe) params.append('managed_by_me', 'true');
+                
+                const response = await fetch(`/api/bank-account/search?${params}`);
+                const students = await response.json();
+                
+                const select = document.getElementById('bank-student-select');
+                select.innerHTML = '<option value="">Select Student</option>';
+                students.forEach(s => {
+                    const option = document.createElement('option');
+                    option.value = s.student_id;
+                    option.textContent = `${s.student_name} ($${s.balance.toFixed(2)})`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error searching:', error);
+            }
+        };
+        
+        if (searchInput) {
+            searchInput.addEventListener('input', performSearch);
+        }
+        if (managedByMeCheckbox) {
+            managedByMeCheckbox.addEventListener('change', performSearch);
+        }
+        
+        // Initial load
+        performSearch();
+    }
+    
+    // Setup event listeners
+    const submitWorksheetBtn = document.getElementById('submit-worksheet-btn');
+    if (submitWorksheetBtn) {
+        submitWorksheetBtn.addEventListener('click', submitPaycheckWorksheet);
+    }
+    
+    const viewDepositedBtn = document.getElementById('view-deposited-paychecks-btn');
+    if (viewDepositedBtn) {
+        viewDepositedBtn.addEventListener('click', () => viewPaychecksModal('deposited'));
+    }
+    
+    const viewUndepositedBtn = document.getElementById('view-undeposited-paychecks-btn');
+    if (viewUndepositedBtn) {
+        viewUndepositedBtn.addEventListener('click', () => viewPaychecksModal('undeposited'));
+    }
+    
+    const marketplaceFilter = document.getElementById('marketplace-filter');
+    if (marketplaceFilter) {
+        marketplaceFilter.addEventListener('change', renderMarketplaceItems);
+    }
+    
+    const createItemBtn = document.getElementById('create-item-btn');
+    if (createItemBtn) {
+        createItemBtn.addEventListener('click', openCreateItemModal);
+    }
+    
+    // Admin paycheck generation
+    const generatePaychecksBtn = document.getElementById('generate-paychecks-btn');
+    if (generatePaychecksBtn) {
+        generatePaychecksBtn.addEventListener('click', generatePaychecksForAll);
+    }
+}
+
+// Generate paychecks for all students (Admin only)
+async function generatePaychecksForAll() {
+    if (window.currentUser.role !== 'admin') {
+        showMessage('Only admins can generate paychecks', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('generate-paychecks-btn');
+    const resultDiv = document.getElementById('paycheck-generation-result');
+    
+    if (btn) btn.disabled = true;
+    if (resultDiv) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<p>Generating paychecks...</p>';
+    }
+    
+    try {
+        const response = await fetch('/api/paycheck/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<p style="color: #10b981;">${data.message}</p>`;
+            }
+            showMessage(data.message, 'success');
+        } else {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<p style="color: #dc2626;">${data.error || 'Error generating paychecks'}</p>`;
+            }
+            showMessage(data.error || 'Error generating paychecks', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating paychecks:', error);
+        if (resultDiv) {
+            resultDiv.innerHTML = '<p style="color: #dc2626;">Error generating paychecks</p>';
+        }
+        showMessage('Error generating paychecks', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Make functions globally accessible
+window.submitPaycheckWorksheet = submitPaycheckWorksheet;
+window.viewPaychecksModal = viewPaychecksModal;
+window.closePaychecksModal = closePaychecksModal;
+window.openPurchaseModal = openPurchaseModal;
+window.closePurchaseModal = closePurchaseModal;
+window.submitPurchase = submitPurchase;
+window.updatePurchaseOrderStatus = updatePurchaseOrderStatus;
+window.openCreateItemModal = openCreateItemModal;
+window.closeCreateItemModal = closeCreateItemModal;
+window.saveMarketplaceItem = saveMarketplaceItem;
+window.generatePaychecksForAll = generatePaychecksForAll;

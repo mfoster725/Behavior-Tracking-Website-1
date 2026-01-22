@@ -766,6 +766,10 @@ table th {
 }
 
 /* Info modal styling */
+#info-modal {
+    z-index: 2000 !important;
+}
+
 #info-modal .modal-content {
     max-width: 600px;
 }
@@ -987,6 +991,49 @@ table th {
 }
 
 .staff-autocomplete-item:active {
+    background-color: #e0e0e0;
+}
+
+/* Custom class autocomplete dropdown (same styling as staff autocomplete) */
+.class-autocomplete-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.class-autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.class-autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.15s;
+}
+
+.class-autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.class-autocomplete-item:hover,
+.class-autocomplete-item.highlighted {
+    background-color: #f0f0f0;
+}
+
+.class-autocomplete-item:active {
     background-color: #e0e0e0;
 }
 
@@ -1612,4 +1659,154 @@ table th {
 
 .close-meet-display-btn:active {
     transform: scale(0.95);
+}
+
+/* ==================== BANK ACCOUNT STYLES ==================== */
+
+.bank-balance-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.bank-balance-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2) !important;
+}
+
+.paycheck-worksheet-form {
+    max-width: 600px;
+}
+
+.worksheet-row input {
+    transition: border-color 0.3s ease;
+}
+
+.worksheet-row input:focus {
+    outline: none;
+    border-color: #764ba2 !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.marketplace-item-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    cursor: pointer;
+}
+
+.marketplace-item-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+}
+
+.purchase-order-card {
+    transition: background-color 0.3s ease;
+}
+
+.purchase-order-card:hover {
+    background-color: #e9ecef !important;
+}
+
+.bank-search-autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    display: none;
+}
+
+.bank-search-autocomplete-item {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+    transition: background-color 0.2s ease;
+}
+
+.bank-search-autocomplete-item:hover,
+.bank-search-autocomplete-item.highlighted {
+    background-color: #f0f0f0;
+}
+
+.bank-search-autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+#transactions-list {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#transactions-list > div:last-child {
+    border-bottom: none;
+}
+
+#purchase-orders-list {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#marketplace-grid {
+    margin-top: 20px;
+}
+
+#marketplace-items-list {
+    margin-top: 15px;
+}
+
+/* Modal styles for bank account modals */
+#paychecks-modal .modal-content,
+#purchase-modal .modal-content,
+#create-item-modal .modal-content {
+    max-width: 800px;
+}
+
+#paychecks-modal table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+#paychecks-modal table th,
+#paychecks-modal table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+#paychecks-modal table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #333;
+}
+
+#paychecks-modal table tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* Responsive design for bank account */
+@media (max-width: 768px) {
+    .marketplace-item-card {
+        min-width: 100%;
+    }
+    
+    #marketplace-grid {
+        grid-template-columns: 1fr !important;
+    }
+    
+    .bank-balance-card {
+        padding: 20px !important;
+    }
+    
+    #bank-balance-amount {
+        font-size: 2em !important;
+    }
 }

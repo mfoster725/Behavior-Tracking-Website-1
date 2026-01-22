@@ -28,6 +28,7 @@
                 <button class="nav-btn" data-view="schedules">Schedules</button>
                 <button class="nav-btn" data-view="import">Import Data</button>
                 {% endif %}
+                <button class="nav-btn" data-view="bank-account">Bank Account</button>
                 {% if user.role == 'admin' %}
                 <button class="nav-btn" data-view="admin">Admin Panel</button>
                 {% endif %}
@@ -501,6 +502,147 @@
                 <div id="import-results"></div>
             </div>
         </div>
+
+        <!-- Bank Account View -->
+        <div id="bank-account-view" class="view">
+            <div class="form-section">
+                <h2>Bank Account</h2>
+                
+                <!-- Staff Search Section -->
+                {% if user.role in ['staff', 'admin'] %}
+                <div class="form-group" style="margin-bottom: 30px;">
+                    <label for="bank-search-input" style="display: block; margin-bottom: 8px;">Search:</label>
+                    <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 400px; position: relative;">
+                        <input type="text" id="bank-search-input" placeholder="Search by staff or student name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="bank-search-autocomplete-dropdown"></div>
+                    </div>
+                    <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin-top: 10px;">
+                        <input type="checkbox" id="bank-managed-by-me-checkbox" style="cursor: pointer;">
+                        <span>Show students managed by me</span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-bottom: 30px;">
+                    <label for="bank-student-select">Select Student:</label>
+                    <select id="bank-student-select">
+                        <option value="">Select Student</option>
+                    </select>
+                </div>
+                {% endif %}
+                
+                <!-- Balance Display -->
+                <div id="bank-balance-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
+                    <div class="bank-balance-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                        <h3 style="margin: 0 0 10px 0; font-size: 1.2em; opacity: 0.9;">Current Balance</h3>
+                        <div id="bank-balance-amount" style="font-size: 3em; font-weight: bold; margin: 0;">$0.00</div>
+                        <div id="bank-student-name" style="margin-top: 10px; opacity: 0.9;">{{ user.name|default(user.username) }}</div>
+                    </div>
+                </div>
+                
+                <!-- Paycheck Section -->
+                <div id="bank-paycheck-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 20px;">Paychecks</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <button id="view-deposited-paychecks-btn" class="btn-secondary">Deposited</button>
+                        <button id="view-undeposited-paychecks-btn" class="btn-secondary">Undeposited</button>
+                    </div>
+                    
+                    <!-- Current Paycheck Worksheet -->
+                    <div id="current-paycheck-worksheet" style="display: none; background: #f8f9fa; padding: 30px; border-radius: 8px; margin-bottom: 20px;">
+                        <h4 style="margin-top: 0;">Complete Your Paycheck Worksheet</h4>
+                        <p style="margin-bottom: 20px;">Calculate your pay based on your STAR data and citations.</p>
+                        
+                        <div class="paycheck-worksheet-form">
+                            <div class="worksheet-row" style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">What is the negative square root of 9?</label>
+                                <p style="margin: 0 0 10px 0; color: #666;">Calculate your base pay: $100 × <span id="worksheet-avg-percent">0</span>% = $<span id="worksheet-base-pay">0</span></p>
+                                <input type="number" id="worksheet-calculated-pay" step="0.01" placeholder="Enter your calculation" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                            </div>
+                            
+                            <div class="worksheet-row" style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Number of Citations:</label>
+                                <p style="margin: 0 0 10px 0; color: #666;">You had <span id="worksheet-citation-count">0</span> citations this week.</p>
+                                <input type="number" id="worksheet-calculated-citations" placeholder="Enter citation count" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                            </div>
+                            
+                            <div class="worksheet-row" style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Citation Deduction:</label>
+                                <p style="margin: 0 0 10px 0; color: #666;">Citations × $2 = $<span id="worksheet-citation-deduction">0</span></p>
+                                <input type="number" id="worksheet-calculated-deduction" step="0.01" placeholder="Enter deduction amount" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                            </div>
+                            
+                            <div class="worksheet-row" style="margin-bottom: 20px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Final Pay:</label>
+                                <p style="margin: 0 0 10px 0; color: #666;">Base Pay - Citation Deduction = $<span id="worksheet-final-pay">0</span></p>
+                                <input type="number" id="worksheet-calculated-final" step="0.01" placeholder="Enter final pay" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                            </div>
+                            
+                            <button id="submit-worksheet-btn" class="btn-primary" style="background: #10b981; border-color: #10b981;">Submit</button>
+                            <div id="worksheet-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
+                            <div id="worksheet-success" style="color: #10b981; margin-top: 10px; display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Marketplace Section -->
+                <div id="bank-marketplace-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 20px;">Marketplace</h3>
+                    
+                    <!-- Case Manager Marketplace Management -->
+                    {% if user.role in ['staff', 'admin'] and user.designation == 'Case Manager' %}
+                    <div id="marketplace-management" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h4 style="margin-top: 0;">Manage Marketplace Items</h4>
+                        <button id="create-item-btn" class="btn-secondary" style="margin-bottom: 15px;">Create New Item</button>
+                        <div id="marketplace-items-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
+                            <!-- Items will be loaded here -->
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Admin Paycheck Generation -->
+                    {% if user.role == 'admin' %}
+                    <div id="admin-paycheck-generation" style="background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffc107;">
+                        <h4 style="margin-top: 0;">Paycheck Generation</h4>
+                        <p style="margin-bottom: 15px;">Generate paychecks for all students for the previous week (Monday-Friday).</p>
+                        <button id="generate-paychecks-btn" class="btn-primary">Generate Paychecks</button>
+                        <div id="paycheck-generation-result" style="margin-top: 10px; display: none;"></div>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Marketplace Filter -->
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label for="marketplace-filter">Filter:</label>
+                        <select id="marketplace-filter">
+                            <option value="all">All Items</option>
+                            <option value="global">Global Items</option>
+                            <option value="case-manager">Case Manager Items</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Marketplace Grid -->
+                    <div id="marketplace-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+                        <!-- Items will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Purchase Orders Section (Staff/Case Manager) -->
+                {% if user.role in ['staff', 'admin'] %}
+                <div id="bank-purchase-orders-section" style="display: none; margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 20px;">Purchase Orders</h3>
+                    <div id="purchase-orders-list">
+                        <!-- Purchase orders will be loaded here -->
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Transaction History -->
+                <div id="bank-transactions-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 20px;">Transaction History</h3>
+                    <div id="transactions-list">
+                        <p>No transactions yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Add Student Modal -->
@@ -525,10 +667,28 @@
                         <label for="student-grade">Grade:</label>
                         <select id="student-grade">
                             <option value="">Select Grade</option>
+                            <option value="K">Kindergarten</option>
+                            <option value="1">1st Grade</option>
+                            <option value="2">2nd Grade</option>
+                            <option value="3">3rd Grade</option>
+                            <option value="4">4th Grade</option>
+                            <option value="5">5th Grade</option>
+                            <option value="6">6th Grade</option>
+                            <option value="7">7th Grade</option>
+                            <option value="8">8th Grade</option>
                             <option value="9">9th Grade</option>
                             <option value="10">10th Grade</option>
                             <option value="11">11th Grade</option>
                             <option value="12">12th Grade</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="student-card-color">Card Color:</label>
+                        <select id="student-card-color">
+                            <option value="">None</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="green">Green</option>
+                            <option value="blue">Blue</option>
                         </select>
                     </div>
                 </div>
@@ -594,6 +754,8 @@
             <span class="close" onclick="document.getElementById('staff-modal').style.display='none'">&times;</span>
             <h2>Create Staff User</h2>
             
+            <div id="staff-modal-error" style="display: none; padding: 12px; margin-bottom: 15px; background-color: #ffebee; border: 1px solid #f44336; border-radius: 4px; color: #c62828;"></div>
+            
             <div style="display: grid; gap: 15px;">
                 <div class="form-group">
                     <label for="staff-name">Name: *</label>
@@ -635,6 +797,8 @@
         <div class="modal-content" style="max-width: 500px;">
             <span class="close" onclick="document.getElementById('outside-staff-modal').style.display='none'">&times;</span>
             <h2>Create Outside Staff User</h2>
+            
+            <div id="outside-staff-modal-error" style="display: none; padding: 12px; margin-bottom: 15px; background-color: #ffebee; border: 1px solid #f44336; border-radius: 4px; color: #c62828;"></div>
             
             <div style="display: grid; gap: 15px;">
                 <div class="form-group">
@@ -744,6 +908,15 @@
                         <label for="edit-user-grade">Grade:</label>
                         <select id="edit-user-grade">
                             <option value="">Select Grade</option>
+                            <option value="K">Kindergarten</option>
+                            <option value="1">1st Grade</option>
+                            <option value="2">2nd Grade</option>
+                            <option value="3">3rd Grade</option>
+                            <option value="4">4th Grade</option>
+                            <option value="5">5th Grade</option>
+                            <option value="6">6th Grade</option>
+                            <option value="7">7th Grade</option>
+                            <option value="8">8th Grade</option>
                             <option value="9">9th Grade</option>
                             <option value="10">10th Grade</option>
                             <option value="11">11th Grade</option>
@@ -922,6 +1095,52 @@
             <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: flex-end;">
                 <button onclick="closePdfTableSelectionModal()" class="btn-secondary">Cancel</button>
                 <button id="generate-pdf-btn" onclick="generatePdfFromModal()" class="btn-primary">Generate PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Paychecks Modal -->
+    <div id="paychecks-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <span class="close" onclick="closePaychecksModal()">&times;</span>
+            <h2>Paycheck History</h2>
+            <div id="paychecks-modal-content">
+                <!-- Paychecks will be loaded here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Purchase Modal -->
+    <div id="purchase-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="closePurchaseModal()">&times;</span>
+            <h2>Purchase Item</h2>
+            <div id="purchase-modal-content">
+                <!-- Purchase form will be loaded here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Create Item Modal -->
+    <div id="create-item-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="closeCreateItemModal()">&times;</span>
+            <h2>Create Marketplace Item</h2>
+            <div class="form-group">
+                <label for="item-name">Item Name:</label>
+                <input type="text" id="item-name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div class="form-group">
+                <label for="item-description">Description:</label>
+                <textarea id="item-description" rows="3" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="item-price">Price ($):</label>
+                <input type="number" id="item-price" step="0.01" min="0.01" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="saveMarketplaceItem()" class="btn-primary">Save</button>
+                <button onclick="closeCreateItemModal()" class="btn-secondary">Cancel</button>
             </div>
         </div>
     </div>
