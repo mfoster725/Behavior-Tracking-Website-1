@@ -8,6 +8,9 @@ from decimal import Decimal
 import os
 import csv
 import json
+import re
+import logging
+import secrets
 from io import StringIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -30,7 +33,22 @@ else:
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# HIPAA Compliance: Secure Secret Key
+# Generate a secure key if not set: python -c "import secrets; print(secrets.token_hex(32))"
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key:
+    if os.environ.get('FLASK_ENV') == 'production':
+        raise ValueError("SECRET_KEY environment variable must be set in production!")
+    secret_key = 'dev-secret-key-change-in-production'
+    app.logger.warning("⚠️ Using default SECRET_KEY. Set SECRET_KEY environment variable in production!")
+app.config['SECRET_KEY'] = secret_key
+
+# HIPAA Compliance: Secure Session Configuration
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Auto-logout after 8 hours
 
 limiter = Limiter(
     key_func=get_remote_address,
@@ -43,6 +61,114 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+
+# HIPAA Compliance: Audit Logging Setup
+audit_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(audit_log_dir, exist_ok=True)
+
+audit_logger = logging.getLogger('audit')
+audit_logger.setLevel(logging.INFO)
+audit_handler = logging.FileHandler(
+    os.path.join(audit_log_dir, 'audit.log'),
+    encoding='utf-8'
+)
+audit_formatter = logging.Formatter(
+    '%(asctime)s | %(levelname)s | User: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S UTC'
+)
+audit_handler.setFormatter(audit_formatter)
+audit_logger.addHandler(audit_handler)
+audit_logger.propagate = False  # Don't propagate to root logger
+
+def log_phi_access(action, user_id, username, role, resource_type, resource_id=None, details=None, ip_address=None):
+    """
+    Log all PHI access for HIPAA compliance.
+    
+    Args:
+        action: Action performed (VIEW, CREATE, UPDATE, DELETE, LOGIN, LOGOUT, etc.)
+        user_id: ID of the user performing the action
+        username: Username of the user
+        role: Role of the user (admin, staff, student)
+        resource_type: Type of resource accessed (students, daily_records, period_records, etc.)
+        resource_id: ID of the specific resource (optional)
+        details: Additional details about the action (optional)
+        ip_address: IP address of the request (optional)
+    """
+    timestamp = datetime.utcnow().isoformat()
+    resource_str = f"{resource_type}"
+    if resource_id is not None:
+        resource_str += f":{resource_id}"
+    
+    log_message = (
+        f"Action: {action} | "
+        f"UserID: {user_id} | "
+        f"Username: {username} | "
+        f"Role: {role} | "
+        f"Resource: {resource_str}"
+    )
+    
+    if ip_address:
+        log_message += f" | IP: {ip_address}"
+    
+    if details:
+        log_message += f" | Details: {details}"
+    
+    audit_logger.info(log_message)
+
+def audit_phi_access(action, resource_type):
+    """
+    Decorator to automatically log PHI access for HIPAA compliance.
+    Usage: @audit_phi_access('VIEW', 'students')
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if current_user.is_authenticated:
+                resource_id = kwargs.get('id') or kwargs.get('student_id')
+                ip_address = get_remote_address()
+                log_phi_access(
+                    action=action,
+                    user_id=current_user.id,
+                    username=current_user.username,
+                    role=current_user.role,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    ip_address=ip_address
+                )
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# HIPAA Compliance: Password Strength Validation
+def validate_password_strength(password):
+    """
+    Enforce strong password requirements for HIPAA compliance.
+    Returns (is_valid, error_message)
+    """
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one number"
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>\[\]\\/_+=~`-]', password):
+        return False, "Password must contain at least one special character (!@#$%^&*(), etc.)"
+    # Check for common weak passwords
+    common_passwords = ['password', 'password123', 'admin', 'admin123', '12345678']
+    if password.lower() in common_passwords:
+        return False, "Password is too common. Please choose a more unique password"
+    return True, "Password is valid"
+
+# HIPAA Compliance: HTTPS Enforcement for Production
+@app.before_request
+def force_https():
+    """Force HTTPS in production for HIPAA compliance"""
+    if not app.debug and os.environ.get('FLASK_ENV') == 'production':
+        # Check if request is HTTP and should be HTTPS
+        if request.headers.get('X-Forwarded-Proto') == 'http':
+            return redirect(request.url.replace('http://', 'https://'), code=301)
 
 # User loader for Flask-Login
 @login_manager.user_loader
@@ -79,11 +205,20 @@ def has_student_access(user, student_id):
     - User is a student and it's their own student_id
     - User is regular staff (not outside staff) - has access to all
     - User is outside staff and the student is assigned to them
+    - User is a parent and the student is their child (and relationship is verified)
     """
     if user.role == 'admin':
         return True
     if user.role == 'student':
         return user.student_id == student_id
+    if user.role == 'parent':
+        # Check if parent has verified relationship with student
+        relationship = ParentStudent.query.filter_by(
+            parent_user_id=user.id,
+            student_id=student_id,
+            verified=True
+        ).first()
+        return relationship is not None
     if user.role == 'staff':
         if user.is_outside_staff:
             # Check if student is assigned to this outside staff user
@@ -103,7 +238,7 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(100))  # Full name of the user
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
-    role = db.Column(db.String(20), nullable=False)  # 'student', 'staff', or 'admin'
+    role = db.Column(db.String(20), nullable=False)  # 'student', 'staff', 'admin', or 'parent'
     designation = db.Column(db.String(50))  # 'Case Manager', 'Practitioner', 'Paraprofessional', 'Professional', 'Admin'
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=True)
     is_outside_staff = db.Column(db.Boolean, default=False, nullable=False)  # True for Outside Staff users
@@ -115,6 +250,10 @@ class User(UserMixin, db.Model):
     
     # Relationship to assigned students (for Outside Staff)
     assigned_students = db.relationship('OutsideStaffStudent', backref='user', lazy=True, cascade='all, delete-orphan')
+    # Relationship to parent-student relationships (for Parents)
+    parent_student_relationships = db.relationship('ParentStudent', foreign_keys='ParentStudent.parent_user_id', backref='parent_user', lazy=True, cascade='all, delete-orphan')
+    # Relationship to parent-student relationships (for Parents)
+    parent_student_relationships = db.relationship('ParentStudent', foreign_keys='ParentStudent.parent_user_id', backref='parent_user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -147,10 +286,13 @@ class Student(db.Model):
     email = db.Column(db.String(100))
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
+    # FERPA Compliance: Directory information opt-out
+    directory_info_opt_out = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
     daily_records = db.relationship('DailyRecord', backref='student', lazy=True, cascade='all, delete-orphan')
+    parent_relationships = db.relationship('ParentStudent', backref='student', lazy=True, cascade='all, delete-orphan')
 
 class DailyRecord(db.Model):
     __tablename__ = 'daily_records'
@@ -248,6 +390,46 @@ class OutsideStaffStudent(db.Model):
     student = db.relationship('Student', backref='outside_staff_assignments')
     
     __table_args__ = (db.UniqueConstraint('user_id', 'student_id', name='unique_outside_staff_student'),)
+
+# FERPA Compliance: Parent-Student Relationship
+class ParentStudent(db.Model):
+    __tablename__ = 'parent_students'
+    id = db.Column(db.Integer, primary_key=True)
+    parent_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    relationship = db.Column(db.String(50), nullable=False)  # 'parent', 'guardian', 'custodial_parent', etc.
+    verified = db.Column(db.Boolean, default=False, nullable=False)  # Must be verified by admin/staff
+    verified_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    verified_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    parent = db.relationship('User', foreign_keys=[parent_user_id], backref='parent_relationships')
+    verified_by = db.relationship('User', foreign_keys=[verified_by_user_id])
+    
+    __table_args__ = (db.UniqueConstraint('parent_user_id', 'student_id', name='unique_parent_student'),)
+
+# FERPA Compliance: Amendment Request
+class AmendmentRequest(db.Model):
+    __tablename__ = 'amendment_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    requested_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    record_type = db.Column(db.String(50), nullable=False)  # 'daily_record', 'period_record', 'infraction', 'frenzy_event', 'general'
+    record_id = db.Column(db.Integer, nullable=True)  # ID of specific record, or None for general requests
+    current_value = db.Column(db.Text, nullable=True)  # Current value that needs correction
+    requested_change = db.Column(db.Text, nullable=False)  # What change is requested
+    reason = db.Column(db.Text, nullable=False)  # Why the change is needed
+    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'approved', 'denied'
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    review_notes = db.Column(db.Text, nullable=True)  # Notes from reviewer
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    student = db.relationship('Student', backref='amendment_requests')
+    requested_by = db.relationship('User', foreign_keys=[requested_by_user_id], backref='amendment_requests')
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_amendment_requests')
 
 class Schedule(db.Model):
     __tablename__ = 'schedules'
@@ -403,6 +585,18 @@ def init_db():
                         with db.engine.connect() as conn:
                             conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
                             conn.commit()
+                    
+                    # FERPA Compliance: Add directory_info_opt_out to students table
+                    if 'students' in inspector.get_table_names():
+                        student_columns = [col['name'] for col in inspector.get_columns('students')]
+                        if 'directory_info_opt_out' not in student_columns:
+                            print("Adding directory_info_opt_out column to students table...")
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT FALSE NOT NULL"))
+                                else:
+                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT 0 NOT NULL"))
+                                conn.commit()
             except Exception as e:
                 print(f"Schema check completed (table may not exist yet or columns already exist): {e}")
     except Exception as e:
@@ -454,8 +648,38 @@ def login():
             
             if user and user.check_password(password):
                 login_user(user)
+                # HIPAA Compliance: Log successful login
+                log_phi_access(
+                    action='LOGIN',
+                    user_id=user.id,
+                    username=user.username,
+                    role=user.role,
+                    resource_type='authentication',
+                    ip_address=get_remote_address()
+                )
                 return jsonify({'success': True}), 200
             else:
+                # HIPAA Compliance: Log failed login attempt
+                if user:
+                    log_phi_access(
+                        action='LOGIN_FAILED',
+                        user_id=user.id,
+                        username=user.username,
+                        role=user.role,
+                        resource_type='authentication',
+                        details='Invalid password',
+                        ip_address=get_remote_address()
+                    )
+                else:
+                    log_phi_access(
+                        action='LOGIN_FAILED',
+                        user_id=None,
+                        username=username,
+                        role='unknown',
+                        resource_type='authentication',
+                        details='User not found',
+                        ip_address=get_remote_address()
+                    )
                 return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
         except Exception as e:
             # Log the error for debugging
@@ -470,6 +694,15 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
+    # HIPAA Compliance: Log logout
+    log_phi_access(
+        action='LOGOUT',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='authentication',
+        ip_address=get_remote_address()
+    )
     logout_user()
     return redirect(url_for('login'))
 
@@ -509,13 +742,20 @@ def students():
                 db.session.rollback()
                 return jsonify({'error': 'Username already exists'}), 400
             
+            # HIPAA Compliance: Validate password strength
+            password = data['password']
+            is_valid, error_msg = validate_password_strength(password)
+            if not is_valid:
+                db.session.rollback()
+                return jsonify({'error': error_msg}), 400
+            
             user = User(
                 name=data['name'],
                 username=data['username'],
                 role='student',
                 student_id=student.id
             )
-            user.set_password(data['password'])
+            user.set_password(password)
             db.session.add(user)
         
         # Save team member info if provided
@@ -544,15 +784,70 @@ def students():
                     db.session.add(team_member)
         
         db.session.commit()
+        
+        # HIPAA Compliance: Log student creation
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='students',
+            resource_id=student.id,
+            details=f"Created student: {student.name}",
+            ip_address=get_remote_address()
+        )
+        
         return jsonify({'id': student.id, 'name': student.name}), 201
     else:
-        # Students can only see themselves, staff/admin can see all
+        # Students and parents can only see their own/their child's data, staff/admin can see all
         if current_user.role == 'student':
             if current_user.student_id:
                 student = Student.query.get(current_user.student_id)
+                # HIPAA Compliance: Log student data access
+                log_phi_access(
+                    action='VIEW',
+                    user_id=current_user.id,
+                    username=current_user.username,
+                    role=current_user.role,
+                    resource_type='students',
+                    resource_id=current_user.student_id,
+                    ip_address=get_remote_address()
+                )
                 return jsonify([{'id': student.id, 'name': student.name, 'email': student.email}])
             return jsonify([])
+        elif current_user.role == 'parent':
+            # Parents can only see their verified children
+            verified_relationships = ParentStudent.query.filter_by(
+                parent_user_id=current_user.id,
+                verified=True
+            ).all()
+            student_ids = [rel.student_id for rel in verified_relationships]
+            if student_ids:
+                students = Student.query.filter(Student.id.in_(student_ids)).all()
+                # HIPAA Compliance: Log parent data access
+                log_phi_access(
+                    action='VIEW',
+                    user_id=current_user.id,
+                    username=current_user.username,
+                    role=current_user.role,
+                    resource_type='students',
+                    resource_id='children',
+                    ip_address=get_remote_address()
+                )
+                return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
+            return jsonify([])
         else:
+            # HIPAA Compliance: Log student list access
+            log_phi_access(
+                action='VIEW',
+                user_id=current_user.id,
+                username=current_user.username,
+                role=current_user.role,
+                resource_type='students',
+                resource_id='all',
+                ip_address=get_remote_address()
+            )
+            
             # Check if filtering by "managed by me"
             managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
             
@@ -621,6 +916,18 @@ def delete_student(student_id):
     # Delete student (cascades to daily records, etc.)
     db.session.delete(student)
     db.session.commit()
+    
+    # HIPAA Compliance: Log student deletion
+    log_phi_access(
+        action='DELETE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='students',
+        resource_id=student_id,
+        details=f"Deleted student: {student.name}",
+        ip_address=get_remote_address()
+    )
     
     return jsonify({'message': 'Student deleted successfully'}), 200
 
@@ -811,6 +1118,20 @@ def period_data():
             saved_count += 1
         
         db.session.commit()
+        
+        # HIPAA Compliance: Log period data creation/update
+        for student_data in data.get('students', []):
+            log_phi_access(
+                action='CREATE',
+                user_id=current_user.id,
+                username=current_user.username,
+                role=current_user.role,
+                resource_type='period_records',
+                resource_id=student_data['student_id'],
+                details=f"Period: {period}, Date: {record_date}",
+                ip_address=get_remote_address()
+            )
+        
         return jsonify({'message': f'Saved {saved_count} student records', 'count': saved_count}), 200
     
     else:
@@ -818,10 +1139,31 @@ def period_data():
         record_date = datetime.strptime(request.args.get('date'), '%Y-%m-%d').date()
         period = request.args.get('period')
         
-        # Get daily records for this date (filtered by student if student role or Outside Staff)
+        # HIPAA Compliance: Log period data access
+        log_phi_access(
+            action='VIEW',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='period_records',
+            details=f"Period: {period}, Date: {record_date}",
+            ip_address=get_remote_address()
+        )
+        
+        # Get daily records for this date (filtered by student if student role, parent role, or Outside Staff)
         query = DailyRecord.query.filter_by(date=record_date)
         if current_user.role == 'student' and current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
+        elif current_user.role == 'parent':
+            # Parents can only see their verified children's records
+            verified_relationships = ParentStudent.query.filter_by(
+                parent_user_id=current_user.id,
+                verified=True
+            ).all()
+            student_ids = [rel.student_id for rel in verified_relationships]
+            if not student_ids:
+                return jsonify([])
+            query = query.filter(DailyRecord.student_id.in_(student_ids))
         elif current_user.role == 'staff' and current_user.is_outside_staff:
             # Outside Staff can only see assigned students
             assigned_student_ids = [assoc.student_id for assoc in 
@@ -874,6 +1216,9 @@ def daily_records():
             student_id=student_id, 
             date=record_date
         ).first()
+        
+        # HIPAA Compliance: Log daily record creation/update
+        action = 'UPDATE' if existing else 'CREATE'
         
         # Get attendance_status from request, or derive from present boolean for backward compatibility
         attendance_status = data.get('attendance_status')
@@ -946,10 +1291,34 @@ def daily_records():
             db.session.add(frenzy)
         
         db.session.commit()
+        
+        # HIPAA Compliance: Log daily record creation/update
+        log_phi_access(
+            action=action,
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='daily_records',
+            resource_id=student_id,
+            details=f"Date: {record_date}",
+            ip_address=get_remote_address()
+        )
+        
         return jsonify({'id': daily_record.id, 'message': 'Record saved successfully'}), 201
     
     else:
         student_id = request.args.get('student_id', type=int)
+        
+        # HIPAA Compliance: Log daily record access
+        log_phi_access(
+            action='VIEW',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='daily_records',
+            resource_id=student_id,
+            ip_address=get_remote_address()
+        )
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         
@@ -1050,6 +1419,18 @@ def summary():
     period = request.args.get('period', None)
     timeframe = request.args.get('quarter') or request.args.get('timeframe', None)  # Support both old and new param names
     
+    # HIPAA Compliance: Log summary access
+    log_phi_access(
+        action='VIEW',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='summary',
+        resource_id=student_id,
+        details=f"Timeframe: {timeframe or period}",
+        ip_address=get_remote_address()
+    )
+    
     # If period is specified, ignore timeframe
     if period:
         timeframe = None
@@ -1097,12 +1478,28 @@ def summary():
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
-    # Students can only see their own summary
+    # Students and parents can only see their own/their child's summary
     if current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
         else:
             return jsonify({'error': 'No student record linked'}), 404
+    elif current_user.role == 'parent':
+        # Parents can only see their verified children's summaries
+        verified_relationships = ParentStudent.query.filter_by(
+            parent_user_id=current_user.id,
+            verified=True
+        ).all()
+        student_ids = [rel.student_id for rel in verified_relationships]
+        if not student_ids:
+            return jsonify({'error': 'No verified student relationships'}), 404
+        if student_id:
+            # Verify parent has access to this student
+            if student_id not in student_ids:
+                return jsonify({'error': 'Access denied to this student'}), 403
+            query = query.filter_by(student_id=student_id)
+        else:
+            query = query.filter(DailyRecord.student_id.in_(student_ids))
     elif current_user.role == 'staff' and current_user.is_outside_staff:
         # Outside Staff can only see assigned students
         assigned_student_ids = [assoc.student_id for assoc in 
@@ -2235,6 +2632,18 @@ def frenzy_stats():
     period = request.args.get('period', None)
     timeframe = request.args.get('timeframe', None)  # "30day", "month", "quarter", "year", "alltime"
     
+    # HIPAA Compliance: Log frenzy stats access
+    log_phi_access(
+        action='VIEW',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='frenzy_stats',
+        resource_id=student_id,
+        details=f"Timeframe: {timeframe or period}",
+        ip_address=get_remote_address()
+    )
+    
     # If period is specified, ignore timeframe
     if period:
         timeframe = None
@@ -2279,12 +2688,48 @@ def frenzy_stats():
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
-    # Students can only see their own frenzy stats
+    # Students and parents can only see their own/their child's frenzy stats
     if current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
         else:
-            return jsonify({'error': 'No student record linked'}), 404
+            return jsonify({
+                'by_day': {},
+                'by_time': {},
+                'by_location': {},
+                'by_purpose': {},
+                'total_count': 0,
+                'total_duration': 0,
+                'avg_duration': 0,
+                'all_purposes': [],
+                'all_results': []
+            })
+    elif current_user.role == 'parent':
+        # Parents can only see their verified children's data
+        verified_relationships = ParentStudent.query.filter_by(
+            parent_user_id=current_user.id,
+            verified=True
+        ).all()
+        student_ids = [rel.student_id for rel in verified_relationships]
+        if not student_ids:
+            return jsonify({
+                'by_day': {},
+                'by_time': {},
+                'by_location': {},
+                'by_purpose': {},
+                'total_count': 0,
+                'total_duration': 0,
+                'avg_duration': 0,
+                'all_purposes': [],
+                'all_results': []
+            })
+        if student_id:
+            # Verify parent has access to this student
+            if student_id not in student_ids:
+                return jsonify({'error': 'Access denied to this student'}), 403
+            query = query.filter_by(student_id=student_id)
+        else:
+            query = query.filter(DailyRecord.student_id.in_(student_ids))
     elif current_user.role == 'staff' and current_user.is_outside_staff:
         # Outside Staff can only see assigned students
         assigned_student_ids = [assoc.student_id for assoc in 
@@ -2996,6 +3441,11 @@ def manage_users():
         if not role:
             return jsonify({'error': 'Role is required'}), 400
         
+        # HIPAA Compliance: Validate password strength
+        is_valid, error_msg = validate_password_strength(password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+        
         # Permission check: Admin can create anyone, staff can only create students
         if current_user.role == 'admin':
             # Admin can create staff, admin, or student users
@@ -3027,6 +3477,18 @@ def manage_users():
         db.session.add(user)
         db.session.commit()
         
+        # HIPAA Compliance: Log user creation
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='users',
+            resource_id=user.id,
+            details=f"Created {role} user: {username}",
+            ip_address=get_remote_address()
+        )
+        
         return jsonify({
             'id': user.id,
             'name': user.name,
@@ -3057,6 +3519,10 @@ def manage_users():
             if 'username' in data:
                 user.username = data['username']
             if 'password' in data:
+                # HIPAA Compliance: Validate password strength
+                is_valid, error_msg = validate_password_strength(data['password'])
+                if not is_valid:
+                    return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
             if 'role' in data:
                 user.role = data['role']
@@ -3091,6 +3557,10 @@ def manage_users():
                     if student:
                         student.name = data['name']
             if 'password' in data:
+                # HIPAA Compliance: Validate password strength
+                is_valid, error_msg = validate_password_strength(data['password'])
+                if not is_valid:
+                    return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
             
             # Update student grade if provided
@@ -3108,6 +3578,10 @@ def manage_users():
         elif current_user.role == 'staff' and current_user.id == user_id:
             # Staff can only update their own password
             if 'password' in data:
+                # HIPAA Compliance: Validate password strength
+                is_valid, error_msg = validate_password_strength(data['password'])
+                if not is_valid:
+                    return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
             else:
                 return jsonify({'error': 'Staff can only change their own password'}), 403
@@ -3115,6 +3589,10 @@ def manage_users():
         elif current_user.id == user_id and user.role == 'student':
             # Students can only update their own password
             if 'password' in data:
+                # HIPAA Compliance: Validate password strength
+                is_valid, error_msg = validate_password_strength(data['password'])
+                if not is_valid:
+                    return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
             else:
                 return jsonify({'error': 'Students can only change their own password'}), 403
@@ -3285,6 +3763,390 @@ def team_members(student_id):
         
         db.session.commit()
         return jsonify({'message': 'Team members updated successfully'}), 200
+
+# FERPA Compliance: Parent Management Endpoints
+@app.route('/api/parents', methods=['GET', 'POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def parents():
+    """Manage parent accounts and parent-student relationships"""
+    if request.method == 'POST':
+        # Create parent account and link to student
+        data = request.json
+        student_id = data.get('student_id')
+        parent_name = data.get('name', '').strip()
+        parent_username = data.get('username', '').strip()
+        parent_password = data.get('password', '')
+        relationship = data.get('relationship', 'parent')
+        
+        if not student_id or not parent_username or not parent_password:
+            return jsonify({'error': 'student_id, username, and password are required'}), 400
+        
+        # Verify student exists
+        student = Student.query.get(student_id)
+        if not student:
+            return jsonify({'error': 'Student not found'}), 404
+        
+        # Check if username already exists
+        if User.query.filter_by(username=parent_username).first():
+            return jsonify({'error': 'Username already exists'}), 400
+        
+        # Validate password strength
+        is_valid, error_msg = validate_password_strength(parent_password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+        
+        # Create parent user
+        parent_user = User(
+            name=parent_name or None,
+            username=parent_username,
+            role='parent',
+            password_hash=generate_password_hash(parent_password)
+        )
+        db.session.add(parent_user)
+        db.session.flush()
+        
+        # Create parent-student relationship (unverified initially)
+        parent_student = ParentStudent(
+            parent_user_id=parent_user.id,
+            student_id=student_id,
+            relationship=relationship,
+            verified=False
+        )
+        db.session.add(parent_student)
+        db.session.commit()
+        
+        # Log parent account creation
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='parents',
+            resource_id=parent_user.id,
+            details=f"Created parent account for student {student_id}",
+            ip_address=get_remote_address()
+        )
+        
+        return jsonify({
+            'id': parent_user.id,
+            'username': parent_user.username,
+            'name': parent_user.name,
+            'message': 'Parent account created. Requires verification before access.'
+        }), 201
+    
+    else:
+        # GET: List parents (admin/staff only)
+        parents_list = User.query.filter_by(role='parent').all()
+        result = []
+        for parent in parents_list:
+            relationships = ParentStudent.query.filter_by(parent_user_id=parent.id).all()
+            result.append({
+                'id': parent.id,
+                'name': parent.name,
+                'username': parent.username,
+                'students': [{
+                    'student_id': rel.student_id,
+                    'student_name': rel.student.name if rel.student else None,
+                    'relationship': rel.relationship,
+                    'verified': rel.verified
+                } for rel in relationships]
+            })
+        return jsonify(result)
+
+@app.route('/api/parents/<int:parent_id>/verify', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def verify_parent(parent_id):
+    """Verify a parent-student relationship (allows parent to access student records)"""
+    data = request.json
+    student_id = data.get('student_id')
+    
+    if not student_id:
+        return jsonify({'error': 'student_id is required'}), 400
+    
+    parent_student = ParentStudent.query.filter_by(
+        parent_user_id=parent_id,
+        student_id=student_id
+    ).first()
+    
+    if not parent_student:
+        return jsonify({'error': 'Parent-student relationship not found'}), 404
+    
+    parent_student.verified = True
+    parent_student.verified_by_user_id = current_user.id
+    parent_student.verified_at = datetime.utcnow()
+    db.session.commit()
+    
+    # Log verification
+    log_phi_access(
+        action='VERIFY',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='parent_students',
+        resource_id=parent_student.id,
+        details=f"Verified parent {parent_id} access to student {student_id}",
+        ip_address=get_remote_address()
+    )
+    
+    return jsonify({'message': 'Parent verified successfully'}), 200
+
+# FERPA Compliance: Amendment Request Endpoints
+@app.route('/api/amendment-requests', methods=['GET', 'POST'])
+@limiter.limit("30 per minute")
+@login_required
+def amendment_requests():
+    """Create or view amendment requests"""
+    if request.method == 'POST':
+        # Create amendment request
+        data = request.json
+        student_id = data.get('student_id')
+        record_type = data.get('record_type', 'general')
+        record_id = data.get('record_id')
+        current_value = data.get('current_value')
+        requested_change = data.get('requested_change', '')
+        reason = data.get('reason', '')
+        
+        if not student_id or not requested_change or not reason:
+            return jsonify({'error': 'student_id, requested_change, and reason are required'}), 400
+        
+        # Verify user has access to this student
+        if not has_student_access(current_user, student_id):
+            return jsonify({'error': 'Access denied to this student'}), 403
+        
+        # Create amendment request
+        amendment = AmendmentRequest(
+            student_id=student_id,
+            requested_by_user_id=current_user.id,
+            record_type=record_type,
+            record_id=record_id,
+            current_value=current_value,
+            requested_change=requested_change,
+            reason=reason,
+            status='pending'
+        )
+        db.session.add(amendment)
+        db.session.commit()
+        
+        # Log amendment request
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='amendment_requests',
+            resource_id=amendment.id,
+            details=f"Amendment request for student {student_id}, record {record_type}:{record_id}",
+            ip_address=get_remote_address()
+        )
+        
+        return jsonify({
+            'id': amendment.id,
+            'status': amendment.status,
+            'message': 'Amendment request submitted successfully'
+        }), 201
+    
+    else:
+        # GET: View amendment requests
+        if current_user.role in ['staff', 'admin']:
+            # Staff/admin can see all requests
+            requests = AmendmentRequest.query.order_by(AmendmentRequest.created_at.desc()).all()
+        else:
+            # Students/parents can only see their own requests
+            requests = AmendmentRequest.query.filter_by(
+                requested_by_user_id=current_user.id
+            ).order_by(AmendmentRequest.created_at.desc()).all()
+        
+        result = []
+        for req in requests:
+            result.append({
+                'id': req.id,
+                'student_id': req.student_id,
+                'student_name': req.student.name if req.student else None,
+                'record_type': req.record_type,
+                'record_id': req.record_id,
+                'current_value': req.current_value,
+                'requested_change': req.requested_change,
+                'reason': req.reason,
+                'status': req.status,
+                'reviewed_by': req.reviewed_by.username if req.reviewed_by else None,
+                'review_notes': req.review_notes,
+                'reviewed_at': req.reviewed_at.isoformat() if req.reviewed_at else None,
+                'created_at': req.created_at.isoformat()
+            })
+        
+        return jsonify(result)
+
+@app.route('/api/amendment-requests/<int:request_id>/review', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def review_amendment_request(request_id):
+    """Review and approve/deny an amendment request"""
+    data = request.json
+    status = data.get('status')  # 'approved' or 'denied'
+    review_notes = data.get('review_notes', '')
+    
+    if status not in ['approved', 'denied']:
+        return jsonify({'error': 'status must be "approved" or "denied"'}), 400
+    
+    amendment = AmendmentRequest.query.get(request_id)
+    if not amendment:
+        return jsonify({'error': 'Amendment request not found'}), 404
+    
+    amendment.status = status
+    amendment.reviewed_by_user_id = current_user.id
+    amendment.reviewed_at = datetime.utcnow()
+    amendment.review_notes = review_notes
+    
+    # If approved, apply the change (simplified - you may need to implement specific logic)
+    if status == 'approved':
+        # Log the change
+        log_phi_access(
+            action='AMEND',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type=amendment.record_type,
+            resource_id=amendment.record_id or amendment.student_id,
+            details=f"Approved amendment: {amendment.requested_change}",
+            ip_address=get_remote_address()
+        )
+        # TODO: Implement actual data modification based on record_type and record_id
+    
+    db.session.commit()
+    
+    return jsonify({
+        'id': amendment.id,
+        'status': amendment.status,
+        'message': f'Amendment request {status}'
+    }), 200
+
+# FERPA Compliance: Directory Information Opt-Out
+@app.route('/api/students/<int:student_id>/directory-opt-out', methods=['POST', 'DELETE'])
+@limiter.limit("30 per minute")
+@login_required
+def directory_opt_out(student_id):
+    """Opt-out or opt-in to directory information sharing"""
+    # Verify user has access
+    if not has_student_access(current_user, student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+    
+    if request.method == 'POST':
+        # Opt-out
+        student.directory_info_opt_out = True
+        action = 'OPT_OUT'
+    else:
+        # DELETE = Opt-in
+        student.directory_info_opt_out = False
+        action = 'OPT_IN'
+    
+    db.session.commit()
+    
+    # Log opt-out/opt-in
+    log_phi_access(
+        action=action,
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='students',
+        resource_id=student_id,
+        details=f"Directory information opt-{'out' if student.directory_info_opt_out else 'in'}",
+        ip_address=get_remote_address()
+    )
+    
+    return jsonify({
+        'student_id': student_id,
+        'directory_info_opt_out': student.directory_info_opt_out,
+        'message': f'Directory information opt-{"out" if student.directory_info_opt_out else "in"} successful'
+    }), 200
+
+# FERPA Compliance: Data Export Endpoint
+@app.route('/api/export-student-data/<int:student_id>', methods=['GET'])
+@limiter.limit("10 per minute")
+@login_required
+def export_student_data(student_id):
+    """Export all student data (FERPA requirement: parents/students can request copies)"""
+    # Verify user has access
+    if not has_student_access(current_user, student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+    
+    # Get all student data
+    daily_records = DailyRecord.query.filter_by(student_id=student_id).order_by(DailyRecord.date.desc()).all()
+    
+    export_data = {
+        'student': {
+            'id': student.id,
+            'name': student.name,
+            'email': student.email,
+            'grade': student.grade,
+            'directory_info_opt_out': student.directory_info_opt_out,
+            'created_at': student.created_at.isoformat() if student.created_at else None
+        },
+        'daily_records': []
+    }
+    
+    for record in daily_records:
+        periods_data = []
+        for period in record.periods:
+            periods_data.append({
+                'time_range': period.time_range,
+                'location': period.location,
+                'safety_points': period.safety_points,
+                'teamwork_points': period.teamwork_points,
+                'accountability_points': period.accountability_points,
+                'relationships_points': period.relationships_points,
+                'points_possible': period.points_possible,
+                'notes': period.notes,
+                'reminders': period.reminders,
+                'info': period.info,
+                'infractions': [{
+                    'type': i.infraction_type,
+                    'count': i.count,
+                    'is_general': i.is_general,
+                    'is_harmful': i.is_harmful
+                } for i in period.infractions]
+            })
+        
+        export_data['daily_records'].append({
+            'date': record.date.isoformat(),
+            'day_of_week': record.day_of_week,
+            'attendance_status': record.attendance_status,
+            'periods': periods_data,
+            'frenzy_events': [{
+                'time_range': f.time_range,
+                'location': f.location,
+                'purpose': f.purpose,
+                'purpose2': f.purpose2,
+                'duration_minutes': f.duration_minutes,
+                'result': f.result
+            } for f in record.frenzies]
+        })
+    
+    # Log export
+    log_phi_access(
+        action='EXPORT',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='students',
+        resource_id=student_id,
+        details='Data export requested',
+        ip_address=get_remote_address()
+    )
+    
+    return jsonify(export_data), 200
 
 # Bank Account Helper Functions
 def get_student_case_manager(student_id):
