@@ -252,8 +252,6 @@ class User(UserMixin, db.Model):
     assigned_students = db.relationship('OutsideStaffStudent', backref='user', lazy=True, cascade='all, delete-orphan')
     # Relationship to parent-student relationships (for Parents)
     parent_student_relationships = db.relationship('ParentStudent', foreign_keys='ParentStudent.parent_user_id', backref='parent_user', lazy=True, cascade='all, delete-orphan')
-    # Relationship to parent-student relationships (for Parents)
-    parent_student_relationships = db.relationship('ParentStudent', foreign_keys='ParentStudent.parent_user_id', backref='parent_user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
