@@ -123,6 +123,124 @@
             font-size: 12px;
             color: #999;
         }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            overflow: auto;
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .register-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .register-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .role-selection {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .role-option {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: white;
+        }
+        
+        .role-option:hover {
+            border-color: #667eea;
+            background: #f5f5ff;
+        }
+        
+        .role-option.selected {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+        
+        .role-option h3 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+        }
+        
+        .role-option p {
+            margin: 0;
+            font-size: 12px;
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -147,6 +265,10 @@
                 <button type="submit" class="login-btn">Log In</button>
             </form>
             
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="#" id="create-account-link" style="color: #667eea; text-decoration: none; font-weight: 500;">Create Account</a>
+            </div>
+            
             <p class="info-text">
                 Staff: Full access to edit and manage data<br>
                 Student: View-only access to personal data
@@ -154,7 +276,286 @@
         </div>
     </div>
 
+    <!-- Registration Modal -->
+    <div id="register-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="close-register-modal">&times;</span>
+            <h2 style="color: #667eea; margin-bottom: 20px;">Create Account</h2>
+            
+            <div id="register-error" class="error-message" style="display: none;"></div>
+            
+            <!-- Step 1: Role Selection -->
+            <div id="register-step-1">
+                <p style="margin-bottom: 20px; color: #666;">Select your role:</p>
+                <div class="role-selection">
+                    <div class="role-option" data-role="parent">
+                        <h3>Parent</h3>
+                        <p>Access student records</p>
+                    </div>
+                    <div class="role-option" data-role="student">
+                        <h3>Student</h3>
+                        <p>View your data</p>
+                    </div>
+                    <div class="role-option" data-role="staff">
+                        <h3>Staff</h3>
+                        <p>Manage records</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Step 2: Registration Form -->
+            <div id="register-step-2" style="display: none;">
+                <form id="register-form" novalidate onsubmit="return false;">
+                    <div class="form-group">
+                        <label for="register-name">Name:</label>
+                        <input type="text" id="register-name" placeholder="Enter full name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="register-username">Username: *</label>
+                        <input type="text" id="register-username" placeholder="Enter username">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="register-password">Password: *</label>
+                        <input type="password" id="register-password" placeholder="Minimum 6 characters">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="register-password-confirm">Confirm Password: *</label>
+                        <input type="password" id="register-password-confirm" placeholder="Re-enter password">
+                    </div>
+                    
+                    <!-- Parent-specific fields -->
+                    <div id="register-parent-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="register-claimed-student-name">Name of student (e.g. your child): *</label>
+                            <input type="text" id="register-claimed-student-name" placeholder="Enter student name">
+                            <small style="color: #666; display: block; margin-top: 5px;">Note: Your account will require verification by an administrator before you can access student records.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-relationship">Relationship: *</label>
+                            <select id="register-relationship">
+                                <option value="parent">Parent</option>
+                                <option value="guardian">Guardian</option>
+                                <option value="custodial_parent">Custodial Parent</option>
+                                <option value="non_custodial_parent">Non-Custodial Parent</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Student-specific fields -->
+                    <div id="register-student-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="register-grade">Grade: *</label>
+                            <select id="register-grade">
+                                <option value="">Select Grade</option>
+                                <option value="K">Kindergarten</option>
+                                <option value="1">1st Grade</option>
+                                <option value="2">2nd Grade</option>
+                                <option value="3">3rd Grade</option>
+                                <option value="4">4th Grade</option>
+                                <option value="5">5th Grade</option>
+                                <option value="6">6th Grade</option>
+                                <option value="7">7th Grade</option>
+                                <option value="8">8th Grade</option>
+                                <option value="9">9th Grade</option>
+                                <option value="10">10th Grade</option>
+                                <option value="11">11th Grade</option>
+                                <option value="12">12th Grade</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Staff-specific fields -->
+                    <div id="register-staff-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="register-designation">Designation: *</label>
+                            <select id="register-designation">
+                                <option value="">Select Designation</option>
+                                <option value="Case Manager">Case Manager</option>
+                                <option value="Practitioner">Practitioner</option>
+                                <option value="Paraprofessional">Paraprofessional</option>
+                                <option value="Professional">Professional</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button type="button" id="register-back-btn" class="register-btn" style="background: #999;">Back</button>
+                        <button type="button" id="register-submit-btn" class="register-btn">Create Account</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
+        let selectedRole = null;
+        
+        // Open registration modal
+        document.getElementById('create-account-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('register-modal').style.display = 'block';
+            resetRegistrationForm();
+        });
+        
+        // Close registration modal
+        document.getElementById('close-register-modal').addEventListener('click', () => {
+            document.getElementById('register-modal').style.display = 'none';
+            resetRegistrationForm();
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            const modal = document.getElementById('register-modal');
+            if (e.target === modal) {
+                modal.style.display = 'none';
+                resetRegistrationForm();
+            }
+        });
+        
+        // Role selection
+        document.querySelectorAll('.role-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.role-option').forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+                selectedRole = option.dataset.role;
+                
+                // Show registration form
+                document.getElementById('register-step-1').style.display = 'none';
+                document.getElementById('register-step-2').style.display = 'block';
+                
+                // Show/hide role-specific fields
+                document.getElementById('register-parent-fields').style.display = selectedRole === 'parent' ? 'block' : 'none';
+                document.getElementById('register-student-fields').style.display = selectedRole === 'student' ? 'block' : 'none';
+                document.getElementById('register-staff-fields').style.display = selectedRole === 'staff' ? 'block' : 'none';
+            });
+        });
+        
+        // Back button
+        document.getElementById('register-back-btn').addEventListener('click', () => {
+            document.getElementById('register-step-1').style.display = 'block';
+            document.getElementById('register-step-2').style.display = 'none';
+            selectedRole = null;
+            document.querySelectorAll('.role-option').forEach(opt => opt.classList.remove('selected'));
+        });
+        
+        // Reset registration form
+        function resetRegistrationForm() {
+            selectedRole = null;
+            document.getElementById('register-form').reset();
+            document.getElementById('register-error').style.display = 'none';
+            document.getElementById('register-step-1').style.display = 'block';
+            document.getElementById('register-step-2').style.display = 'none';
+            document.querySelectorAll('.role-option').forEach(opt => opt.classList.remove('selected'));
+            document.getElementById('register-parent-fields').style.display = 'none';
+            document.getElementById('register-student-fields').style.display = 'none';
+            document.getElementById('register-staff-fields').style.display = 'none';
+        }
+        
+        // Create Account button click (bypasses form submit / HTML5 validation)
+        document.getElementById('register-submit-btn').addEventListener('click', async () => {
+            const errorDiv = document.getElementById('register-error');
+            if (!errorDiv) return;
+            errorDiv.style.display = 'none';
+            errorDiv.textContent = '';
+            
+            const nameEl = document.getElementById('register-name');
+            const usernameEl = document.getElementById('register-username');
+            const passwordEl = document.getElementById('register-password');
+            const passwordConfirmEl = document.getElementById('register-password-confirm');
+            const name = nameEl ? nameEl.value.trim() : '';
+            const username = usernameEl ? usernameEl.value.trim() : '';
+            const password = passwordEl ? passwordEl.value : '';
+            const passwordConfirm = passwordConfirmEl ? passwordConfirmEl.value : '';
+            
+            function showError(msg) {
+                errorDiv.textContent = msg;
+                errorDiv.style.display = 'block';
+                errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+            if (!selectedRole) {
+                showError('Please select a role');
+                return;
+            }
+            if (!username || !password) {
+                showError('Username and password are required');
+                return;
+            }
+            if (password.length < 6) {
+                showError('Password must be at least 6 characters long');
+                return;
+            }
+            if (password !== passwordConfirm) {
+                showError('Passwords do not match');
+                return;
+            }
+            
+            const registerData = {
+                role: selectedRole,
+                username: username,
+                password: password,
+                name: name || null
+            };
+            
+            if (selectedRole === 'parent') {
+                const claimedEl = document.getElementById('register-claimed-student-name');
+                const relEl = document.getElementById('register-relationship');
+                const claimedStudentName = claimedEl ? claimedEl.value.trim() : '';
+                const relationship = relEl ? relEl.value : '';
+                if (!claimedStudentName) {
+                    showError('Please enter the name of the student (e.g. your child)');
+                    return;
+                }
+                if (!relationship) {
+                    showError('Please select a relationship');
+                    return;
+                }
+                registerData.claimed_student_name = claimedStudentName;
+                registerData.relationship = relationship;
+            } else if (selectedRole === 'student') {
+                const gradeEl = document.getElementById('register-grade');
+                const grade = gradeEl ? gradeEl.value : '';
+                if (!grade) {
+                    showError('Please select a grade');
+                    return;
+                }
+                registerData.grade = grade;
+            } else if (selectedRole === 'staff') {
+                const designationEl = document.getElementById('register-designation');
+                const designation = designationEl ? designationEl.value : '';
+                if (!designation) {
+                    showError('Please select a designation');
+                    return;
+                }
+                registerData.designation = designation;
+            }
+            
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(registerData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert(data.message || 'Account created successfully! You can now log in.');
+                    document.getElementById('register-modal').style.display = 'none';
+                    resetRegistrationForm();
+                } else {
+                    showError(data.error || 'Registration failed. Please try again.');
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                showError('Network error. Please check your connection and try again.');
+            }
+        });
+        
+        // Login form submission
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             

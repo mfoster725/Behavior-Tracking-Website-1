@@ -20,6 +20,12 @@
                 <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
             </div>
             <nav>
+                {% if user.role == 'parent' %}
+                <button class="nav-btn active" data-view="parent-portal">Parent Portal</button>
+                <button class="nav-btn" data-view="summary">Summary</button>
+                <button class="nav-btn" data-view="frenzy">Frenzy Stats</button>
+                <button class="nav-btn" onclick="showFERPARightsModal()">FERPA Rights</button>
+                {% else %}
                 <button class="nav-btn active" data-view="period-entry">Period Entry</button>
                 <button class="nav-btn" data-view="entry">Daily Entry</button>
                 <button class="nav-btn" data-view="summary">Summary</button>
@@ -34,6 +40,8 @@
                 {% endif %}
                 {% if user.role in ['staff', 'admin'] %}
                 <button class="nav-btn" data-view="users">User Management</button>
+                {% endif %}
+                <button class="nav-btn" onclick="showFERPARightsModal()">FERPA Rights</button>
                 {% endif %}
             </nav>
         </header>
@@ -394,6 +402,31 @@
                     </table>
                 </div>
                 
+                <!-- Parent Users Table -->
+                <div class="user-role-section" style="margin-bottom: 30px;">
+                    <h3 style="color: #9c27b0; border-bottom: 2px solid #9c27b0; padding-bottom: 10px; margin-bottom: 15px;">
+                        Parent Users
+                    </h3>
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <input type="text" id="parent-search" placeholder="🔍 Search parents by name or username..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Username</th>
+                                <th>Verified Children</th>
+                                <th>FERPA</th>
+                                <th>Password</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="parent-users-table-body">
+                            <!-- Parent user rows will be loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                
                 <!-- Admin Users Table -->
                 <div class="user-role-section">
                     <h3 style="color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 15px;">
@@ -426,6 +459,9 @@
                     <button id="add-staff-btn" class="btn-primary">Add Staff User</button>
                     <button id="add-outside-staff-btn" class="btn-primary">Add Outside Staff User</button>
                     <button id="add-admin-btn" class="btn-primary">Add Admin User</button>
+                    {% endif %}
+                    {% if user.role in ['staff', 'admin'] %}
+                    <button id="add-parent-btn" class="btn-primary">Add Parent Account</button>
                     {% endif %}
                     <button id="refresh-users-btn" class="btn-secondary">Refresh List</button>
                 </div>
@@ -641,6 +677,25 @@
                         <p>No transactions yet.</p>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parent Portal View -->
+    <div id="parent-portal-view" class="view">
+        <div class="form-section">
+            <h2>Parent Portal</h2>
+            <p>Access your child's education records and FERPA rights</p>
+            
+            <div id="parent-children-list" style="margin-top: 30px;">
+                <h3>My Children</h3>
+                <div id="parent-children-container" style="display: grid; gap: 20px; margin-top: 20px;">
+                    <p>Loading children...</p>
+                </div>
+            </div>
+            
+            <div id="parent-no-children" style="display: none; padding: 40px; text-align: center; background: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                <p>No verified children found. Please contact the school to verify your parent-student relationship.</p>
             </div>
         </div>
     </div>
@@ -892,7 +947,7 @@
                         <label for="edit-user-username">Username: *</label>
                         <input type="text" id="edit-user-username" required placeholder="Enter username">
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="edit-user-role-group">
                         <label for="edit-user-role">Role: *</label>
                         <select id="edit-user-role">
                             <option value="Admin">Admin</option>
@@ -972,12 +1027,86 @@
                         <button type="button" id="edit-add-paraprofessional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Paraprofessional</button>
                     </div>
                 </div>
+                
+                <!-- Parent Students Section (only for parents) -->
+                <div id="edit-user-parent-students-section" style="display: none;">
+                    <h3 style="color: #667eea; margin-bottom: 15px;">Linked Students</h3>
+                    <div id="edit-parent-students-list" style="margin-bottom: 15px;">
+                        <!-- Linked students will be displayed here -->
+                    </div>
+                    <div id="edit-parent-claimed-name" style="display: none; margin-bottom: 12px; padding: 8px 12px; background: #e3f2fd; border-radius: 4px; font-size: 13px; color: #1565c0;"></div>
+                    <div class="form-group" id="edit-parent-add-student-combobox-wrap" style="position: relative;">
+                        <label for="edit-parent-add-student-combobox-input">Add Student:</label>
+                        <input type="text" id="edit-parent-add-student-combobox-input" placeholder="Type to search students..." autocomplete="off">
+                        <input type="hidden" id="edit-parent-add-student-id" value="">
+                        <div id="edit-parent-add-student-dropdown" class="student-combobox-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; max-height: 200px; overflow-y: auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-parent-add-relationship">Relationship:</label>
+                        <select id="edit-parent-add-relationship">
+                            <option value="parent">Parent</option>
+                            <option value="guardian">Guardian</option>
+                            <option value="custodial_parent">Custodial Parent</option>
+                            <option value="non_custodial_parent">Non-Custodial Parent</option>
+                        </select>
+                    </div>
+                    <button type="button" id="edit-parent-add-student-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Student</button>
+                </div>
             </div>
             
             <div style="margin-top: 20px; display: flex; gap: 10px;">
                 <button id="save-edit-user-btn" class="btn-primary">Save Changes</button>
                 <button onclick="document.getElementById('edit-user-modal').style.display='none'" class="btn-secondary">Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Add Parent User Modal -->
+    <div id="parent-user-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close" onclick="document.getElementById('parent-user-modal').style.display='none'">&times;</span>
+            <h2>Create Parent Account</h2>
+            
+            <div id="parent-user-modal-error" style="display: none; padding: 12px; margin-bottom: 15px; background-color: #ffebee; border: 1px solid #f44336; border-radius: 4px; color: #c62828;"></div>
+            
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="parent-user-name">Name: *</label>
+                    <input type="text" id="parent-user-name" required placeholder="Enter full name">
+                </div>
+                <div class="form-group">
+                    <label for="parent-user-username">Username: *</label>
+                    <input type="text" id="parent-user-username" required placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label for="parent-user-password">Password: *</label>
+                    <input type="password" id="parent-user-password" required placeholder="Minimum 6 characters">
+                </div>
+                <div class="form-group" id="parent-user-student-combobox-wrap" style="position: relative;">
+                    <label for="parent-user-student-combobox-input">Link to Student: *</label>
+                    <input type="text" id="parent-user-student-combobox-input" placeholder="Type to search students..." autocomplete="off">
+                    <input type="hidden" id="parent-user-student-id" value="">
+                    <div id="parent-user-student-dropdown" class="student-combobox-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; max-height: 200px; overflow-y: auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;"></div>
+                </div>
+                <div class="form-group">
+                    <label for="parent-user-relationship">Relationship: *</label>
+                    <select id="parent-user-relationship" required>
+                        <option value="parent">Parent</option>
+                        <option value="guardian">Guardian</option>
+                        <option value="custodial_parent">Custodial Parent</option>
+                        <option value="non_custodial_parent">Non-Custodial Parent</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="save-parent-user-btn" class="btn-primary">Create Parent Account</button>
+                <button onclick="document.getElementById('parent-user-modal').style.display='none'" class="btn-secondary">Cancel</button>
+            </div>
+            
+            <p style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px; font-size: 12px; color: #1565c0;">
+                <strong>Note:</strong> Parent accounts require verification by staff/admin before they can access student records. You can verify the relationship after creating the account.
+            </p>
         </div>
     </div>
 
@@ -1141,6 +1270,114 @@
             <div style="margin-top: 20px; display: flex; gap: 10px;">
                 <button onclick="saveMarketplaceItem()" class="btn-primary">Save</button>
                 <button onclick="closeCreateItemModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FERPA Rights Modal -->
+    <div id="ferpa-rights-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+            <span class="close" onclick="closeFERPARightsModal()">&times;</span>
+            <h2>FERPA Rights & Privacy Policy</h2>
+            <div id="ferpa-rights-content" style="margin-top: 20px; line-height: 1.6;">
+                <h3>Your Rights Under FERPA</h3>
+                <p>The Family Educational Rights and Privacy Act (FERPA) affords parents and students over 18 years of age ("eligible students") certain rights with respect to the student's education records. These rights include:</p>
+                
+                <h4>1. The Right to Inspect and Review</h4>
+                <p>You have the right to inspect and review your child's education records within 45 days of the day the school receives a request for access. You should submit a written request to the school principal or designated school official identifying the record(s) you wish to inspect.</p>
+                
+                <h4>2. The Right to Request Amendment</h4>
+                <p>You have the right to request that the school amend records that you believe are inaccurate, misleading, or otherwise in violation of your child's privacy rights. You may submit an amendment request through this portal or by contacting the school directly.</p>
+                
+                <h4>3. The Right to Consent to Disclosure</h4>
+                <p>Generally, the school must have written permission from the parent or eligible student before releasing any information from a student's education record. However, FERPA allows schools to disclose records, without consent, to school officials with legitimate educational interests.</p>
+                
+                <h4>4. The Right to File a Complaint</h4>
+                <p>You have the right to file a complaint with the U.S. Department of Education concerning alleged failures by the school to comply with FERPA requirements. The name and address of the office that administers FERPA is:</p>
+                <p style="margin-left: 20px;">
+                    Family Policy Compliance Office<br>
+                    U.S. Department of Education<br>
+                    400 Maryland Avenue, SW<br>
+                    Washington, DC 20202-8520
+                </p>
+                
+                <h4>5. Directory Information</h4>
+                <p>Schools may disclose, without consent, "directory" information such as a student's name, address, telephone number, email address, grade level, and participation in activities. You have the right to opt-out of directory information sharing. You can manage this setting in the Parent Portal.</p>
+                
+                <h3>Contact Information</h3>
+                <p>For questions about FERPA or to exercise your rights, please contact:</p>
+                <p id="ferpa-contact-info" style="margin-left: 20px;">
+                    [School FERPA Contact Information]
+                </p>
+            </div>
+            <div id="ferpa-modal-message" style="display: none; margin-top: 20px; padding: 12px; border-radius: 4px;"></div>
+            <div style="margin-top: 30px; padding: 15px; background: #e3f2fd; border-radius: 4px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="ferpa-rights-acknowledged">
+                    <span>I acknowledge that I have read and understand my FERPA rights</span>
+                </label>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="acknowledgeFERPARights()" class="btn-primary" id="acknowledge-ferpa-btn">Acknowledge</button>
+                <button onclick="closeFERPARightsModal()" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Amendment Request Modal -->
+    <div id="amendment-request-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="closeAmendmentRequestModal()">&times;</span>
+            <h2>Request Record Amendment</h2>
+            <p style="margin-bottom: 20px; color: #666;">Submit a request to correct inaccurate or misleading information in your child's education record.</p>
+            
+            <div id="amendment-request-error" style="display: none; padding: 12px; margin-bottom: 15px; background-color: #ffebee; border: 1px solid #f44336; border-radius: 4px; color: #c62828;"></div>
+            <div id="amendment-request-success" style="display: none; padding: 12px; margin-bottom: 15px; background-color: #e8f5e9; border: 1px solid #4caf50; border-radius: 4px; color: #2e7d32;"></div>
+            
+            <div style="display: grid; gap: 15px;">
+                <div class="form-group">
+                    <label for="amendment-student-select">Student: *</label>
+                    <select id="amendment-student-select" required>
+                        <option value="">Select Student</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amendment-record-type">Record Type: *</label>
+                    <select id="amendment-record-type" required>
+                        <option value="">Select Record Type</option>
+                        <option value="daily_record">Daily Record</option>
+                        <option value="period_record">Period Record</option>
+                        <option value="infraction">Infraction</option>
+                        <option value="frenzy_event">Frenzy Event</option>
+                        <option value="general">General Information</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amendment-record-id">Record ID (if applicable):</label>
+                    <input type="number" id="amendment-record-id" placeholder="Leave blank for general requests">
+                </div>
+                
+                <div class="form-group">
+                    <label for="amendment-current-value">Current Value: *</label>
+                    <textarea id="amendment-current-value" rows="3" required placeholder="Describe the current information that needs to be corrected"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amendment-requested-change">Requested Change: *</label>
+                    <textarea id="amendment-requested-change" rows="3" required placeholder="Describe what change you are requesting"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amendment-reason">Reason for Change: *</label>
+                    <textarea id="amendment-reason" rows="3" required placeholder="Explain why this change is needed"></textarea>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="submitAmendmentRequest()" class="btn-primary">Submit Request</button>
+                <button onclick="closeAmendmentRequestModal()" class="btn-secondary">Cancel</button>
             </div>
         </div>
     </div>

@@ -8,9 +8,7 @@ from decimal import Decimal
 import os
 import csv
 import json
-import re
 import logging
-import secrets
 from io import StringIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -33,22 +31,7 @@ else:
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# HIPAA Compliance: Secure Secret Key
-# Generate a secure key if not set: python -c "import secrets; print(secrets.token_hex(32))"
-secret_key = os.environ.get('SECRET_KEY')
-if not secret_key:
-    if os.environ.get('FLASK_ENV') == 'production':
-        raise ValueError("SECRET_KEY environment variable must be set in production!")
-    secret_key = 'dev-secret-key-change-in-production'
-    app.logger.warning("⚠️ Using default SECRET_KEY. Set SECRET_KEY environment variable in production!")
-app.config['SECRET_KEY'] = secret_key
-
-# HIPAA Compliance: Secure Session Configuration
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # HTTPS only in production
-app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Auto-logout after 8 hours
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 limiter = Limiter(
     key_func=get_remote_address,
@@ -61,8 +44,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-
-# HIPAA Compliance: Audit Logging Setup
+# HIPAA/FERPA Compliance: Audit Logging Setup
 audit_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(audit_log_dir, exist_ok=True)
 
@@ -73,102 +55,46 @@ audit_handler = logging.FileHandler(
     encoding='utf-8'
 )
 audit_formatter = logging.Formatter(
-    '%(asctime)s | %(levelname)s | User: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S UTC'
+    '%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 audit_handler.setFormatter(audit_formatter)
 audit_logger.addHandler(audit_handler)
 audit_logger.propagate = False  # Don't propagate to root logger
 
-def log_phi_access(action, user_id, username, role, resource_type, resource_id=None, details=None, ip_address=None):
+# HIPAA/FERPA Compliance: Audit logging function
+def log_phi_access(action, user_id=None, username=None, role=None, resource_type=None, resource_id=None, details=None, ip_address=None):
     """
-    Log all PHI access for HIPAA compliance.
+    Log access to Protected Health Information (PHI) / Education Records for HIPAA/FERPA compliance.
     
     Args:
-        action: Action performed (VIEW, CREATE, UPDATE, DELETE, LOGIN, LOGOUT, etc.)
+        action: Action performed (e.g., 'VIEW', 'CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'EXPORT')
         user_id: ID of the user performing the action
         username: Username of the user
-        role: Role of the user (admin, staff, student)
-        resource_type: Type of resource accessed (students, daily_records, period_records, etc.)
+        role: Role of the user (student, staff, admin, parent)
+        resource_type: Type of resource accessed (e.g., 'students', 'daily_records', 'period_records')
         resource_id: ID of the specific resource (optional)
         details: Additional details about the action (optional)
-        ip_address: IP address of the request (optional)
+        ip_address: IP address of the user (optional)
     """
-    timestamp = datetime.utcnow().isoformat()
-    resource_str = f"{resource_type}"
+    log_message = f"ACTION={action}"
+    if user_id is not None:
+        log_message += f" | USER_ID={user_id}"
+    if username:
+        log_message += f" | USERNAME={username}"
+    if role:
+        log_message += f" | ROLE={role}"
+    if resource_type:
+        log_message += f" | RESOURCE_TYPE={resource_type}"
     if resource_id is not None:
-        resource_str += f":{resource_id}"
-    
-    log_message = (
-        f"Action: {action} | "
-        f"UserID: {user_id} | "
-        f"Username: {username} | "
-        f"Role: {role} | "
-        f"Resource: {resource_str}"
-    )
-    
-    if ip_address:
-        log_message += f" | IP: {ip_address}"
-    
+        log_message += f" | RESOURCE_ID={resource_id}"
     if details:
-        log_message += f" | Details: {details}"
+        log_message += f" | DETAILS={details}"
+    if ip_address:
+        log_message += f" | IP={ip_address}"
     
     audit_logger.info(log_message)
 
-def audit_phi_access(action, resource_type):
-    """
-    Decorator to automatically log PHI access for HIPAA compliance.
-    Usage: @audit_phi_access('VIEW', 'students')
-    """
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if current_user.is_authenticated:
-                resource_id = kwargs.get('id') or kwargs.get('student_id')
-                ip_address = get_remote_address()
-                log_phi_access(
-                    action=action,
-                    user_id=current_user.id,
-                    username=current_user.username,
-                    role=current_user.role,
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    ip_address=ip_address
-                )
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
-
-# HIPAA Compliance: Password Strength Validation
-def validate_password_strength(password):
-    """
-    Enforce strong password requirements for HIPAA compliance.
-    Returns (is_valid, error_message)
-    """
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long"
-    if not re.search(r'[A-Z]', password):
-        return False, "Password must contain at least one uppercase letter"
-    if not re.search(r'[a-z]', password):
-        return False, "Password must contain at least one lowercase letter"
-    if not re.search(r'\d', password):
-        return False, "Password must contain at least one number"
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>\[\]\\/_+=~`-]', password):
-        return False, "Password must contain at least one special character (!@#$%^&*(), etc.)"
-    # Check for common weak passwords
-    common_passwords = ['password', 'password123', 'admin', 'admin123', '12345678']
-    if password.lower() in common_passwords:
-        return False, "Password is too common. Please choose a more unique password"
-    return True, "Password is valid"
-
-# HIPAA Compliance: HTTPS Enforcement for Production
-@app.before_request
-def force_https():
-    """Force HTTPS in production for HIPAA compliance"""
-    if not app.debug and os.environ.get('FLASK_ENV') == 'production':
-        # Check if request is HTTP and should be HTTPS
-        if request.headers.get('X-Forwarded-Proto') == 'http':
-            return redirect(request.url.replace('http://', 'https://'), code=301)
 
 # User loader for Flask-Login
 @login_manager.user_loader
@@ -231,6 +157,52 @@ def has_student_access(user, student_id):
             return True
     return False
 
+# HIPAA/FERPA Compliance: Password validation
+def validate_password_strength(password):
+    """
+    Validate password strength for HIPAA/FERPA compliance.
+    Returns (is_valid, error_message) tuple.
+    """
+    if not password:
+        return False, 'Password is required'
+    
+    if len(password) < 6:
+        return False, 'Password must be at least 6 characters long'
+    
+    # Optional: Add more strength requirements
+    # if not re.search(r'[A-Z]', password):
+    #     return False, 'Password must contain at least one uppercase letter'
+    # if not re.search(r'[a-z]', password):
+    #     return False, 'Password must contain at least one lowercase letter'
+    # if not re.search(r'\d', password):
+    #     return False, 'Password must contain at least one number'
+    
+    return True, None
+
+# FERPA Compliance: Helper function to filter students based on directory information opt-out
+def filter_directory_info(students, include_opted_out=False):
+    """
+    Filter students based on directory information opt-out status.
+    
+    Args:
+        students: List or query result of Student objects
+        include_opted_out: If True, include all students (for internal educational use).
+                          If False, exclude students who opted out (for public directory information).
+    
+    Returns:
+        Filtered list of students
+    """
+    if include_opted_out:
+        # For internal educational purposes, include all students
+        return students
+    
+    # For public directory information, exclude opted-out students
+    if isinstance(students, list):
+        return [s for s in students if not s.directory_info_opt_out]
+    else:
+        # If it's a query object, filter it
+        return students.filter(Student.directory_info_opt_out == False)
+
 # Database Models
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -243,6 +215,8 @@ class User(UserMixin, db.Model):
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=True)
     is_outside_staff = db.Column(db.Boolean, default=False, nullable=False)  # True for Outside Staff users
     district = db.Column(db.String(100), nullable=True)  # District name for Outside Staff
+    claimed_student_name = db.Column(db.String(200), nullable=True)  # Parent self-registration: name they gave
+    claimed_relationship = db.Column(db.String(50), nullable=True)  # Parent self-registration: relationship
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationship to student (for student users)
@@ -402,7 +376,7 @@ class ParentStudent(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    parent = db.relationship('User', foreign_keys=[parent_user_id], backref='parent_relationships')
+    # Note: parent_user is available via backref from User.parent_student_relationships
     verified_by = db.relationship('User', foreign_keys=[verified_by_user_id])
     
     __table_args__ = (db.UniqueConstraint('parent_user_id', 'student_id', name='unique_parent_student'),)
@@ -428,6 +402,22 @@ class AmendmentRequest(db.Model):
     student = db.relationship('Student', backref='amendment_requests')
     requested_by = db.relationship('User', foreign_keys=[requested_by_user_id], backref='amendment_requests')
     reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_amendment_requests')
+
+# FERPA Compliance: FERPA Rights Notification Tracking
+class FERPARightsNotification(db.Model):
+    __tablename__ = 'ferpa_rights_notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=True)  # Nullable for parent users
+    notification_year = db.Column(db.Integer, nullable=False)  # Year the notification was sent
+    acknowledged_at = db.Column(db.DateTime, nullable=True)
+    acknowledged_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref='ferpa_notifications')
+    student = db.relationship('Student', backref='ferpa_notifications')
+    acknowledged_by = db.relationship('User', foreign_keys=[acknowledged_by_user_id])
 
 class Schedule(db.Model):
     __tablename__ = 'schedules'
@@ -581,113 +571,245 @@ def init_db():
                     if 'district' not in columns:
                         print("Adding district column to users table...")
                         with db.engine.connect() as conn:
-                            conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
+                            if is_postgres:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(255)"))
+                            else:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN district TEXT"))
                             conn.commit()
-                    
-                    # FERPA Compliance: Add directory_info_opt_out to students table
-                    if 'students' in inspector.get_table_names():
-                        student_columns = [col['name'] for col in inspector.get_columns('students')]
-                        if 'directory_info_opt_out' not in student_columns:
-                            print("Adding directory_info_opt_out column to students table...")
-                            with db.engine.connect() as conn:
-                                if is_postgres:
-                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT FALSE NOT NULL"))
-                                else:
-                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT 0 NOT NULL"))
-                                conn.commit()
-            except Exception as e:
-                print(f"Schema check completed (table may not exist yet or columns already exist): {e}")
+                    if 'claimed_student_name' not in columns:
+                        print("Adding claimed_student_name column to users table...")
+                        with db.engine.connect() as conn:
+                            if is_postgres:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
+                            else:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
+                            conn.commit()
+                    if 'claimed_relationship' not in columns:
+                        print("Adding claimed_relationship column to users table...")
+                        with db.engine.connect() as conn:
+                            if is_postgres:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
+                            else:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
+                            conn.commit()
+            except Exception as inner_e:
+                print(f"Error during database migration: {inner_e}")
+                import traceback
+                traceback.print_exc()
     except Exception as e:
-        print(f"Database initialization error: {e}")
+        print(f"Error initializing database: {e}")
+        import traceback
+        traceback.print_exc()
 
-# Initialize database on app startup (only if not already in app context)
-try:
-    with app.app_context():
-        init_db()
-except Exception as e:
-    print(f"Initial database setup error (will retry on first request): {e}")
-
-# Routes
+# Login route
 @app.route('/login', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def login():
-    if request.method == 'POST':
-        try:
-            data = request.json
-            if not data:
-                return jsonify({'success': False, 'error': 'Invalid request. Please provide username and password.'}), 400
-            
-            username = data.get('username')
-            password = data.get('password')
-            
-            if not username or not password:
-                return jsonify({'success': False, 'error': 'Username and password are required.'}), 400
-            
-            # Check database connection
-            try:
-                from sqlalchemy import text
-                db.session.execute(text('SELECT 1'))
-            except Exception as db_error:
-                app.logger.error(f'Database connection error: {str(db_error)}', exc_info=True)
-                return jsonify({'success': False, 'error': f'Database connection error: {str(db_error)}'}), 500
-            
-            user = User.query.filter_by(username=username).first()
-            
-            # Debug logging for Render
-            if not user:
-                app.logger.warning(f'Login attempt with non-existent username: {username}')
-                # Check total user count for debugging
-                total_users = User.query.count()
-                app.logger.info(f'Total users in database: {total_users}')
-            else:
-                app.logger.info(f'User found: {username}, checking password...')
-                password_check = user.check_password(password)
-                app.logger.info(f'Password check result: {password_check}')
-            
-            if user and user.check_password(password):
-                login_user(user)
-                # HIPAA Compliance: Log successful login
+    if request.method == 'GET':
+        return render_template('login.html')
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid request. Please provide username and password.'}), 400
+        
+        username = data.get('username')
+        password = data.get('password')
+        
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password are required.'}), 400
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password):
+            login_user(user)
+            # HIPAA Compliance: Log successful login
+            log_phi_access(
+                action='LOGIN',
+                user_id=user.id,
+                username=user.username,
+                role=user.role,
+                resource_type='authentication',
+                ip_address=get_remote_address()
+            )
+            return jsonify({'success': True}), 200
+        else:
+            # HIPAA Compliance: Log failed login attempt
+            if user:
                 log_phi_access(
-                    action='LOGIN',
+                    action='LOGIN_FAILED',
                     user_id=user.id,
                     username=user.username,
                     role=user.role,
                     resource_type='authentication',
+                    details='Invalid password',
                     ip_address=get_remote_address()
                 )
-                return jsonify({'success': True}), 200
             else:
-                # HIPAA Compliance: Log failed login attempt
-                if user:
-                    log_phi_access(
-                        action='LOGIN_FAILED',
-                        user_id=user.id,
-                        username=user.username,
-                        role=user.role,
-                        resource_type='authentication',
-                        details='Invalid password',
-                        ip_address=get_remote_address()
-                    )
-                else:
-                    log_phi_access(
-                        action='LOGIN_FAILED',
-                        user_id=None,
-                        username=username,
-                        role='unknown',
-                        resource_type='authentication',
-                        details='User not found',
-                        ip_address=get_remote_address()
-                    )
-                return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
-        except Exception as e:
-            # Log the error for debugging
-            import traceback
-            error_trace = traceback.format_exc()
-            app.logger.error(f'Login error: {str(e)}\n{error_trace}')
-            print(f'Login error: {str(e)}\n{error_trace}')  # Also print to console
-            return jsonify({'success': False, 'error': f'An error occurred during login: {str(e)}'}), 500
-    
-    return render_template('login.html')
+                log_phi_access(
+                    action='LOGIN_FAILED',
+                    user_id=None,
+                    username=username,
+                    role='unknown',
+                    resource_type='authentication',
+                    details='User not found',
+                    ip_address=get_remote_address()
+                )
+            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        app.logger.error(f'Login error: {str(e)}\n{error_trace}')
+        print(f'Login error: {str(e)}\n{error_trace}')  # Also print to console
+        return jsonify({'success': False, 'error': f'An error occurred during login: {str(e)}'}), 500
+
+@app.route('/api/register', methods=['POST'])
+@limiter.limit("10 per minute")
+def register():
+    """Public registration endpoint for creating accounts"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'Invalid request'}), 400
+        
+        role = data.get('role')
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        name = data.get('name', '').strip()
+        
+        # Validate required fields
+        if not role or not username or not password:
+            return jsonify({'error': 'Role, username, and password are required'}), 400
+        
+        # Validate role
+        allowed_roles = ['parent', 'student', 'staff']
+        if role not in allowed_roles:
+            return jsonify({'error': f'Invalid role. Allowed roles: {", ".join(allowed_roles)}'}), 400
+        
+        # Check if username already exists
+        if User.query.filter_by(username=username).first():
+            return jsonify({'error': 'Username already exists'}), 400
+        
+        # Validate password strength
+        is_valid, error_msg = validate_password_strength(password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+        
+        # Create user based on role
+        if role == 'parent':
+            # Parent self-registration: store claimed student name and relationship; no link until admin links
+            claimed_student_name = (data.get('claimed_student_name') or '').strip()
+            relationship = (data.get('relationship') or 'parent').strip()
+            
+            if not claimed_student_name:
+                return jsonify({'error': 'Name of student (e.g. your child) is required for parent accounts'}), 400
+            if not relationship:
+                return jsonify({'error': 'Relationship is required for parent accounts'}), 400
+            
+            parent_user = User(
+                name=name or None,
+                username=username,
+                role='parent',
+                password_hash=generate_password_hash(password),
+                claimed_student_name=claimed_student_name,
+                claimed_relationship=relationship
+            )
+            db.session.add(parent_user)
+            db.session.commit()
+            
+            log_phi_access(
+                action='REGISTER',
+                user_id=None,
+                username=username,
+                role='public',
+                resource_type='parents',
+                resource_id=parent_user.id,
+                details=f"Self-registered parent account (claimed student: {claimed_student_name}); pending admin link",
+                ip_address=get_remote_address()
+            )
+            
+            return jsonify({
+                'id': parent_user.id,
+                'username': parent_user.username,
+                'name': parent_user.name,
+                'message': 'Parent account created successfully. Your account requires verification by an administrator before you can access student records.'
+            }), 201
+        
+        elif role == 'student':
+            # Student accounts require grade
+            grade = data.get('grade')
+            if not grade:
+                return jsonify({'error': 'Grade is required for student accounts'}), 400
+            
+            # Create student user
+            student_user = User(
+                name=name or None,
+                username=username,
+                role='student',
+                password_hash=generate_password_hash(password),
+                grade=grade
+            )
+            db.session.add(student_user)
+            db.session.commit()
+            
+            # Log registration
+            log_phi_access(
+                action='REGISTER',
+                user_id=None,
+                username=username,
+                role='public',
+                resource_type='users',
+                resource_id=student_user.id,
+                details=f"Self-registered student account",
+                ip_address=get_remote_address()
+            )
+            
+            return jsonify({
+                'id': student_user.id,
+                'username': student_user.username,
+                'name': student_user.name,
+                'message': 'Student account created successfully.'
+            }), 201
+        
+        elif role == 'staff':
+            # Staff accounts require designation
+            designation = data.get('designation')
+            if not designation:
+                return jsonify({'error': 'Designation is required for staff accounts'}), 400
+            
+            # Create staff user
+            staff_user = User(
+                name=name or None,
+                username=username,
+                role='staff',
+                password_hash=generate_password_hash(password),
+                designation=designation
+            )
+            db.session.add(staff_user)
+            db.session.commit()
+            
+            # Log registration
+            log_phi_access(
+                action='REGISTER',
+                user_id=None,
+                username=username,
+                role='public',
+                resource_type='users',
+                resource_id=staff_user.id,
+                details=f"Self-registered staff account with designation {designation}",
+                ip_address=get_remote_address()
+            )
+            
+            return jsonify({
+                'id': staff_user.id,
+                'username': staff_user.username,
+                'name': staff_user.name,
+                'message': 'Staff account created successfully. Your account may require approval before full access.'
+            }), 201
+        
+    except Exception as e:
+        app.logger.error(f"Registration error: {str(e)}")
+        return jsonify({'error': 'An error occurred during registration. Please try again.'}), 500
 
 @app.route('/logout')
 @login_required
@@ -888,6 +1010,10 @@ def students():
             else:
                 students = query.order_by(Student.name).all()
             
+            # FERPA Compliance: Filter out students who opted out of directory information
+            # Directory information includes name, email, grade, etc.
+            students = filter_directory_info(students, include_opted_out=False)
+            
             return jsonify([{'id': s.id, 'name': s.name, 'email': s.email, 'card_color': s.card_color} for s in students])
 
 @app.route('/api/students/<int:student_id>', methods=['DELETE'])
@@ -964,6 +1090,8 @@ def students_by_staff_period():
     # Get student details
     if student_ids:
         students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+        # FERPA Compliance: Filter out students who opted out of directory information
+        students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
     else:
         return jsonify([])
@@ -1031,7 +1159,8 @@ def students_by_staff_name():
     # Get student details
     if student_ids:
         students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
-        print(f"Returning {len(students)} students: {[s.name for s in students]}")
+        # FERPA Compliance: Filter out students who opted out of directory information
+        students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
     else:
         print("No students found for this staff member")
@@ -1051,15 +1180,18 @@ def period_data():
         # Only staff and admin can save data
         if current_user.role not in ['staff', 'admin']:
             return jsonify({'error': 'Permission denied'}), 403
+        
         data = request.json
         record_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
-        period = data['period']
-        location = data.get('location', period)
+        period = data.get('period')
+        location = data.get('location', '')
+        students_data = data.get('students', {})
         
         saved_count = 0
         
-        for student_data in data.get('students', []):
-            student_id = student_data['student_id']
+        # Process each student's data
+        for student_id_str, student_data in students_data.items():
+            student_id = int(student_id_str)
             
             # Verify Outside Staff has access to this student
             if current_user.role == 'staff' and current_user.is_outside_staff:
@@ -1118,17 +1250,15 @@ def period_data():
         db.session.commit()
         
         # HIPAA Compliance: Log period data creation/update
-        for student_data in data.get('students', []):
-            log_phi_access(
-                action='CREATE',
-                user_id=current_user.id,
-                username=current_user.username,
-                role=current_user.role,
-                resource_type='period_records',
-                resource_id=student_data['student_id'],
-                details=f"Period: {period}, Date: {record_date}",
-                ip_address=get_remote_address()
-            )
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='period_records',
+            details=f"Period: {period}, Date: {record_date}, Students: {saved_count}",
+            ip_address=get_remote_address()
+        )
         
         return jsonify({'message': f'Saved {saved_count} student records', 'count': saved_count}), 200
     
@@ -1195,35 +1325,34 @@ def period_data():
 @limiter.limit("60 per minute")
 @login_required
 def daily_records():
+    """Get or save daily records"""
     if request.method == 'POST':
-        # Only staff and admin can save records
+        # Only staff and admin can save data
         if current_user.role not in ['staff', 'admin']:
             return jsonify({'error': 'Permission denied'}), 403
+        
         data = request.json
-        student_id = data['student_id']
+        student_id = data.get('student_id')
         
         # Verify Outside Staff has access to this student
         if current_user.role == 'staff' and current_user.is_outside_staff:
             if not has_student_access(current_user, student_id):
                 return jsonify({'error': 'Access denied to this student'}), 403
         
+        attendance_status = data.get('attendance_status')
+        
         record_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
         
-        # Check if record exists
-        existing = DailyRecord.query.filter_by(
-            student_id=student_id, 
-            date=record_date
-        ).first()
-        
-        # HIPAA Compliance: Log daily record creation/update
-        action = 'UPDATE' if existing else 'CREATE'
-        
-        # Get attendance_status from request, or derive from present boolean for backward compatibility
-        attendance_status = data.get('attendance_status')
         if not attendance_status:
             # Migration: convert old present boolean to new attendance_status
             present = data.get('present', True)
             attendance_status = 'present' if present else 'unexcused'
+        
+        # Check if daily record already exists
+        existing = DailyRecord.query.filter_by(
+            student_id=student_id,
+            date=record_date
+        ).first()
         
         if existing:
             daily_record = existing
@@ -1320,14 +1449,20 @@ def daily_records():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         
+        # Get daily records (filtered by student if student role, parent role, or Outside Staff)
         query = DailyRecord.query
-        
-        # Students can only see their own data
-        if current_user.role == 'student':
-            if current_user.student_id:
-                query = query.filter_by(student_id=current_user.student_id)
-            else:
+        if current_user.role == 'student' and current_user.student_id:
+            query = query.filter_by(student_id=current_user.student_id)
+        elif current_user.role == 'parent':
+            # Parents can only see their verified children's records
+            verified_relationships = ParentStudent.query.filter_by(
+                parent_user_id=current_user.id,
+                verified=True
+            ).all()
+            student_ids = [rel.student_id for rel in verified_relationships]
+            if not student_ids:
                 return jsonify([])
+            query = query.filter(DailyRecord.student_id.in_(student_ids))
         elif current_user.role == 'staff' and current_user.is_outside_staff:
             # Outside Staff can only see assigned students
             assigned_student_ids = [assoc.student_id for assoc in 
@@ -2517,18 +2652,6 @@ def case_manager_comparison():
             'infractions': infractions
         }
     
-    # Sort case managers by overall STAR percent (highest to lowest)
-    sorted_managers = sorted(case_manager_data.keys(), key=lambda x: case_manager_data[x]['star_percentages']['overall'], reverse=True)
-    
-    return jsonify({
-        'timeframe': timeframe,
-        'case_managers': case_manager_data,
-        'sorted_managers': sorted_managers
-    })
-
-@app.route('/api/import-csv', methods=['POST'])
-@limiter.limit("10 per minute")
-@login_required
 @staff_required
 def import_csv():
     """Import data from CSV files"""
@@ -3326,18 +3449,22 @@ def schedules():
         
         result = [{
             'id': s.id,
+            'schedule_type': s.schedule_type,
+            'user_id': s.user_id,
+            'student_id': s.student_id,
             'time_period': s.time_period,
             'class_name': s.class_name,
-            'staff_name': s.staff_name
+            'staff_name': s.staff_name,
+            'sort_order': s.sort_order
         } for s in schedules]
         
         return jsonify(result)
 
-@app.route('/api/schedules/all-locations', methods=['GET'])
-@limiter.limit("60 per minute")
+@app.route('/api/schedules/locations', methods=['GET'])
+@limiter.limit("30 per minute")
 @login_required
-def all_schedule_locations():
-    """Get all unique class_name values from all staff schedules"""
+def get_schedule_locations():
+    """Get list of unique class names from teacher schedules"""
     if current_user.role not in ['staff', 'admin']:
         return jsonify({'error': 'Permission denied'}), 403
     
@@ -3427,10 +3554,6 @@ def manage_users():
         if not data:
             return jsonify({'error': 'Invalid request. JSON data required.'}), 400
         
-        # Validate required fields
-        username = data.get('username', '').strip() if data.get('username') else ''
-        password = data.get('password', '')
-        role = data.get('role', '').strip() if data.get('role') else ''
         
         if not username:
             return jsonify({'error': 'Username is required'}), 400
@@ -3438,10 +3561,6 @@ def manage_users():
             return jsonify({'error': 'Password is required'}), 400
         if not role:
             return jsonify({'error': 'Role is required'}), 400
-        
-        # HIPAA Compliance: Validate password strength
-        is_valid, error_msg = validate_password_strength(password)
-        if not is_valid:
             return jsonify({'error': error_msg}), 400
         
         # Permission check: Admin can create anyone, staff can only create students
@@ -3805,12 +3924,16 @@ def parents():
         db.session.add(parent_user)
         db.session.flush()
         
-        # Create parent-student relationship (unverified initially)
+        # Create parent-student relationship
+        # If created by admin/staff, automatically verify it
+        is_admin_created = current_user.is_authenticated and current_user.role in ['admin', 'staff']
         parent_student = ParentStudent(
             parent_user_id=parent_user.id,
             student_id=student_id,
             relationship=relationship,
-            verified=False
+            verified=is_admin_created,
+            verified_by_user_id=current_user.id if is_admin_created else None,
+            verified_at=datetime.utcnow() if is_admin_created else None
         )
         db.session.add(parent_student)
         db.session.commit()
@@ -3818,12 +3941,12 @@ def parents():
         # Log parent account creation
         log_phi_access(
             action='CREATE',
-            user_id=current_user.id,
-            username=current_user.username,
-            role=current_user.role,
+            user_id=current_user.id if current_user.is_authenticated else None,
+            username=current_user.username if current_user.is_authenticated else 'self_registration',
+            role=current_user.role if current_user.is_authenticated else 'public',
             resource_type='parents',
             resource_id=parent_user.id,
-            details=f"Created parent account for student {student_id}",
+            details=f"Created parent account for student {student_id}" + (" (auto-verified)" if is_admin_created else " (pending verification)"),
             ip_address=get_remote_address()
         )
         
@@ -3831,19 +3954,30 @@ def parents():
             'id': parent_user.id,
             'username': parent_user.username,
             'name': parent_user.name,
-            'message': 'Parent account created. Requires verification before access.'
+            'message': 'Parent account created.' + (' Relationship verified.' if is_admin_created else ' Requires verification before access.')
         }), 201
     
     else:
         # GET: List parents (admin/staff only)
+        current_year = datetime.now().year
         parents_list = User.query.filter_by(role='parent').all()
         result = []
         for parent in parents_list:
             relationships = ParentStudent.query.filter_by(parent_user_id=parent.id).all()
+            frn = FERPARightsNotification.query.filter_by(
+                user_id=parent.id,
+                notification_year=current_year
+            ).first()
+            ferpa_acknowledged = frn is not None and frn.acknowledged_at is not None
+            ferpa_acknowledged_at = frn.acknowledged_at.isoformat() if frn and frn.acknowledged_at else None
             result.append({
                 'id': parent.id,
                 'name': parent.name,
                 'username': parent.username,
+                'claimed_student_name': parent.claimed_student_name,
+                'claimed_relationship': parent.claimed_relationship,
+                'ferpa_acknowledged': ferpa_acknowledged,
+                'ferpa_acknowledged_at': ferpa_acknowledged_at,
                 'students': [{
                     'student_id': rel.student_id,
                     'student_name': rel.student.name if rel.student else None,
@@ -3891,6 +4025,85 @@ def verify_parent(parent_id):
     )
     
     return jsonify({'message': 'Parent verified successfully'}), 200
+
+@app.route('/api/parents/<int:parent_id>/students', methods=['POST', 'DELETE'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def manage_parent_students(parent_id):
+    """Add or remove student relationships for a parent"""
+    parent = User.query.get(parent_id)
+    if not parent or parent.role != 'parent':
+        return jsonify({'error': 'Parent not found'}), 404
+    
+    data = request.json
+    student_id = data.get('student_id')
+    relationship = data.get('relationship', 'parent')
+    
+    if not student_id:
+        return jsonify({'error': 'student_id is required'}), 400
+    
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+    
+    if request.method == 'POST':
+        # Add relationship
+        existing = ParentStudent.query.filter_by(
+            parent_user_id=parent_id,
+            student_id=student_id
+        ).first()
+        
+        if existing:
+            return jsonify({'error': 'Relationship already exists'}), 400
+        
+        parent_student = ParentStudent(
+            parent_user_id=parent_id,
+            student_id=student_id,
+            relationship=relationship,
+            verified=False
+        )
+        db.session.add(parent_student)
+        db.session.commit()
+        
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='parent_students',
+            resource_id=parent_student.id,
+            details=f"Added student {student_id} to parent {parent_id}",
+            ip_address=get_remote_address()
+        )
+        
+        return jsonify({'message': 'Student relationship added successfully'}), 201
+    
+    else:  # DELETE
+        parent_student = ParentStudent.query.filter_by(
+            parent_user_id=parent_id,
+            student_id=student_id
+        ).first()
+        
+        if not parent_student:
+            return jsonify({'error': 'Relationship not found'}), 404
+        
+        relationship_id = parent_student.id
+        db.session.delete(parent_student)
+        db.session.commit()
+        
+        log_phi_access(
+            action='DELETE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='parent_students',
+            resource_id=relationship_id,
+            details=f"Removed student {student_id} from parent {parent_id}",
+            ip_address=get_remote_address()
+        )
+        
+        return jsonify({'message': 'Student relationship removed successfully'}), 200
 
 # FERPA Compliance: Amendment Request Endpoints
 @app.route('/api/amendment-requests', methods=['GET', 'POST'])
@@ -4145,6 +4358,75 @@ def export_student_data(student_id):
     )
     
     return jsonify(export_data), 200
+
+# FERPA Compliance: FERPA Rights Notification Endpoint
+@app.route('/api/ferpa-notification', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
+@login_required
+def ferpa_notification():
+    """Handle FERPA rights notification acknowledgment"""
+    if request.method == 'POST':
+        # Acknowledge FERPA rights notification
+        data = request.json or {}
+        notification_year = data.get('notification_year')
+        student_id = data.get('student_id')  # Optional, for parent users
+        
+        if not notification_year:
+            return jsonify({'error': 'Notification year is required'}), 400
+        
+        # Check if notification already exists for this year
+        existing = FERPARightsNotification.query.filter_by(
+            user_id=current_user.id,
+            notification_year=notification_year
+        ).first()
+        
+        if existing:
+            # Update existing acknowledgment
+            existing.acknowledged_at = datetime.utcnow()
+            existing.acknowledged_by_user_id = current_user.id
+            if student_id:
+                existing.student_id = student_id
+        else:
+            # Create new acknowledgment
+            notification = FERPARightsNotification(
+                user_id=current_user.id,
+                student_id=student_id,
+                notification_year=notification_year,
+                acknowledged_at=datetime.utcnow(),
+                acknowledged_by_user_id=current_user.id
+            )
+            db.session.add(notification)
+        
+        db.session.commit()
+        
+        # Log acknowledgment
+        log_phi_access(
+            action='FERPA_RIGHTS_ACKNOWLEDGED',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='ferpa_notifications',
+            details=f'FERPA rights acknowledged for year {notification_year}',
+            ip_address=get_remote_address()
+        )
+        
+        return jsonify({'message': 'FERPA rights acknowledgment recorded', 'acknowledged': True}), 200
+    
+    else:
+        # GET: Check if notification has been acknowledged
+        notification_year = request.args.get('year', type=int)
+        if not notification_year:
+            notification_year = datetime.now().year
+        
+        notification = FERPARightsNotification.query.filter_by(
+            user_id=current_user.id,
+            notification_year=notification_year
+        ).first()
+        
+        return jsonify({
+            'acknowledged': notification is not None and notification.acknowledged_at is not None,
+            'acknowledged_at': notification.acknowledged_at.isoformat() if notification and notification.acknowledged_at else None
+        }), 200
 
 # Bank Account Helper Functions
 def get_student_case_manager(student_id):
