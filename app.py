@@ -19,11 +19,25 @@ app = Flask(__name__)
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
     # Render provides DATABASE_URL with postgres://, but SQLAlchemy needs postgresql+psycopg:// for psycopg3
+    # Also handle postgresql:// URLs that might come from newer Render setups
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql+psycopg://', 1)
-    elif database_url.startswith('postgresql://'):
+    elif database_url.startswith('postgresql://') and '+psycopg' not in database_url:
         database_url = database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
+    
+    # Render PostgreSQL requires SSL - add SSL parameters if not already present
+    if 'sslmode' not in database_url.lower():
+        # Add sslmode=require to the connection string
+        separator = '&' if '?' in database_url else '?'
+        database_url = f"{database_url}{separator}sslmode=require"
+    
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    # Configure connection pool for production (Flask-SQLAlchemy uses these via SQLALCHEMY_ENGINE_OPTIONS)
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'pool_recycle': 300,
+        'pool_pre_ping': True,  # Verify connections before using them
+    }
 else:
     # Local development: Use instance folder for database (Flask convention)
     instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
@@ -543,63 +557,131 @@ def init_db():
     """Initialize database tables if they don't exist"""
     try:
         with app.app_context():
+            # Test database connection first
+            try:
+                db.engine.connect()
+                print("Database connection successful")
+            except Exception as conn_error:
+                print(f"Database connection error: {conn_error}")
+                import traceback
+                traceback.print_exc()
+                raise
+            
+            # Create all tables
             db.create_all()
-            # Ensure OutsideStaffStudent table exists
+            print("Database tables created/verified")
+            
+            # Ensure OutsideStaffStudent table exists and run migrations
             try:
                 from sqlalchemy import inspect, text
+                from sqlalchemy.exc import OperationalError, ProgrammingError
+                
                 inspector = inspect(db.engine)
+                table_names = inspector.get_table_names()
+                
                 # Check if outside_staff_students table exists
-                if 'outside_staff_students' not in inspector.get_table_names():
+                if 'outside_staff_students' not in table_names:
                     print("Creating outside_staff_students table...")
                     db.create_all()
+                
                 # Verify columns exist in users table
-                if 'users' in inspector.get_table_names():
+                if 'users' in table_names:
                     columns = [col['name'] for col in inspector.get_columns('users')]
                     # Check if we're using PostgreSQL or SQLite
                     is_postgres = 'postgresql' in str(db.engine.url).lower()
                     
                     if 'is_outside_staff' not in columns:
                         print("Adding is_outside_staff column to users table...")
-                        with db.engine.connect() as conn:
-                            if is_postgres:
-                                # PostgreSQL syntax
-                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT FALSE NOT NULL"))
-                            else:
-                                # SQLite syntax
-                                conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT 0 NOT NULL"))
-                            conn.commit()
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    # PostgreSQL syntax
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT FALSE NOT NULL"))
+                                else:
+                                    # SQLite syntax
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN is_outside_staff BOOLEAN DEFAULT 0 NOT NULL"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            # Column might already exist or other error
+                            print(f"Note: Could not add is_outside_staff column (may already exist): {e}")
+                    
                     if 'district' not in columns:
                         print("Adding district column to users table...")
-                        with db.engine.connect() as conn:
-                            if is_postgres:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(255)"))
-                            else:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN district TEXT"))
-                            conn.commit()
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(255)"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN district TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add district column (may already exist): {e}")
+                    
                     if 'claimed_student_name' not in columns:
                         print("Adding claimed_student_name column to users table...")
-                        with db.engine.connect() as conn:
-                            if is_postgres:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
-                            else:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
-                            conn.commit()
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN claimed_student_name VARCHAR(200)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add claimed_student_name column (may already exist): {e}")
+                    
                     if 'claimed_relationship' not in columns:
                         print("Adding claimed_relationship column to users table...")
-                        with db.engine.connect() as conn:
-                            if is_postgres:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
-                            else:
-                                conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
-                            conn.commit()
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN claimed_relationship VARCHAR(50)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add claimed_relationship column (may already exist): {e}")
             except Exception as inner_e:
                 print(f"Error during database migration: {inner_e}")
                 import traceback
                 traceback.print_exc()
+                # Don't raise - migrations are optional
     except Exception as e:
         print(f"Error initializing database: {e}")
         import traceback
         traceback.print_exc()
+        # Re-raise to ensure we know about connection failures
+        raise
+
+# Initialize database when module is imported (for gunicorn/production)
+# This ensures tables are created even when app is imported by gunicorn
+_db_initialized = False
+try:
+    init_db()
+    _db_initialized = True
+    print("Database initialized successfully on import")
+except Exception as e:
+    print(f"Warning: Database initialization failed on import: {e}")
+    import traceback
+    traceback.print_exc()
+    # Don't fail completely - let the app start and try again on first request
+    # The database might not be ready yet, or there might be a connection issue
+    _db_initialized = False
+
+# Ensure database is initialized before handling requests
+@app.before_request
+def ensure_db_initialized():
+    """Ensure database is initialized before handling requests"""
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            init_db()
+            _db_initialized = True
+            print("Database initialized successfully on first request")
+        except Exception as e:
+            print(f"Database initialization still failing: {e}")
+            # Log but don't block - let the route handle the error
+            import traceback
+            traceback.print_exc()
 
 # Login route
 @app.route('/login', methods=['GET', 'POST'])
