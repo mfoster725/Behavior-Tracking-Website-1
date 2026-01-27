@@ -145,20 +145,11 @@ def has_student_access(user, student_id):
     - User is a student and it's their own student_id
     - User is regular staff (not outside staff) - has access to all
     - User is outside staff and the student is assigned to them
-    - User is a parent and the student is their child (and relationship is verified)
     """
     if user.role == 'admin':
         return True
     if user.role == 'student':
         return user.student_id == student_id
-    if user.role == 'parent':
-        # Check if parent has verified relationship with student
-        relationship = ParentStudent.query.filter_by(
-            parent_user_id=user.id,
-            student_id=student_id,
-            verified=True
-        ).first()
-        return relationship is not None
     if user.role == 'staff':
         if user.is_outside_staff:
             # Check if student is assigned to this outside staff user
@@ -703,6 +694,10 @@ def login():
         
         user = User.query.filter_by(username=username).first()
         
+        # Prevent parent logins
+        if user and user.role == 'parent':
+            return jsonify({'success': False, 'error': 'Parent accounts are no longer supported. Please contact an administrator.'}), 403
+        
         if user and user.check_password(password):
             login_user(user)
             # HIPAA Compliance: Log successful login
@@ -764,7 +759,7 @@ def register():
             return jsonify({'error': 'Role, username, and password are required'}), 400
         
         # Validate role
-        allowed_roles = ['parent', 'student', 'staff']
+        allowed_roles = ['student', 'staff']
         if role not in allowed_roles:
             return jsonify({'error': f'Invalid role. Allowed roles: {", ".join(allowed_roles)}'}), 400
         
@@ -778,46 +773,7 @@ def register():
             return jsonify({'error': error_msg}), 400
         
         # Create user based on role
-        if role == 'parent':
-            # Parent self-registration: store claimed student name and relationship; no link until admin links
-            claimed_student_name = (data.get('claimed_student_name') or '').strip()
-            relationship = (data.get('relationship') or 'parent').strip()
-            
-            if not claimed_student_name:
-                return jsonify({'error': 'Name of student (e.g. your child) is required for parent accounts'}), 400
-            if not relationship:
-                return jsonify({'error': 'Relationship is required for parent accounts'}), 400
-            
-            parent_user = User(
-                name=name or None,
-                username=username,
-                role='parent',
-                password_hash=generate_password_hash(password),
-                claimed_student_name=claimed_student_name,
-                claimed_relationship=relationship
-            )
-            db.session.add(parent_user)
-            db.session.commit()
-            
-            log_phi_access(
-                action='REGISTER',
-                user_id=None,
-                username=username,
-                role='public',
-                resource_type='parents',
-                resource_id=parent_user.id,
-                details=f"Self-registered parent account (claimed student: {claimed_student_name}); pending admin link",
-                ip_address=get_remote_address()
-            )
-            
-            return jsonify({
-                'id': parent_user.id,
-                'username': parent_user.username,
-                'name': parent_user.name,
-                'message': 'Parent account created successfully. Your account requires verification by an administrator before you can access student records.'
-            }), 201
-        
-        elif role == 'student':
+        if role == 'student':
             # Student accounts require grade
             grade = data.get('grade')
             if not grade:
@@ -1016,27 +972,6 @@ def students():
                     ip_address=get_remote_address()
                 )
                 return jsonify([{'id': student.id, 'name': student.name, 'email': student.email}])
-            return jsonify([])
-        elif current_user.role == 'parent':
-            # Parents can only see their verified children
-            verified_relationships = ParentStudent.query.filter_by(
-                parent_user_id=current_user.id,
-                verified=True
-            ).all()
-            student_ids = [rel.student_id for rel in verified_relationships]
-            if student_ids:
-                students = Student.query.filter(Student.id.in_(student_ids)).all()
-                # HIPAA Compliance: Log parent data access
-                log_phi_access(
-                    action='VIEW',
-                    user_id=current_user.id,
-                    username=current_user.username,
-                    role=current_user.role,
-                    resource_type='students',
-                    resource_id='children',
-                    ip_address=get_remote_address()
-                )
-                return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
             return jsonify([])
         else:
             # HIPAA Compliance: Log student list access
@@ -1360,20 +1295,10 @@ def period_data():
             ip_address=get_remote_address()
         )
         
-        # Get daily records for this date (filtered by student if student role, parent role, or Outside Staff)
+        # Get daily records for this date (filtered by student if student role or Outside Staff)
         query = DailyRecord.query.filter_by(date=record_date)
         if current_user.role == 'student' and current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
-        elif current_user.role == 'parent':
-            # Parents can only see their verified children's records
-            verified_relationships = ParentStudent.query.filter_by(
-                parent_user_id=current_user.id,
-                verified=True
-            ).all()
-            student_ids = [rel.student_id for rel in verified_relationships]
-            if not student_ids:
-                return jsonify([])
-            query = query.filter(DailyRecord.student_id.in_(student_ids))
         elif current_user.role == 'staff' and current_user.is_outside_staff:
             # Outside Staff can only see assigned students
             assigned_student_ids = [assoc.student_id for assoc in 
@@ -1502,6 +1427,7 @@ def daily_records():
         db.session.commit()
         
         # HIPAA Compliance: Log daily record creation/update
+        action = 'UPDATE' if existing else 'CREATE'
         log_phi_access(
             action=action,
             user_id=current_user.id,
@@ -1531,20 +1457,10 @@ def daily_records():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         
-        # Get daily records (filtered by student if student role, parent role, or Outside Staff)
+        # Get daily records (filtered by student if student role or Outside Staff)
         query = DailyRecord.query
         if current_user.role == 'student' and current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
-        elif current_user.role == 'parent':
-            # Parents can only see their verified children's records
-            verified_relationships = ParentStudent.query.filter_by(
-                parent_user_id=current_user.id,
-                verified=True
-            ).all()
-            student_ids = [rel.student_id for rel in verified_relationships]
-            if not student_ids:
-                return jsonify([])
-            query = query.filter(DailyRecord.student_id.in_(student_ids))
         elif current_user.role == 'staff' and current_user.is_outside_staff:
             # Outside Staff can only see assigned students
             assigned_student_ids = [assoc.student_id for assoc in 
@@ -1693,28 +1609,12 @@ def summary():
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
-    # Students and parents can only see their own/their child's summary
+    # Students can only see their own summary
     if current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
         else:
             return jsonify({'error': 'No student record linked'}), 404
-    elif current_user.role == 'parent':
-        # Parents can only see their verified children's summaries
-        verified_relationships = ParentStudent.query.filter_by(
-            parent_user_id=current_user.id,
-            verified=True
-        ).all()
-        student_ids = [rel.student_id for rel in verified_relationships]
-        if not student_ids:
-            return jsonify({'error': 'No verified student relationships'}), 404
-        if student_id:
-            # Verify parent has access to this student
-            if student_id not in student_ids:
-                return jsonify({'error': 'Access denied to this student'}), 403
-            query = query.filter_by(student_id=student_id)
-        else:
-            query = query.filter(DailyRecord.student_id.in_(student_ids))
     elif current_user.role == 'staff' and current_user.is_outside_staff:
         # Outside Staff can only see assigned students
         assigned_student_ids = [assoc.student_id for assoc in 
@@ -2891,7 +2791,7 @@ def frenzy_stats():
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
-    # Students and parents can only see their own/their child's frenzy stats
+    # Students can only see their own frenzy stats
     if current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
@@ -2907,32 +2807,6 @@ def frenzy_stats():
                 'all_purposes': [],
                 'all_results': []
             })
-    elif current_user.role == 'parent':
-        # Parents can only see their verified children's data
-        verified_relationships = ParentStudent.query.filter_by(
-            parent_user_id=current_user.id,
-            verified=True
-        ).all()
-        student_ids = [rel.student_id for rel in verified_relationships]
-        if not student_ids:
-            return jsonify({
-                'by_day': {},
-                'by_time': {},
-                'by_location': {},
-                'by_purpose': {},
-                'total_count': 0,
-                'total_duration': 0,
-                'avg_duration': 0,
-                'all_purposes': [],
-                'all_results': []
-            })
-        if student_id:
-            # Verify parent has access to this student
-            if student_id not in student_ids:
-                return jsonify({'error': 'Access denied to this student'}), 403
-            query = query.filter_by(student_id=student_id)
-        else:
-            query = query.filter(DailyRecord.student_id.in_(student_ids))
     elif current_user.role == 'staff' and current_user.is_outside_staff:
         # Outside Staff can only see assigned students
         assigned_student_ids = [assoc.student_id for assoc in 
@@ -3962,230 +3836,6 @@ def team_members(student_id):
         
         db.session.commit()
         return jsonify({'message': 'Team members updated successfully'}), 200
-
-# FERPA Compliance: Parent Management Endpoints
-@app.route('/api/parents', methods=['GET', 'POST'])
-@limiter.limit("30 per minute")
-@login_required
-@staff_required
-def parents():
-    """Manage parent accounts and parent-student relationships"""
-    if request.method == 'POST':
-        # Create parent account and link to student
-        data = request.json
-        student_id = data.get('student_id')
-        parent_name = data.get('name', '').strip()
-        parent_username = data.get('username', '').strip()
-        parent_password = data.get('password', '')
-        relationship = data.get('relationship', 'parent')
-        
-        if not student_id or not parent_username or not parent_password:
-            return jsonify({'error': 'student_id, username, and password are required'}), 400
-        
-        # Verify student exists
-        student = Student.query.get(student_id)
-        if not student:
-            return jsonify({'error': 'Student not found'}), 404
-        
-        # Check if username already exists
-        if User.query.filter_by(username=parent_username).first():
-            return jsonify({'error': 'Username already exists'}), 400
-        
-        # Validate password strength
-        is_valid, error_msg = validate_password_strength(parent_password)
-        if not is_valid:
-            return jsonify({'error': error_msg}), 400
-        
-        # Create parent user
-        parent_user = User(
-            name=parent_name or None,
-            username=parent_username,
-            role='parent',
-            password_hash=generate_password_hash(parent_password)
-        )
-        db.session.add(parent_user)
-        db.session.flush()
-        
-        # Create parent-student relationship
-        # If created by admin/staff, automatically verify it
-        is_admin_created = current_user.is_authenticated and current_user.role in ['admin', 'staff']
-        parent_student = ParentStudent(
-            parent_user_id=parent_user.id,
-            student_id=student_id,
-            relationship=relationship,
-            verified=is_admin_created,
-            verified_by_user_id=current_user.id if is_admin_created else None,
-            verified_at=datetime.utcnow() if is_admin_created else None
-        )
-        db.session.add(parent_student)
-        db.session.commit()
-        
-        # Log parent account creation
-        log_phi_access(
-            action='CREATE',
-            user_id=current_user.id if current_user.is_authenticated else None,
-            username=current_user.username if current_user.is_authenticated else 'self_registration',
-            role=current_user.role if current_user.is_authenticated else 'public',
-            resource_type='parents',
-            resource_id=parent_user.id,
-            details=f"Created parent account for student {student_id}" + (" (auto-verified)" if is_admin_created else " (pending verification)"),
-            ip_address=get_remote_address()
-        )
-        
-        return jsonify({
-            'id': parent_user.id,
-            'username': parent_user.username,
-            'name': parent_user.name,
-            'message': 'Parent account created.' + (' Relationship verified.' if is_admin_created else ' Requires verification before access.')
-        }), 201
-    
-    else:
-        # GET: List parents (admin/staff only)
-        current_year = datetime.now().year
-        parents_list = User.query.filter_by(role='parent').all()
-        result = []
-        for parent in parents_list:
-            relationships = ParentStudent.query.filter_by(parent_user_id=parent.id).all()
-            frn = FERPARightsNotification.query.filter_by(
-                user_id=parent.id,
-                notification_year=current_year
-            ).first()
-            ferpa_acknowledged = frn is not None and frn.acknowledged_at is not None
-            ferpa_acknowledged_at = frn.acknowledged_at.isoformat() if frn and frn.acknowledged_at else None
-            result.append({
-                'id': parent.id,
-                'name': parent.name,
-                'username': parent.username,
-                'claimed_student_name': parent.claimed_student_name,
-                'claimed_relationship': parent.claimed_relationship,
-                'ferpa_acknowledged': ferpa_acknowledged,
-                'ferpa_acknowledged_at': ferpa_acknowledged_at,
-                'students': [{
-                    'student_id': rel.student_id,
-                    'student_name': rel.student.name if rel.student else None,
-                    'relationship': rel.relationship,
-                    'verified': rel.verified
-                } for rel in relationships]
-            })
-        return jsonify(result)
-
-@app.route('/api/parents/<int:parent_id>/verify', methods=['POST'])
-@limiter.limit("30 per minute")
-@login_required
-@staff_required
-def verify_parent(parent_id):
-    """Verify a parent-student relationship (allows parent to access student records)"""
-    data = request.json
-    student_id = data.get('student_id')
-    
-    if not student_id:
-        return jsonify({'error': 'student_id is required'}), 400
-    
-    parent_student = ParentStudent.query.filter_by(
-        parent_user_id=parent_id,
-        student_id=student_id
-    ).first()
-    
-    if not parent_student:
-        return jsonify({'error': 'Parent-student relationship not found'}), 404
-    
-    parent_student.verified = True
-    parent_student.verified_by_user_id = current_user.id
-    parent_student.verified_at = datetime.utcnow()
-    db.session.commit()
-    
-    # Log verification
-    log_phi_access(
-        action='VERIFY',
-        user_id=current_user.id,
-        username=current_user.username,
-        role=current_user.role,
-        resource_type='parent_students',
-        resource_id=parent_student.id,
-        details=f"Verified parent {parent_id} access to student {student_id}",
-        ip_address=get_remote_address()
-    )
-    
-    return jsonify({'message': 'Parent verified successfully'}), 200
-
-@app.route('/api/parents/<int:parent_id>/students', methods=['POST', 'DELETE'])
-@limiter.limit("30 per minute")
-@login_required
-@staff_required
-def manage_parent_students(parent_id):
-    """Add or remove student relationships for a parent"""
-    parent = User.query.get(parent_id)
-    if not parent or parent.role != 'parent':
-        return jsonify({'error': 'Parent not found'}), 404
-    
-    data = request.json
-    student_id = data.get('student_id')
-    relationship = data.get('relationship', 'parent')
-    
-    if not student_id:
-        return jsonify({'error': 'student_id is required'}), 400
-    
-    student = Student.query.get(student_id)
-    if not student:
-        return jsonify({'error': 'Student not found'}), 404
-    
-    if request.method == 'POST':
-        # Add relationship
-        existing = ParentStudent.query.filter_by(
-            parent_user_id=parent_id,
-            student_id=student_id
-        ).first()
-        
-        if existing:
-            return jsonify({'error': 'Relationship already exists'}), 400
-        
-        parent_student = ParentStudent(
-            parent_user_id=parent_id,
-            student_id=student_id,
-            relationship=relationship,
-            verified=False
-        )
-        db.session.add(parent_student)
-        db.session.commit()
-        
-        log_phi_access(
-            action='CREATE',
-            user_id=current_user.id,
-            username=current_user.username,
-            role=current_user.role,
-            resource_type='parent_students',
-            resource_id=parent_student.id,
-            details=f"Added student {student_id} to parent {parent_id}",
-            ip_address=get_remote_address()
-        )
-        
-        return jsonify({'message': 'Student relationship added successfully'}), 201
-    
-    else:  # DELETE
-        parent_student = ParentStudent.query.filter_by(
-            parent_user_id=parent_id,
-            student_id=student_id
-        ).first()
-        
-        if not parent_student:
-            return jsonify({'error': 'Relationship not found'}), 404
-        
-        relationship_id = parent_student.id
-        db.session.delete(parent_student)
-        db.session.commit()
-        
-        log_phi_access(
-            action='DELETE',
-            user_id=current_user.id,
-            username=current_user.username,
-            role=current_user.role,
-            resource_type='parent_students',
-            resource_id=relationship_id,
-            details=f"Removed student {student_id} from parent {parent_id}",
-            ip_address=get_remote_address()
-        )
-        
-        return jsonify({'message': 'Student relationship removed successfully'}), 200
 
 # FERPA Compliance: Amendment Request Endpoints
 @app.route('/api/amendment-requests', methods=['GET', 'POST'])

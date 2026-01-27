@@ -320,8 +320,8 @@ document.addEventListener('DOMContentLoaded', () => {
             loadSchedules('teacher');
         }
         
-        // FERPA Compliance: Check if user needs to acknowledge FERPA rights
-        checkAndShowFERPANotification();
+        
+        // If user is a parent, ensure parent portal view is active and load children
         
         console.log('Initialization complete');
     } catch (error) {
@@ -585,11 +585,11 @@ function setupEventListeners() {
                 console.log('Add student button clicked');
                 // Clear all fields
                 document.getElementById('student-name').value = '';
-                document.getElementById('student-email').value = '';
                 document.getElementById('student-grade').value = '';
                 document.getElementById('student-card-color').value = '';
                 document.getElementById('student-username').value = '';
                 document.getElementById('student-password').value = '';
+                document.getElementById('student-password-confirm').value = '';
                 // Set up team member button handlers
                 setupTeamMemberButtons();
                 
@@ -601,6 +601,30 @@ function setupEventListeners() {
                 populateTeamMemberRows('paraprofessional-container', [], ['paraprofessional']);
                 
                 document.getElementById('student-modal').style.display = 'block';
+            });
+        }
+
+        // Real-time validation for student initials
+        const studentNameInput = document.getElementById('student-name');
+        if (studentNameInput) {
+            studentNameInput.addEventListener('input', function() {
+                const value = this.value;
+                const formGroup = this.closest('.form-group');
+                let warningMsg = formGroup.querySelector('.initials-warning');
+                
+                if (value.length > 4) {
+                    if (!warningMsg) {
+                        warningMsg = document.createElement('small');
+                        warningMsg.className = 'initials-warning';
+                        warningMsg.style.color = '#dc3545';
+                        warningMsg.style.display = 'block';
+                        warningMsg.style.marginTop = '5px';
+                        formGroup.appendChild(warningMsg);
+                    }
+                    warningMsg.textContent = 'Only initials should be entered (maximum 4 characters). Example: Jane Doe = JD';
+                } else if (warningMsg) {
+                    warningMsg.remove();
+                }
             });
         }
 
@@ -790,15 +814,6 @@ function setupEventListeners() {
             });
         }
 
-        const importCsvBtn = document.getElementById('import-csv-btn');
-        if (importCsvBtn) {
-            importCsvBtn.addEventListener('click', () => {
-                console.log('Import CSV button clicked');
-                importCSV();
-            });
-        } else {
-            console.warn('import-csv-btn not found');
-        }
 
         // Admin panel buttons
         const addStaffBtn = document.getElementById('add-staff-btn');
@@ -824,22 +839,6 @@ function setupEventListeners() {
             });
         }
 
-        const addParentBtn = document.getElementById('add-parent-btn');
-        if (addParentBtn) {
-            addParentBtn.addEventListener('click', async () => {
-                hideModalError('parent-user-modal');
-                await loadStudents();
-                const input = document.getElementById('parent-user-student-combobox-input');
-                const hidden = document.getElementById('parent-user-student-id');
-                const dropdown = document.getElementById('parent-user-student-dropdown');
-                if (input) { input.value = ''; input.placeholder = 'Type to search students...'; }
-                if (hidden) hidden.value = '';
-                if (dropdown) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; }
-                document.getElementById('parent-user-modal').style.display = 'block';
-                if (input) input.focus();
-            });
-        }
-        setupParentUserStudentCombobox();
         setupEditParentAddStudentCombobox();
 
         const createStaffAccountBtn = document.getElementById('create-staff-account-btn');
@@ -884,12 +883,6 @@ function setupEventListeners() {
             });
         }
 
-        const saveParentUserBtn = document.getElementById('save-parent-user-btn');
-        if (saveParentUserBtn) {
-            saveParentUserBtn.addEventListener('click', () => {
-                saveParentUser();
-            });
-        }
 
         const saveEditUserBtn = document.getElementById('save-edit-user-btn');
         if (saveEditUserBtn) {
@@ -3236,11 +3229,11 @@ async function saveDailyRecord() {
 
 async function saveStudent() {
     const name = document.getElementById('student-name').value;
-    const email = document.getElementById('student-email').value;
     const grade = document.getElementById('student-grade').value;
     const cardColor = document.getElementById('student-card-color')?.value || '';
     const username = document.getElementById('student-username').value;
     const password = document.getElementById('student-password').value;
+    const passwordConfirm = document.getElementById('student-password-confirm').value;
     
     // Get values from team member containers as arrays
     const caseManager = getSelectedTeamMembers('case-manager-container');
@@ -3251,7 +3244,12 @@ async function saveStudent() {
 
     // Validation
     if (!name || !name.trim()) {
-        alert('Please enter a student name');
+        alert('Please enter student initials');
+        return;
+    }
+
+    if (name.length > 4) {
+        alert('Please enter only initials (maximum 4 characters). Example: Jane Doe = JD');
         return;
     }
 
@@ -3265,13 +3263,17 @@ async function saveStudent() {
         return;
     }
 
+    if (password !== passwordConfirm) {
+        alert('Passwords do not match. Please re-enter your password.');
+        return;
+    }
+
     try {
         const response = await fetch('/api/students', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name.trim(),
-                email: email.trim(),
                 grade: grade,
                 card_color: cardColor || null,
                 username: username.trim(),
@@ -3291,11 +3293,11 @@ async function saveStudent() {
             
             // Clear all fields
             document.getElementById('student-name').value = '';
-            document.getElementById('student-email').value = '';
             document.getElementById('student-grade').value = '';
             document.getElementById('student-card-color').value = '';
             document.getElementById('student-username').value = '';
             document.getElementById('student-password').value = '';
+            document.getElementById('student-password-confirm').value = '';
             // Clear team member containers
             document.getElementById('case-manager-container').innerHTML = '';
             document.getElementById('practitioner-container').innerHTML = '';
@@ -7761,7 +7763,6 @@ async function loadUsers() {
         const staffTbody = document.getElementById('staff-users-table-body');
         const studentTbody = document.getElementById('student-users-table-body');
         const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
-        const parentTbody = document.getElementById('parent-users-table-body');
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
         
@@ -7769,19 +7770,17 @@ async function loadUsers() {
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
         if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
-        if (parentTbody) parentTbody.innerHTML = '';
         
         if (users.length === 0) {
             studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
             return;
         }
         
-        // Separate users by role
+        // Separate users by role (excluding parent role)
         const adminUsers = users.filter(u => u.role === 'admin');
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
         const studentUsers = users.filter(u => u.role === 'student');
-        const parentUsers = users.filter(u => u.role === 'parent');
         
         // Helper function to get display role
         const getDisplayRole = (user) => {
@@ -7830,41 +7829,6 @@ async function loadUsers() {
                 const row = createStudentRow(user);
                 studentTbody.appendChild(row);
             });
-        }
-        
-        // Populate Parent table
-        if (parentTbody) {
-            if (parentUsers.length === 0) {
-                parentTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No parent users</td></tr>';
-            } else {
-                // Load parent-student relationships for each parent
-                const parentPromises = parentUsers.map(async (user) => {
-                    try {
-                        const response = await fetch(`/api/parents`);
-                        if (response.ok) {
-                            const parents = await response.json();
-                            const parentData = parents.find(p => p.id === user.id);
-                            if (parentData) {
-                                if (parentData.students) {
-                                    user.verified_children = parentData.students
-                                        .filter(s => s.verified)
-                                        .map(s => s.student_name || `Student ${s.student_id}`);
-                                }
-                                user.ferpa_acknowledged = !!parentData.ferpa_acknowledged;
-                            }
-                        }
-                    } catch (error) {
-                        console.error(`Error loading relationships for parent ${user.id}:`, error);
-                    }
-                    return user;
-                });
-                
-                const parentsWithChildren = await Promise.all(parentPromises);
-                parentsWithChildren.forEach(user => {
-                    const row = createParentRow(user);
-                    parentTbody.appendChild(row);
-                });
-            }
         }
         
         // Load admin stats if on admin panel
@@ -8035,50 +7999,6 @@ function createOutsideStaffRow(user) {
     return row;
 }
 
-function createParentRow(user) {
-    const row = document.createElement('tr');
-    row.dataset.userId = user.id;
-    
-    const name = user.name || user.username;
-    
-    // Format verified children for display
-    let childrenDisplay = 'No verified children';
-    if (user.verified_children && user.verified_children.length > 0) {
-        if (user.verified_children.length <= 3) {
-            childrenDisplay = user.verified_children.join(', ');
-        } else {
-            childrenDisplay = `${user.verified_children.length} children (${user.verified_children.slice(0, 2).join(', ')}, ...)`;
-        }
-    }
-    
-    const canDelete = isAdmin() && user.id !== window.currentUser.id;
-    const canEdit = isAdmin();
-    const canSeePassword = isAdmin();
-    
-    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
-    
-    const ferpaDisplay = user.ferpa_acknowledged
-        ? '<span style="color: #2e7d32; font-weight: 500;">Acknowledged</span>'
-        : '<span style="color: #d32f2f;">Not acknowledged</span>';
-    
-    row.innerHTML = `
-        <td><strong>${name}</strong></td>
-        <td>${user.username}</td>
-        <td style="font-size: 13px;">${childrenDisplay}</td>
-        <td style="font-size: 13px;">${ferpaDisplay}</td>
-        <td id="password-cell-${user.id}">
-            ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
-            ` : '<span style="color: #999;">Hidden</span>'}
-        </td>
-        <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', null, null, null)">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
-        </td>
-    `;
-    
-    return row;
-}
 
 async function resetAndViewPassword(userId, username) {
     // Confirm before resetting
@@ -8228,11 +8148,9 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         }
     }
     
-    // Show/hide role field - hide for parent users
+    // Show/hide role field
     const roleGroup = document.getElementById('edit-user-role-group');
-    if (role === 'parent') {
-        if (roleGroup) roleGroup.style.display = 'none';
-    } else {
+    {
         if (roleGroup) roleGroup.style.display = 'block';
     }
     
@@ -8269,14 +8187,6 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         teamSection.style.display = 'none';
     }
     
-    // Show/hide parent students section based on role
-    const parentStudentsSection = document.getElementById('edit-user-parent-students-section');
-    if (role === 'parent') {
-        parentStudentsSection.style.display = 'block';
-        await loadParentStudentsForEdit(userId);
-    } else {
-        parentStudentsSection.style.display = 'none';
-    }
     
     // Show the modal
     document.getElementById('edit-user-modal').style.display = 'block';
@@ -9006,53 +8916,6 @@ function filterStudentsByName(students, query) {
     });
 }
 
-function setupParentUserStudentCombobox() {
-    const input = document.getElementById('parent-user-student-combobox-input');
-    const hidden = document.getElementById('parent-user-student-id');
-    const dropdown = document.getElementById('parent-user-student-dropdown');
-    if (!input || !hidden || !dropdown) return;
-
-    function render() {
-        const query = input.value.trim();
-        const list = filterStudentsByName(allStudents || [], query);
-        dropdown.innerHTML = '';
-        list.forEach(student => {
-            const name = student.name || `Student ${student.id}`;
-            const div = document.createElement('div');
-            div.className = 'student-combobox-item';
-            div.dataset.id = student.id;
-            div.dataset.name = name;
-            div.style.cssText = 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;';
-            div.textContent = name;
-            div.addEventListener('click', () => selectStudent(student.id, name));
-            dropdown.appendChild(div);
-        });
-        dropdown.style.display = list.length ? 'block' : 'none';
-    }
-
-    function selectStudent(id, name) {
-        hidden.value = id;
-        input.value = name;
-        dropdown.style.display = 'none';
-        dropdown.innerHTML = '';
-    }
-
-    input.addEventListener('focus', () => render());
-    input.addEventListener('input', () => render());
-    input.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        const first = dropdown.querySelector('.student-combobox-item');
-        if (first) selectStudent(parseInt(first.dataset.id), first.dataset.name);
-    });
-    input.addEventListener('blur', () => {
-        setTimeout(() => {
-            dropdown.style.display = 'none';
-            dropdown.innerHTML = '';
-        }, 200);
-    });
-}
-
 function setupEditParentAddStudentCombobox() {
     const input = document.getElementById('edit-parent-add-student-combobox-input');
     const hidden = document.getElementById('edit-parent-add-student-id');
@@ -9102,77 +8965,6 @@ function setupEditParentAddStudentCombobox() {
             dropdown.innerHTML = '';
         }, 200);
     });
-}
-
-async function saveParentUser() {
-    const name = document.getElementById('parent-user-name').value.trim();
-    const username = document.getElementById('parent-user-username').value.trim();
-    const password = document.getElementById('parent-user-password').value;
-    const studentIdEl = document.getElementById('parent-user-student-id');
-    const studentId = studentIdEl ? parseInt(studentIdEl.value) : NaN;
-    const relationship = document.getElementById('parent-user-relationship').value;
-    const errorDiv = document.getElementById('parent-user-modal-error');
-    
-    // Clear previous errors
-    if (errorDiv) {
-        errorDiv.style.display = 'none';
-        errorDiv.textContent = '';
-    }
-    
-    if (!name || !username || !password || !studentId) {
-        if (errorDiv) {
-            errorDiv.textContent = 'Please fill in all required fields';
-            errorDiv.style.display = 'block';
-        }
-        return;
-    }
-    
-    if (password.length < 6) {
-        if (errorDiv) {
-            errorDiv.textContent = 'Password must be at least 6 characters long';
-            errorDiv.style.display = 'block';
-        }
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/parents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: name,
-                username: username,
-                password: password,
-                student_id: studentId,
-                relationship: relationship
-            })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            showMessage(data.message || 'Parent account created successfully. Requires verification before access.', 'success');
-            document.getElementById('parent-user-modal').style.display = 'none';
-            document.getElementById('parent-user-name').value = '';
-            document.getElementById('parent-user-username').value = '';
-            document.getElementById('parent-user-password').value = '';
-            const pi = document.getElementById('parent-user-student-combobox-input');
-            const ph = document.getElementById('parent-user-student-id');
-            if (pi) pi.value = '';
-            if (ph) ph.value = '';
-            await loadUsers();
-        } else {
-            const data = await response.json();
-            throw new Error(data.error || 'Failed to create parent account');
-        }
-    } catch (error) {
-        console.error('Error creating parent user:', error);
-        if (errorDiv) {
-            errorDiv.textContent = 'Error: ' + error.message;
-            errorDiv.style.display = 'block';
-        } else {
-            showMessage('Error: ' + error.message, 'error');
-        }
-    }
 }
 
 async function manageOutsideStaffStudents(userId, name) {
@@ -9442,13 +9234,12 @@ document.addEventListener('DOMContentLoaded', () => {
         outsideStaffSearch.addEventListener('input', (e) => filterUserTable('outside-staff', e.target.value));
     }
     
-    const parentSearch = document.getElementById('parent-search');
-    if (parentSearch) {
-        parentSearch.addEventListener('input', (e) => filterUserTable('parent', e.target.value));
-    }
 });
 
 function filterUserTable(tableType, searchQuery) {
+    // Skip parent table as it no longer exists
+    if (tableType === 'parent') return;
+    
     const query = searchQuery.toLowerCase().trim();
     const tbody = document.getElementById(`${tableType}-users-table-body`);
     
@@ -12351,46 +12142,106 @@ window.generatePaychecksForAll = generatePaychecksForAll;
 
 // Load parent's verified children
 async function loadParentChildren() {
+    console.log('loadParentChildren called');
     const container = document.getElementById('parent-children-container');
     const noChildrenDiv = document.getElementById('parent-no-children');
     
-    if (!container) return;
+    if (!container) {
+        console.error('parent-children-container not found');
+        return;
+    }
     
     try {
+        console.log('Fetching children from /api/students');
         const response = await fetch('/api/students');
         if (!response.ok) {
-            throw new Error('Failed to load children');
+            throw new Error(`Failed to load children: ${response.status} ${response.statusText}`);
         }
         
         const children = await response.json();
+        console.log('Received children data:', children);
         
         if (!children || children.length === 0) {
+            console.log('No children found');
             container.style.display = 'none';
             if (noChildrenDiv) noChildrenDiv.style.display = 'block';
             return;
         }
         
         if (noChildrenDiv) noChildrenDiv.style.display = 'none';
-        container.style.display = 'grid';
+        container.style.display = 'block';
         
-        container.innerHTML = children.map(child => `
-            <div style="background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px;">
-                <h4 style="margin: 0 0 15px 0; color: #667eea; font-size: 1.3em;">${child.name || 'Unknown'}</h4>
-                <div style="display: grid; gap: 10px; margin-top: 15px;">
-                    <button onclick="viewChildRecords(${child.id})" class="btn-primary" style="width: 100%;">View Records</button>
-                    <button onclick="openAmendmentRequestModal(${child.id})" class="btn-secondary" style="width: 100%;">Request Amendment</button>
-                    <button onclick="exportChildData(${child.id})" class="btn-secondary" style="width: 100%;">Export Data</button>
-                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                            <input type="checkbox" id="directory-opt-out-${child.id}" 
-                                   ${child.directory_info_opt_out ? 'checked' : ''}
-                                   onchange="toggleDirectoryOptOut(${child.id}, this.checked)">
-                            <span>Opt-out of directory information</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        `).join('');
+        // Format attendance status
+        const formatAttendance = (status) => {
+            if (!status) return '-';
+            const statusMap = {
+                'present': 'Present',
+                'excused': 'Excused',
+                'unexcused': 'Unexcused'
+            };
+            return statusMap[status] || status;
+        };
+        
+        // Format STAR points
+        const formatStarPoints = (starPoints) => {
+            if (!starPoints || Object.values(starPoints).every(v => v === null)) {
+                return '-';
+            }
+            const parts = [];
+            if (starPoints.s !== null) parts.push(`S: ${starPoints.s}%`);
+            if (starPoints.t !== null) parts.push(`T: ${starPoints.t}%`);
+            if (starPoints.a !== null) parts.push(`A: ${starPoints.a}%`);
+            if (starPoints.r !== null) parts.push(`R: ${starPoints.r}%`);
+            return parts.length > 0 ? parts.join(', ') : '-';
+        };
+        
+        // Build table HTML
+        let tableHTML = `
+            <table class="parent-children-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Grade</th>
+                        <th>Verification Status</th>
+                        <th>Attendance</th>
+                        <th>STAR Points</th>
+                        <th>Infractions</th>
+                        <th>Frenzy Events</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        children.forEach(child => {
+            const verificationBadge = child.verified 
+                ? '<span class="verification-badge verified">Verified</span>'
+                : '<span class="verification-badge unverified">Not Verified</span>';
+            
+            tableHTML += `
+                <tr>
+                    <td>${child.name || 'Unknown'}</td>
+                    <td>${child.grade || '-'}</td>
+                    <td>${verificationBadge}</td>
+                    <td>${formatAttendance(child.attendance)}</td>
+                    <td>${formatStarPoints(child.star_points)}</td>
+                    <td>${child.infractions_count || 0}</td>
+                    <td>${child.frenzy_count || 0}</td>
+                    <td class="actions-cell">
+                        <button onclick="viewChildRecords(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">View Records</button>
+                        <button onclick="openAmendmentRequestModal(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">Request Amendment</button>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        tableHTML += `
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = tableHTML;
+        console.log('Parent children table rendered successfully');
     } catch (error) {
         console.error('Error loading children:', error);
         container.innerHTML = '<p style="color: #dc2626;">Error loading children. Please try again.</p>';
@@ -12565,201 +12416,6 @@ async function exportChildData(studentId) {
     }
 }
 
-// FERPA Rights Modal Functions
-function showFERPARightsModal() {
-    const modal = document.getElementById('ferpa-rights-modal');
-    if (!modal) return;
-    
-    const msgEl = document.getElementById('ferpa-modal-message');
-    if (msgEl) {
-        msgEl.style.display = 'none';
-        msgEl.textContent = '';
-        msgEl.style.background = '';
-        msgEl.style.color = '';
-    }
-    
-    const checkbox = document.getElementById('ferpa-rights-acknowledged');
-    if (checkbox) checkbox.checked = false;
-    
-    modal.style.display = 'block';
-    
-    checkFERPARightsAcknowledgment();
-}
-
-function closeFERPARightsModal() {
-    const modal = document.getElementById('ferpa-rights-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-function showFERPAModalMessage(text, isError) {
-    const msgEl = document.getElementById('ferpa-modal-message');
-    if (!msgEl) return;
-    msgEl.textContent = text;
-    msgEl.style.display = 'block';
-    msgEl.style.background = isError ? '#ffebee' : '#e8f5e9';
-    msgEl.style.color = isError ? '#c62828' : '#2e7d32';
-    msgEl.style.border = `1px solid ${isError ? '#f44336' : '#4caf50'}`;
-}
-
-async function acknowledgeFERPARights() {
-    const checkbox = document.getElementById('ferpa-rights-acknowledged');
-    if (!checkbox || !checkbox.checked) {
-        showFERPAModalMessage('Please check the box to acknowledge that you have read and understand your FERPA rights.', true);
-        return;
-    }
-    
-    const msgEl = document.getElementById('ferpa-modal-message');
-    if (msgEl) {
-        msgEl.style.display = 'none';
-        msgEl.textContent = '';
-    }
-    
-    const btn = document.getElementById('acknowledge-ferpa-btn');
-    if (btn) btn.disabled = true;
-    
-    try {
-        const currentYear = new Date().getFullYear();
-        const response = await fetch('/api/ferpa-notification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-                notification_year: currentYear
-            })
-        });
-        
-        if (response.ok) {
-            showFERPAModalMessage('Acknowledgment saved. Thank you.', false);
-            setTimeout(() => {
-                closeFERPARightsModal();
-                showMessage('FERPA rights acknowledgment recorded', 'success');
-            }, 1500);
-        } else {
-            let errMsg = 'Error recording acknowledgment.';
-            try {
-                const data = await response.json();
-                if (data && data.error) errMsg = data.error;
-            } catch (_) {
-                if (response.status === 401) errMsg = 'Please log in to acknowledge.';
-                else if (response.status >= 500) errMsg = 'Server error. Please try again later.';
-            }
-            showFERPAModalMessage(errMsg, true);
-        }
-    } catch (error) {
-        console.error('Error acknowledging FERPA rights:', error);
-        showFERPAModalMessage('Network error. Please check your connection and try again.', true);
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
-async function checkFERPARightsAcknowledgment() {
-    try {
-        const currentYear = new Date().getFullYear();
-        const response = await fetch(`/api/ferpa-notification?year=${currentYear}`);
-        if (response.ok) {
-            const data = await response.json();
-            if (data.acknowledged) {
-                document.getElementById('ferpa-rights-acknowledged').checked = true;
-            }
-        }
-    } catch (error) {
-        console.error('Error checking FERPA acknowledgment:', error);
-    }
-}
-
-// Check and show FERPA notification banner/modal on page load
-async function checkAndShowFERPANotification() {
-    // Only show for parents and students
-    if (!window.currentUser || !['parent', 'student'].includes(window.currentUser.role)) {
-        return;
-    }
-    
-    try {
-        const currentYear = new Date().getFullYear();
-        const response = await fetch(`/api/ferpa-notification?year=${currentYear}`);
-        
-        if (response.ok) {
-            const data = await response.json();
-            
-            // If not acknowledged, show notification banner
-            if (!data.acknowledged) {
-                showFERPANotificationBanner();
-            }
-        }
-    } catch (error) {
-        console.error('Error checking FERPA notification:', error);
-    }
-}
-
-// Show FERPA notification banner at top of page
-function showFERPANotificationBanner() {
-    // Check if banner already exists
-    if (document.getElementById('ferpa-notification-banner')) {
-        return;
-    }
-    
-    const banner = document.createElement('div');
-    banner.id = 'ferpa-notification-banner';
-    banner.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 15px 20px;
-        z-index: 10000;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 20px;
-    `;
-    
-    banner.innerHTML = `
-        <div style="flex: 1;">
-            <strong style="font-size: 1.1em;">FERPA Rights Notification</strong>
-            <p style="margin: 5px 0 0 0; font-size: 0.9em; opacity: 0.95;">
-                You have rights under the Family Educational Rights and Privacy Act (FERPA). 
-                Please review your FERPA rights and acknowledge that you have read and understand them.
-            </p>
-        </div>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <button onclick="showFERPARightsModal(); document.getElementById('ferpa-notification-banner').style.display='none';" 
-                    style="padding: 8px 20px; background: white; color: #667eea; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
-                Review Rights
-            </button>
-            <button onclick="document.getElementById('ferpa-notification-banner').style.display='none';" 
-                    style="padding: 8px 15px; background: transparent; color: white; border: 1px solid white; border-radius: 4px; cursor: pointer;">
-                Dismiss
-            </button>
-        </div>
-    `;
-    
-    document.body.insertBefore(banner, document.body.firstChild);
-    
-    // Adjust body padding to account for banner
-    document.body.style.paddingTop = '80px';
-    
-    // Remove padding when banner is dismissed
-    const dismissBtn = banner.querySelector('button:last-child');
-    if (dismissBtn) {
-        dismissBtn.addEventListener('click', () => {
-            document.body.style.paddingTop = '0';
-        });
-    }
-}
-
-// Update switchView to load parent children when switching to parent portal
-const originalSwitchView = switchView;
-switchView = function(viewName) {
-    originalSwitchView(viewName);
-    if (viewName === 'parent-portal' && window.currentUser && window.currentUser.role === 'parent') {
-        loadParentChildren();
-    }
-};
-
 // Expose functions to window
 window.loadParentChildren = loadParentChildren;
 window.viewChildRecords = viewChildRecords;
@@ -12768,9 +12424,6 @@ window.closeAmendmentRequestModal = closeAmendmentRequestModal;
 window.submitAmendmentRequest = submitAmendmentRequest;
 window.toggleDirectoryOptOut = toggleDirectoryOptOut;
 window.exportChildData = exportChildData;
-window.showFERPARightsModal = showFERPARightsModal;
-window.closeFERPARightsModal = closeFERPARightsModal;
-window.acknowledgeFERPARights = acknowledgeFERPARights;
 window.removeParentStudent = removeParentStudent;
 window.addParentStudent = addParentStudent;
 window.verifyParentStudent = verifyParentStudent;

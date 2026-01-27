@@ -1277,6 +1277,56 @@ table th {
     transform: scale(0.98);
 }
 
+/* Parent Children Table */
+.parent-children-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    margin-top: 20px;
+}
+
+.parent-children-table th {
+    background: #667eea;
+    color: white;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+}
+
+.parent-children-table td {
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+}
+
+.parent-children-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.parent-children-table .actions-cell {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.verification-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.verification-badge.verified {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.verification-badge.unverified {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
 /* Add Student Modal Enhancements */
 .form-section h3 {
     font-size: 16px;
