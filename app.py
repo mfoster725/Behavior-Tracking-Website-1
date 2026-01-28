@@ -258,6 +258,35 @@ class User(UserMixin, db.Model):
         
         return designation_map.get(self.designation, [])
 
+
+# One-time Postgres migration: ensure ui_preferences column exists in production
+def ensure_ui_preferences_column():
+    """
+    Ensure the ui_preferences column exists on the users table in Postgres.
+    This is needed for Render where we cannot run a shell.
+    Safe to run multiple times thanks to IF NOT EXISTS.
+    """
+    # Only run this when using the external Postgres DATABASE_URL (Render)
+    if not os.environ.get('DATABASE_URL'):
+        return
+
+    try:
+        # Import here to avoid circular imports / early use
+        from sqlalchemy import text
+        with app.app_context():
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences TEXT"
+                ))
+                conn.commit()
+    except Exception as e:
+        # Log but don't crash the app if migration fails
+        app.logger.warning(f"Failed to ensure ui_preferences column exists: {e}")
+
+
+# Run the migration once when the app starts up in a Postgres environment
+ensure_ui_preferences_column()
+
 class Student(db.Model):
     __tablename__ = 'students'
     id = db.Column(db.Integer, primary_key=True)
