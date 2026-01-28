@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Paycheck Worksheet — Example</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; max-width: 520px; margin: 24px auto; padding: 0 16px; color: #1e293b; }
+        h2 { margin-top: 0; font-size: 1.25rem; }
+        .worksheet { background: #f8fafc; padding: 24px 28px; border-radius: 16px; border: 1px solid #e2e8f0; }
+        .worksheet p { margin: 0 0 10px 0; color: #666; }
+        .worksheet label { display: block; margin-bottom: 5px; font-weight: 600; }
+        .row { margin-bottom: 20px; }
+        .answer { background: #e0f2fe; padding: 10px 14px; border-radius: 8px; font-weight: 600; color: #0369a1; margin-top: 6px; width: 220px; max-width: 100%; box-sizing: border-box; border: 1px solid #bae6fd; }
+        .note { font-size: 0.9rem; color: #64748b; margin-top: 24px; }
+        input.currency { width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+        input.currency::placeholder { color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <h2>Student Paycheck Worksheet — Example</h2>
+    <p class="note">Reminder text shows average star % and citation count, but not the answers after "=". Base pay, citation deduction, and final pay use <strong>currency format</strong> when you leave a field. <strong>Enter</strong> moves to the next field (same as Tab).</p>
+
+    <div class="worksheet">
+        <h3 style="margin-top: 0; margin-bottom: 8px;">Complete Your Paycheck Worksheet</h3>
+        <p style="margin-bottom: 20px; color: #64748b;">Calculate your pay based on your STAR data and citations.</p>
+
+        <div class="row">
+            <label>Base Pay:</label>
+            <p>Calculate your base pay: $100 × <strong>85</strong>% =</p>
+            <input type="text" class="currency" id="ex-base-pay" inputmode="decimal" placeholder="$0.00" value="$85.00">
+        </div>
+
+        <div class="row">
+            <label>Number of Citations:</label>
+            <p style="margin: 0 0 8px 0; color: #666;">Citations this week:</p>
+            <div style="white-space: pre-line; margin: 0 0 10px 0; padding: 10px 12px; background: #f1f5f9; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; color: #334155;">2x Off Task
+1x Lang</div>
+            <p style="margin: 0 0 8px 0; color: #666;">Count the citations above and enter the number below.</p>
+            <input type="number" class="currency" id="ex-citations" placeholder="Enter citation count" value="3">
+        </div>
+
+        <div class="row">
+            <label>Citation Deduction:</label>
+            <p>Citations × $2 =</p>
+            <input type="text" class="currency" id="ex-deduction" inputmode="decimal" placeholder="$0.00" value="$6.00">
+        </div>
+
+        <div class="row">
+            <label>Final Pay:</label>
+            <p>Base Pay - Citation Deduction =</p>
+            <input type="text" class="currency" id="ex-final" inputmode="decimal" placeholder="$0.00" value="$79.00">
+        </div>
+    </div>
+
+    <script>
+        function parseCurrency(str) {
+            if (str == null || str === '') return NaN;
+            var cleaned = String(str).replace(/[$,]/g, '').trim();
+            return cleaned === '' ? NaN : parseFloat(cleaned);
+        }
+        function formatCurrency(num) {
+            if (num === '' || num == null || isNaN(parseFloat(num))) return '';
+            var n = parseFloat(num);
+            return '$' + n.toFixed(2);
+        }
+        ['ex-base-pay', 'ex-deduction', 'ex-final'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('blur', function () {
+                    var parsed = parseCurrency(this.value);
+                    if (!isNaN(parsed)) this.value = formatCurrency(parsed);
+                });
+            }
+        });
+        // Enter = Tab (move to next field)
+        var exFocusOrder = ['ex-base-pay', 'ex-citations', 'ex-deduction', 'ex-final'];
+        exFocusOrder.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    var idx = exFocusOrder.indexOf(id);
+                    var nextId = exFocusOrder[(idx + 1) % exFocusOrder.length];
+                    var nextEl = document.getElementById(nextId);
+                    if (nextEl) nextEl.focus();
+                });
+            }
+        });
+    </script>
+</body>
+</html>

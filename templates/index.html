@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Behavior Tracking System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=acc4">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -20,6 +20,7 @@
                 <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
             </div>
             <nav>
+                <!-- Template version: acc4 (has Accounts tab) -->
                 <button class="nav-btn active" data-view="period-entry">Period Entry</button>
                 <button class="nav-btn" data-view="entry">Daily Entry</button>
                 <button class="nav-btn" data-view="summary">Summary</button>
@@ -28,6 +29,7 @@
                 <button class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
                 <button class="nav-btn" data-view="bank-account">Bank Account</button>
+                <button id="nav-btn-accounts" class="nav-btn" data-view="accounts" title="Modern banking view">Accounts</button>
                 {% if user.role == 'admin' %}
                 <button class="nav-btn" data-view="admin">Admin Panel</button>
                 {% endif %}
@@ -315,106 +317,163 @@
                 <p>View and manage user accounts</p>
                 
                 <!-- Student Users Table -->
-                <div class="user-role-section" style="margin-bottom: 30px;">
-                    <h3 style="color: #388e3c; border-bottom: 2px solid #388e3c; padding-bottom: 10px; margin-bottom: 15px;">
-                        Student Users
+                <div class="user-role-section" id="user-section-students" style="margin-bottom: 30px;">
+                    <h3 style="color: #388e3c; border-bottom: 2px solid #388e3c; padding-bottom: 10px; margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>Student Users</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-students" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
                     </h3>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div class="user-role-section-body" id="user-section-students-body">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Grade</th>
+                                    <th>Card Color</th>
+                                    <th>Case Manager</th>
+                                    <th>Practitioner</th>
+                                    <th>Professional</th>
+                                    <th>Group Leader</th>
+                                    <th>Paraprofessional</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="student-users-table-body">
+                                <!-- Student user rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
                     </div>
-                    <table class="users-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Grade</th>
-                                <th>Card Color</th>
-                                <th>Case Manager</th>
-                                <th>Practitioner</th>
-                                <th>Professional</th>
-                                <th>Group Leader</th>
-                                <th>Paraprofessional</th>
-                                <th>Username</th>
-                                <th>Password</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="student-users-table-body">
-                            <!-- Student user rows will be loaded dynamically -->
-                        </tbody>
-                    </table>
                 </div>
+
+                {% if user.role == 'admin' %}
+                <!-- Archived Students Table (Admin-only) -->
+                <div class="user-role-section" id="user-section-archived" style="margin-bottom: 30px;">
+                    <h3 style="color: #6d4c41; border-bottom: 2px solid #6d4c41; padding-bottom: 10px; margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>Archived Students</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-archived" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
+                    </h3>
+                    <div class="user-role-section-body" id="user-section-archived-body">
+                        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                            Students who no longer have a Student User account. These students are hidden from all normal views
+                            (daily entry, period entry, linking, etc.) and are only visible here in archived mode.
+                        </p>
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Grade</th>
+                                    <th>Card Color</th>
+                                    <th>Created At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="archived-students-table-body">
+                                <!-- Archived student rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
                 
                 <!-- Staff Users Table -->
-                <div class="user-role-section" style="margin-bottom: 30px;">
-                    <h3 style="color: #1976d2; border-bottom: 2px solid #1976d2; padding-bottom: 10px; margin-bottom: 15px;">
-                        Staff Users
+                <div class="user-role-section" id="user-section-staff" style="margin-bottom: 30px;">
+                    <h3 style="color: #1976d2; border-bottom: 2px solid #1976d2; padding-bottom: 10px; margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>Staff Users</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-staff" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
                     </h3>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div class="user-role-section-body" id="user-section-staff-body">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="staff-users-table-body">
+                                <!-- Staff user rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
                     </div>
-                    <table class="users-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Role</th>
-                                <th>Username</th>
-                                <th>Password</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="staff-users-table-body">
-                            <!-- Staff user rows will be loaded dynamically -->
-                        </tbody>
-                    </table>
                 </div>
                 
                 <!-- Outside Staff Users Table -->
-                <div class="user-role-section" style="margin-bottom: 30px;">
-                    <h3 style="color: #ff9800; border-bottom: 2px solid #ff9800; padding-bottom: 10px; margin-bottom: 15px;">
-                        Outside Staff Users
+                <div class="user-role-section" id="user-section-outside-staff" style="margin-bottom: 30px;">
+                    <h3 style="color: #ff9800; border-bottom: 2px solid #ff9800; padding-bottom: 10px; margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>Outside Staff Users</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-outside-staff" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
                     </h3>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div class="user-role-section-body" id="user-section-outside-staff-body">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>District</th>
+                                    <th>Students Assigned</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="outside-staff-users-table-body">
+                                <!-- Outside Staff user rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
                     </div>
-                    <table class="users-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>District</th>
-                                <th>Students Assigned</th>
-                                <th>Username</th>
-                                <th>Password</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="outside-staff-users-table-body">
-                            <!-- Outside Staff user rows will be loaded dynamically -->
-                        </tbody>
-                    </table>
                 </div>
                 
                 <!-- Admin Users Table -->
-                <div class="user-role-section">
-                    <h3 style="color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 15px;">
-                        Admin Users
+                <div class="user-role-section" id="user-section-admin">
+                    <h3 style="color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>Admin Users</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-admin" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
                     </h3>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div class="user-role-section-body" id="user-section-admin-body">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-table-body">
+                                <!-- Admin user rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
                     </div>
-                    <table class="users-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Role</th>
-                                <th>Username</th>
-                                <th>Password</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="admin-users-table-body">
-                            <!-- Admin user rows will be loaded dynamically -->
-                        </tbody>
-                    </table>
                 </div>
                 
                 <div class="button-group" style="margin-top: 20px; display: flex; gap: 10px;">
@@ -477,144 +536,295 @@
             </div>
         </div>
 
-        <!-- Bank Account View -->
+        <!-- Bank Account View (restyled to match Accounts UI) -->
         <div id="bank-account-view" class="view">
-            <div class="form-section">
-                <h2>Bank Account</h2>
-                
+            <div class="form-section accounts-ui">
+                <h2 style="margin-bottom: 24px;">Bank Account</h2>
+
                 <!-- Staff Search Section -->
                 {% if user.role in ['staff', 'admin'] %}
-                <div class="form-group" style="margin-bottom: 30px;">
-                    <label for="bank-search-input" style="display: block; margin-bottom: 8px;">Search:</label>
-                    <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                        <input type="text" id="bank-search-input" placeholder="Search by staff or student name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="bank-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Search</label>
+                    <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
+                        <input
+                            type="text"
+                            id="bank-search-input"
+                            placeholder="Search by staff or student name"
+                            style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
+                        >
                         <div class="bank-search-autocomplete-dropdown"></div>
                     </div>
-                    <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin-top: 10px;">
+                    <label style="display: inline-flex; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; white-space: nowrap; margin-top: 10px; font-size: 13px; color: #475569;">
                         <input type="checkbox" id="bank-managed-by-me-checkbox" style="cursor: pointer;">
                         <span>Show students managed by me</span>
                     </label>
                 </div>
-                <div class="form-group" style="margin-bottom: 30px;">
-                    <label for="bank-student-select">Select Student:</label>
-                    <select id="bank-student-select">
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="bank-student-select" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Student</label>
+                    <select
+                        id="bank-student-select"
+                        style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"
+                    >
                         <option value="">Select Student</option>
                     </select>
                 </div>
                 {% endif %}
-                
+
                 <!-- Balance Display -->
-                <div id="bank-balance-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
-                    <div class="bank-balance-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                        <h3 style="margin: 0 0 10px 0; font-size: 1.2em; opacity: 0.9;">Current Balance</h3>
-                        <div id="bank-balance-amount" style="font-size: 3em; font-weight: bold; margin: 0;">$0.00</div>
-                        <div id="bank-student-name" style="margin-top: 10px; opacity: 0.9;">{{ user.name|default(user.username) }}</div>
+                <div
+                    id="bank-balance-section"
+                    style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
+                >
+                    <div
+                        class="accounts-total-balance"
+                        style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(14,165,233,0.25);"
+                    >
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+                            <div>
+                                <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Current balance</p>
+                                <p id="bank-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
+                                <p id="bank-student-name" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
+                            </div>
+                            <button
+                                type="button"
+                                id="bank-refresh-btn"
+                                style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;"
+                            >
+                                ↻ Refresh
+                            </button>
+                        </div>
                     </div>
                 </div>
-                
+
                 <!-- Paycheck Section -->
-                <div id="bank-paycheck-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
-                    <h3 style="margin-bottom: 20px;">Paychecks</h3>
-                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <div
+                    id="bank-paycheck-section"
+                    style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
+                >
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Paychecks</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">
                         <button id="view-deposited-paychecks-btn" class="btn-secondary">Deposited</button>
                         <button id="view-undeposited-paychecks-btn" class="btn-secondary">Undeposited</button>
                     </div>
-                    
+
                     <!-- Current Paycheck Worksheet -->
-                    <div id="current-paycheck-worksheet" style="display: none; background: #f8f9fa; padding: 30px; border-radius: 8px; margin-bottom: 20px;">
-                        <h4 style="margin-top: 0;">Complete Your Paycheck Worksheet</h4>
-                        <p style="margin-bottom: 20px;">Calculate your pay based on your STAR data and citations.</p>
-                        
+                    <div
+                        id="current-paycheck-worksheet"
+                        style="display: none; background: #f8fafc; padding: 24px 28px; border-radius: 16px; margin-bottom: 20px; border: 1px solid #e2e8f0;"
+                    >
+                        <h4 style="margin-top: 0; margin-bottom: 8px;">Complete Your Paycheck Worksheet</h4>
+                        <p style="margin-bottom: 20px; color: #64748b;">Calculate your pay based on your STAR data and citations.</p>
+
                         <div class="paycheck-worksheet-form">
-                            <div class="worksheet-row" style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">What is the negative square root of 9?</label>
-                                <p style="margin: 0 0 10px 0; color: #666;">Calculate your base pay: $100 × <span id="worksheet-avg-percent">0</span>% = $<span id="worksheet-base-pay">0</span></p>
-                                <input type="number" id="worksheet-calculated-pay" step="0.01" placeholder="Enter your calculation" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                            <div class="worksheet-row" style="margin-bottom: 16px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Base Pay:</label>
+                                <p style="margin: 0 0 10px 0; color: #666;">Calculate your base pay: $100 × <span id="worksheet-avg-percent">0</span>% =</p>
+                                <input
+                                    type="text"
+                                    id="worksheet-calculated-pay"
+                                    inputmode="decimal"
+                                    placeholder="$0.00"
+                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
+                                >
                             </div>
-                            
-                            <div class="worksheet-row" style="margin-bottom: 15px;">
+
+                            <div class="worksheet-row" style="margin-bottom: 16px;">
                                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Number of Citations:</label>
-                                <p style="margin: 0 0 10px 0; color: #666;">You had <span id="worksheet-citation-count">0</span> citations this week.</p>
-                                <input type="number" id="worksheet-calculated-citations" placeholder="Enter citation count" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                                <p style="margin: 0 0 8px 0; color: #666;">Citations this week:</p>
+                                <div id="worksheet-citation-list" style="white-space: pre-line; margin: 0 0 10px 0; padding: 10px 12px; background: #f1f5f9; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; color: #334155; min-height: 2em;"></div>
+                                <p style="margin: 0 0 8px 0; color: #666;">Count the citations above and enter the number below.</p>
+                                <input
+                                    type="number"
+                                    id="worksheet-calculated-citations"
+                                    placeholder="Enter citation count"
+                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
+                                >
                             </div>
-                            
-                            <div class="worksheet-row" style="margin-bottom: 15px;">
+
+                            <div class="worksheet-row" style="margin-bottom: 16px;">
                                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Citation Deduction:</label>
-                                <p style="margin: 0 0 10px 0; color: #666;">Citations × $2 = $<span id="worksheet-citation-deduction">0</span></p>
-                                <input type="number" id="worksheet-calculated-deduction" step="0.01" placeholder="Enter deduction amount" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                                <p style="margin: 0 0 10px 0; color: #666;">Citations × $2 =</p>
+                                <input
+                                    type="text"
+                                    id="worksheet-calculated-deduction"
+                                    inputmode="decimal"
+                                    placeholder="$0.00"
+                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
+                                >
                             </div>
-                            
+
                             <div class="worksheet-row" style="margin-bottom: 20px;">
                                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Final Pay:</label>
-                                <p style="margin: 0 0 10px 0; color: #666;">Base Pay - Citation Deduction = $<span id="worksheet-final-pay">0</span></p>
-                                <input type="number" id="worksheet-calculated-final" step="0.01" placeholder="Enter final pay" style="width: 200px; padding: 8px; border: 2px solid #667eea; border-radius: 4px;">
+                                <p style="margin: 0 0 10px 0; color: #666;">Base Pay - Citation Deduction =</p>
+                                <input
+                                    type="text"
+                                    id="worksheet-calculated-final"
+                                    inputmode="decimal"
+                                    placeholder="$0.00"
+                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
+                                >
                             </div>
-                            
-                            <button id="submit-worksheet-btn" class="btn-primary" style="background: #10b981; border-color: #10b981;">Submit</button>
+
+                            <button
+                                id="submit-worksheet-btn"
+                                class="btn-primary"
+                                style="background: #10b981; border-color: #10b981;"
+                            >
+                                Submit
+                            </button>
                             <div id="worksheet-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
                             <div id="worksheet-success" style="color: #10b981; margin-top: 10px; display: none;"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Marketplace Section -->
-                <div id="bank-marketplace-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
-                    <h3 style="margin-bottom: 20px;">Marketplace</h3>
-                    
+                <div
+                    id="bank-marketplace-section"
+                    style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
+                >
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Marketplace</h3>
+
                     <!-- Case Manager Marketplace Management -->
                     {% if user.role in ['staff', 'admin'] and user.designation == 'Case Manager' %}
-                    <div id="marketplace-management" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <div id="marketplace-management" style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
                         <h4 style="margin-top: 0;">Manage Marketplace Items</h4>
                         <button id="create-item-btn" class="btn-secondary" style="margin-bottom: 15px;">Create New Item</button>
-                        <div id="marketplace-items-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
+                        <div
+                            id="marketplace-items-list"
+                            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;"
+                        >
                             <!-- Items will be loaded here -->
                         </div>
                     </div>
                     {% endif %}
-                    
+
                     <!-- Admin Paycheck Generation -->
                     {% if user.role == 'admin' %}
-                    <div id="admin-paycheck-generation" style="background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffc107;">
+                    <div
+                        id="admin-paycheck-generation"
+                        style="background: #fff3cd; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ffc107;"
+                    >
                         <h4 style="margin-top: 0;">Paycheck Generation</h4>
                         <p style="margin-bottom: 15px;">Generate paychecks for all students for the previous week (Monday-Friday).</p>
                         <button id="generate-paychecks-btn" class="btn-primary">Generate Paychecks</button>
                         <div id="paycheck-generation-result" style="margin-top: 10px; display: none;"></div>
                     </div>
                     {% endif %}
-                    
+
                     <!-- Marketplace Filter -->
                     <div class="form-group" style="margin-bottom: 20px;">
-                        <label for="marketplace-filter">Filter:</label>
-                        <select id="marketplace-filter">
+                        <label for="marketplace-filter" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Filter</label>
+                        <select
+                            id="marketplace-filter"
+                            style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"
+                        >
                             <option value="all">All Items</option>
                             <option value="global">Global Items</option>
                             <option value="case-manager">Case Manager Items</option>
                         </select>
                     </div>
-                    
+
                     <!-- Marketplace Grid -->
-                    <div id="marketplace-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+                    <div
+                        id="marketplace-grid"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;"
+                    >
                         <!-- Items will be loaded here -->
                     </div>
                 </div>
-                
+
                 <!-- Purchase Orders Section (Staff/Case Manager) -->
                 {% if user.role in ['staff', 'admin'] %}
-                <div id="bank-purchase-orders-section" style="display: none; margin-bottom: 30px;">
-                    <h3 style="margin-bottom: 20px;">Purchase Orders</h3>
-                    <div id="purchase-orders-list">
+                <div
+                    id="bank-purchase-orders-section"
+                    style="display: none; margin-bottom: 28px;"
+                >
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Purchase Orders</h3>
+                    <div
+                        id="purchase-orders-list"
+                        style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;"
+                    >
                         <!-- Purchase orders will be loaded here -->
                     </div>
                 </div>
                 {% endif %}
-                
+
                 <!-- Transaction History -->
-                <div id="bank-transactions-section" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 30px;">
-                    <h3 style="margin-bottom: 20px;">Transaction History</h3>
-                    <div id="transactions-list">
-                        <p>No transactions yet.</p>
+                <div
+                    id="bank-transactions-section"
+                    style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
+                >
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Transaction History</h3>
+                    <div
+                        id="transactions-list"
+                        style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;"
+                    >
+                        <p style="margin: 0; color: #94a3b8;">No transactions yet.</p>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Accounts View (modern banking UI, Python/vanilla JS) -->
+        <div id="accounts-view" class="view">
+            <div class="form-section accounts-ui">
+                <h2 style="margin-bottom: 24px;">Accounts</h2>
+                <div id="accounts-student-select-wrap" style="display: none; margin-bottom: 16px;">
+                    <label style="font-size: 13px; color: #64748b; margin-right: 8px;">Student</label>
+                    <select id="accounts-student-select" style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"><option value="">— Select student —</option></select>
+                    <p id="accounts-no-student-msg" style="display: none; margin-top: 8px; color: #64748b;">Select a student to view their account and transactions.</p>
+                </div>
+                <div class="accounts-total-balance" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 28px; box-shadow: 0 4px 14px rgba(14,165,233,0.25);">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+                        <div>
+                            <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Total balance</p>
+                            <p id="accounts-total-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
+                        </div>
+                        <button type="button" id="accounts-refresh-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;">↻ Refresh</button>
+                    </div>
+                </div>
+                <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Accounts</h3>
+                <div id="accounts-cards-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 28px;"></div>
+                <div id="accounts-add-investment-wrap" style="display: none;"><button type="button" id="accounts-add-investment-btn" style="min-height: 100px; border: 2px dashed #cbd5e1; background: #f8fafc; border-radius: 16px; color: #64748b; font-weight: 500; cursor: pointer;">+ Add Investment Account</button></div>
+                <div style="margin-top: 32px;">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
+                        <h3 style="margin: 0; font-size: 1.1rem;">Transaction History</h3>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                            <label style="font-size: 13px; color: #64748b;">Account</label>
+                            <select id="accounts-filter-account" style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"><option value="all">All accounts</option></select>
+                            <label style="font-size: 13px; color: #64748b;">Type</label>
+                            <select id="accounts-filter-type" style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;">
+                                <option value="all">All types</option>
+                                <option value="deposit">Deposit</option>
+                                <option value="withdrawal">Withdrawal</option>
+                                <option value="interest">Interest Payment</option>
+                                <option value="transfer_in">Transfer In</option>
+                                <option value="transfer_out">Transfer Out</option>
+                                <option value="purchase">Purchase</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden;">
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                                <thead style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;"><tr><th style="text-align: left; padding: 12px 14px; font-weight: 600; color: #475569;">Date</th><th style="text-align: left; padding: 12px 14px; font-weight: 600; color: #475569;">Description</th><th style="text-align: left; padding: 12px 14px; font-weight: 600; color: #475569;">Type</th><th style="text-align: right; padding: 12px 14px; font-weight: 600; color: #475569;">Amount</th><th style="text-align: right; padding: 12px 14px; font-weight: 600; color: #475569;">Balance</th></tr></thead>
+                                <tbody id="accounts-transactions-tbody"><tr><td colspan="5" style="padding: 24px; text-align: center; color: #94a3b8;">No transactions.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="accounts-add-investment-modal" style="display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; padding: 16px;">
+            <div style="background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); max-width: 420px; width: 100%; padding: 24px;" onclick="event.stopPropagation();">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0;">Add Investment Account</h3>
+                    <button type="button" id="accounts-add-investment-close" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 20px;">&times;</button>
+                </div>
+                <div style="margin-bottom: 14px;"><label style="display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px;">Account name</label><input type="text" id="accounts-add-investment-name" placeholder="e.g. Brokerage, IRA" style="width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; box-sizing: border-box;"></div>
+                <div style="margin-bottom: 18px;"><label style="display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px;">Last 4 digits (optional)</label><input type="text" id="accounts-add-investment-last4" placeholder="4521" maxlength="4" style="width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; box-sizing: border-box;"></div>
+                <div style="display: flex; gap: 10px;"><button type="button" id="accounts-add-investment-cancel" class="btn-secondary" style="flex: 1;">Cancel</button><button type="button" id="accounts-add-investment-submit" class="btn-primary" style="flex: 1; background: #0ea5e9; border-color: #0ea5e9;">Add account</button></div>
             </div>
         </div>
     </div>
@@ -1223,7 +1433,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc5"></script>
 </body>
 </html>
 

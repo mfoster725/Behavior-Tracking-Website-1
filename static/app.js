@@ -254,6 +254,8 @@ function updateQuarterDisplay() {
 }
 
 let quarterDates = loadQuarterDates();
+// Per-user UI preferences loaded from backend (e.g., hidden sections)
+let userPreferences = {};
 
 // Check if user is staff
 function isStaff() {
@@ -308,6 +310,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         loadStudents();
         setupEventListeners();
+        // Load per-user UI preferences (e.g., which User Management sections are hidden)
+        loadUserPreferences();
         
         // Set up period selector
         setupPeriodSelector();
@@ -637,6 +641,28 @@ function setupEventListeners() {
         } else {
             console.warn('save-student-btn not found');
         }
+
+        // User Management section visibility toggles
+        const userSectionToggleConfigs = [
+            { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
+            { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+            { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
+            { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
+            { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
+        ];
+
+        userSectionToggleConfigs.forEach(config => {
+            const checkbox = document.getElementById(config.checkboxId);
+            const body = document.getElementById(config.bodyId);
+            if (!checkbox || !body) {
+                return;
+            }
+            checkbox.addEventListener('change', () => {
+                const isHidden = checkbox.checked;
+                body.style.display = isHidden ? 'none' : '';
+                updateUserManagementPreference(config.key, isHidden);
+            });
+        });
 
         const loadSummaryBtn = document.getElementById('load-summary-btn');
         if (loadSummaryBtn) {
@@ -1048,9 +1074,10 @@ async function switchView(viewName) {
         }
     }
     
-    // If switching to users view, load users
+    // If switching to users view, load users and apply any stored visibility preferences
     if (viewName === 'users') {
         loadUsers();
+        applyUserManagementSectionVisibility();
     }
     
     // If switching to admin view, load users and stats
@@ -1096,6 +1123,214 @@ async function switchView(viewName) {
     if (viewName === 'bank-account') {
         handleBankAccountView();
     }
+    if (viewName === 'accounts') {
+        initAccountsView();
+    }
+}
+
+// --- Accounts tab (Python/vanilla JS) ---
+var accountsData = {
+    accounts: [],
+    transactions: []
+};
+var ACCOUNTS_TYPE_LABELS = { deposit: 'Deposit', withdrawal: 'Withdrawal', interest: 'Interest Payment', transfer_in: 'Transfer In', transfer_out: 'Transfer Out', purchase: 'Purchase', other: 'Other' };
+var currentBankStudentId = null;
+
+function getAccountsStudentId() {
+    if (window.currentUser && window.currentUser.role === 'student') {
+        return window.currentUser.studentId || null;
+    }
+    if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) return currentBankStudentId;
+    var sel = document.getElementById('accounts-student-select');
+    if (sel && sel.value) return parseInt(sel.value, 10);
+    return null;
+}
+
+function renderAccountsFromData() {
+    var totalEl = document.getElementById('accounts-total-amount');
+    var cardsEl = document.getElementById('accounts-cards-container');
+    var filterAccount = document.getElementById('accounts-filter-account');
+    if (!cardsEl) return;
+    var total = accountsData.accounts.reduce(function (s, a) { return s + a.balance; }, 0);
+    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    cardsEl.innerHTML = '';
+    accountsData.accounts.forEach(function (a) {
+        var typeLabel = a.type === 'checking' ? 'Checking' : a.type === 'savings' ? 'Savings' : 'Investment';
+        var card = document.createElement('div');
+        card.style.cssText = 'border: 2px solid #e2e8f0; border-radius: 16px; padding: 18px; background: #fff; cursor: pointer;';
+        card.onmouseover = function () { card.style.borderColor = '#0ea5e9'; card.style.boxShadow = '0 4px 12px rgba(14,165,233,0.15)'; };
+        card.onmouseout = function () { card.style.borderColor = '#e2e8f0'; card.style.boxShadow = 'none'; }
+        var lastInt = a.lastInterestDate ? '<p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">Last interest: ' + new Date(a.lastInterestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '</p>' : '';
+        card.innerHTML = '<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;color:#64748b;">' + typeLabel + '</p><p style="margin:0;font-weight:600;">' + (a.name || '') + '</p><p style="margin:4px 0 0 0;font-size:13px;color:#64748b;">' + (a.maskedNumber || '') + '</p><p style="margin:10px 0 0 0;font-size:1.25rem;font-weight:700;">$' + Number(a.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) + '</p>' + lastInt;
+        cardsEl.appendChild(card);
+    });
+    if (filterAccount) {
+        filterAccount.innerHTML = '<option value="all">All accounts</option>';
+        accountsData.accounts.forEach(function (a) { var o = document.createElement('option'); o.value = a.id; o.textContent = a.name; filterAccount.appendChild(o); });
+    }
+    renderAccountsTransactions();
+}
+
+function loadAccountsForStudent(studentId) {
+    return fetch('/api/bank-account/' + studentId)
+        .then(function (res) { return res.ok ? res.json() : Promise.reject(res); })
+        .then(function (data) {
+            var sid = String(studentId);
+            accountsData.accounts = [{ id: 'chk-1', type: 'checking', name: 'Primary Checking', maskedNumber: '•••• ' + sid.slice(-4), balance: data.balance }];
+            accountsData.transactions = (data.transactions || []).map(function (t) {
+                return {
+                    id: t.id,
+                    accountId: 'chk-1',
+                    date: t.created_at,
+                    description: t.description || '',
+                    type: t.type || 'other',
+                    amount: t.amount,
+                    balanceAfter: t.balance_after
+                };
+            });
+            renderAccountsFromData();
+        })
+        .catch(function () {
+            accountsData.accounts = [];
+            accountsData.transactions = [];
+            renderAccountsFromData();
+        });
+}
+
+function initAccountsView() {
+    var totalEl = document.getElementById('accounts-total-amount');
+    var cardsEl = document.getElementById('accounts-cards-container');
+    var filterAccount = document.getElementById('accounts-filter-account');
+    var filterType = document.getElementById('accounts-filter-type');
+    var wrap = document.getElementById('accounts-student-select-wrap');
+    var sel = document.getElementById('accounts-student-select');
+    var noMsg = document.getElementById('accounts-no-student-msg');
+    if (!cardsEl) return;
+
+    var isStudent = window.currentUser && window.currentUser.role === 'student';
+
+    if (isStudent) {
+        if (wrap) wrap.style.display = 'none';
+        var studentId = window.currentUser.studentId || null;
+        if (!studentId) {
+            accountsData.accounts = [];
+            accountsData.transactions = [];
+            if (totalEl) totalEl.textContent = '$0.00';
+            cardsEl.innerHTML = '';
+            if (filterAccount) filterAccount.innerHTML = '<option value="all">All accounts</option>';
+            renderAccountsTransactions();
+            bindAccountsEvents();
+            return;
+        }
+        loadAccountsForStudent(studentId).finally(bindAccountsEvents);
+        return;
+    }
+
+    if (wrap) wrap.style.display = 'block';
+    if (noMsg) noMsg.style.display = 'none';
+
+    function onStudentChosen() {
+        var studentId = getAccountsStudentId();
+        if (!studentId) {
+            if (noMsg) noMsg.style.display = 'block';
+            accountsData.accounts = [];
+            accountsData.transactions = [];
+            renderAccountsFromData();
+            return;
+        }
+        if (noMsg) noMsg.style.display = 'none';
+        if (typeof currentBankStudentId !== 'undefined') currentBankStudentId = studentId;
+        loadAccountsForStudent(studentId);
+    }
+
+    var params = new URLSearchParams();
+    fetch('/api/bank-account/search?' + params)
+        .then(function (res) {
+            if (!res.ok) {
+                return res.text().then(function (text) {
+                    console.error('Accounts student list failed:', res.status, res.statusText, text);
+                    return Promise.reject(new Error('API ' + res.status));
+                });
+            }
+            return res.json();
+        })
+        .then(function (students) {
+            if (!sel) return;
+            sel.innerHTML = '<option value="">— Select student —</option>';
+            var list = Array.isArray(students) ? students : [];
+            console.log('Accounts student list loaded:', list.length, 'students');
+            list.forEach(function (s) {
+                var o = document.createElement('option');
+                o.value = s.student_id;
+                o.textContent = s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
+                sel.appendChild(o);
+            });
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
+                sel.value = currentBankStudentId;
+            }
+            if (!sel._accountsBound) {
+                sel._accountsBound = true;
+                sel.addEventListener('change', function () {
+                    var v = sel.value;
+                    if (v && typeof currentBankStudentId !== 'undefined') currentBankStudentId = parseInt(v, 10);
+                    onStudentChosen();
+                });
+            }
+            onStudentChosen();
+        })
+        .catch(function (err) {
+            console.error('Accounts student list error:', err);
+            if (sel) sel.innerHTML = '<option value="">— Select student —</option>';
+            onStudentChosen();
+        })
+        .then(bindAccountsEvents);
+}
+
+function renderAccountsTransactions() {
+    var tbody = document.getElementById('accounts-transactions-tbody');
+    var filterAccount = document.getElementById('accounts-filter-account');
+    var filterType = document.getElementById('accounts-filter-type');
+    if (!tbody) return;
+    var accountId = filterAccount && filterAccount.value !== 'all' ? filterAccount.value : null;
+    var typeVal = filterType && filterType.value !== 'all' ? filterType.value : null;
+    var list = accountsData.transactions.filter(function (t) { return (!accountId || t.accountId === accountId) && (!typeVal || t.type === typeVal); });
+    list.sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
+    if (list.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8;">No transactions match the filters.</td></tr>'; return; }
+    tbody.innerHTML = list.map(function (tx) {
+        var typeLabel = ACCOUNTS_TYPE_LABELS[tx.type] || tx.type;
+        var amtStr = (tx.amount >= 0 ? '+' : '−') + '$' + Math.abs(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
+        var amtStyle = 'padding:12px 14px;text-align:right;font-weight:600;' + (tx.amount >= 0 ? 'color:#059669;' : 'color:#dc2626;');
+        return '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:12px 14px;">' + new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '</td><td style="padding:12px 14px;">' + (tx.description || '') + '</td><td style="padding:12px 14px;">' + typeLabel + '</td><td style="' + amtStyle + '">' + amtStr + '</td><td style="padding:12px 14px;text-align:right;">$' + Number(tx.balanceAfter).toLocaleString('en-US', { minimumFractionDigits: 2 }) + '</td></tr>';
+    }).join('');
+}
+
+function bindAccountsEvents() {
+    var refreshBtn = document.getElementById('accounts-refresh-btn');
+    var filterAccount = document.getElementById('accounts-filter-account');
+    var filterType = document.getElementById('accounts-filter-type');
+    var addBtn = document.getElementById('accounts-add-investment-btn');
+    var modal = document.getElementById('accounts-add-investment-modal');
+    var closeBtn = document.getElementById('accounts-add-investment-close');
+    var cancelBtn = document.getElementById('accounts-add-investment-cancel');
+    var submitBtn = document.getElementById('accounts-add-investment-submit');
+    var nameIn = document.getElementById('accounts-add-investment-name');
+    var last4In = document.getElementById('accounts-add-investment-last4');
+    function closeModal() { if (modal) modal.style.display = 'none'; }
+    if (refreshBtn && !refreshBtn._accountsBound) {
+        refreshBtn._accountsBound = true;
+        refreshBtn.addEventListener('click', function () {
+            var studentId = getAccountsStudentId();
+            if (!studentId) return;
+            loadAccountsForStudent(studentId);
+        });
+    }
+    if (filterAccount && !filterAccount._accountsBound) { filterAccount._accountsBound = true; filterAccount.addEventListener('change', renderAccountsTransactions); }
+    if (filterType && !filterType._accountsBound) { filterType._accountsBound = true; filterType.addEventListener('change', renderAccountsTransactions); }
+    if (addBtn && !addBtn._accountsBound) { addBtn._accountsBound = true; addBtn.addEventListener('click', function () { if (modal) { modal.style.display = 'flex'; } if (nameIn) nameIn.value = ''; if (last4In) last4In.value = ''; }); }
+    if (closeBtn && !closeBtn._accountsBound) { closeBtn._accountsBound = true; closeBtn.addEventListener('click', closeModal); }
+    if (cancelBtn && !cancelBtn._accountsBound) { cancelBtn._accountsBound = true; cancelBtn.addEventListener('click', closeModal); }
+    if (modal && !modal._accountsBound) { modal._accountsBound = true; modal.addEventListener('click', closeModal); }
+    if (submitBtn && !submitBtn._accountsBound) { submitBtn._accountsBound = true; submitBtn.addEventListener('click', function () { var name = nameIn && nameIn.value ? nameIn.value.trim() : ''; if (!name) return; var last4 = last4In && last4In.value ? String(last4In.value).replace(/\D/g, '').slice(-4) : ''; accountsData.accounts.push({ id: 'inv-' + Date.now(), type: 'investment', name: name, maskedNumber: last4 ? '•••• ' + last4 : '•••• ----', balance: 0 }); closeModal(); initAccountsView(); }); }
 }
 
 function loadQuarterConfig() {
@@ -7747,6 +7982,79 @@ async function saveSchedule(type) {
     }
 }
 
+// Load and apply per-user UI preferences (e.g., hidden User Management sections)
+async function loadUserPreferences() {
+    try {
+        const response = await fetch('/api/user/preferences');
+        if (!response.ok) {
+            console.warn('Failed to load user preferences:', response.status);
+            return;
+        }
+        const data = await response.json();
+        userPreferences = data || {};
+        applyUserManagementSectionVisibility();
+    } catch (error) {
+        console.error('Error loading user preferences:', error);
+    }
+}
+
+function applyUserManagementSectionVisibility() {
+    if (!userPreferences) {
+        return;
+    }
+
+    const hiddenSections = userPreferences.userManagementHiddenSections || {};
+    const sectionConfigs = [
+        { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
+        { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+        { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
+        { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
+        { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
+    ];
+
+    sectionConfigs.forEach(config => {
+        const checkbox = document.getElementById(config.checkboxId);
+        const body = document.getElementById(config.bodyId);
+        if (!checkbox || !body) {
+            return;
+        }
+        const isHidden = !!hiddenSections[config.key];
+        checkbox.checked = isHidden;
+        body.style.display = isHidden ? 'none' : '';
+    });
+}
+
+async function updateUserManagementPreference(sectionKey, hidden) {
+    const existingPrefs = userPreferences || {};
+    const hiddenSections = existingPrefs.userManagementHiddenSections || {};
+    const newHiddenSections = {
+        ...hiddenSections,
+        [sectionKey]: hidden
+    };
+
+    const newPrefs = {
+        ...existingPrefs,
+        userManagementHiddenSections: newHiddenSections
+    };
+
+    userPreferences = newPrefs;
+
+    try {
+        const response = await fetch('/api/user/preferences', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(newPrefs)
+        });
+        if (!response.ok) {
+            console.warn('Failed to save user preferences:', response.status);
+        }
+    } catch (error) {
+        console.error('Error saving user preferences:', error);
+    }
+}
+
 // User Management Functions
 async function loadUsers() {
     try {
@@ -7763,6 +8071,7 @@ async function loadUsers() {
         const staffTbody = document.getElementById('staff-users-table-body');
         const studentTbody = document.getElementById('student-users-table-body');
         const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
+        const archivedStudentsTbody = document.getElementById('archived-students-table-body');
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
         
@@ -7770,9 +8079,13 @@ async function loadUsers() {
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
         if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
+        if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
             studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            if (archivedStudentsTbody) {
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+            }
             return;
         }
         
@@ -7834,6 +8147,48 @@ async function loadUsers() {
         // Load admin stats if on admin panel
         if (isAdmin()) {
             loadAdminStats(users);
+        }
+
+        // Load archived students table (admin-only view)
+        if (archivedStudentsTbody && isAdmin()) {
+            try {
+                const archivedResponse = await fetch('/api/students/archived');
+                if (archivedResponse.ok) {
+                    const archivedStudents = await archivedResponse.json();
+                    if (archivedStudents.length === 0) {
+                        archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                    } else {
+                        archivedStudents.forEach(student => {
+                            const row = document.createElement('tr');
+                            const createdAt = student.created_at
+                                ? new Date(student.created_at).toLocaleDateString()
+                                : '-';
+                            const cardColor = student.card_color || '-';
+                            const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
+                            // Safely escape single quotes in name for inline handler
+                            const safeName = (student.name || 'Student').replace(/'/g, "\\'");
+                            row.innerHTML = `
+                                <td><strong>${student.name || 'Unnamed Student'}</strong></td>
+                                <td>${student.grade || '-'}</td>
+                                <td>${cardColorDisplay}</td>
+                                <td>${createdAt}</td>
+                                <td class="actions-cell">
+                                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
+                                        onclick="restoreArchivedStudent(${student.id}, '${safeName}')">
+                                        Restore Student User
+                                    </button>
+                                </td>
+                            `;
+                            archivedStudentsTbody.appendChild(row);
+                        });
+                    }
+                } else {
+                    archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                }
+            } catch (e) {
+                console.error('Error loading archived students:', e);
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+            }
         }
     } catch (error) {
         console.error('Error loading users:', error);
@@ -7952,6 +8307,48 @@ function createStudentRow(user) {
     `;
     
     return row;
+}
+
+// Restore an archived student by creating a new Student User account linked to the
+// existing Student record. Admin is prompted for username and password.
+async function restoreArchivedStudent(studentId, studentName) {
+    if (!isAdmin()) {
+        showMessage('Only admins can restore archived students.', 'error');
+        return;
+    }
+    
+    const nameForPrompt = studentName || 'this student';
+    const username = window.prompt(`Enter a username for ${nameForPrompt}:`);
+    if (!username) {
+        return;
+    }
+    const password = window.prompt(`Enter a temporary password for ${nameForPrompt} (they should change it after first login):`);
+    if (!password) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/students/${studentId}/restore-user`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        });
+        
+        if (response.ok) {
+            showMessage('Student user restored successfully.', 'success');
+            // Reload users so both Student Users and Archived Students tables refresh
+            await loadUsers();
+        } else {
+            const data = await response.json().catch(() => ({}));
+            const errorMsg = data.error || 'Failed to restore student user.';
+            showMessage(errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('Error restoring archived student:', error);
+        showMessage('Error restoring student user. Please try again.', 'error');
+    }
 }
 
 function createOutsideStaffRow(user) {
@@ -9403,7 +9800,6 @@ async function saveStudentInfo(studentId, row, buttonElement) {
 }
 
 // Make functions globally accessible
-window.resetPassword = resetPassword;
 window.copyToClipboard = copyToClipboard;
 window.removeStudent = removeStudent;
 window.editStudent = editStudent;
@@ -11269,7 +11665,6 @@ window.generatePdfFromModal = generatePdfFromModal;
 
 // ==================== BANK ACCOUNT FUNCTIONALITY ====================
 
-let currentBankStudentId = null;
 let allMarketplaceItems = [];
 let currentPurchaseItem = null;
 
@@ -11295,15 +11690,15 @@ async function loadBankAccount(studentId) {
         const response = await fetch(`/api/bank-account/${studentId}`);
         if (!response.ok) {
             // If account doesn't exist, show default UI
-            const balanceAmount = document.getElementById('bank-balance-amount');
-            const studentName = document.getElementById('bank-student-name');
-            if (balanceAmount) balanceAmount.textContent = '$0.00';
-            if (studentName) {
-                // Try to get student name
-                const student = allStudents.find(s => s.id === studentId);
-                if (student) studentName.textContent = student.name;
-                else studentName.textContent = window.currentUser.name || 'Student';
-            }
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) {
+            // Try to get student name
+            const student = allStudents.find(s => s.id === studentId);
+            if (student) studentName.textContent = student.name;
+            else studentName.textContent = window.currentUser.name || 'Student';
+        }
             
             const transactionsList = document.getElementById('transactions-list');
             if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
@@ -11358,6 +11753,19 @@ async function loadBankAccount(studentId) {
     }
 }
 
+// Bank account refresh button
+document.addEventListener('DOMContentLoaded', () => {
+    const refreshBtn = document.getElementById('bank-refresh-btn');
+    if (refreshBtn && !refreshBtn._bankBound) {
+        refreshBtn._bankBound = true;
+        refreshBtn.addEventListener('click', () => {
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
+                loadBankAccount(currentBankStudentId);
+            }
+        });
+    }
+});
+
 // Load paychecks
 async function loadPaychecks(studentId) {
     if (!studentId) {
@@ -11394,6 +11802,18 @@ async function loadPaychecks(studentId) {
     }
 }
 
+// Currency helpers for paycheck worksheet
+function parseCurrency(str) {
+    if (str == null || str === '') return NaN;
+    const cleaned = String(str).replace(/[$,]/g, '').trim();
+    return cleaned === '' ? NaN : parseFloat(cleaned);
+}
+function formatCurrency(num) {
+    if (num === '' || num == null || isNaN(parseFloat(num))) return '';
+    const n = parseFloat(num);
+    return '$' + n.toFixed(2);
+}
+
 // Render paycheck worksheet
 function renderPaycheckWorksheet(paycheck) {
     const worksheetDiv = document.getElementById('current-paycheck-worksheet');
@@ -11401,20 +11821,39 @@ function renderPaycheckWorksheet(paycheck) {
     
     worksheetDiv.style.display = 'block';
     document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(1);
-    document.getElementById('worksheet-base-pay').textContent = paycheck.base_pay.toFixed(2);
-    document.getElementById('worksheet-citation-count').textContent = paycheck.citation_count;
-    document.getElementById('worksheet-citation-deduction').textContent = paycheck.citation_deduction.toFixed(2);
-    document.getElementById('worksheet-final-pay').textContent = paycheck.final_pay.toFixed(2);
+    
+    // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
+    const citationListEl = document.getElementById('worksheet-citation-list');
+    if (citationListEl) {
+        const list = paycheck.citation_list || [];
+        if (!list.length) {
+            citationListEl.textContent = '(none this week)';
+        } else {
+            const counts = {};
+            list.forEach(function (type) {
+                counts[type] = (counts[type] || 0) + 1;
+            });
+            const lines = Object.keys(counts)
+                .sort(function (a, b) {
+                    const diff = counts[b] - counts[a];
+                    return diff !== 0 ? diff : (a < b ? -1 : a > b ? 1 : 0);
+                })
+                .map(function (type) {
+                    return counts[type] + 'x ' + type;
+                });
+            citationListEl.textContent = lines.join('\n');
+        }
+    }
     
     // Store paycheck ID
     worksheetDiv.dataset.paycheckId = paycheck.id;
     
     // Pre-fill inputs if this is a retry (worksheet was completed but not verified)
     if (paycheck.worksheet_completed && !paycheck.is_verified && paycheck.student_calculated_pay) {
-        document.getElementById('worksheet-calculated-pay').value = paycheck.student_calculated_pay;
+        document.getElementById('worksheet-calculated-pay').value = formatCurrency(paycheck.student_calculated_pay);
         document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
-        document.getElementById('worksheet-calculated-deduction').value = paycheck.student_calculated_deduction || '';
-        document.getElementById('worksheet-calculated-final').value = paycheck.student_calculated_final || '';
+        document.getElementById('worksheet-calculated-deduction').value = formatCurrency(paycheck.student_calculated_deduction);
+        document.getElementById('worksheet-calculated-final').value = formatCurrency(paycheck.student_calculated_final);
     } else {
         // Clear inputs for new worksheet
         document.getElementById('worksheet-calculated-pay').value = '';
@@ -11436,10 +11875,10 @@ async function submitPaycheckWorksheet() {
     const paycheckId = worksheetDiv.dataset.paycheckId;
     if (!paycheckId) return;
     
-    const calculatedPay = parseFloat(document.getElementById('worksheet-calculated-pay').value);
-    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value);
-    const calculatedDeduction = parseFloat(document.getElementById('worksheet-calculated-deduction').value);
-    const calculatedFinal = parseFloat(document.getElementById('worksheet-calculated-final').value);
+    const calculatedPay = parseCurrency(document.getElementById('worksheet-calculated-pay').value);
+    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value, 10);
+    const calculatedDeduction = parseCurrency(document.getElementById('worksheet-calculated-deduction').value);
+    const calculatedFinal = parseCurrency(document.getElementById('worksheet-calculated-final').value);
     
     if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal)) {
         document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
@@ -11754,72 +12193,42 @@ async function updatePurchaseOrderStatus(orderId, status) {
 function renderTransactions(transactions) {
     const list = document.getElementById('transactions-list');
     if (!list) return;
-    
+
     if (!transactions || transactions.length === 0) {
-        list.innerHTML = '<p>No transactions yet.</p>';
+        list.innerHTML = '<p style="margin:0; color:#94a3b8;">No transactions yet.</p>';
         return;
     }
-    
-    // Separate transactions into deposits and withdrawals
-    const deposits = transactions.filter(t => t.type === 'deposit');
-    const withdrawals = transactions.filter(t => t.type === 'purchase');
-    
-    let html = '';
-    
-    // Deposits section
-    if (deposits.length > 0) {
-        html += '<div style="margin-bottom: 30px;">';
-        html += '<h4 style="margin-bottom: 15px; color: #10b981; font-size: 1.2em;">Deposits</h4>';
-        deposits.forEach(t => {
-            html += `
-                <div style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #ddd; background: #f0fdf4;">
-                    <div>
-                        <strong style="color: #10b981;">Deposit</strong>
-                        <p style="margin: 5px 0; color: #666;">${t.description || ''}</p>
-                        <small style="color: #999;">${new Date(t.created_at).toLocaleDateString()}</small>
+
+    // Render in a compact, table-like list similar to Accounts UI
+    const rows = transactions
+        .slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .map(t => {
+            const isDeposit = t.type === 'deposit';
+            const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
+            const amountStr = (isDeposit ? '+' : '−') + '$' + Math.abs(t.amount).toFixed(2);
+            const amtColor = isDeposit ? '#059669' : '#dc2626';
+            return `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; color:#0f172a;">${new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        <div style="font-size:13px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.description || ''}</div>
                     </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 1.2em; font-weight: bold; color: #10b981;">
-                            +$${Math.abs(t.amount).toFixed(2)}
-                        </div>
-                        <small style="color: #999;">Balance: $${t.balance_after.toFixed(2)}</small>
+                    <div style="width:110px; text-align:right; font-size:13px; color:#64748b;">
+                        ${typeLabel}
                     </div>
-                </div>
-            `;
-        });
-        html += '</div>';
-    }
-    
-    // Withdrawals section
-    if (withdrawals.length > 0) {
-        html += '<div style="margin-bottom: 30px;">';
-        html += '<h4 style="margin-bottom: 15px; color: #000; font-size: 1.2em;">Withdrawals</h4>';
-        withdrawals.forEach(t => {
-            html += `
-                <div style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #ddd;">
-                    <div>
-                        <strong style="color: #000;">Withdrawal</strong>
-                        <p style="margin: 5px 0; color: #666;">${t.description || ''}</p>
-                        <small style="color: #999;">${new Date(t.created_at).toLocaleDateString()}</small>
+                    <div style="width:120px; text-align:right; font-weight:600; font-size:13px; color:${amtColor};">
+                        ${amountStr}
                     </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 1.2em; font-weight: bold; color: #000;">
-                            -$${Math.abs(t.amount).toFixed(2)}
-                        </div>
-                        <small style="color: #999;">Balance: $${t.balance_after.toFixed(2)}</small>
+                    <div style="width:120px; text-align:right; font-size:13px; color:#0f172a;">
+                        $${t.balance_after.toFixed(2)}
                     </div>
                 </div>
             `;
-        });
-        html += '</div>';
-    }
-    
-    // If no transactions in either category
-    if (deposits.length === 0 && withdrawals.length === 0) {
-        html = '<p>No transactions yet.</p>';
-    }
-    
-    list.innerHTML = html;
+        })
+        .join('');
+
+    list.innerHTML = rows;
 }
 
 // Create marketplace item
@@ -12020,18 +12429,25 @@ function handleBankAccountView() {
                 if (managedByMe) params.append('managed_by_me', 'true');
                 
                 const response = await fetch(`/api/bank-account/search?${params}`);
-                const students = await response.json();
+                if (!response.ok) {
+                    const text = await response.text();
+                    console.error('Bank Account student list failed:', response.status, response.statusText, text);
+                    return;
+                }
+                const raw = await response.json();
+                const data = Array.isArray(raw) ? raw : [];
                 
                 const select = document.getElementById('bank-student-select');
+                if (!select) return;
                 select.innerHTML = '<option value="">Select Student</option>';
-                students.forEach(s => {
+                data.forEach(s => {
                     const option = document.createElement('option');
                     option.value = s.student_id;
-                    option.textContent = `${s.student_name} ($${s.balance.toFixed(2)})`;
+                    option.textContent = `${s.student_name} ($${(s.balance != null ? Number(s.balance) : 0).toFixed(2)})`;
                     select.appendChild(option);
                 });
             } catch (error) {
-                console.error('Error searching:', error);
+                console.error('Error searching bank students:', error);
             }
         };
         
@@ -12050,6 +12466,35 @@ function handleBankAccountView() {
     const submitWorksheetBtn = document.getElementById('submit-worksheet-btn');
     if (submitWorksheetBtn) {
         submitWorksheetBtn.addEventListener('click', submitPaycheckWorksheet);
+    }
+    
+    // Currency format on blur for worksheet inputs
+    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('blur', function () {
+                const parsed = parseCurrency(this.value);
+                if (!isNaN(parsed)) this.value = formatCurrency(parsed);
+            });
+        }
+    });
+    
+    // Enter = Tab in worksheet (move to next field)
+    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'submit-worksheet-btn'];
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (worksheetDiv) {
+        worksheetDiv.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            const id = e.target.id;
+            const idx = worksheetFocusOrder.indexOf(id);
+            if (idx === -1) return;
+            e.preventDefault();
+            const nextId = worksheetFocusOrder[idx + 1];
+            if (nextId) {
+                const nextEl = document.getElementById(nextId);
+                if (nextEl) nextEl.focus();
+            }
+        });
     }
     
     const viewDepositedBtn = document.getElementById('view-deposited-paychecks-btn');

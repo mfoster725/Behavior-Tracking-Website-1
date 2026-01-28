@@ -223,6 +223,8 @@ class User(UserMixin, db.Model):
     claimed_student_name = db.Column(db.String(200), nullable=True)  # Parent self-registration: name they gave
     claimed_relationship = db.Column(db.String(50), nullable=True)  # Parent self-registration: relationship
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # JSON-encoded per-user UI preferences (non-PHI, e.g., hidden sections)
+    ui_preferences = db.Column(db.Text, nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -270,6 +272,26 @@ class Student(db.Model):
     # Relationships
     daily_records = db.relationship('DailyRecord', backref='student', lazy=True, cascade='all, delete-orphan')
     parent_relationships = db.relationship('ParentStudent', backref='student', lazy=True, cascade='all, delete-orphan')
+
+
+def get_archived_students():
+    """
+    Helper to compute 'archived' students.
+    
+    Archived students are defined as Student records that do NOT currently have
+    an associated User account with role='student'. This allows the system to
+    retain historical student data while removing their active login/user entry.
+    """
+    # Get all active student user accounts
+    student_users = User.query.filter_by(role='student').all()
+    active_student_ids = {u.student_id for u in student_users if u.student_id}
+    
+    if not active_student_ids:
+        # If there are no active student users, then all students are archived
+        return Student.query.order_by(Student.name).all()
+    
+    # Archived students = all students whose id is NOT in active_student_ids
+    return Student.query.filter(~Student.id.in_(active_student_ids)).order_by(Student.name).all()
 
 class DailyRecord(db.Model):
     __tablename__ = 'daily_records'
@@ -1027,6 +1049,18 @@ def students():
             else:
                 students = query.order_by(Student.name).all()
             
+            # Additional restriction: for ALL roles in normal mode (including admin),
+            # only expose students who currently have an active student user account in the
+            # "Student Users" table. This ensures that once a student's user account is
+            # removed/archived, their data is no longer accessible in daily/period entry,
+            # user linking, or other standard views. Archived students can still be viewed
+            # separately via the dedicated archived-students admin view.
+            # Get all student user accounts
+            student_users = User.query.filter_by(role='student').all()
+            student_user_ids = {u.student_id for u in student_users if u.student_id}
+            # Filter students list down to those with student user accounts
+            students = [s for s in students if s.id in student_user_ids]
+            
             # FERPA Compliance: Filter out students who opted out of directory information
             # Directory information includes name, email, grade, etc.
             students = filter_directory_info(students, include_opted_out=False)
@@ -1107,6 +1141,15 @@ def students_by_staff_period():
     # Get student details
     if student_ids:
         students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+        
+        # In normal views (including for admin), further restrict to students that have an
+        # active student user account. This keeps archived/non-user students from
+        # appearing in period entry lists. Archived students are available via a
+        # separate admin-only archived-students view.
+        student_users = User.query.filter_by(role='student').all()
+        student_user_ids = {u.student_id for u in student_users if u.student_id}
+        students = [s for s in students if s.id in student_user_ids]
+        
         # FERPA Compliance: Filter out students who opted out of directory information
         students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
@@ -1176,6 +1219,13 @@ def students_by_staff_name():
     # Get student details
     if student_ids:
         students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+        
+        # Restrict to students that have an active student user account so that
+        # archived/non-user students are not shown in normal staff/admin views.
+        student_users = User.query.filter_by(role='student').all()
+        student_user_ids = {u.student_id for u in student_users if u.student_id}
+        students = [s for s in students if s.id in student_user_ids]
+        
         # FERPA Compliance: Filter out students who opted out of directory information
         students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
@@ -1187,6 +1237,137 @@ def students_by_staff_name():
             unique_names = list(set([tm.name for tm in all_team_members]))
             print(f"All team member names in database: {unique_names}")
         return jsonify([])
+
+
+@app.route('/api/students/archived', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+@admin_required
+def archived_students():
+    """
+    Admin-only endpoint to view archived students.
+    
+    Archived students are those who no longer have an active User account with
+    role='student' (i.e., they do not appear in the Student Users table).
+    They are hidden from normal student lists and can only be viewed in this
+    dedicated archived mode.
+    """
+    students = get_archived_students()
+    
+    # HIPAA/FERPA: This is an internal administrative view of historical data.
+    # We include all students here, including those who opted out of directory
+    # information, because this is not a public directory but an internal log.
+    # Still, we minimize the fields we return.
+    result = [{
+        'id': s.id,
+        'name': s.name,
+        'grade': s.grade,
+        'card_color': s.card_color,
+        'created_at': s.created_at.isoformat() if s.created_at else None
+    } for s in students]
+    
+    return jsonify(result)
+
+
+@app.route('/api/students/<int:student_id>/restore-user', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+@admin_required
+def restore_student_user(student_id):
+    """
+    Restore a student by creating a new User account (role='student') linked
+    to an existing Student record that currently has no student user.
+    """
+    student = Student.query.get_or_404(student_id)
+    
+    # Check if there is already a student user linked to this student
+    existing_user = User.query.filter_by(student_id=student.id, role='student').first()
+    if existing_user:
+        return jsonify({'error': 'This student already has a user account.'}), 400
+    
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+    
+    # Check if username already exists
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username already exists'}), 400
+    
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(password)
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+    
+    # Create new student user linked to this student
+    user = User(
+        name=student.name,
+        username=username,
+        role='student',
+        student_id=student.id
+    )
+    user.set_password(password)
+    
+    db.session.add(user)
+    db.session.commit()
+    
+    # Log restoration as a CREATE of a user account for existing student
+    log_phi_access(
+        action='CREATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='users',
+        resource_id=user.id,
+        details=f"Restored student user for student_id={student.id}, username={username}",
+        ip_address=get_remote_address()
+    )
+    
+    return jsonify({
+        'message': 'Student user restored successfully.',
+        'user_id': user.id
+    }), 201
+
+
+@app.route('/api/admin/purge-student-emails', methods=['POST'])
+@limiter.limit("5 per minute")
+@login_required
+@admin_required
+def purge_student_emails():
+    """
+    Admin-only endpoint to remove all email data from Student records.
+    This supports stricter privacy by deleting stored student email addresses.
+    """
+    students = Student.query.all()
+    count = 0
+    for s in students:
+        if s.email:
+            s.email = None
+            count += 1
+    
+    db.session.commit()
+    
+    # Log the purge operation (no specific student IDs listed to avoid
+    # reintroducing the deleted data into logs).
+    log_phi_access(
+        action='UPDATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='students',
+        resource_id='all',
+        details=f'Purged email addresses from {count} student record(s)',
+        ip_address=get_remote_address()
+    )
+    
+    return jsonify({
+        'message': 'All student email addresses have been removed.',
+        'updated_count': count
+    }), 200
 
 @app.route('/api/period-data', methods=['GET', 'POST'])
 @limiter.limit("60 per minute")
@@ -3696,6 +3877,37 @@ def manage_users():
         db.session.commit()
         return jsonify({'message': 'User deleted successfully'}), 200
 
+
+@app.route('/api/user/preferences', methods=['GET', 'POST'])
+@limiter.limit("30 per minute")
+@login_required
+def user_preferences():
+    """
+    Store and retrieve per-user UI preferences (non-PHI, e.g., hidden sections).
+    """
+    if request.method == 'GET':
+        # Safely decode JSON preferences; fall back to empty dict on error
+        prefs = {}
+        if getattr(current_user, 'ui_preferences', None):
+            try:
+                prefs = json.loads(current_user.ui_preferences) or {}
+            except Exception as e:
+                app.logger.warning(f"Failed to decode ui_preferences for user {current_user.id}: {e}")
+                prefs = {}
+        return jsonify(prefs)
+
+    # POST: replace the user's preferences document with the provided JSON
+    data = request.get_json(silent=True) or {}
+    try:
+        current_user.ui_preferences = json.dumps(data)
+        db.session.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        app.logger.error(f"Error saving user preferences for user {current_user.id}: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Error saving preferences'}), 500
+
+
 @app.route('/api/outside-staff/<int:user_id>/students', methods=['GET', 'POST', 'DELETE'])
 @limiter.limit("30 per minute")
 @login_required
@@ -4219,8 +4431,14 @@ def calculate_weekly_star_percent(student_id, start_date, end_date):
     overall_percent = (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4
     return Decimal(str(round(overall_percent, 2)))
 
+def _is_reset_infraction(infraction_type):
+    """Return True if this infraction type should not count as a citation (e.g. Reset)."""
+    if not infraction_type:
+        return False
+    return str(infraction_type).strip().lower() == 'reset'
+
 def count_weekly_infractions(student_id, start_date, end_date):
-    """Count total infractions for a date range"""
+    """Count total infractions for a date range. Excludes Reset (reset is not a citation)."""
     records = DailyRecord.query.filter(
         DailyRecord.student_id == student_id,
         DailyRecord.date >= start_date,
@@ -4231,9 +4449,29 @@ def count_weekly_infractions(student_id, start_date, end_date):
     for record in records:
         for period in record.periods:
             for infraction in period.infractions:
+                if _is_reset_infraction(infraction.infraction_type):
+                    continue
                 total_count += infraction.count
     
     return total_count
+
+def list_weekly_citations(student_id, start_date, end_date):
+    """Return a list of citation labels for the date range, one per occurrence. Excludes Reset."""
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date
+    ).order_by(DailyRecord.date, DailyRecord.id).all()
+    
+    result = []
+    for record in records:
+        for period in record.periods:
+            for infraction in period.infractions:
+                if _is_reset_infraction(infraction.infraction_type):
+                    continue
+                for _ in range(infraction.count):
+                    result.append(infraction.infraction_type)
+    return result
 
 def get_or_create_bank_account(student_id):
     """Get or create a bank account for a student"""
@@ -4285,6 +4523,7 @@ def get_paychecks(student_id):
         'average_star_percent': float(p.average_star_percent),
         'base_pay': float(p.base_pay),
         'citation_count': p.citation_count,
+        'citation_list': list_weekly_citations(p.student_id, p.pay_period_start, p.pay_period_end),
         'citation_deduction': float(p.citation_deduction),
         'final_pay': float(p.final_pay),
         'worksheet_completed': p.worksheet_completed,
@@ -4311,6 +4550,7 @@ def get_paycheck(paycheck_id):
         'average_star_percent': float(paycheck.average_star_percent),
         'base_pay': float(paycheck.base_pay),
         'citation_count': paycheck.citation_count,
+        'citation_list': list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end),
         'citation_deduction': float(paycheck.citation_deduction),
         'final_pay': float(paycheck.final_pay),
         'worksheet_completed': paycheck.worksheet_completed,
@@ -4366,8 +4606,8 @@ def generate_paychecks():
         avg_star_percent = calculate_weekly_star_percent(student.id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(student.id, pay_period_start, pay_period_end)
         
-        # Calculate pay
-        base_pay = avg_star_percent * Decimal('100')
+        # Calculate pay: 80% STAR -> $80 (percent of $100 max); citations $2 each
+        base_pay = (avg_star_percent / 100) * Decimal('100')
         citation_deduction = Decimal(str(citation_count * 2))
         final_pay = base_pay - citation_deduction
         
@@ -4939,16 +5179,15 @@ def get_case_manager_purchase_orders(user_id):
 @login_required
 @staff_required
 def search_bank_accounts():
-    """Search for student bank accounts (same search logic as daily entry)"""
+    """Search for student bank accounts. Returns only active students (those in Student Users table).
+    When no query, uses same access rules as /api/students. With ?q=..., searches by student name or
+    case manager; with ?managed_by_me=true, restricts to managed students."""
     query = request.args.get('q', '').strip()
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
-    # Get all students
-    students_query = Student.query
-    
     if query:
         # Search by student name
-        students_by_name = students_query.filter(Student.name.ilike(f'%{query}%')).all()
+        students_by_name = Student.query.filter(Student.name.ilike(f'%{query}%')).all()
         
         # Also search by staff name (case manager) - similar to daily entry
         staff_members = User.query.filter(
@@ -4971,7 +5210,48 @@ def search_bank_accounts():
         
         students = Student.query.filter(Student.id.in_(list(all_student_ids))).all() if all_student_ids else []
     else:
-        students = students_query.all()
+        # No query: return all students staff can access (same logic as /api/students but without
+        # restricting to "student user accounts only"). Staff need to look up any student's bank
+        # account; bank accounts are per-Student, not per-User.
+        if current_user.role == 'staff' and current_user.is_outside_staff:
+            assigned_student_ids = [a.student_id for a in
+                                   OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+            if not assigned_student_ids:
+                students = []
+            else:
+                query_obj = Student.query.filter(Student.id.in_(assigned_student_ids))
+                if managed_by_me:
+                    user_name = current_user.name or current_user.username
+                    user_username = current_user.username
+                    team_members = TeamMember.query.filter(
+                        (TeamMember.name == user_name) | (TeamMember.name == user_username)
+                    ).all()
+                    sid_list = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                    sid_list = [sid for sid in sid_list if sid in assigned_student_ids]
+                    students = query_obj.filter(Student.id.in_(sid_list)).order_by(Student.name).all() if sid_list else []
+                else:
+                    students = query_obj.order_by(Student.name).all()
+        else:
+            query_obj = Student.query
+            if managed_by_me:
+                user_name = current_user.name or current_user.username
+                user_username = current_user.username
+                team_members = TeamMember.query.filter(
+                    (TeamMember.name == user_name) | (TeamMember.name == user_username)
+                ).all()
+                student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                if student_ids:
+                    students = query_obj.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                else:
+                    students = []
+            else:
+                students = query_obj.order_by(Student.name).all()
+        students = filter_directory_info(students, include_opted_out=False)
+    
+    # Restrict to active students only (those in Student Users / User Management)
+    student_users = User.query.filter_by(role='student').all()
+    student_user_ids = {u.student_id for u in student_users if u.student_id}
+    students = [s for s in students if s.id in student_user_ids]
     
     # Filter by managed by me if requested
     if managed_by_me and current_user.designation == 'Case Manager':
@@ -4995,11 +5275,41 @@ def search_bank_accounts():
             'balance': balance
         })
     
-    return jsonify(result)
+    msg = (
+        'bank-account/search: role=%s outside_staff=%s managed_by_me=%s query=%r students=%d result=%d'
+        % (
+            getattr(current_user, 'role', None),
+            getattr(current_user, 'is_outside_staff', None),
+            managed_by_me,
+            query or None,
+            len(students),
+            len(result),
+        )
+    )
+    app.logger.info(msg)
+    print(msg)
+    resp = jsonify(result)
+    resp.headers['X-Accounts-Search-Version'] = 'acc5'
+    return resp
 
 @app.route('/test')
 def test():
     return jsonify({'status': 'ok', 'message': 'Server is running'})
+
+
+@app.route('/api/debug/accounts-search-check', methods=['GET'])
+@login_required
+@staff_required
+def debug_accounts_search_check():
+    """Diagnostic endpoint for Accounts tab student dropdown. Returns backend version and student counts."""
+    total = Student.query.count()
+    ahu = Student.query.filter(Student.name.ilike('%AHu%')).first()
+    return jsonify({
+        'backend_version': 'acc5',
+        'total_students': total,
+        'has_ahu': ahu is not None,
+        'ahu_id': ahu.id if ahu else None,
+    })
 
 @app.route('/setup', methods=['POST'])
 def setup():
