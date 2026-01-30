@@ -12649,7 +12649,7 @@ function submitMarketplaceHide() {
         if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a card color.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
     } else if (type === 'grade_section') {
         value = document.getElementById('marketplace-hide-grade').value.trim();
-        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a grade section.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
     } else {
         document.getElementById('marketplace-hide-error').textContent = 'Choose one: specific student, card color, or grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return;
     }
@@ -12687,7 +12687,7 @@ function openMarketplaceUnhideModal(itemId) {
         listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
     } else {
         rules.forEach(function (r) {
-            var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+            var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
             var li = document.createElement('li');
             li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
             li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
@@ -12720,7 +12720,7 @@ function removeMarketplaceHiddenRule(itemId, ruleId) {
                             closeMarketplaceUnhideModal();
                         } else {
                             rules.forEach(function (r) {
-                                var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+                                var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
                                 var li = document.createElement('li');
                                 li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
                                 li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
@@ -12747,7 +12747,7 @@ function refreshMarketplaceUnhideModalList() {
                 closeMarketplaceUnhideModal();
             } else {
                 rules.forEach(function (r) {
-                    var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+                    var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
                     var li = document.createElement('li');
                     li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
                     li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';

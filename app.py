@@ -221,8 +221,18 @@ def is_item_hidden_for_student(item_id, student):
             return True
         if r.hidden_type == 'card_color' and (student.card_color or '').strip().lower() == (r.value or '').strip().lower():
             return True
-        if r.hidden_type == 'grade_section' and (student.grade or '').strip() == (r.value or '').strip():
-            return True
+        if r.hidden_type == 'grade_section':
+            rv = (r.value or '').strip()
+            # Section rules: K-3, 4-8, 9-12
+            if rv == 'K-3' and student_grade_matches_item_grade_range(student.grade, 'k_3'):
+                return True
+            if rv == '4-8' and student_grade_matches_item_grade_range(student.grade, '4_8'):
+                return True
+            if rv == '9-12' and student_grade_matches_item_grade_range(student.grade, '9_12'):
+                return True
+            # Legacy: single-grade rule (exact match)
+            if (student.grade or '').strip() == rv:
+                return True
     return False
 
 
@@ -655,12 +665,12 @@ class MarketplaceItemRequest(db.Model):
 
 
 class MarketplaceItemHiddenRule(db.Model):
-    """Rule to hide a marketplace item from specific students (by student, card_color, or grade)."""
+    """Rule to hide a marketplace item from specific students (by student, card_color, or grade section: K-3, 4-8, 9-12)."""
     __tablename__ = 'marketplace_item_hidden_rules'
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
     hidden_type = db.Column(db.String(20), nullable=False)  # 'student', 'card_color', 'grade_section'
-    value = db.Column(db.String(100), nullable=False)  # student_id, color name, or grade
+    value = db.Column(db.String(100), nullable=False)  # student_id, color name, or grade section (K-3, 4-8, 9-12)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     item = db.relationship('MarketplaceItem', backref=db.backref('hidden_rules', lazy=True, cascade='all, delete-orphan'))
