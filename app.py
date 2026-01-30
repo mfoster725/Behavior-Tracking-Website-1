@@ -6105,12 +6105,16 @@ def search_bank_accounts():
             else:
                 query_obj = Student.query.filter(Student.id.in_(assigned_student_ids))
                 if managed_by_me:
-                    user_name = current_user.name or current_user.username
-                    user_username = current_user.username
-                    team_members = TeamMember.query.filter(
-                        (TeamMember.name == user_name) | (TeamMember.name == user_username)
-                    ).all()
-                    sid_list = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                    user_name = (current_user.name or current_user.username) or ''
+                    user_username = (current_user.username or '').strip()
+                    if not user_name and not user_username:
+                        sid_list = []
+                    else:
+                        team_members = TeamMember.query.filter(
+                            (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
+                            (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+                        ).all()
+                        sid_list = list(set([tm.student_id for tm in team_members if tm.student_id]))
                     sid_list = [sid for sid in sid_list if sid in assigned_student_ids]
                     students = query_obj.filter(Student.id.in_(sid_list)).order_by(Student.name).all() if sid_list else []
                 else:
@@ -6118,12 +6122,16 @@ def search_bank_accounts():
         else:
             query_obj = Student.query
             if managed_by_me:
-                user_name = current_user.name or current_user.username
-                user_username = current_user.username
-                team_members = TeamMember.query.filter(
-                    (TeamMember.name == user_name) | (TeamMember.name == user_username)
-                ).all()
-                student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                user_name = (current_user.name or current_user.username) or ''
+                user_username = (current_user.username or '').strip()
+                if not user_name and not user_username:
+                    student_ids = []
+                else:
+                    team_members = TeamMember.query.filter(
+                        (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
+                        (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+                    ).all()
+                    student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
                 if student_ids:
                     students = query_obj.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
                 else:
@@ -6137,16 +6145,10 @@ def search_bank_accounts():
     student_user_ids = {u.student_id for u in student_users if u.student_id}
     students = [s for s in students if s.id in student_user_ids]
     
-    # Filter by managed by me if requested
-    if managed_by_me and current_user.designation == 'Case Manager':
-        managed_student_ids = [
-            tm.student_id for tm in TeamMember.query.filter_by(
-                role='Case Manager',
-                name=current_user.name
-            ).all()
-        ]
-        students = [s for s in students if s.id in managed_student_ids]
-    
+    # When managed_by_me is true, the list is already restricted above to students where the current
+    # user appears in any column in that student's row (Case Manager, Practitioner, Professional,
+    # Group Leader, Paraprofessional). No further role-based filter.
+
     # Get bank accounts for these students
     result = []
     for student in students:
