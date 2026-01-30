@@ -3009,6 +3009,13 @@ def case_manager_comparison():
             'infractions': infractions
         }
     
+    sorted_managers = sorted(case_manager_data.keys())
+    return jsonify({
+        'case_managers': case_manager_data,
+        'sorted_managers': sorted_managers
+    })
+
+
 @staff_required
 def import_csv():
     """Import data from CSV files"""

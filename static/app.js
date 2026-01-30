@@ -4488,7 +4488,10 @@ async function loadCaseManagerComparison() {
     try {
         const response = await fetch(url);
         const data = await response.json();
-        
+        if (!response.ok) {
+            showMessage(data.error || 'Error loading case manager comparison. Please try again.', 'error');
+            return;
+        }
         // Get timeframe label
         let timeframeLabel = 'All Time';
         if (timeframe === 'weekly') {
