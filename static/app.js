@@ -12563,18 +12563,25 @@ function submitMarketplaceAddItem() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     })
-        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (r) {
+            return r.text().then(function (text) {
+                var data = null;
+                try { data = text ? JSON.parse(text) : {}; } catch (_) { }
+                return { ok: r.ok, status: r.status, data: data, text: text };
+            });
+        })
         .then(function (res) {
             if (res.ok) {
                 closeMarketplaceAddItemModal();
                 showMessage('Item added.', 'success');
                 if (getMarketplaceStudentId()) loadMarketplaceCatalog();
             } else {
-                if (errEl) { errEl.textContent = res.data.error || 'Failed to add item.'; errEl.style.display = 'block'; }
+                var msg = (res.data && res.data.error) ? res.data.error : (res.status === 500 ? 'Server error. Please try again or contact support.' : 'Failed to add item.');
+                if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
             }
         })
-        .catch(function () {
-            if (errEl) { errEl.textContent = 'Failed to add item.'; errEl.style.display = 'block'; }
+        .catch(function (e) {
+            if (errEl) { errEl.textContent = 'Network or server error. Please try again.'; errEl.style.display = 'block'; }
         });
 }
 

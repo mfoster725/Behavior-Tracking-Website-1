@@ -5334,49 +5334,58 @@ def create_marketplace_item():
     if current_user.role == 'staff' and getattr(current_user, 'is_outside_staff', False):
         return jsonify({'error': 'Outside staff cannot create marketplace items'}), 403
     
-    data = request.json
-    name = data.get('name')
-    description = data.get('description', '')
-    price = Decimal(str(data.get('price', 0)))
-    grade_range = data.get('grade_range', '9_12')
-    if grade_range not in ('k_3', '4_8', '9_12', 'school_wide'):
-        grade_range = '9_12'
-    if grade_range == 'school_wide' and current_user.role != 'admin':
-        return jsonify({'error': 'Only admins can create school-wide items'}), 403
-    item_type_id = data.get('item_type_id')
-    category_id = data.get('category_id')
-    image_url = (data.get('image_url') or '').strip() or None
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({'error': 'Invalid JSON in request body'}), 400
     
-    if not name or price <= 0:
-        return jsonify({'error': 'Name and valid price required'}), 400
-    
-    item = MarketplaceItem(
-        name=name,
-        description=description,
-        price=price,
-        created_by_user_id=current_user.id,
-        is_global=data.get('is_global', False),
-        grade_range=grade_range,
-        item_type_id=item_type_id,
-        category_id=category_id,
-        image_url=image_url
-    )
-    db.session.add(item)
-    db.session.commit()
-    
-    return jsonify({
-        'id': item.id,
-        'name': item.name,
-        'description': item.description or '',
-        'price': float(item.price),
-        'grade_range': item.grade_range,
-        'item_type_id': item.item_type_id,
-        'category_id': item.category_id,
-        'image_url': item.image_url,
-        'created_by_user_id': item.created_by_user_id,
-        'is_global': item.is_global,
-        'created_at': item.created_at.isoformat()
-    }), 201
+    try:
+        name = data.get('name')
+        description = data.get('description', '')
+        price = Decimal(str(data.get('price', 0)))
+        grade_range = data.get('grade_range', '9_12')
+        if grade_range not in ('k_3', '4_8', '9_12', 'school_wide'):
+            grade_range = '9_12'
+        if grade_range == 'school_wide' and current_user.role != 'admin':
+            return jsonify({'error': 'Only admins can create school-wide items'}), 403
+        item_type_id = data.get('item_type_id')
+        category_id = data.get('category_id')
+        image_url = (data.get('image_url') or '').strip() or None
+        
+        if not name or price <= 0:
+            return jsonify({'error': 'Name and valid price required'}), 400
+        
+        item = MarketplaceItem(
+            name=name,
+            description=description,
+            price=price,
+            created_by_user_id=current_user.id,
+            is_global=data.get('is_global', False),
+            grade_range=grade_range,
+            item_type_id=item_type_id,
+            category_id=category_id,
+            image_url=image_url
+        )
+        db.session.add(item)
+        db.session.commit()
+        
+        return jsonify({
+            'id': item.id,
+            'name': item.name,
+            'description': item.description or '',
+            'price': float(item.price),
+            'grade_range': item.grade_range,
+            'item_type_id': item.item_type_id,
+            'category_id': item.category_id,
+            'image_url': item.image_url,
+            'created_by_user_id': item.created_by_user_id,
+            'is_global': item.is_global,
+            'created_at': item.created_at.isoformat()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("create_marketplace_item failed")
+        err_msg = str(e) if str(e) else "Database or server error"
+        return jsonify({'error': err_msg}), 500
 
 @app.route('/api/marketplace-items/<int:item_id>', methods=['PUT'])
 @limiter.limit("20 per minute")
