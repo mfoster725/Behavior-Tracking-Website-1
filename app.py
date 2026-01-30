@@ -6,11 +6,15 @@ from datetime import datetime, date, timedelta
 from functools import wraps
 from decimal import Decimal
 import os
+import re
 import secrets
 import csv
 import json
 import logging
-from io import StringIO
+from io import StringIO, BytesIO
+from urllib.parse import urlparse, urljoin
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -5188,6 +5192,94 @@ def get_marketplace_catalog():
         'image_url': item.image_url,
         'created_at': item.created_at.isoformat()
     } for item in items])
+
+
+def _resolve_marketplace_image_url(raw_url):
+    """Convert Drive/Imgur page URLs to direct image URLs. Returns (final_url, content_type_hint) or (None, None)."""
+    if not raw_url or not isinstance(raw_url, str):
+        return None, None
+    u = raw_url.strip()
+    parsed = urlparse(u)
+    netloc = (parsed.netloc or '').lower().replace('www.', '')
+    # Already direct image URLs: pass through
+    if 'i.imgur.com' in netloc:
+        return u, None
+    if 'drive.google.com' in netloc and '/uc' in (parsed.path or ''):
+        return u, None
+    # Google Drive: .../file/d/FILE_ID/view... -> uc?export=view&id=FILE_ID (ID can end with hyphen)
+    if 'drive.google.com' in netloc:
+        match = re.match(r'/file/d/([a-zA-Z0-9\-_.]+)', parsed.path or '')
+        if match:
+            file_id = match.group(1)
+            return f'https://drive.google.com/uc?export=view&id={file_id}', 'image/jpeg'
+    # Imgur album: imgur.com/a/ALBUM_ID -> fetch page for og:image
+    if 'imgur.com' in netloc and '/a/' in (parsed.path or ''):
+        album_match = re.search(r'/a/([a-zA-Z0-9]+)', parsed.path or '')
+        if album_match:
+            album_id = album_match.group(1)
+            try:
+                req = Request(
+                    f'https://imgur.com/a/{album_id}',
+                    headers={'User-Agent': 'Mozilla/5.0 (compatible; MarketplaceImageProxy/1.0)'}
+                )
+                with urlopen(req, timeout=10) as resp:
+                    html = resp.read().decode('utf-8', errors='ignore')
+                # og:image content
+                og = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
+                if not og:
+                    og = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', html, re.I)
+                if og:
+                    return og.group(1).strip(), None
+            except (URLError, HTTPError, OSError):
+                pass
+        return None, None
+    # Imgur single image page: imgur.com/CODE -> i.imgur.com/CODE.jpg
+    if 'imgur.com' in netloc and parsed.path:
+        single_match = re.match(r'^/([a-zA-Z0-9]+)/?(\?.*)?$', parsed.path)
+        if single_match and single_match.group(1) != 'a':
+            code = single_match.group(1)
+            return f'https://i.imgur.com/{code}.jpg', 'image/jpeg'
+    # Already direct (e.g. i.imgur.com/xxx)
+    if 'imgur.com' in netloc or 'drive.google.com' in netloc:
+        return u, None
+    return None, None
+
+
+@app.route('/api/marketplace/image-proxy', methods=['GET'])
+@limiter.limit("120 per minute")
+@login_required
+def marketplace_image_proxy():
+    """Proxy marketplace images from Google Drive and Imgur so they load without CORS/referrer blocks."""
+    raw = request.args.get('url')
+    if not raw:
+        return '', 400
+    try:
+        from urllib.parse import unquote
+        raw_url = unquote(raw)
+    except Exception:
+        raw_url = raw
+    parsed = urlparse(raw_url)
+    netloc = (parsed.netloc or '').lower().replace('www.', '')
+    if 'drive.google.com' not in netloc and 'imgur.com' not in netloc:
+        return '', 403
+    final_url, content_type_hint = _resolve_marketplace_image_url(raw_url)
+    if not final_url:
+        return '', 404
+    try:
+        req = Request(
+            final_url,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; MarketplaceImageProxy/1.0)', 'Referer': ''}
+        )
+        with urlopen(req, timeout=15) as resp:
+            data = resp.read(10 * 1024 * 1024)  # max 10MB
+        ct = resp.headers.get('Content-Type', content_type_hint or 'image/jpeg')
+        if ';' in ct:
+            ct = ct.split(';')[0].strip()
+        from flask import Response
+        return Response(data, mimetype=ct or 'image/jpeg')
+    except (URLError, HTTPError, OSError) as e:
+        logging.getLogger(__name__).warning('Marketplace image proxy failed for %s: %s', raw_url[:80], e)
+        return '', 502
 
 
 @app.route('/api/marketplace/checkout', methods=['POST'])

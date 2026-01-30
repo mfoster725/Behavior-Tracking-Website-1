@@ -11926,16 +11926,16 @@ function loadMarketplaceCatalog() {
 }
 
 /**
- * Normalize image URL for display: convert Google Drive / Imgur page links to direct image URLs
- * so they load when used as img src (Drive share links and Imgur page URLs often don't work as img src).
+ * Return the image src to use for marketplace display. For Google Drive and Imgur we use the
+ * backend image proxy so Drive share links and Imgur albums work (they fail when loaded directly).
  */
-function normalizeMarketplaceImageUrl(url) {
-    if (!url || typeof url !== 'string') return url;
+function getMarketplaceImageSrc(url) {
+    if (!url || typeof url !== 'string') return '';
     var u = url.trim();
-    // Google Drive: .../file/d/FILE_ID/view... -> https://drive.google.com/uc?export=view&id=FILE_ID
-    var driveMatch = u.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (driveMatch) return 'https://drive.google.com/uc?export=view&id=' + driveMatch[1];
-    // Imgur page URL (e.g. imgur.com/abc123) -> direct image i.imgur.com/abc123 (no /a/ album path)
+    if (/drive\.google\.com/i.test(u) || /imgur\.com/i.test(u)) {
+        return '/api/marketplace/image-proxy?url=' + encodeURIComponent(u);
+    }
+    // Other hosts: normalize single-image Imgur page URLs only (no proxy)
     if (/^https?:\/\/(www\.)?imgur\.com\/[a-zA-Z0-9]+(\?.*)?$/.test(u)) {
         var code = u.replace(/^https?:\/\/(www\.)?imgur\.com\/([a-zA-Z0-9]+).*$/, '$2');
         if (code && code !== 'a') return 'https://i.imgur.com/' + code + '.jpg';
@@ -11954,7 +11954,7 @@ function renderMarketplaceCatalog(items) {
     var isStaffOrAdmin = window.currentUser && (window.currentUser.role === 'staff' || window.currentUser.role === 'admin');
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
     grid.innerHTML = items.map(function (item) {
-        var imgSrc = item.image_url ? normalizeMarketplaceImageUrl(item.image_url).replace(/"/g, '&quot;') : '';
+        var imgSrc = item.image_url ? getMarketplaceImageSrc(item.image_url).replace(/"/g, '&quot;') : '';
         var noImgDiv = '<div class="marketplace-card-no-img" style="width:100%; height:140px; background:#e2e8f0; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:#94a3b8;">No image</div>';
         var imgHtml = item.image_url
             ? '<img src="' + imgSrc + '" alt="" referrerpolicy="no-referrer" style="width:100%; height:140px; object-fit:cover; border-radius:8px; margin-bottom:10px;" onerror="this.outerHTML=\'<div class=&quot;marketplace-card-no-img&quot; style=&quot;width:100%;height:140px;background:#e2e8f0;border-radius:8px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#94a3b8;&quot;>No image</div>\';">'
@@ -12040,7 +12040,7 @@ function openMarketplaceItemDetailModal(itemId) {
     var noImgEl = document.getElementById('marketplace-item-detail-no-image');
     if (imgEl && imgWrap) {
         if (item.image_url) {
-            imgEl.src = normalizeMarketplaceImageUrl(item.image_url);
+            imgEl.src = getMarketplaceImageSrc(item.image_url);
             imgEl.referrerPolicy = 'no-referrer';
             imgEl.alt = item.name || '';
             imgEl.style.display = 'block';
