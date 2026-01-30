@@ -8,6 +8,8 @@
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <!-- Chart.js for marketplace analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -17,7 +19,20 @@
                     <h1>Behavior Tracking System</h1>
                     <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
                 </div>
-                <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div id="notifications-bell-wrap" style="position: relative;">
+                        <button type="button" id="notifications-bell-btn" title="Notifications" style="background: none; border: none; cursor: pointer; padding: 6px; font-size: 1.2rem;">🔔</button>
+                        <span id="notifications-badge" style="display: none; position: absolute; top: -2px; right: -2px; background: #dc2626; color: white; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; align-items: center; justify-content: center; padding: 0 4px;">0</span>
+                        <div id="notifications-dropdown" style="display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; width: 360px; max-height: 400px; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); z-index: 1000;">
+                            <div style="padding: 12px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                                <strong>Notifications</strong>
+                                <button type="button" id="notifications-mark-all-read" style="font-size: 12px; background: none; border: none; color: #0ea5e9; cursor: pointer;">Mark all read</button>
+                            </div>
+                            <div id="notifications-list" style="padding: 8px;"></div>
+                        </div>
+                    </div>
+                    <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+                </div>
             </div>
             <nav>
                 <!-- Template version: acc4 (has Accounts tab) -->
@@ -29,6 +44,7 @@
                 <button class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
                 <button class="nav-btn" data-view="bank-account">Bank Account</button>
+                <button class="nav-btn" data-view="marketplace">Marketplace</button>
                 <button id="nav-btn-accounts" class="nav-btn" data-view="accounts" title="Modern banking view">Accounts</button>
                 {% if user.role == 'admin' %}
                 <button class="nav-btn" data-view="admin">Admin Panel</button>
@@ -541,15 +557,16 @@
             <div class="form-section accounts-ui">
                 <h2 style="margin-bottom: 24px;">Bank Account</h2>
 
-                <!-- Staff Search Section -->
+                <!-- Staff/Admin Student Select (searchable dropdown + managed by me) -->
                 {% if user.role in ['staff', 'admin'] %}
-                <div class="form-group" style="margin-bottom: 20px;">
-                    <label for="bank-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Search</label>
+                <div id="bank-student-select-wrap" style="display: none; margin-bottom: 16px;">
+                    <label for="bank-student-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Student</label>
                     <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
                         <input
                             type="text"
-                            id="bank-search-input"
-                            placeholder="Search by staff or student name"
+                            id="bank-student-search-input"
+                            placeholder="Search or select student"
+                            autocomplete="off"
                             style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;"
                         >
                         <div class="bank-search-autocomplete-dropdown"></div>
@@ -558,16 +575,21 @@
                         <input type="checkbox" id="bank-managed-by-me-checkbox" style="cursor: pointer;">
                         <span>Show students managed by me</span>
                     </label>
+                    <p id="bank-no-student-msg" style="display: none; margin-top: 8px; color: #64748b;">Select a student to view their account and transactions.</p>
                 </div>
-                <div class="form-group" style="margin-bottom: 20px;">
-                    <label for="bank-student-select" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Student</label>
-                    <select
-                        id="bank-student-select"
-                        style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"
-                    >
-                        <option value="">Select Student</option>
-                    </select>
+                
+                <!-- Admin Paycheck Generation -->
+                {% if user.role == 'admin' %}
+                <div
+                    id="admin-paycheck-generation"
+                    style="background: #fff3cd; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ffc107;"
+                >
+                    <h4 style="margin-top: 0;">Paycheck Generation</h4>
+                    <p style="margin-bottom: 15px;">Generate paychecks for all students for the previous week (Monday-Friday).</p>
+                    <button id="generate-paychecks-btn" class="btn-primary">Generate Paychecks</button>
+                    <div id="paycheck-generation-result" style="margin-top: 10px; display: none;"></div>
                 </div>
+                {% endif %}
                 {% endif %}
 
                 <!-- Balance Display -->
@@ -678,78 +700,6 @@
                     </div>
                 </div>
 
-                <!-- Marketplace Section -->
-                <div
-                    id="bank-marketplace-section"
-                    style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
-                >
-                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Marketplace</h3>
-
-                    <!-- Case Manager Marketplace Management -->
-                    {% if user.role in ['staff', 'admin'] and user.designation == 'Case Manager' %}
-                    <div id="marketplace-management" style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
-                        <h4 style="margin-top: 0;">Manage Marketplace Items</h4>
-                        <button id="create-item-btn" class="btn-secondary" style="margin-bottom: 15px;">Create New Item</button>
-                        <div
-                            id="marketplace-items-list"
-                            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;"
-                        >
-                            <!-- Items will be loaded here -->
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    <!-- Admin Paycheck Generation -->
-                    {% if user.role == 'admin' %}
-                    <div
-                        id="admin-paycheck-generation"
-                        style="background: #fff3cd; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ffc107;"
-                    >
-                        <h4 style="margin-top: 0;">Paycheck Generation</h4>
-                        <p style="margin-bottom: 15px;">Generate paychecks for all students for the previous week (Monday-Friday).</p>
-                        <button id="generate-paychecks-btn" class="btn-primary">Generate Paychecks</button>
-                        <div id="paycheck-generation-result" style="margin-top: 10px; display: none;"></div>
-                    </div>
-                    {% endif %}
-
-                    <!-- Marketplace Filter -->
-                    <div class="form-group" style="margin-bottom: 20px;">
-                        <label for="marketplace-filter" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Filter</label>
-                        <select
-                            id="marketplace-filter"
-                            style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"
-                        >
-                            <option value="all">All Items</option>
-                            <option value="global">Global Items</option>
-                            <option value="case-manager">Case Manager Items</option>
-                        </select>
-                    </div>
-
-                    <!-- Marketplace Grid -->
-                    <div
-                        id="marketplace-grid"
-                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;"
-                    >
-                        <!-- Items will be loaded here -->
-                    </div>
-                </div>
-
-                <!-- Purchase Orders Section (Staff/Case Manager) -->
-                {% if user.role in ['staff', 'admin'] %}
-                <div
-                    id="bank-purchase-orders-section"
-                    style="display: none; margin-bottom: 28px;"
-                >
-                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Purchase Orders</h3>
-                    <div
-                        id="purchase-orders-list"
-                        style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;"
-                    >
-                        <!-- Purchase orders will be loaded here -->
-                    </div>
-                </div>
-                {% endif %}
-
                 <!-- Transaction History -->
                 <div
                     id="bank-transactions-section"
@@ -761,6 +711,173 @@
                         style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;"
                     >
                         <p style="margin: 0; color: #94a3b8;">No transactions yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Marketplace View -->
+        <div id="marketplace-view" class="view">
+            <div class="form-section accounts-ui">
+                <h2 style="margin-bottom: 24px;">Marketplace</h2>
+
+                <!-- Staff/Admin: Purchase orders to fulfill (at top) -->
+                {% if user.role in ['staff', 'admin'] %}
+                <div id="marketplace-po-approvals-section" style="margin-bottom: 28px;">
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Purchase orders to fulfill</h3>
+                    <div id="marketplace-po-approvals-list" style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;">
+                        <p style="margin: 0; color: #94a3b8;">Loading...</p>
+                    </div>
+                </div>
+
+                <!-- Staff/Admin: Purchase analytics (most/least purchased, demographics) -->
+                <div id="marketplace-analytics-section" style="margin-bottom: 28px;">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <h3 style="margin: 0; font-size: 1.1rem;">Purchase analytics</h3>
+                        <label style="display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; font-size: 14px; color: #475569;">
+                            <input type="checkbox" id="marketplace-analytics-hide-checkbox" style="cursor: pointer;">
+                            <span>Hide analytics</span>
+                        </label>
+                    </div>
+                    <div id="marketplace-analytics-body">
+                    <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">Most purchased, least purchased, and who buys each item (by grade and card color). Counts include approved and fulfilled orders only.</p>
+                    <div id="marketplace-analytics-loading" style="padding: 24px; text-align: center; color: #94a3b8;">Loading analytics…</div>
+                    <div id="marketplace-analytics-error" style="display: none; padding: 16px; margin-bottom: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626;"></div>
+                    <div id="marketplace-analytics-content" style="display: none;">
+                        <div class="marketplace-analytics-charts-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                            <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px;">
+                                <h4 style="margin: 0 0 12px 0; font-size: 1rem;">Most purchased</h4>
+                                <p id="marketplace-analytics-most-empty" style="display: none; margin: 0; color: #94a3b8; padding: 40px 0;">No purchase data.</p>
+                                <div id="marketplace-analytics-most-wrap" style="height: 280px; position: relative;">
+                                    <canvas id="marketplace-analytics-most-chart"></canvas>
+                                </div>
+                            </div>
+                            <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px;">
+                                <h4 style="margin: 0 0 12px 0; font-size: 1rem;">Least purchased</h4>
+                                <p id="marketplace-analytics-least-empty" style="display: none; margin: 0; color: #94a3b8; padding: 40px 0;">No purchase data.</p>
+                                <div id="marketplace-analytics-least-wrap" style="height: 280px; position: relative;">
+                                    <canvas id="marketplace-analytics-least-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+                            <h4 style="margin: 0 0 12px 0; font-size: 1rem;">Never purchased</h4>
+                            <p id="marketplace-analytics-never-msg" style="margin: 0; color: #64748b; font-size: 14px;"></p>
+                            <ul id="marketplace-analytics-never-list" style="margin: 8px 0 0 0; padding-left: 20px; columns: 2; column-gap: 24px;"></ul>
+                        </div>
+                        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px;">
+                            <h4 style="margin: 0 0 12px 0; font-size: 1rem;">Demographics by item</h4>
+                            <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">Select an item to see who purchases it (by grade and card color).</p>
+                            <div style="margin-bottom: 16px;">
+                                <label for="marketplace-analytics-item-select" style="font-size: 13px; color: #64748b;">Item</label>
+                                <select id="marketplace-analytics-item-select" style="margin-left: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; min-width: 260px;">
+                                    <option value="">— Select item —</option>
+                                </select>
+                            </div>
+                            <div id="marketplace-analytics-demographics-placeholder" style="padding: 24px; text-align: center; color: #94a3b8; font-size: 14px;">Select an item above.</div>
+                            <div id="marketplace-analytics-demographics-charts" style="display: none; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start;">
+                                <div>
+                                    <h5 style="margin: 0 0 8px 0; font-size: 0.95rem;">By grade</h5>
+                                    <div style="height: 240px;"><canvas id="marketplace-analytics-grade-chart"></canvas></div>
+                                </div>
+                                <div>
+                                    <h5 style="margin: 0 0 8px 0; font-size: 0.95rem;">By card color</h5>
+                                    <div style="height: 240px;"><canvas id="marketplace-analytics-color-chart"></canvas></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Add marketplace items (staff except outside, admin) -->
+                {% if user.role == 'admin' or (user.role == 'staff' and not user.is_outside_staff) %}
+                <div id="marketplace-add-items-section" style="margin-bottom: 28px;">
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Add marketplace items</h3>
+                    <p style="margin: 0 0 12px 0; color: #64748b; font-size: 14px;">Create new items for students to purchase. Ensure types and categories are set up in Admin if needed.</p>
+                    <button type="button" id="marketplace-add-item-btn" class="btn-primary">Add item</button>
+                </div>
+                {% endif %}
+
+                <!-- Staff/Admin: View as student (checkbox to show section) -->
+                {% if user.role in ['staff', 'admin'] %}
+                <div id="marketplace-view-as-student-row" style="margin-bottom: 16px;">
+                    <label style="display: inline-flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; font-size: 14px; color: #475569;">
+                        <input type="checkbox" id="marketplace-show-view-as-student-checkbox" style="cursor: pointer;">
+                        <span>View as student</span>
+                    </label>
+                </div>
+                <div id="marketplace-student-select-wrap" style="display: none; margin-bottom: 16px;">
+                    <label for="marketplace-student-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Select student</label>
+                    <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
+                        <input type="text" id="marketplace-student-search-input" placeholder="Search or select student" autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;">
+                        <div class="marketplace-student-autocomplete-dropdown"></div>
+                    </div>
+                    <label style="display: inline-flex; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; margin-top: 10px; font-size: 13px; color: #475569;">
+                        <input type="checkbox" id="marketplace-managed-by-me-checkbox" style="cursor: pointer;">
+                        <span>Show students managed by me</span>
+                    </label>
+                    <p id="marketplace-no-student-msg" style="margin-top: 8px; color: #64748b;">Select a student to browse and shop as that student.</p>
+                </div>
+                {% endif %}
+
+                <!-- Balance card (student or selected student) -->
+                <div id="marketplace-balance-section" style="margin-bottom: 28px;">
+                    <div class="accounts-total-balance" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 24px 28px; border-radius: 16px; box-shadow: 0 4px 14px rgba(14,165,233,0.25);">
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+                            <div>
+                                <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Current balance</p>
+                                <p id="marketplace-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
+                                <p id="marketplace-student-name" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
+                            </div>
+                            <button type="button" id="marketplace-refresh-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;">↻ Refresh</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search and filters -->
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; align-items: flex-end;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <label for="marketplace-search-input" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Search</label>
+                        <input type="text" id="marketplace-search-input" placeholder="Search items..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label for="marketplace-filter-type" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Type</label>
+                        <select id="marketplace-filter-type" style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"><option value="">All types</option></select>
+                    </div>
+                    <div>
+                        <label for="marketplace-filter-category" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Category</label>
+                        <select id="marketplace-filter-category" style="border-radius: 8px; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 14px;"><option value="">All categories</option></select>
+                    </div>
+                    <button type="button" id="marketplace-search-btn" class="btn-primary">Search</button>
+                </div>
+
+                <!-- Cart summary and catalog -->
+                <div id="marketplace-catalog-cart-wrap" style="display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start;">
+                    <div>
+                        <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Items</h3>
+                        <div id="marketplace-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;">
+                            <!-- Item cards loaded by JS -->
+                        </div>
+                        <p id="marketplace-no-items-msg" style="display: none; color: #64748b; padding: 20px;">No items match. Select a student first if you are staff.</p>
+                    </div>
+                    <div id="marketplace-cart-section" style="border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; padding: 16px; position: sticky; top: 16px;">
+                        <h3 style="margin: 0 0 12px 0; font-size: 1rem;">Cart</h3>
+                        <div id="marketplace-cart-items" style="margin-bottom: 12px; min-height: 60px;">
+                            <p style="margin: 0; color: #94a3b8; font-size: 13px;">Cart is empty.</p>
+                        </div>
+                        <p id="marketplace-cart-total" style="margin: 0 0 12px 0; font-weight: 600;">Total: $0.00</p>
+                        <button type="button" id="marketplace-checkout-btn" class="btn-primary" style="width: 100%;" disabled>Checkout</button>
+                        <p id="marketplace-checkout-msg" style="margin-top: 10px; font-size: 13px; color: #64748b; display: none;"></p>
+                    </div>
+                </div>
+
+                <!-- My orders (student's purchase orders) -->
+                <div style="margin-top: 28px;">
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">My orders</h3>
+                    <div id="marketplace-my-orders-list" style="border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; padding: 16px;">
+                        <p style="margin: 0; color: #94a3b8;">No orders yet.</p>
                     </div>
                 </div>
             </div>
@@ -987,6 +1104,11 @@
                     </select>
                     <small style="color: #666;">Select the staff member's professional designation</small>
                 </div>
+                <div class="form-group" id="staff-grades-taught-group" style="display: none;">
+                    <label for="staff-grades-taught">Grades taught:</label>
+                    <input type="text" id="staff-grades-taught" placeholder="e.g. 9, 10, 11 or 9-12">
+                    <small style="color: #666;">Which grade(s) they teach (for Case Managers/Teachers)</small>
+                </div>
             </div>
             
             <div style="margin-top: 20px; display: flex; gap: 10px;">
@@ -1107,6 +1229,11 @@
                             <option value="Student">Student</option>
                         </select>
                         <small style="color: #666;">Admin can change any role. Staff can only edit students.</small>
+                    </div>
+                    <div class="form-group" id="edit-user-grades-taught-group" style="display: none;">
+                        <label for="edit-user-grades-taught">Grades taught:</label>
+                        <input type="text" id="edit-user-grades-taught" placeholder="e.g. 9, 10, 11 or 9-12">
+                        <small style="color: #666;">For teachers/case managers: which grade(s) they teach</small>
                     </div>
                     <div class="form-group" id="edit-user-grade-group" style="display: none;">
                         <label for="edit-user-grade">Grade:</label>
@@ -1374,6 +1501,185 @@
         </div>
     </div>
 
+    <!-- Marketplace Add Item Modal (grade range, type, category, image URL) -->
+    <div id="marketplace-add-item-modal" class="modal">
+        <div class="modal-content" style="max-width: 520px;">
+            <span class="close" onclick="closeMarketplaceAddItemModal()">&times;</span>
+            <h2>Add marketplace item</h2>
+            <div id="marketplace-add-item-error" style="display: none; margin-bottom: 12px; padding: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626; font-size: 14px;"></div>
+            <div class="form-group">
+                <label for="marketplace-add-item-name">Name *</label>
+                <input type="text" id="marketplace-add-item-name" placeholder="Item name" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            </div>
+            <div class="form-group">
+                <label for="marketplace-add-item-description">Description</label>
+                <textarea id="marketplace-add-item-description" rows="3" placeholder="Brief description" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="marketplace-add-item-price">Price ($) *</label>
+                <input type="number" id="marketplace-add-item-price" step="0.01" min="0.01" placeholder="0.00" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            </div>
+            <div class="form-group">
+                <label for="marketplace-add-item-grade-range">Grade range</label>
+                <select id="marketplace-add-item-grade-range" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <option value="k_3">K–3</option>
+                    <option value="4_8">4–8</option>
+                    <option value="9_12">9–12</option>
+                    <option value="school_wide">School-wide</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="marketplace-add-item-type-input">Type</label>
+                <div class="marketplace-combobox-wrap">
+                    <input type="text" id="marketplace-add-item-type-input" placeholder="Select or type to add..." autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <input type="hidden" id="marketplace-add-item-type-id" value="">
+                    <div id="marketplace-add-item-type-dropdown" class="marketplace-combobox-dropdown" role="listbox"></div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="marketplace-add-item-category-input">Category</label>
+                <div class="marketplace-combobox-wrap">
+                    <input type="text" id="marketplace-add-item-category-input" placeholder="Select or type to add..." autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <input type="hidden" id="marketplace-add-item-category-id" value="">
+                    <div id="marketplace-add-item-category-dropdown" class="marketplace-combobox-dropdown" role="listbox"></div>
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="marketplace-image-url-label-row">
+                    <label for="marketplace-add-item-image-url">Image URL</label>
+                    <span class="marketplace-image-url-info-wrap">
+                        <button type="button" id="marketplace-add-item-image-url-info-btn" class="marketplace-image-url-info-btn" title="How to add an image URL">i</button>
+                        <div id="marketplace-add-item-image-url-info" class="marketplace-image-url-info-popover" role="tooltip">
+                            <p style="margin: 0 0 8px 0; font-weight: 600;">How to add an image URL</p>
+                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Find an image URL:</strong> On a website, right‑click the image → <em>Copy image address</em> (or <em>Copy image link</em>). Paste that URL into the box.</p>
+                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Create one:</strong> Upload your image to a host (e.g. Imgur, Google Drive with “Anyone with the link”), then get the direct image link. The URL should end in <code>.jpg</code>, <code>.png</code>, or <code>.gif</code> (or similar) for best results.</p>
+                            <p style="margin: 0; font-size: 12px; color: #64748b;">Leave blank if you don’t have an image.</p>
+                        </div>
+                    </span>
+                </div>
+                <input type="url" id="marketplace-add-item-image-url" placeholder="https://..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button type="button" id="marketplace-add-item-submit" class="btn-primary">Save</button>
+                <button type="button" onclick="closeMarketplaceAddItemModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Marketplace item detail popup (full description, larger image) -->
+    <div id="marketplace-item-detail-modal" class="modal">
+        <div class="modal-content marketplace-item-detail-content" style="max-width: 560px;">
+            <span class="close" id="marketplace-item-detail-close">&times;</span>
+            <div id="marketplace-item-detail-body">
+                <div class="marketplace-item-detail-image-wrap" style="margin-bottom: 16px;">
+                    <img id="marketplace-item-detail-image" src="" alt="" style="width: 100%; max-height: 320px; object-fit: contain; border-radius: 12px; background: #f1f5f9;">
+                    <div id="marketplace-item-detail-no-image" style="display: none; width: 100%; height: 240px; background: #e2e8f0; border-radius: 12px; align-items: center; justify-content: center; color: #94a3b8; font-size: 15px;">No image</div>
+                </div>
+                <h2 id="marketplace-item-detail-name" style="margin: 16px 0 8px 0; font-size: 1.35rem;"></h2>
+                <p id="marketplace-item-detail-meta" style="margin: 0 0 12px 0; font-size: 14px; color: #64748b;"></p>
+                <p id="marketplace-item-detail-description" style="margin: 0 0 16px 0; font-size: 15px; line-height: 1.5; color: #334155; white-space: pre-wrap;"></p>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <span id="marketplace-item-detail-price" style="font-weight: 700; font-size: 1.25rem; color: #0ea5e9;"></span>
+                    <button type="button" id="marketplace-item-detail-add-cart" class="btn-primary">Add to cart</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Marketplace Hide from students modal (staff/admin) -->
+    <div id="marketplace-hide-modal" class="modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <span class="close" id="marketplace-hide-modal-close">&times;</span>
+            <h2>Hide item from students</h2>
+            <p id="marketplace-hide-item-name" style="margin-bottom: 16px; color: #64748b;"></p>
+            <div class="form-group">
+                <label>Hide from</label>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: inline-flex; align-items: center; gap: 8px; margin-right: 16px;"><input type="radio" name="marketplace-hide-type" value="student"> Specific student</label>
+                    <label style="display: inline-flex; align-items: center; gap: 8px; margin-right: 16px;"><input type="radio" name="marketplace-hide-type" value="card_color"> Card color</label>
+                    <label style="display: inline-flex; align-items: center; gap: 8px;"><input type="radio" name="marketplace-hide-type" value="grade_section"> Grade</label>
+                </div>
+            </div>
+            <div id="marketplace-hide-value-student" style="display: none; margin-bottom: 12px;">
+                <label for="marketplace-hide-student-search">Select student</label>
+                <div class="bank-search-autocomplete-wrapper" style="position: relative;">
+                    <input type="text" id="marketplace-hide-student-search" placeholder="Search student..." autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <div id="marketplace-hide-student-dropdown" class="marketplace-combobox-dropdown" style="position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto;"></div>
+                </div>
+                <input type="hidden" id="marketplace-hide-student-id" value="">
+            </div>
+            <div id="marketplace-hide-value-color" style="display: none; margin-bottom: 12px;">
+                <label for="marketplace-hide-card-color">Card color</label>
+                <select id="marketplace-hide-card-color" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <option value="">— Select —</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="green">Green</option>
+                    <option value="blue">Blue</option>
+                </select>
+            </div>
+            <div id="marketplace-hide-value-grade" style="display: none; margin-bottom: 12px;">
+                <label for="marketplace-hide-grade">Grade</label>
+                <select id="marketplace-hide-grade" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                    <option value="">— Select —</option>
+                    <option value="K">K</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
+                </select>
+            </div>
+            <div id="marketplace-hide-error" style="display: none; padding: 10px; margin-bottom: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626; font-size: 14px;"></div>
+            <div style="margin-top: 16px; display: flex; gap: 10px;">
+                <button type="button" id="marketplace-hide-submit" class="btn-primary">Hide from students</button>
+                <button type="button" id="marketplace-hide-cancel" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Marketplace Unhide / Manage visibility modal -->
+    <div id="marketplace-unhide-modal" class="modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <span class="close" id="marketplace-unhide-modal-close">&times;</span>
+            <h2>Manage visibility</h2>
+            <p id="marketplace-unhide-item-name" style="margin-bottom: 16px; color: #64748b;"></p>
+            <p style="font-size: 13px; color: #64748b; margin-bottom: 12px;">This item is hidden from the following. Remove a rule to make it visible again.</p>
+            <ul id="marketplace-unhide-rules-list" style="list-style: none; padding: 0; margin: 0 0 16px 0;"></ul>
+            <div style="margin-top: 16px;">
+                <button type="button" id="marketplace-unhide-add-more" class="btn-secondary" style="margin-right: 8px;">Add another rule</button>
+                <button type="button" id="marketplace-unhide-close-btn" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Marketplace Edit item modal (admin only) -->
+    <div id="marketplace-edit-item-modal" class="modal">
+        <div class="modal-content" style="max-width: 560px;">
+            <span class="close" id="marketplace-edit-item-modal-close">&times;</span>
+            <h2>Edit marketplace item</h2>
+            <div id="marketplace-edit-item-error" style="display: none; margin-bottom: 12px; padding: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626; font-size: 14px;"></div>
+            <div style="display: grid; gap: 12px;">
+                <div><label for="marketplace-edit-item-name">Name *</label><input type="text" id="marketplace-edit-item-name" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"></div>
+                <div><label for="marketplace-edit-item-description">Description</label><textarea id="marketplace-edit-item-description" rows="3" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"></textarea></div>
+                <div><label for="marketplace-edit-item-price">Price ($) *</label><input type="number" id="marketplace-edit-item-price" step="0.01" min="0.01" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"></div>
+                <div><label for="marketplace-edit-item-grade-range">Grade range</label><select id="marketplace-edit-item-grade-range" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"><option value="k_3">K–3</option><option value="4_8">4–8</option><option value="9_12">9–12</option><option value="school_wide">School-wide</option></select></div>
+                <div><label for="marketplace-edit-item-type">Type</label><select id="marketplace-edit-item-type" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"><option value="">— None —</option></select></div>
+                <div><label for="marketplace-edit-item-category">Category</label><select id="marketplace-edit-item-category" style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"><option value="">— None —</option></select></div>
+                <div><label for="marketplace-edit-item-image-url">Image URL</label><input type="url" id="marketplace-edit-item-image-url" placeholder="https://..." style="width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px;"></div>
+            </div>
+            <div style="margin-top: 16px; display: flex; gap: 10px;">
+                <button type="button" id="marketplace-edit-item-submit" class="btn-primary">Save</button>
+                <button type="button" id="marketplace-edit-item-cancel" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Amendment Request Modal -->
     <div id="amendment-request-modal" class="modal">

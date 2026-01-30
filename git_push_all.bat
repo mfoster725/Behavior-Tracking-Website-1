@@ -1,12 +1,12 @@
 @echo off
 cd /d "c:\Users\manfo\OneDrive\Desktop\Cursor"
 
-echo Staging files...
-git add app.py run.bat static/app.js templates/index.html migrate_add_ui_preferences.py static/paycheck_worksheet_example.html
+echo Staging all changes...
+git add -A
 
 echo.
 echo Committing...
-git commit -m "Update app, run script, static assets, templates; add migration and paycheck example"
+git commit -m "Recent changes: marketplace plan, paycheck cron, migrations (grades_taught, marketplace, hidden_rules), HIPAA, UI, app and static updates"
 
 echo.
 echo Pushing to origin...

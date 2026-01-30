@@ -6,6 +6,7 @@ from datetime import datetime, date, timedelta
 from functools import wraps
 from decimal import Decimal
 import os
+import secrets
 import csv
 import json
 import logging
@@ -162,6 +163,70 @@ def has_student_access(user, student_id):
             return True
     return False
 
+
+def get_support_team_user_ids(student_id):
+    """
+    Return set of user_ids who are on the student's support team.
+    Support team = any staff in that student's row in the student user table (User Management):
+    i.e. users matched from team_members (by name or username) + outside_staff_students + admins.
+    """
+    team_members = TeamMember.query.filter_by(student_id=student_id).all()
+    team_member_user_ids = set()
+    for tm in team_members:
+        if not (tm.name and str(tm.name).strip()):
+            continue
+        name_or_username = str(tm.name).strip()
+        # Match staff/admin by name or username (case-insensitive) so all staff in student's row count
+        u = User.query.filter(
+            User.role.in_(['staff', 'admin']),
+            db.or_(
+                db.func.lower(User.name) == db.func.lower(name_or_username),
+                db.func.lower(User.username) == db.func.lower(name_or_username)
+            )
+        ).first()
+        if u:
+            team_member_user_ids.add(u.id)
+    outside_staff_ids = [oss.user_id for oss in OutsideStaffStudent.query.filter_by(student_id=student_id).all()]
+    admin_ids = [u.id for u in User.query.filter_by(role='admin').all()]
+    return team_member_user_ids | set(outside_staff_ids) | set(admin_ids)
+
+
+def student_grade_matches_item_grade_range(student_grade, item_grade_range):
+    """Return True if student's grade can see item with given grade_range (k_3, 4_8, 9_12, school_wide)."""
+    if not student_grade:
+        return False
+    if item_grade_range == 'school_wide':
+        return True
+    g = str(student_grade).strip().upper()
+    if item_grade_range == 'k_3':
+        return g in ('K', '1', '2', '3')
+    if item_grade_range == '4_8':
+        return g in ('4', '5', '6', '7', '8')
+    if item_grade_range == '9_12':
+        return g in ('9', '10', '11', '12')
+    return False
+
+
+def is_item_hidden_for_student(item_id, student):
+    """Return True if the item is hidden for this student (by any hidden rule)."""
+    if not student:
+        return False
+    rules = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id).all()
+    for r in rules:
+        if r.hidden_type == 'student' and str(r.value) == str(student.id):
+            return True
+        if r.hidden_type == 'card_color' and (student.card_color or '').strip().lower() == (r.value or '').strip().lower():
+            return True
+        if r.hidden_type == 'grade_section' and (student.grade or '').strip() == (r.value or '').strip():
+            return True
+    return False
+
+
+def is_case_manager(user):
+    """True if user can create/approve marketplace items (Case Manager designation)."""
+    return user.role in ('staff', 'admin') and getattr(user, 'designation', None) == 'Case Manager'
+
+
 # HIPAA/FERPA Compliance: Password validation
 def validate_password_strength(password):
     """
@@ -225,6 +290,8 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # JSON-encoded per-user UI preferences (non-PHI, e.g., hidden sections)
     ui_preferences = db.Column(db.Text, nullable=True)
+    # Grades taught by teachers/case managers (e.g. "9, 10, 11" or "9-12")
+    grades_taught = db.Column(db.String(50), nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -277,6 +344,9 @@ def ensure_ui_preferences_column():
             with db.engine.connect() as conn:
                 conn.execute(text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences TEXT"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS grades_taught VARCHAR(50)"
                 ))
                 conn.commit()
     except Exception as e:
@@ -524,21 +594,43 @@ class Paycheck(db.Model):
     student = db.relationship('Student', backref='paychecks')
     transactions = db.relationship('Transaction', backref='paycheck', lazy=True)
 
+# Admin-managed lookup tables for Marketplace
+class MarketplaceItemType(db.Model):
+    __tablename__ = 'marketplace_item_types'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+
+class MarketplaceCategory(db.Model):
+    __tablename__ = 'marketplace_categories'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+
 class MarketplaceItem(db.Model):
     __tablename__ = 'marketplace_items'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     price = db.Column(db.Numeric(10, 2), nullable=False)
-    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Case manager who created it
-    is_global = db.Column(db.Boolean, default=False, nullable=False)  # If true, visible to all students
-    is_approved_for_global = db.Column(db.Boolean, default=False, nullable=False)  # Admin approval for global
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    is_global = db.Column(db.Boolean, default=False, nullable=False)
+    is_approved_for_global = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    # New: grade_range k_3, 4_8, 9_12, school_wide
+    grade_range = db.Column(db.String(20), default='9_12', nullable=False)
+    item_type_id = db.Column(db.Integer, db.ForeignKey('marketplace_item_types.id'), nullable=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('marketplace_categories.id'), nullable=True)
+    image_url = db.Column(db.String(500), nullable=True)  # URL only
+    suggested_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    creator = db.relationship('User', backref='created_marketplace_items')
+    creator = db.relationship('User', backref='created_marketplace_items', foreign_keys=[created_by_user_id])
+    suggester = db.relationship('User', foreign_keys=[suggested_by_user_id])
+    item_type = db.relationship('MarketplaceItemType', backref='items')
+    category = db.relationship('MarketplaceCategory', backref='items')
     purchase_orders = db.relationship('PurchaseOrder', backref='item', lazy=True)
 
 class MarketplaceItemRequest(db.Model):
@@ -557,26 +649,59 @@ class MarketplaceItemRequest(db.Model):
     requester = db.relationship('User', foreign_keys=[requested_by_user_id], backref='marketplace_requests')
     reviewer = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_marketplace_requests')
 
+
+class MarketplaceItemHiddenRule(db.Model):
+    """Rule to hide a marketplace item from specific students (by student, card_color, or grade)."""
+    __tablename__ = 'marketplace_item_hidden_rules'
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
+    hidden_type = db.Column(db.String(20), nullable=False)  # 'student', 'card_color', 'grade_section'
+    value = db.Column(db.String(100), nullable=False)  # student_id, color name, or grade
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    item = db.relationship('MarketplaceItem', backref=db.backref('hidden_rules', lazy=True, cascade='all, delete-orphan'))
+
+
 class PurchaseOrder(db.Model):
     __tablename__ = 'purchase_orders'
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
     item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
-    item_price = db.Column(db.Numeric(10, 2), nullable=False)  # Price at time of purchase
+    item_price = db.Column(db.Numeric(10, 2), nullable=False)
     student_balance_before = db.Column(db.Numeric(10, 2), nullable=False)
-    student_calculated_balance_after = db.Column(db.Numeric(10, 2), nullable=False)  # Student's calculation
-    actual_balance_after = db.Column(db.Numeric(10, 2), nullable=False)  # Actual calculated balance
+    student_calculated_balance_after = db.Column(db.Numeric(10, 2), nullable=False)
+    actual_balance_after = db.Column(db.Numeric(10, 2), nullable=False)
     is_calculation_correct = db.Column(db.Boolean, nullable=True)
-    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'approved', 'fulfilled', 'denied'
-    case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Assigned case manager
+    status = db.Column(db.String(20), default='pending', nullable=False)  # pending, approved, fulfilled, denied
+    case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Legacy; support team derived
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    denied_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    denial_reason = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     approved_at = db.Column(db.DateTime, nullable=True)
     fulfilled_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
     student = db.relationship('Student', backref='purchase_orders')
-    case_manager = db.relationship('User', backref='managed_purchase_orders')
+    case_manager = db.relationship('User', foreign_keys=[case_manager_id], backref='managed_purchase_orders')
+    approved_by = db.relationship('User', foreign_keys=[approved_by_user_id])
+    denied_by = db.relationship('User', foreign_keys=[denied_by_user_id])
     transactions = db.relationship('Transaction', backref='purchase_order', lazy=True)
+
+
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # purchase_approved, purchase_denied, etc.
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=True)
+    purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True)
+    read_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='notifications')
+    purchase_order = db.relationship('PurchaseOrder', backref='notification_records')
 
 class Transaction(db.Model):
     __tablename__ = 'transactions'
@@ -2177,6 +2302,32 @@ def summary():
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
                         
+                        # Extract infractions array (Info column dynamic infractions)
+                        for inf_item in info_data.get('infractions') or []:
+                            if not isinstance(inf_item, dict):
+                                continue
+                            infraction_type = (inf_item.get('type') or '').strip()
+                            if not infraction_type:
+                                continue
+                            try:
+                                count = int(inf_item.get('count', 1))
+                            except (ValueError, TypeError):
+                                count = 1
+                            if infraction_type not in total_infractions:
+                                total_infractions[infraction_type] = 0
+                            total_infractions[infraction_type] += count
+                            if infraction_type not in additional_info['infractions']:
+                                additional_info['infractions'][infraction_type] = 0
+                            additional_info['infractions'][infraction_type] += count
+                            if is_weekday:
+                                if infraction_type not in by_day_of_week[day_of_week]['infractions']:
+                                    by_day_of_week[day_of_week]['infractions'][infraction_type] = 0
+                                by_day_of_week[day_of_week]['infractions'][infraction_type] += count
+                            class_name = period.location or 'Unknown'
+                            if infraction_type not in by_class[class_name]['infractions']:
+                                by_class[class_name]['infractions'][infraction_type] = 0
+                            by_class[class_name]['infractions'][infraction_type] += count
+                        
                         # Count reminders
                         reminder1 = info_data.get('reminder1', False)
                         reminder2 = info_data.get('reminder2', False)
@@ -2818,6 +2969,20 @@ def case_manager_comparison():
                                 if infraction_type not in infractions:
                                     infractions[infraction_type] = 0
                                 infractions[infraction_type] += count
+                        # Extract infractions array (Info column dynamic infractions)
+                        for inf_item in info_data.get('infractions') or []:
+                            if not isinstance(inf_item, dict):
+                                continue
+                            infraction_type = (inf_item.get('type') or '').strip()
+                            if not infraction_type:
+                                continue
+                            try:
+                                count = int(inf_item.get('count', 1))
+                            except (ValueError, TypeError):
+                                count = 1
+                            if infraction_type not in infractions:
+                                infractions[infraction_type] = 0
+                            infractions[infraction_type] += count
                     except (json.JSONDecodeError, ValueError, TypeError):
                         pass
         
@@ -3673,6 +3838,7 @@ def manage_users():
                 'student_id': user.student_id,
                 'is_outside_staff': user.is_outside_staff if hasattr(user, 'is_outside_staff') else False,
                 'district': user.district if hasattr(user, 'district') else None,
+                'grades_taught': getattr(user, 'grades_taught', None),
                 'created_at': user.created_at.isoformat() if user.created_at else None
             }
             
@@ -3753,7 +3919,8 @@ def manage_users():
             designation=data.get('designation'),
             student_id=data.get('student_id'),
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
-            district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None
+            district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None,
+            grades_taught=data.get('grades_taught') if role == 'staff' else None
         )
         user.set_password(password)
         
@@ -3811,6 +3978,8 @@ def manage_users():
                 user.role = data['role']
             if 'designation' in data:
                 user.designation = data['designation'] if data['designation'] else None
+            if 'grades_taught' in data:
+                user.grades_taught = data['grades_taught'] if data['grades_taught'] else None
             if 'student_id' in data:
                 user.student_id = data['student_id']
             if 'is_outside_staff' in data:
@@ -4418,6 +4587,19 @@ def get_student_case_manager(student_id):
         return case_manager_user
     return None
 
+
+def create_purchase_notification(student_user_id, notification_type, title, body, purchase_order_id=None):
+    """Create an in-app notification for a student (user_id of student's login)."""
+    n = Notification(
+        user_id=student_user_id,
+        type=notification_type,
+        title=title,
+        body=body,
+        purchase_order_id=purchase_order_id
+    )
+    db.session.add(n)
+
+
 def calculate_weekly_star_percent(student_id, start_date, end_date):
     """Calculate average STAR percentage for a date range"""
     records = DailyRecord.query.filter(
@@ -4466,8 +4648,45 @@ def _is_reset_infraction(infraction_type):
         return False
     return str(infraction_type).strip().lower() == 'reset'
 
+def _citations_from_period_info(period):
+    """Extract citation labels from period.info JSON (infraction1, infraction2, infractions array). Excludes Reset."""
+    labels = []
+    if not period.info:
+        return labels
+    try:
+        info_data = json.loads(period.info)
+        for inf_key in ['infraction1', 'infraction2']:
+            infraction_type = info_data.get(inf_key)
+            if infraction_type and str(infraction_type).strip():
+                infraction_type = str(infraction_type).strip()
+                if _is_reset_infraction(infraction_type):
+                    continue
+                count = 1
+                try:
+                    count_key = f'{inf_key}Count'
+                    count = int(info_data.get(count_key, 1))
+                except (ValueError, TypeError):
+                    count = 1
+                for _ in range(count):
+                    labels.append(infraction_type)
+        for inf_item in info_data.get('infractions') or []:
+            if not isinstance(inf_item, dict):
+                continue
+            infraction_type = (inf_item.get('type') or '').strip()
+            if not infraction_type or _is_reset_infraction(infraction_type):
+                continue
+            try:
+                count = int(inf_item.get('count', 1))
+            except (ValueError, TypeError):
+                count = 1
+            for _ in range(count):
+                labels.append(infraction_type)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return labels
+
 def count_weekly_infractions(student_id, start_date, end_date):
-    """Count total infractions for a date range. Excludes Reset (reset is not a citation)."""
+    """Count total infractions for a date range. Includes Infraction table and Info column. Excludes Reset."""
     records = DailyRecord.query.filter(
         DailyRecord.student_id == student_id,
         DailyRecord.date >= start_date,
@@ -4481,11 +4700,12 @@ def count_weekly_infractions(student_id, start_date, end_date):
                 if _is_reset_infraction(infraction.infraction_type):
                     continue
                 total_count += infraction.count
+            total_count += len(_citations_from_period_info(period))
     
     return total_count
 
 def list_weekly_citations(student_id, start_date, end_date):
-    """Return a list of citation labels for the date range, one per occurrence. Excludes Reset."""
+    """Return a list of citation labels for the date range. Includes Infraction table and Info column. Excludes Reset."""
     records = DailyRecord.query.filter(
         DailyRecord.student_id == student_id,
         DailyRecord.date >= start_date,
@@ -4500,6 +4720,7 @@ def list_weekly_citations(student_id, start_date, end_date):
                     continue
                 for _ in range(infraction.count):
                     result.append(infraction.infraction_type)
+            result.extend(_citations_from_period_info(period))
     return result
 
 def get_or_create_bank_account(student_id):
@@ -4545,21 +4766,27 @@ def get_paychecks(student_id):
     
     paychecks = Paycheck.query.filter_by(student_id=student_id).order_by(Paycheck.created_at.desc()).all()
     
-    return jsonify([{
-        'id': p.id,
-        'pay_period_start': p.pay_period_start.isoformat(),
-        'pay_period_end': p.pay_period_end.isoformat(),
-        'average_star_percent': float(p.average_star_percent),
-        'base_pay': float(p.base_pay),
-        'citation_count': p.citation_count,
-        'citation_list': list_weekly_citations(p.student_id, p.pay_period_start, p.pay_period_end),
-        'citation_deduction': float(p.citation_deduction),
-        'final_pay': float(p.final_pay),
-        'worksheet_completed': p.worksheet_completed,
-        'is_verified': p.is_verified,
-        'deposited_at': p.deposited_at.isoformat() if p.deposited_at else None,
-        'created_at': p.created_at.isoformat()
-    } for p in paychecks])
+    def paycheck_item(p):
+        citation_list = list_weekly_citations(p.student_id, p.pay_period_start, p.pay_period_end)
+        live_count = len(citation_list)
+        live_deduction = float(Decimal(str(live_count * 2)))
+        live_final = float(p.base_pay) - live_deduction
+        return {
+            'id': p.id,
+            'pay_period_start': p.pay_period_start.isoformat(),
+            'pay_period_end': p.pay_period_end.isoformat(),
+            'average_star_percent': float(p.average_star_percent),
+            'base_pay': float(p.base_pay),
+            'citation_count': live_count,
+            'citation_list': citation_list,
+            'citation_deduction': live_deduction,
+            'final_pay': live_final,
+            'worksheet_completed': p.worksheet_completed,
+            'is_verified': p.is_verified,
+            'deposited_at': p.deposited_at.isoformat() if p.deposited_at else None,
+            'created_at': p.created_at.isoformat()
+        }
+    return jsonify([paycheck_item(p) for p in paychecks])
 
 @app.route('/api/paycheck/<int:paycheck_id>', methods=['GET'])
 @limiter.limit("30 per minute")
@@ -4571,6 +4798,11 @@ def get_paycheck(paycheck_id):
     if not has_student_access(current_user, paycheck.student_id):
         return jsonify({'error': 'Access denied'}), 403
     
+    # Use live citation list/count so worksheet shows current infractions (not stale paycheck record)
+    citation_list = list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+    live_citation_count = len(citation_list)
+    live_citation_deduction = Decimal(str(live_citation_count * 2))
+    live_final_pay = paycheck.base_pay - live_citation_deduction
     return jsonify({
         'id': paycheck.id,
         'student_id': paycheck.student_id,
@@ -4578,10 +4810,10 @@ def get_paycheck(paycheck_id):
         'pay_period_end': paycheck.pay_period_end.isoformat(),
         'average_star_percent': float(paycheck.average_star_percent),
         'base_pay': float(paycheck.base_pay),
-        'citation_count': paycheck.citation_count,
-        'citation_list': list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end),
-        'citation_deduction': float(paycheck.citation_deduction),
-        'final_pay': float(paycheck.final_pay),
+        'citation_count': live_citation_count,
+        'citation_list': citation_list,
+        'citation_deduction': float(live_citation_deduction),
+        'final_pay': float(live_final_pay),
         'worksheet_completed': paycheck.worksheet_completed,
         'student_calculated_pay': float(paycheck.student_calculated_pay) if paycheck.student_calculated_pay else None,
         'student_calculated_citations': paycheck.student_calculated_citations,
@@ -4592,55 +4824,77 @@ def get_paycheck(paycheck_id):
         'created_at': paycheck.created_at.isoformat()
     })
 
-@app.route('/api/paycheck/generate', methods=['POST'])
-@limiter.limit("10 per minute")
-@login_required
-@staff_required
-def generate_paychecks():
-    """Manually trigger paycheck generation"""
-    data = request.json or {}
-    target_date = data.get('date')  # Optional: specific Monday date to generate for
-    
-    if target_date:
-        target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+def run_paycheck_generation(target_date=None):
+    """
+    Generate paychecks for all students for a Mon–Fri pay period.
+    Used by both the API route and the cron script.
+
+    target_date: optional Monday date as 'YYYY-MM-DD' or date; if None, uses
+                 the **previous week** (Monday of the week before the current week).
+
+    Returns:
+        tuple: (generated_count, pay_period_start, pay_period_end)
+    """
+    if target_date is not None:
+        if isinstance(target_date, str):
+            target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
     else:
-        # Default to previous Monday
+        # Generate for the **previous** Monday–Friday week only.
+        # Example: if the button is pressed on Wed 1/29/25, this week's Monday
+        # is 1/27, so the previous week is Mon 1/20–Fri 1/24.
         today = date.today()
-        days_since_monday = (today.weekday()) % 7
-        if days_since_monday == 0:  # Today is Monday
-            target_date = today - timedelta(days=7)
-        else:
-            target_date = today - timedelta(days=days_since_monday)
-    
-    # Calculate Monday-Friday range
-    pay_period_start = target_date  # Monday
-    pay_period_end = target_date + timedelta(days=4)  # Friday
-    
-    # Get all students
-    students = Student.query.all()
+        this_monday = today - timedelta(days=today.weekday())
+        target_date = this_monday - timedelta(days=7)
+
+    pay_period_start = target_date
+    pay_period_end = target_date + timedelta(days=4)
+
     generated_count = 0
-    
+
+    # Only process students who have active user accounts (User Management tab).
+    student_users = User.query.filter_by(role='student').all()
+    active_student_ids = {u.student_id for u in student_users if u.student_id}
+
+    # 1. Update existing non-deposited paychecks for this period, but only for
+    #    students who have an active user account (no updates for students not in User Management).
+    existing_pending = Paycheck.query.filter(
+        Paycheck.pay_period_start == pay_period_start,
+        Paycheck.pay_period_end == pay_period_end,
+        Paycheck.deposited_at.is_(None)
+    ).all()
+
+    for paycheck in existing_pending:
+        if paycheck.student_id not in active_student_ids:
+            continue
+        avg_star_percent = calculate_weekly_star_percent(paycheck.student_id, pay_period_start, pay_period_end)
+        citation_count = count_weekly_infractions(paycheck.student_id, pay_period_start, pay_period_end)
+        base_pay = (avg_star_percent / 100) * Decimal('100')
+        citation_deduction = Decimal(str(citation_count * 2))
+        final_pay = base_pay - citation_deduction
+        paycheck.average_star_percent = avg_star_percent
+        paycheck.base_pay = base_pay
+        paycheck.citation_count = citation_count
+        paycheck.citation_deduction = citation_deduction
+        paycheck.final_pay = final_pay
+        generated_count += 1
+
+    # 2. Create new paychecks only for students who have active user accounts and
+    #    do not yet have a paycheck for this period.
+    students = Student.query.filter(Student.id.in_(active_student_ids)).all() if active_student_ids else []
+
     for student in students:
-        # Check if paycheck already exists for this period
         existing = Paycheck.query.filter_by(
             student_id=student.id,
             pay_period_start=pay_period_start,
             pay_period_end=pay_period_end
         ).first()
-        
         if existing:
-            continue
-        
-        # Calculate STAR percent and infractions
+            continue  # Already updated in step 1 if not deposited; if deposited, leave as-is
         avg_star_percent = calculate_weekly_star_percent(student.id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(student.id, pay_period_start, pay_period_end)
-        
-        # Calculate pay: 80% STAR -> $80 (percent of $100 max); citations $2 each
         base_pay = (avg_star_percent / 100) * Decimal('100')
         citation_deduction = Decimal(str(citation_count * 2))
         final_pay = base_pay - citation_deduction
-        
-        # Create paycheck
         paycheck = Paycheck(
             student_id=student.id,
             pay_period_start=pay_period_start,
@@ -4653,9 +4907,64 @@ def generate_paychecks():
         )
         db.session.add(paycheck)
         generated_count += 1
-    
+
     db.session.commit()
-    return jsonify({'message': f'Generated {generated_count} paychecks', 'count': generated_count})
+    return (generated_count, pay_period_start, pay_period_end)
+
+
+@app.route('/api/paycheck/generate', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+@staff_required
+def generate_paychecks():
+    """Manually trigger paycheck generation"""
+    data = request.get_json(silent=True) or {}
+    target_date = data.get('date')
+    try:
+        count, start, end = run_paycheck_generation(target_date)
+        return jsonify({
+            'message': f'Generated {count} paychecks',
+            'count': count,
+            'pay_period_start': start.isoformat(),
+            'pay_period_end': end.isoformat(),
+        })
+    except Exception as e:
+        app.logger.exception('manual paycheck generation error')
+        return jsonify({'error': f'Paycheck generation failed: {e}'}), 500
+
+
+@app.route('/api/paycheck/generate-cron', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def generate_paychecks_cron():
+    """
+    Cron endpoint for external schedulers (e.g. cron-job.org).
+    Secured by CRON_SECRET env var. No login required.
+    """
+    secret = os.environ.get('CRON_SECRET')
+    if not secret:
+        return jsonify({'error': 'CRON_SECRET not configured'}), 503
+    provided = request.headers.get('X-Cron-Secret') or (
+        request.headers.get('Authorization') or ''
+    ).replace('Bearer ', '').strip()
+    if not provided or not secrets.compare_digest(secret, provided):
+        return jsonify({'error': 'Unauthorized'}), 401
+    target_date = None
+    if request.method == 'POST' and request.is_json:
+        target_date = (request.json or {}).get('date')
+    elif request.method == 'GET':
+        target_date = request.args.get('date')
+    try:
+        count, start, end = run_paycheck_generation(target_date)
+        return jsonify({
+            'message': f'Generated {count} paychecks',
+            'count': count,
+            'pay_period_start': start.isoformat(),
+            'pay_period_end': end.isoformat(),
+        })
+    except Exception as e:
+        app.logger.exception('paycheck cron error')
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/paycheck/<int:paycheck_id>/complete-worksheet', methods=['POST'])
 @limiter.limit("30 per minute")
@@ -4702,15 +5011,24 @@ def verify_paycheck(paycheck_id):
     if not paycheck.worksheet_completed:
         return jsonify({'error': 'Worksheet not completed'}), 400
     
+    # Use live citation count so verification matches current infractions (not stale paycheck record)
+    live_citation_count = count_weekly_infractions(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+    live_citation_deduction = Decimal(str(live_citation_count * 2))
+    live_final_pay = paycheck.base_pay - live_citation_deduction
+
     # Verify calculations
     tolerance = Decimal('0.01')  # Allow small rounding differences
     
     pay_correct = abs(paycheck.student_calculated_pay - paycheck.base_pay) <= tolerance
-    citations_correct = paycheck.student_calculated_citations == paycheck.citation_count
-    deduction_correct = abs(paycheck.student_calculated_deduction - paycheck.citation_deduction) <= tolerance
-    final_correct = abs(paycheck.student_calculated_final - paycheck.final_pay) <= tolerance
+    citations_correct = paycheck.student_calculated_citations == live_citation_count
+    deduction_correct = abs(paycheck.student_calculated_deduction - live_citation_deduction) <= tolerance
+    final_correct = abs(paycheck.student_calculated_final - live_final_pay) <= tolerance
     
     if pay_correct and citations_correct and deduction_correct and final_correct:
+        # Sync paycheck record with live values before depositing so ledger is correct
+        paycheck.citation_count = live_citation_count
+        paycheck.citation_deduction = live_citation_deduction
+        paycheck.final_pay = live_final_pay
         paycheck.is_verified = True
         paycheck.deposited_at = datetime.utcnow()
         
@@ -4739,13 +5057,13 @@ def verify_paycheck(paycheck_id):
     else:
         errors = []
         if not pay_correct:
-            errors.append(f'Base pay calculation incorrect. Expected: {paycheck.base_pay}, Got: {paycheck.student_calculated_pay}')
+            errors.append('Please correct base pay calculation.')
         if not citations_correct:
-            errors.append(f'Citation count incorrect. Expected: {paycheck.citation_count}, Got: {paycheck.student_calculated_citations}')
+            errors.append('Please correct citation count.')
         if not deduction_correct:
-            errors.append(f'Citation deduction incorrect. Expected: {paycheck.citation_deduction}, Got: {paycheck.student_calculated_deduction}')
+            errors.append('Please correct citation deduction.')
         if not final_correct:
-            errors.append(f'Final pay calculation incorrect. Expected: {paycheck.final_pay}, Got: {paycheck.student_calculated_final}')
+            errors.append('Please correct final pay calculation.')
         
         return jsonify({
             'verified': False,
@@ -4753,46 +5071,246 @@ def verify_paycheck(paycheck_id):
             'message': 'Some calculations are incorrect. Please review and try again.'
         }), 400
 
-# Marketplace Routes
+# Marketplace catalog: grade-filtered for student (or view-as student_id); staff can get all items with staff=1
+@app.route('/api/marketplace/catalog', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_marketplace_catalog():
+    """Get marketplace items. Staff/admin with staff=1 get all items + hidden_rules. With student_id, return items visible to that student (grade + not hidden)."""
+    staff_catalog = request.args.get('staff', type=lambda x: x == '1' or x == 'true')
+    student_id = request.args.get('student_id', type=int)
+    if current_user.role == 'student':
+        student_id = current_user.student_id
+        staff_catalog = False
+    elif current_user.role in ['staff', 'admin'] and student_id:
+        if not has_student_access(current_user, student_id):
+            return jsonify({'error': 'Access denied'}), 403
+    else:
+        student_id = current_user.student_id if current_user.role == 'student' else None
+
+    # Staff/admin viewing full catalog (no student): return all active items with hidden_rules
+    if staff_catalog and current_user.role in ['staff', 'admin']:
+        items_query = MarketplaceItem.query.filter_by(is_active=True)
+        q = request.args.get('q', '').strip()
+        if q:
+            items_query = items_query.filter(
+                db.or_(
+                    MarketplaceItem.name.ilike(f'%{q}%'),
+                    MarketplaceItem.description.ilike(f'%{q}%')
+                )
+            )
+        type_id = request.args.get('type_id', type=int)
+        if type_id:
+            items_query = items_query.filter(MarketplaceItem.item_type_id == type_id)
+        category_id = request.args.get('category_id', type=int)
+        if category_id:
+            items_query = items_query.filter(MarketplaceItem.category_id == category_id)
+        min_price = request.args.get('min_price', type=lambda x: Decimal(x) if x is not None else None)
+        if min_price is not None:
+            items_query = items_query.filter(MarketplaceItem.price >= min_price)
+        max_price = request.args.get('max_price', type=lambda x: Decimal(x) if x is not None else None)
+        if max_price is not None:
+            items_query = items_query.filter(MarketplaceItem.price <= max_price)
+        items = items_query.all()
+        return jsonify([{
+            'id': item.id,
+            'name': item.name,
+            'description': item.description or '',
+            'price': float(item.price),
+            'grade_range': getattr(item, 'grade_range', '9_12'),
+            'item_type_id': item.item_type_id,
+            'item_type_name': item.item_type.name if item.item_type else None,
+            'category_id': item.category_id,
+            'category_name': item.category.name if item.category else None,
+            'image_url': item.image_url,
+            'created_at': item.created_at.isoformat(),
+            'hidden_rules': [{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value} for r in item.hidden_rules]
+        } for item in items])
+
+    if not student_id:
+        return jsonify([])
+
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify([])
+
+    items_query = MarketplaceItem.query.filter_by(is_active=True)
+    grade_ranges_visible = ['school_wide']
+    if student_grade_matches_item_grade_range(student.grade, 'k_3'):
+        grade_ranges_visible.append('k_3')
+    if student_grade_matches_item_grade_range(student.grade, '4_8'):
+        grade_ranges_visible.append('4_8')
+    if student_grade_matches_item_grade_range(student.grade, '9_12'):
+        grade_ranges_visible.append('9_12')
+    items_query = items_query.filter(MarketplaceItem.grade_range.in_(grade_ranges_visible))
+
+    q = request.args.get('q', '').strip()
+    if q:
+        items_query = items_query.filter(
+            db.or_(
+                MarketplaceItem.name.ilike(f'%{q}%'),
+                MarketplaceItem.description.ilike(f'%{q}%')
+            )
+        )
+    type_id = request.args.get('type_id', type=int)
+    if type_id:
+        items_query = items_query.filter(MarketplaceItem.item_type_id == type_id)
+    category_id = request.args.get('category_id', type=int)
+    if category_id:
+        items_query = items_query.filter(MarketplaceItem.category_id == category_id)
+    min_price = request.args.get('min_price', type=lambda x: Decimal(x) if x is not None else None)
+    if min_price is not None:
+        items_query = items_query.filter(MarketplaceItem.price >= min_price)
+    max_price = request.args.get('max_price', type=lambda x: Decimal(x) if x is not None else None)
+    if max_price is not None:
+        items_query = items_query.filter(MarketplaceItem.price <= max_price)
+
+    items = items_query.all()
+    # Exclude items hidden for this student
+    items = [item for item in items if not is_item_hidden_for_student(item.id, student)]
+    return jsonify([{
+        'id': item.id,
+        'name': item.name,
+        'description': item.description or '',
+        'price': float(item.price),
+        'grade_range': getattr(item, 'grade_range', '9_12'),
+        'item_type_id': item.item_type_id,
+        'item_type_name': item.item_type.name if item.item_type else None,
+        'category_id': item.category_id,
+        'category_name': item.category.name if item.category else None,
+        'image_url': item.image_url,
+        'created_at': item.created_at.isoformat()
+    } for item in items])
+
+
+@app.route('/api/marketplace/checkout', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+def marketplace_checkout():
+    """Checkout cart: create one purchase order per cart line. Student only (or staff view-as not used for checkout)."""
+    if current_user.role != 'student':
+        return jsonify({'error': 'Only students can checkout'}), 403
+    
+    data = request.json or {}
+    cart_lines = data.get('cart', [])  # [{ item_id, quantity }, ...]
+    if not cart_lines:
+        return jsonify({'error': 'Cart is empty'}), 400
+    
+    student_id = current_user.student_id
+    if not student_id:
+        return jsonify({'error': 'No student account'}), 400
+    
+    account = get_or_create_bank_account(student_id)
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 400
+    
+    support_team_ids = get_support_team_user_ids(student_id)
+    if not support_team_ids:
+        return jsonify({'error': 'No support team assigned'}), 400
+    
+    case_manager = get_student_case_manager(student_id)
+    case_manager_id = case_manager.id if case_manager else list(support_team_ids)[0]
+    
+    total = Decimal('0')
+    orders_to_create = []
+    for line in cart_lines:
+        item_id = line.get('item_id')
+        quantity = int(line.get('quantity', 1))
+        if quantity < 1:
+            continue
+        item = MarketplaceItem.query.get(item_id)
+        if not item or not item.is_active:
+            return jsonify({'error': f'Item {item_id} is not available'}), 400
+        if not student_grade_matches_item_grade_range(student.grade, getattr(item, 'grade_range', '9_12')):
+            return jsonify({'error': f'Item {item.name} is not available for your grade'}), 400
+        if is_item_hidden_for_student(item.id, student):
+            return jsonify({'error': f'Item {item.name} is not available for you'}), 400
+        line_total = item.price * quantity
+        total += line_total
+        for _ in range(quantity):
+            orders_to_create.append((item, item.price))
+    
+    if total > account.balance:
+        return jsonify({'error': 'Insufficient funds', 'balance': float(account.balance), 'total': float(total)}), 400
+    
+    created_orders = []
+    balance = account.balance
+    for (item, price) in orders_to_create:
+        balance_after = balance - price
+        order = PurchaseOrder(
+            student_id=student_id,
+            item_id=item.id,
+            item_price=price,
+            student_balance_before=balance,
+            student_calculated_balance_after=balance_after,
+            actual_balance_after=balance_after,
+            is_calculation_correct=True,
+            status='pending',
+            case_manager_id=case_manager_id
+        )
+        db.session.add(order)
+        created_orders.append((order, item.name, float(price)))
+        balance = balance_after
+    db.session.flush()
+    running_balance = account.balance
+    for (order, item_name, price_float) in created_orders:
+        price_decimal = Decimal(str(price_float))
+        running_balance = running_balance - price_decimal
+        order.actual_balance_after = running_balance
+        transaction = Transaction(
+            student_id=student_id,
+            bank_account_id=account.id,
+            transaction_type='purchase',
+            amount=-price_decimal,
+            purchase_order_id=order.id,
+            balance_after=running_balance,
+            description=f'Purchase (pending fulfillment): {item_name}'
+        )
+        db.session.add(transaction)
+    account.balance = running_balance
+    account.updated_at = datetime.utcnow()
+    db.session.commit()
+    created = [{'id': o.id, 'item_name': name, 'item_price': p} for o, name, p in created_orders]
+    return jsonify({'message': 'Purchase orders created', 'orders': created}), 201
+
+
+# Legacy list (all items for staff; kept for compatibility)
 @app.route('/api/marketplace-items', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
 def get_marketplace_items():
-    """Get marketplace items (filtered by user role and case manager)"""
+    """Get marketplace items (all active for staff/admin; for student use catalog)"""
     items_query = MarketplaceItem.query.filter_by(is_active=True)
     
     if current_user.role == 'student':
-        # Students see global items and items from their case manager
         student_id = current_user.student_id
-        case_manager = get_student_case_manager(student_id)
-        
-        if case_manager:
-            items_query = items_query.filter(
-                db.or_(
-                    MarketplaceItem.is_global == True,
-                    MarketplaceItem.is_approved_for_global == True,
-                    MarketplaceItem.created_by_user_id == case_manager.id
-                )
-            )
-        else:
-            # Only global items if no case manager
-            items_query = items_query.filter(
-                db.or_(
-                    MarketplaceItem.is_global == True,
-                    MarketplaceItem.is_approved_for_global == True
-                )
-            )
-    elif current_user.role in ['staff', 'admin']:
-        # Staff and admin see all items
-        pass
+        if not student_id:
+            return jsonify([])
+        student = Student.query.get(student_id)
+        if not student:
+            return jsonify([])
+        grade_ranges_visible = ['school_wide']
+        if student_grade_matches_item_grade_range(student.grade, 'k_3'):
+            grade_ranges_visible.append('k_3')
+        if student_grade_matches_item_grade_range(student.grade, '4_8'):
+            grade_ranges_visible.append('4_8')
+        if student_grade_matches_item_grade_range(student.grade, '9_12'):
+            grade_ranges_visible.append('9_12')
+        items_query = items_query.filter(MarketplaceItem.grade_range.in_(grade_ranges_visible))
     
     items = items_query.all()
-    
     return jsonify([{
         'id': item.id,
         'name': item.name,
-        'description': item.description,
+        'description': item.description or '',
         'price': float(item.price),
+        'grade_range': getattr(item, 'grade_range', '9_12'),
+        'item_type_id': item.item_type_id,
+        'item_type_name': item.item_type.name if item.item_type else None,
+        'category_id': item.category_id,
+        'category_name': item.category.name if item.category else None,
+        'image_url': item.image_url,
         'created_by_user_id': item.created_by_user_id,
         'is_global': item.is_global,
         'is_approved_for_global': item.is_approved_for_global,
@@ -4803,18 +5321,24 @@ def get_marketplace_items():
 @limiter.limit("20 per minute")
 @login_required
 def create_marketplace_item():
-    """Create new marketplace item (case manager only)"""
+    """Create new marketplace item (staff except outside staff, and admin)"""
     if current_user.role not in ['staff', 'admin']:
         return jsonify({'error': 'Permission denied'}), 403
-    
-    # Check if user is a case manager
-    if current_user.designation != 'Case Manager' and current_user.role != 'admin':
-        return jsonify({'error': 'Only case managers can create marketplace items'}), 403
+    if current_user.role == 'staff' and getattr(current_user, 'is_outside_staff', False):
+        return jsonify({'error': 'Outside staff cannot create marketplace items'}), 403
     
     data = request.json
     name = data.get('name')
     description = data.get('description', '')
     price = Decimal(str(data.get('price', 0)))
+    grade_range = data.get('grade_range', '9_12')
+    if grade_range not in ('k_3', '4_8', '9_12', 'school_wide'):
+        grade_range = '9_12'
+    if grade_range == 'school_wide' and current_user.role != 'admin':
+        return jsonify({'error': 'Only admins can create school-wide items'}), 403
+    item_type_id = data.get('item_type_id')
+    category_id = data.get('category_id')
+    image_url = (data.get('image_url') or '').strip() or None
     
     if not name or price <= 0:
         return jsonify({'error': 'Name and valid price required'}), 400
@@ -4824,7 +5348,11 @@ def create_marketplace_item():
         description=description,
         price=price,
         created_by_user_id=current_user.id,
-        is_global=data.get('is_global', False)
+        is_global=data.get('is_global', False),
+        grade_range=grade_range,
+        item_type_id=item_type_id,
+        category_id=category_id,
+        image_url=image_url
     )
     db.session.add(item)
     db.session.commit()
@@ -4832,8 +5360,12 @@ def create_marketplace_item():
     return jsonify({
         'id': item.id,
         'name': item.name,
-        'description': item.description,
+        'description': item.description or '',
         'price': float(item.price),
+        'grade_range': item.grade_range,
+        'item_type_id': item.item_type_id,
+        'category_id': item.category_id,
+        'image_url': item.image_url,
         'created_by_user_id': item.created_by_user_id,
         'is_global': item.is_global,
         'created_at': item.created_at.isoformat()
@@ -4858,6 +5390,17 @@ def update_marketplace_item(item_id):
         item.price = Decimal(str(data['price']))
     if 'is_active' in data:
         item.is_active = data['is_active']
+    if 'grade_range' in data and data['grade_range'] in ('k_3', '4_8', '9_12', 'school_wide'):
+        if data['grade_range'] == 'school_wide' and current_user.role != 'admin':
+            pass  # don't allow non-admin to set school_wide
+        else:
+            item.grade_range = data['grade_range']
+    if 'item_type_id' in data:
+        item.item_type_id = data['item_type_id']
+    if 'category_id' in data:
+        item.category_id = data['category_id']
+    if 'image_url' in data:
+        item.image_url = (data['image_url'] or '').strip() or None
     
     item.updated_at = datetime.utcnow()
     db.session.commit()
@@ -4865,8 +5408,12 @@ def update_marketplace_item(item_id):
     return jsonify({
         'id': item.id,
         'name': item.name,
-        'description': item.description,
+        'description': item.description or '',
         'price': float(item.price),
+        'grade_range': item.grade_range,
+        'item_type_id': item.item_type_id,
+        'category_id': item.category_id,
+        'image_url': item.image_url,
         'is_active': item.is_active,
         'updated_at': item.updated_at.isoformat()
     })
@@ -4887,6 +5434,54 @@ def delete_marketplace_item(item_id):
     db.session.commit()
     
     return jsonify({'message': 'Item deleted successfully'})
+
+
+@app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_marketplace_item_hidden_rules(item_id):
+    """List hidden rules for an item (staff/admin)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    item = MarketplaceItem.query.get_or_404(item_id)
+    rules = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id).all()
+    return jsonify([{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value, 'created_at': r.created_at.isoformat()} for r in rules])
+
+
+@app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def add_marketplace_item_hidden_rule(item_id):
+    """Add a hidden rule: hide item from specific student, card_color, or grade_section (staff/admin)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    item = MarketplaceItem.query.get_or_404(item_id)
+    data = request.json or {}
+    hidden_type = (data.get('hidden_type') or '').strip()
+    value = (data.get('value') or '').strip()
+    if hidden_type not in ('student', 'card_color', 'grade_section') or not value:
+        return jsonify({'error': 'hidden_type must be student, card_color, or grade_section and value is required'}), 400
+    # Avoid duplicate rule
+    existing = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id, hidden_type=hidden_type, value=value).first()
+    if existing:
+        return jsonify({'id': existing.id, 'hidden_type': existing.hidden_type, 'value': existing.value}), 200
+    rule = MarketplaceItemHiddenRule(item_id=item_id, hidden_type=hidden_type, value=value)
+    db.session.add(rule)
+    db.session.commit()
+    return jsonify({'id': rule.id, 'hidden_type': rule.hidden_type, 'value': rule.value, 'created_at': rule.created_at.isoformat()}), 201
+
+
+@app.route('/api/marketplace-items/<int:item_id>/hidden-rules/<int:rule_id>', methods=['DELETE'])
+@limiter.limit("30 per minute")
+@login_required
+def remove_marketplace_item_hidden_rule(item_id, rule_id):
+    """Remove a hidden rule (staff/admin)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    rule = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id, id=rule_id).first_or_404()
+    db.session.delete(rule)
+    db.session.commit()
+    return jsonify({'message': 'Rule removed'})
 
 @app.route('/api/marketplace-items/<int:item_id>/request-global', methods=['POST'])
 @limiter.limit("20 per minute")
@@ -4997,44 +5592,53 @@ def deny_marketplace_item_request(request_id):
     return jsonify({'message': 'Request denied', 'status': 'denied'})
 
 # Purchase Order Routes
-@app.route('/api/purchase-orders', methods=['GET'])
-@limiter.limit("30 per minute")
-@login_required
-def get_purchase_orders():
-    """Get purchase orders (filtered by user role)"""
-    if current_user.role == 'student':
-        orders = PurchaseOrder.query.filter_by(student_id=current_user.student_id).order_by(PurchaseOrder.created_at.desc()).all()
-    elif current_user.designation == 'Case Manager':
-        # Case managers see orders for their students
-        orders = PurchaseOrder.query.filter_by(case_manager_id=current_user.id).order_by(PurchaseOrder.created_at.desc()).all()
-    elif current_user.role == 'admin':
-        orders = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
-    else:
-        orders = []
-    
-    return jsonify([{
+def _po_to_json(o):
+    item = o.item
+    return {
         'id': o.id,
         'student_id': o.student_id,
         'student_name': o.student.name,
         'item_id': o.item_id,
-        'item_name': o.item.name,
+        'item_name': item.name if item else '',
         'item_price': float(o.item_price),
+        'item_grade_range': getattr(item, 'grade_range', '9_12') if item else '9_12',
         'student_balance_before': float(o.student_balance_before),
         'student_calculated_balance_after': float(o.student_calculated_balance_after),
         'actual_balance_after': float(o.actual_balance_after),
         'is_calculation_correct': o.is_calculation_correct,
         'status': o.status,
         'case_manager_id': o.case_manager_id,
+        'approved_by_user_id': o.approved_by_user_id,
+        'approved_by_name': o.approved_by.name if o.approved_by else None,
+        'denied_by_user_id': o.denied_by_user_id,
+        'denied_by_name': o.denied_by.name if o.denied_by else None,
+        'denial_reason': o.denial_reason,
         'created_at': o.created_at.isoformat(),
         'approved_at': o.approved_at.isoformat() if o.approved_at else None,
         'fulfilled_at': o.fulfilled_at.isoformat() if o.fulfilled_at else None
-    } for o in orders])
+    }
+
+
+@app.route('/api/purchase-orders', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_purchase_orders():
+    """Get purchase orders (student: own; staff/admin: students they have access to)"""
+    if current_user.role == 'student':
+        orders = PurchaseOrder.query.filter_by(student_id=current_user.student_id).order_by(PurchaseOrder.created_at.desc()).all()
+    elif current_user.role in ['staff', 'admin']:
+        all_orders = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
+        orders = [o for o in all_orders if has_student_access(current_user, o.student_id)]
+    else:
+        orders = []
+    
+    return jsonify([_po_to_json(o) for o in orders])
 
 @app.route('/api/purchase-orders', methods=['POST'])
 @limiter.limit("20 per minute")
 @login_required
 def create_purchase_order():
-    """Create purchase order (student submits purchase with calculation)"""
+    """Create single purchase order (legacy; prefer checkout for cart)"""
     if current_user.role != 'student':
         return jsonify({'error': 'Only students can create purchase orders'}), 403
     
@@ -5049,18 +5653,20 @@ def create_purchase_order():
     if not item.is_active:
         return jsonify({'error': 'Item is not available'}), 400
     
-    # Get student's bank account
-    account = get_or_create_bank_account(current_user.student_id)
-    student_balance_before = account.balance
+    student_id = current_user.student_id
+    if not student_id:
+        return jsonify({'error': 'No student account'}), 400
+    student = Student.query.get(student_id)
+    if not student_grade_matches_item_grade_range(student.grade, getattr(item, 'grade_range', '9_12')):
+        return jsonify({'error': 'Item not available for your grade'}), 400
     
-    # Calculate actual balance after
+    account = get_or_create_bank_account(student_id)
+    student_balance_before = account.balance
     actual_balance_after = student_balance_before - item.price
     
-    # Verify calculation
     tolerance = Decimal('0.01')
     is_calculation_correct = abs(student_calculated_balance_after - actual_balance_after) <= tolerance
     
-    # Check if balance would be negative
     if actual_balance_after < 0:
         return jsonify({'error': 'Insufficient funds'}), 400
     
@@ -5071,14 +5677,14 @@ def create_purchase_order():
             'got': float(student_calculated_balance_after)
         }), 400
     
-    # Get case manager
-    case_manager = get_student_case_manager(current_user.student_id)
-    if not case_manager:
-        return jsonify({'error': 'No case manager assigned'}), 400
+    support_team_ids = get_support_team_user_ids(student_id)
+    if not support_team_ids:
+        return jsonify({'error': 'No support team assigned'}), 400
+    case_manager = get_student_case_manager(student_id)
+    case_manager_id = case_manager.id if case_manager else list(support_team_ids)[0]
     
-    # Create purchase order
     order = PurchaseOrder(
-        student_id=current_user.student_id,
+        student_id=student_id,
         item_id=item_id,
         item_price=item.price,
         student_balance_before=student_balance_before,
@@ -5086,7 +5692,7 @@ def create_purchase_order():
         actual_balance_after=actual_balance_after,
         is_calculation_correct=is_calculation_correct,
         status='pending',
-        case_manager_id=case_manager.id
+        case_manager_id=case_manager_id
     )
     db.session.add(order)
     db.session.commit()
@@ -5110,77 +5716,127 @@ def get_purchase_order(order_id):
     if not has_student_access(current_user, order.student_id):
         return jsonify({'error': 'Access denied'}), 403
     
-    return jsonify({
-        'id': order.id,
-        'student_id': order.student_id,
-        'student_name': order.student.name,
-        'item_id': order.item_id,
-        'item_name': order.item.name,
-        'item_description': order.item.description,
-        'item_price': float(order.item_price),
-        'student_balance_before': float(order.student_balance_before),
-        'student_calculated_balance_after': float(order.student_calculated_balance_after),
-        'actual_balance_after': float(order.actual_balance_after),
-        'is_calculation_correct': order.is_calculation_correct,
-        'status': order.status,
-        'case_manager_id': order.case_manager_id,
-        'case_manager_name': order.case_manager.name if order.case_manager else None,
-        'created_at': order.created_at.isoformat(),
-        'approved_at': order.approved_at.isoformat() if order.approved_at else None,
-        'fulfilled_at': order.fulfilled_at.isoformat() if order.fulfilled_at else None
-    })
+    return jsonify(_po_to_json(order))
 
 @app.route('/api/purchase-orders/<int:order_id>/status', methods=['PUT'])
 @limiter.limit("20 per minute")
 @login_required
 def update_purchase_order_status(order_id):
-    """Update purchase order status (case manager/admin)"""
+    """Fulfill or deny purchase order (any support team member)"""
     order = PurchaseOrder.query.get_or_404(order_id)
     
-    if current_user.role == 'admin':
-        pass  # Admin can update any order
-    elif current_user.designation == 'Case Manager' and order.case_manager_id == current_user.id:
-        pass  # Case manager can update their orders
-    else:
+    support_team_ids = get_support_team_user_ids(order.student_id)
+    if current_user.id not in support_team_ids:
         return jsonify({'error': 'Permission denied'}), 403
     
-    data = request.json
+    data = request.json or {}
     new_status = data.get('status')
+    denial_reason = (data.get('denial_reason') or '').strip() or None
     
-    if new_status not in ['pending', 'approved', 'fulfilled', 'denied']:
-        return jsonify({'error': 'Invalid status'}), 400
+    if new_status not in ('approved', 'denied'):
+        return jsonify({'error': 'Invalid status; use approved or denied'}), 400
     
-    old_status = order.status
-    order.status = new_status
+    if order.status != 'pending':
+        return jsonify({'error': 'Order is not pending'}), 400
     
-    if new_status == 'approved' and old_status == 'pending':
-        order.approved_at = datetime.utcnow()
-    elif new_status == 'fulfilled' and old_status == 'approved':
-        order.fulfilled_at = datetime.utcnow()
-        
-        # Create transaction and update balance
+    student_user = User.query.filter_by(role='student', student_id=order.student_id).first()
+    student_user_id = student_user.id if student_user else None
+    
+    if new_status == 'denied':
+        order.status = 'denied'
+        order.denied_by_user_id = current_user.id
+        order.denial_reason = denial_reason
+        purchase_txn = Transaction.query.filter_by(
+            purchase_order_id=order.id, transaction_type='purchase'
+        ).first()
+        if purchase_txn:
+            account = get_or_create_bank_account(order.student_id)
+            account.balance += order.item_price
+            account.updated_at = datetime.utcnow()
+            item_name = order.item.name if order.item else 'item'
+            refund_txn = Transaction(
+                student_id=order.student_id,
+                bank_account_id=account.id,
+                transaction_type='refund',
+                amount=order.item_price,
+                purchase_order_id=order.id,
+                balance_after=account.balance,
+                description=f'Refund (purchase denied): {item_name}'
+            )
+            db.session.add(refund_txn)
+        if student_user_id:
+            item_name = order.item.name if order.item else 'item'
+            create_purchase_notification(
+                student_user_id, 'purchase_denied',
+                'Purchase denied',
+                f"Your purchase of {item_name} was denied." + (f" Reason: {denial_reason}" if denial_reason else ""),
+                order.id
+            )
+        db.session.commit()
+        return jsonify({'id': order.id, 'status': 'denied', 'message': 'Order denied'})
+    
+    if new_status == 'approved':
+        purchase_txn = Transaction.query.filter_by(
+            purchase_order_id=order.id, transaction_type='purchase'
+        ).first()
+        if purchase_txn:
+            order.status = 'approved'
+            order.approved_at = datetime.utcnow()
+            order.approved_by_user_id = current_user.id
+            order.fulfilled_at = datetime.utcnow()
+            if student_user_id:
+                item_name = order.item.name if order.item else 'item'
+                create_purchase_notification(
+                    student_user_id, 'purchase_approved',
+                    'Purchase fulfilled',
+                    f"Your purchase of {item_name} was fulfilled by {current_user.name or current_user.username}.",
+                    order.id
+                )
+            db.session.commit()
+            return jsonify({'id': order.id, 'status': 'approved', 'message': 'Order fulfilled'})
         account = get_or_create_bank_account(order.student_id)
+        if account.balance < order.item_price:
+            order.status = 'denied'
+            order.denied_by_user_id = None
+            order.denial_reason = 'Insufficient funds at fulfillment time'
+            if student_user_id:
+                create_purchase_notification(
+                    student_user_id, 'purchase_denied',
+                    'Purchase denied',
+                    'Your purchase was denied due to insufficient funds.',
+                    order.id
+                )
+            db.session.commit()
+            return jsonify({'error': 'Insufficient funds', 'status': 'denied'}), 400
+        order.status = 'approved'
+        order.approved_at = datetime.utcnow()
+        order.approved_by_user_id = current_user.id
+        order.fulfilled_at = datetime.utcnow()
         account.balance = order.actual_balance_after
         account.updated_at = datetime.utcnow()
-        
+        item_name = order.item.name if order.item else 'Purchase'
         transaction = Transaction(
             student_id=order.student_id,
             bank_account_id=account.id,
             transaction_type='purchase',
-            amount=-order.item_price,  # Negative for purchase
+            amount=-order.item_price,
             purchase_order_id=order.id,
             balance_after=account.balance,
-            description=f'Purchase: {order.item.name}'
+            description=f'Purchase: {item_name}'
         )
         db.session.add(transaction)
+        if student_user_id:
+            item_name = order.item.name if order.item else 'item'
+            create_purchase_notification(
+                student_user_id, 'purchase_approved',
+                'Purchase fulfilled',
+                f"Your purchase of {item_name} was fulfilled by {current_user.name or current_user.username}.",
+                order.id
+            )
+        db.session.commit()
+        return jsonify({'id': order.id, 'status': 'approved', 'message': 'Order fulfilled'})
     
-    db.session.commit()
-    
-    return jsonify({
-        'id': order.id,
-        'status': order.status,
-        'message': f'Order status updated to {new_status}'
-    })
+    return jsonify({'error': 'Invalid status'}), 400
 
 @app.route('/api/purchase-orders/case-manager/<int:user_id>', methods=['GET'])
 @limiter.limit("30 per minute")
@@ -5202,6 +5858,198 @@ def get_case_manager_purchase_orders(user_id):
         'status': o.status,
         'created_at': o.created_at.isoformat()
     } for o in orders])
+
+
+# Notifications API
+@app.route('/api/notifications', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_notifications():
+    """Get current user's notifications (unread first, limit 50)"""
+    notifications = Notification.query.filter_by(user_id=current_user.id).order_by(
+        Notification.created_at.desc()
+    ).limit(50).all()
+    return jsonify([{
+        'id': n.id,
+        'type': n.type,
+        'title': n.title,
+        'body': n.body,
+        'purchase_order_id': n.purchase_order_id,
+        'read_at': n.read_at.isoformat() if n.read_at else None,
+        'created_at': n.created_at.isoformat()
+    } for n in notifications])
+
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PATCH', 'POST'])
+@limiter.limit("60 per minute")
+@login_required
+def mark_notification_read(notification_id):
+    """Mark a notification as read"""
+    n = Notification.query.get_or_404(notification_id)
+    if n.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    n.read_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'id': n.id, 'read_at': n.read_at.isoformat()})
+
+
+@app.route('/api/notifications/read-all', methods=['PATCH', 'POST'])
+@limiter.limit("20 per minute")
+@login_required
+def mark_all_notifications_read():
+    """Mark all notifications as read for current user"""
+    Notification.query.filter_by(user_id=current_user.id).filter(Notification.read_at.is_(None)).update(
+        {'read_at': datetime.utcnow()}
+    )
+    db.session.commit()
+    return jsonify({'message': 'All notifications marked as read'})
+
+
+# Marketplace admin: item types and categories
+@app.route('/api/marketplace/types', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_marketplace_types():
+    """Get all marketplace item types (admin-managed)"""
+    types = MarketplaceItemType.query.order_by(MarketplaceItemType.sort_order, MarketplaceItemType.name).all()
+    return jsonify([{'id': t.id, 'name': t.name, 'sort_order': t.sort_order} for t in types])
+
+
+@app.route('/api/marketplace/types', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def create_marketplace_type():
+    """Create item type (staff or admin)"""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
+    if MarketplaceItemType.query.filter_by(name=name).first():
+        return jsonify({'error': 'Type already exists'}), 400
+    t = MarketplaceItemType(name=name, sort_order=data.get('sort_order', 0))
+    db.session.add(t)
+    db.session.commit()
+    return jsonify({'id': t.id, 'name': t.name, 'sort_order': t.sort_order}), 201
+
+
+@app.route('/api/marketplace/categories', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_marketplace_categories():
+    """Get all marketplace categories (admin-managed)"""
+    cats = MarketplaceCategory.query.order_by(MarketplaceCategory.sort_order, MarketplaceCategory.name).all()
+    return jsonify([{'id': c.id, 'name': c.name, 'sort_order': c.sort_order} for c in cats])
+
+
+@app.route('/api/marketplace/categories', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def create_marketplace_category():
+    """Create category (staff or admin)"""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
+    if MarketplaceCategory.query.filter_by(name=name).first():
+        return jsonify({'error': 'Category already exists'}), 400
+    c = MarketplaceCategory(name=name, sort_order=data.get('sort_order', 0))
+    db.session.add(c)
+    db.session.commit()
+    return jsonify({'id': c.id, 'name': c.name, 'sort_order': c.sort_order}), 201
+
+
+@app.route('/api/marketplace/analytics', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def get_marketplace_analytics():
+    """Purchase analytics for staff/admin: most/least purchased, demographics by grade and card color."""
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Staff or admin only'}), 403
+
+    from collections import defaultdict
+    from sqlalchemy.orm import joinedload
+
+    allowed_student_ids = None
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        allowed_student_ids = {
+            a.student_id for a in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()
+        }
+        if not allowed_student_ids:
+            return jsonify({
+                'most_purchased': [],
+                'least_purchased': [],
+                'never_purchased': [],
+                'demographics_by_item': {},
+                'item_index': {}
+            })
+
+    q = PurchaseOrder.query.options(
+        joinedload(PurchaseOrder.student),
+        joinedload(PurchaseOrder.item),
+    ).filter(PurchaseOrder.status.in_(['approved', 'fulfilled']))
+    if allowed_student_ids is not None:
+        q = q.filter(PurchaseOrder.student_id.in_(allowed_student_ids))
+    orders = q.all()
+
+    count_by_item = defaultdict(int)
+    by_item_grade = defaultdict(lambda: defaultdict(int))
+    by_item_card_color = defaultdict(lambda: defaultdict(int))
+    item_names = {}
+
+    for o in orders:
+        item_id = o.item_id
+        count_by_item[item_id] += 1
+        item_names[item_id] = o.item.name if o.item else f'Item #{item_id}'
+        g = (o.student.grade or '').strip() or None
+        grade_key = g if g else '(none)'
+        by_item_grade[item_id][grade_key] += 1
+        c = (o.student.card_color or '').strip() or None
+        color_key = c if c else 'none'
+        by_item_card_color[item_id][color_key] += 1
+
+    sorted_items = sorted(count_by_item.items(), key=lambda x: -x[1])
+    top_n = 15
+    most_purchased = [
+        {'item_id': iid, 'item_name': item_names.get(iid, f'Item #{iid}'), 'purchase_count': c}
+        for iid, c in sorted_items[:top_n]
+    ]
+    purchased_list = [(iid, c) for iid, c in sorted_items]
+    least_list = purchased_list[-top_n:] if len(purchased_list) > top_n else purchased_list
+    least_purchased = [
+        {'item_id': iid, 'item_name': item_names.get(iid, f'Item #{iid}'), 'purchase_count': c}
+        for iid, c in least_list
+    ]
+    least_purchased.reverse()
+
+    active_ids = {i.id for i in MarketplaceItem.query.filter_by(is_active=True).all()}
+    purchased_ids = set(count_by_item.keys())
+    never_ids = active_ids - purchased_ids
+    never_name_map = {i.id: i.name for i in MarketplaceItem.query.filter(MarketplaceItem.id.in_(never_ids)).all()} if never_ids else {}
+    never_items = [
+        {'item_id': iid, 'item_name': never_name_map.get(iid, f'Item #{iid}'), 'purchase_count': 0}
+        for iid in never_ids
+    ]
+    never_items.sort(key=lambda x: x['item_name'])
+
+    demographics_by_item = {}
+    for iid in set(count_by_item.keys()):
+        demographics_by_item[iid] = {
+            'by_grade': dict(by_item_grade[iid]),
+            'by_card_color': dict(by_item_card_color[iid]),
+        }
+
+    item_index = {iid: item_names.get(iid, f'Item #{iid}') for iid in item_names}
+
+    return jsonify({
+        'most_purchased': most_purchased,
+        'least_purchased': least_purchased,
+        'never_purchased': never_items,
+        'demographics_by_item': demographics_by_item,
+        'item_index': item_index,
+    })
+
 
 @app.route('/api/bank-account/search', methods=['GET'])
 @limiter.limit("30 per minute")

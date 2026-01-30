@@ -847,6 +847,9 @@ function setupEventListeners() {
             addStaffBtn.addEventListener('click', () => {
                 hideModalError('staff-modal');
                 document.getElementById('staff-modal').style.display = 'block';
+                const sg = document.getElementById('staff-grades-taught-group');
+                const sr = document.getElementById('staff-role');
+                if (sg && sr) sg.style.display = sr.value === 'Case Manager' ? 'block' : 'none';
             });
         }
 
@@ -872,6 +875,9 @@ function setupEventListeners() {
             createStaffAccountBtn.addEventListener('click', () => {
                 hideModalError('staff-modal');
                 document.getElementById('staff-modal').style.display = 'block';
+                const sg = document.getElementById('staff-grades-taught-group');
+                const sr = document.getElementById('staff-role');
+                if (sg && sr) sg.style.display = sr.value === 'Case Manager' ? 'block' : 'none';
             });
         }
         
@@ -892,6 +898,14 @@ function setupEventListeners() {
         if (saveStaffUserBtn) {
             saveStaffUserBtn.addEventListener('click', () => {
                 saveStaffUser();
+            });
+        }
+        // Show/hide Grades taught when staff role is Case Manager
+        const staffRoleSelect = document.getElementById('staff-role');
+        const staffGradesTaughtGroup = document.getElementById('staff-grades-taught-group');
+        if (staffRoleSelect && staffGradesTaughtGroup) {
+            staffRoleSelect.addEventListener('change', () => {
+                staffGradesTaughtGroup.style.display = staffRoleSelect.value === 'Case Manager' ? 'block' : 'none';
             });
         }
 
@@ -934,6 +948,7 @@ function setupEventListeners() {
             editUserRoleSelect.addEventListener('change', (e) => {
                 const teamSection = document.getElementById('edit-user-team-section');
                 const gradeGroup = document.getElementById('edit-user-grade-group');
+                const gradesTaughtGroup = document.getElementById('edit-user-grades-taught-group');
                 const studentId = document.getElementById('edit-user-student-id').value;
                 const selectedRole = e.target.value;
                 
@@ -943,9 +958,14 @@ function setupEventListeners() {
                         teamSection.style.display = 'block';
                     }
                     gradeGroup.style.display = 'block';
+                    if (gradesTaughtGroup) gradesTaughtGroup.style.display = 'none';
                 } else {
                     teamSection.style.display = 'none';
                     gradeGroup.style.display = 'none';
+                    // Show grades taught for Case Manager / Teacher
+                    if (gradesTaughtGroup) {
+                        gradesTaughtGroup.style.display = (selectedRole === 'Case Manager' || selectedRole === 'Teacher') ? 'block' : 'none';
+                    }
                 }
             });
         }
@@ -1122,6 +1142,9 @@ async function switchView(viewName) {
     // If switching to bank account view
     if (viewName === 'bank-account') {
         handleBankAccountView();
+    }
+    if (viewName === 'marketplace') {
+        handleMarketplaceView();
     }
     if (viewName === 'accounts') {
         initAccountsView();
@@ -8208,13 +8231,19 @@ function createAdminStaffRow(user, displayRole) {
     // Password visibility: Admin sees all, staff/admin see their own
     const canSeePassword = isAdmin() || user.id === window.currentUser.id;
     
-    const userDesignation = user.designation ? `'${user.designation}'` : 'null';
+    const userDesignation = user.designation ? `'${user.designation.replace(/'/g, "\\'")}'` : 'null';
     const grade = user.grade ? `'${user.grade}'` : 'null';
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const gradesTaught = user.grades_taught ? `'${String(user.grades_taught).replace(/'/g, "\\'")}'` : 'null';
+    const cardColorVal = user.card_color ? `'${user.card_color}'` : 'null';
+    const isTeacherOrCaseManager = user.role === 'staff' && (user.designation === 'Case Manager' || user.designation === 'Teacher');
+    const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
+        ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
+        : '';
     
     row.innerHTML = `
         <td><strong>${name}</strong></td>
-        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${displayRole}</td>
+        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${escapeHtml(displayRole)}${gradesTaughtHtml}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
@@ -8222,7 +8251,7 @@ function createAdminStaffRow(user, displayRole) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade})">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -8301,7 +8330,7 @@ function createStudentRow(user) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'})">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -8457,7 +8486,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -8485,6 +8514,17 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     document.getElementById('edit-user-original-role').value = role;
     document.getElementById('edit-user-password').value = '';
     document.getElementById('edit-user-password-confirm').value = '';
+    
+    // Set grades taught if staff (Case Manager / Teacher)
+    const gradesTaughtGroup = document.getElementById('edit-user-grades-taught-group');
+    const gradesTaughtInput = document.getElementById('edit-user-grades-taught');
+    if (gradesTaughtInput) {
+        gradesTaughtInput.value = gradesTaught || '';
+    }
+    const isCaseManagerOrTeacher = role === 'staff' && (designation === 'Case Manager' || designation === 'Teacher');
+    if (gradesTaughtGroup) {
+        gradesTaughtGroup.style.display = isCaseManagerOrTeacher ? 'block' : 'none';
+    }
     
     // Set grade if student
     if (role === 'student' && grade) {
@@ -9031,6 +9071,15 @@ async function saveEditUser() {
         updateData.grade = grade;
     }
     
+    // Include grades_taught for staff (Case Manager / Teacher)
+    if (systemRole === 'staff') {
+        const gradesTaughtInput = document.getElementById('edit-user-grades-taught');
+        if (gradesTaughtInput) {
+            const gradesTaught = gradesTaughtInput.value.trim();
+            updateData.grades_taught = gradesTaught || null;
+        }
+    }
+    
     // Include card_color for student users
     if (systemRole === 'student') {
         updateData.card_color = cardColor || null;
@@ -9160,17 +9209,24 @@ async function saveStaffUser() {
         return;
     }
     
+    const gradesTaughtInput = document.getElementById('staff-grades-taught');
+    const gradesTaught = gradesTaughtInput ? gradesTaughtInput.value.trim() : '';
+    
     try {
+        const payload = {
+            name: name,
+            username: username,
+            password: password,
+            role: 'staff',
+            designation: role
+        };
+        if (role === 'Case Manager' && gradesTaught) {
+            payload.grades_taught = gradesTaught;
+        }
         const response = await fetch('/api/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: name,
-                username: username,
-                password: password,
-                role: 'staff',
-                designation: role
-            })
+            body: JSON.stringify(payload)
         });
         
         if (response.ok) {
@@ -9182,6 +9238,10 @@ async function saveStaffUser() {
             document.getElementById('staff-password').value = '';
             document.getElementById('staff-password-confirm').value = '';
             document.getElementById('staff-role').value = 'Case Manager';
+            const staffGradesTaughtEl = document.getElementById('staff-grades-taught');
+            if (staffGradesTaughtEl) staffGradesTaughtEl.value = '';
+            const staffGradesTaughtGrp = document.getElementById('staff-grades-taught-group');
+            if (staffGradesTaughtGrp) staffGradesTaughtGrp.style.display = 'none';
             await loadUsers();
         } else {
             const data = await response.json();
@@ -11663,6 +11723,1435 @@ window.showPdfTableSelectionModal = showPdfTableSelectionModal;
 window.closePdfTableSelectionModal = closePdfTableSelectionModal;
 window.generatePdfFromModal = generatePdfFromModal;
 
+// ==================== MARKETPLACE TAB ====================
+
+var currentMarketplaceStudentId = null;
+var marketplaceCatalog = [];
+var marketplaceCart = []; // [{ item_id, quantity, name?, price? }]
+var marketplaceBalance = null;
+
+function getMarketplaceCartKey() {
+    var uid = (window.currentUser && window.currentUser.id) ? window.currentUser.id : 'anon';
+    return 'marketplace_cart_' + uid;
+}
+
+function getMarketplaceStudentId() {
+    if (window.currentUser && window.currentUser.role === 'student') {
+        return window.currentUser.studentId || null;
+    }
+    return currentMarketplaceStudentId;
+}
+
+function loadMarketplaceCartFromStorage() {
+    try {
+        var raw = sessionStorage.getItem(getMarketplaceCartKey());
+        marketplaceCart = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+        marketplaceCart = [];
+    }
+}
+
+function saveMarketplaceCartToStorage() {
+    try {
+        sessionStorage.setItem(getMarketplaceCartKey(), JSON.stringify(marketplaceCart));
+    } catch (e) {}
+}
+
+function addToMarketplaceCart(itemId, name, price, quantity) {
+    quantity = quantity || 1;
+    var existing = marketplaceCart.find(function (x) { return x.item_id === itemId; });
+    if (existing) {
+        existing.quantity += quantity;
+    } else {
+        marketplaceCart.push({ item_id: itemId, quantity: quantity, name: name, price: price });
+    }
+    saveMarketplaceCartToStorage();
+    renderMarketplaceCart();
+}
+
+function removeFromMarketplaceCart(itemId) {
+    marketplaceCart = marketplaceCart.filter(function (x) { return x.item_id !== itemId; });
+    saveMarketplaceCartToStorage();
+    renderMarketplaceCart();
+}
+
+function setMarketplaceCartQuantity(itemId, quantity) {
+    var item = marketplaceCart.find(function (x) { return x.item_id === itemId; });
+    if (!item) return;
+    if (quantity <= 0) {
+        removeFromMarketplaceCart(itemId);
+        return;
+    }
+    item.quantity = quantity;
+    saveMarketplaceCartToStorage();
+    renderMarketplaceCart();
+}
+
+function renderMarketplaceCart() {
+    var el = document.getElementById('marketplace-cart-items');
+    var totalEl = document.getElementById('marketplace-cart-total');
+    var checkoutBtn = document.getElementById('marketplace-checkout-btn');
+    if (!el) return;
+    if (!marketplaceCart.length) {
+        el.innerHTML = '<p style="margin:0; color:#94a3b8; font-size:13px;">Cart is empty.</p>';
+        if (totalEl) totalEl.textContent = 'Total: $0.00';
+        if (checkoutBtn) checkoutBtn.disabled = true;
+        return;
+    }
+    var total = 0;
+    el.innerHTML = marketplaceCart.map(function (line) {
+        var price = Number(line.price || 0);
+        var subtotal = price * (line.quantity || 1);
+        total += subtotal;
+        return '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px;">' +
+            '<span>' + (line.name || 'Item') + ' × ' + (line.quantity || 1) + '</span>' +
+            '<span>$' + subtotal.toFixed(2) + '</span>' +
+            '</div>';
+    }).join('');
+    if (totalEl) totalEl.textContent = 'Total: $' + total.toFixed(2);
+    var checkoutMsg = document.getElementById('marketplace-checkout-msg');
+    if (marketplaceBalance !== null && total > marketplaceBalance) {
+        if (checkoutBtn) checkoutBtn.disabled = true;
+        if (checkoutMsg) { checkoutMsg.style.display = 'block'; checkoutMsg.textContent = 'Insufficient funds.'; checkoutMsg.style.color = '#dc2626'; }
+    } else {
+        if (checkoutBtn) checkoutBtn.disabled = false;
+        if (checkoutMsg) checkoutMsg.style.display = 'none';
+    }
+}
+
+function handleMarketplaceView() {
+    loadMarketplaceCartFromStorage();
+    var isStudent = window.currentUser && window.currentUser.role === 'student';
+    var poSection = document.getElementById('marketplace-po-approvals-section');
+    var viewAsRow = document.getElementById('marketplace-view-as-student-row');
+    var studentWrap = document.getElementById('marketplace-student-select-wrap');
+    var viewAsCheck = document.getElementById('marketplace-show-view-as-student-checkbox');
+    var cartSection = document.getElementById('marketplace-cart-section');
+    var balanceSection = document.getElementById('marketplace-balance-section');
+    if (poSection) poSection.style.display = (isStudent ? 'none' : 'block');
+    if (viewAsRow) viewAsRow.style.display = (isStudent ? 'none' : 'block');
+    if (viewAsCheck) viewAsCheck.checked = false;
+    if (studentWrap) studentWrap.style.display = 'none';
+    if (cartSection) cartSection.style.display = (isStudent ? 'block' : 'none');
+    // Balance card: only show for students, or for staff/admin when "View as student" is checked
+    if (balanceSection) balanceSection.style.display = (isStudent ? 'block' : 'none');
+
+    if (isStudent) {
+        currentMarketplaceStudentId = window.currentUser.studentId || null;
+        loadMarketplaceTypesAndCategories();
+        loadMarketplaceBalance();
+        loadMarketplaceCatalog();
+        loadMarketplaceMyOrders();
+        renderMarketplaceCart();
+        bindMarketplaceCheckout();
+    } else {
+        loadMarketplacePOApprovals();
+        setupMarketplaceStudentSearch();
+        loadMarketplaceAnalytics();
+        loadMarketplaceTypesAndCategories();
+        currentMarketplaceStudentId = null;
+        document.getElementById('marketplace-balance-amount').textContent = '$0.00';
+        document.getElementById('marketplace-student-name').textContent = '';
+        loadMarketplaceCatalog(); // staff sees all items (no student required)
+        renderMarketplaceCart();
+        if (document.getElementById('marketplace-no-items-msg')) document.getElementById('marketplace-no-items-msg').style.display = 'none';
+    }
+    loadNotifications();
+}
+
+function loadMarketplaceBalance() {
+    var sid = getMarketplaceStudentId();
+    if (!sid) {
+        marketplaceBalance = null;
+        document.getElementById('marketplace-balance-amount').textContent = '$0.00';
+        document.getElementById('marketplace-student-name').textContent = '';
+        renderMarketplaceCart();
+        return;
+    }
+    fetch('/api/bank-account/' + sid)
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (data) {
+            marketplaceBalance = Number(data.balance) || 0;
+            document.getElementById('marketplace-balance-amount').textContent = '$' + marketplaceBalance.toFixed(2);
+            var student = (typeof allStudents !== 'undefined' && allStudents) ? allStudents.find(function (s) { return s.id === sid; }) : null;
+            document.getElementById('marketplace-student-name').textContent = student ? student.name : '';
+            renderMarketplaceCart();
+        })
+        .catch(function () {
+            marketplaceBalance = null;
+            document.getElementById('marketplace-balance-amount').textContent = '$0.00';
+            document.getElementById('marketplace-student-name').textContent = '';
+            renderMarketplaceCart();
+        });
+}
+
+function loadMarketplaceCatalog() {
+    var isStudent = window.currentUser && window.currentUser.role === 'student';
+    var sid = getMarketplaceStudentId();
+    var params = new URLSearchParams();
+    if (isStudent) {
+        if (!sid) {
+            document.getElementById('marketplace-items-grid').innerHTML = '';
+            document.getElementById('marketplace-no-items-msg').style.display = 'block';
+            return;
+        }
+        params.set('student_id', sid);
+    } else {
+        // Staff/admin: load all items with hidden_rules (no student required)
+        params.set('staff', '1');
+    }
+    var q = document.getElementById('marketplace-search-input') && document.getElementById('marketplace-search-input').value.trim();
+    var typeId = document.getElementById('marketplace-filter-type') && document.getElementById('marketplace-filter-type').value;
+    var categoryId = document.getElementById('marketplace-filter-category') && document.getElementById('marketplace-filter-category').value;
+    if (q) params.set('q', q);
+    if (typeId) params.set('type_id', typeId);
+    if (categoryId) params.set('category_id', categoryId);
+    fetch('/api/marketplace/catalog?' + params.toString())
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (items) {
+            marketplaceCatalog = items;
+            renderMarketplaceCatalog(items);
+            var noMsg = document.getElementById('marketplace-no-items-msg');
+            if (noMsg) noMsg.style.display = items.length ? 'none' : 'block';
+        })
+        .catch(function () {
+            marketplaceCatalog = [];
+            renderMarketplaceCatalog([]);
+            var noMsg = document.getElementById('marketplace-no-items-msg');
+            if (noMsg) noMsg.style.display = 'block';
+        });
+}
+
+function renderMarketplaceCatalog(items) {
+    var grid = document.getElementById('marketplace-items-grid');
+    if (!grid) return;
+    if (!items || !items.length) {
+        grid.innerHTML = '';
+        return;
+    }
+    var isStudent = window.currentUser && window.currentUser.role === 'student';
+    var isStaffOrAdmin = window.currentUser && (window.currentUser.role === 'staff' || window.currentUser.role === 'admin');
+    var isAdmin = window.currentUser && window.currentUser.role === 'admin';
+    grid.innerHTML = items.map(function (item) {
+        var imgHtml = item.image_url
+            ? '<img src="' + item.image_url.replace(/"/g, '&quot;') + '" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:8px; margin-bottom:10px;">'
+            : '<div style="width:100%; height:140px; background:#e2e8f0; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:#94a3b8;">No image</div>';
+        var btnHtml = isStudent
+            ? '<button type="button" class="btn-primary marketplace-card-add-btn" style="padding:6px 12px; font-size:13px;" data-item-id="' + item.id + '" data-item-name="' + (item.name || '').replace(/"/g, '&quot;') + '" data-item-price="' + item.price + '">Add to cart</button>'
+            : '';
+        var staffBtns = '';
+        if (isStaffOrAdmin) {
+            var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
+            staffBtns = '<div class="marketplace-item-staff-actions" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">' +
+                (hasHidden
+                    ? '<button type="button" class="marketplace-btn-unhide btn-secondary" style="padding:4px 10px; font-size:12px;" data-item-id="' + item.id + '">Unhide / Manage</button>'
+                    : '<button type="button" class="marketplace-btn-hide btn-secondary" style="padding:4px 10px; font-size:12px;" data-item-id="' + item.id + '">Hide from students</button>') +
+                '</div>';
+        }
+        var adminBtns = '';
+        if (isAdmin) {
+            adminBtns = '<div class="marketplace-item-admin-actions" style="margin-top:6px; display:flex; gap:6px;">' +
+                '<button type="button" class="marketplace-btn-edit btn-secondary" style="padding:4px 10px; font-size:12px;" data-item-id="' + item.id + '">Edit</button>' +
+                '<button type="button" class="marketplace-btn-delete btn-secondary" style="padding:4px 10px; font-size:12px; color:#dc2626;" data-item-id="' + item.id + '">Delete</button>' +
+                '</div>';
+        }
+        return '<div class="marketplace-item-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
+            imgHtml +
+            '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
+            '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
+            '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+            '<span style="font-weight:700; color:#0ea5e9;">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
+            '</div>' + staffBtns + adminBtns + '</div>';
+    }).join('');
+    grid.querySelectorAll('.marketplace-item-card').forEach(function (card) {
+        card.addEventListener('click', function (e) {
+            if (e.target.closest('.marketplace-card-add-btn') || e.target.closest('.marketplace-btn-hide') || e.target.closest('.marketplace-btn-unhide') || e.target.closest('.marketplace-btn-edit') || e.target.closest('.marketplace-btn-delete')) return;
+            var id = parseInt(card.getAttribute('data-item-id'), 10);
+            openMarketplaceItemDetailModal(id);
+        });
+    });
+    grid.querySelectorAll('.marketplace-card-add-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); });
+        btn.addEventListener('click', function () {
+            var id = parseInt(btn.getAttribute('data-item-id'), 10);
+            var name = btn.getAttribute('data-item-name') || '';
+            var price = parseFloat(btn.getAttribute('data-item-price'), 10) || 0;
+            addToMarketplaceCart(id, name, price, 1);
+        });
+    });
+    grid.querySelectorAll('.marketplace-btn-hide').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); openMarketplaceHideModal(parseInt(btn.getAttribute('data-item-id'), 10)); });
+    });
+    grid.querySelectorAll('.marketplace-btn-unhide').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); openMarketplaceUnhideModal(parseInt(btn.getAttribute('data-item-id'), 10)); });
+    });
+    grid.querySelectorAll('.marketplace-btn-edit').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); openMarketplaceEditModal(parseInt(btn.getAttribute('data-item-id'), 10)); });
+    });
+    grid.querySelectorAll('.marketplace-btn-delete').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); confirmDeleteMarketplaceItem(parseInt(btn.getAttribute('data-item-id'), 10)); });
+    });
+}
+
+function openMarketplaceItemDetailModal(itemId) {
+    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+    if (!item) return;
+    var modal = document.getElementById('marketplace-item-detail-modal');
+    var imgEl = document.getElementById('marketplace-item-detail-image');
+    var imgWrap = document.querySelector('.marketplace-item-detail-image-wrap');
+    var nameEl = document.getElementById('marketplace-item-detail-name');
+    var metaEl = document.getElementById('marketplace-item-detail-meta');
+    var descEl = document.getElementById('marketplace-item-detail-description');
+    var priceEl = document.getElementById('marketplace-item-detail-price');
+    var addBtn = document.getElementById('marketplace-item-detail-add-cart');
+    if (!modal || !nameEl) return;
+    nameEl.textContent = item.name || '';
+    var metaParts = [];
+    if (item.item_type_name) metaParts.push(item.item_type_name);
+    if (item.category_name) metaParts.push(item.category_name);
+    metaEl.textContent = metaParts.length ? metaParts.join(' · ') : '';
+    metaEl.style.display = metaParts.length ? 'block' : 'none';
+    descEl.textContent = item.description || 'No description.';
+    descEl.style.display = (item.description || '').trim() ? 'block' : 'block';
+    priceEl.textContent = '$' + Number(item.price).toFixed(2);
+    var noImgEl = document.getElementById('marketplace-item-detail-no-image');
+    if (imgEl && imgWrap) {
+        if (item.image_url) {
+            imgEl.src = item.image_url;
+            imgEl.alt = item.name || '';
+            imgEl.style.display = 'block';
+            imgWrap.style.display = 'block';
+            if (noImgEl) noImgEl.style.display = 'none';
+        } else {
+            imgEl.style.display = 'none';
+            if (noImgEl) { noImgEl.style.display = 'flex'; noImgEl.style.alignItems = 'center'; noImgEl.style.justifyContent = 'center'; }
+            imgWrap.style.display = 'block';
+        }
+    }
+    if (addBtn) {
+        addBtn.style.display = (window.currentUser && window.currentUser.role === 'student') ? 'inline-block' : 'none';
+        addBtn.onclick = function () {
+            addToMarketplaceCart(item.id, item.name || '', item.price, 1);
+            closeMarketplaceItemDetailModal();
+        };
+    }
+    modal.setAttribute('data-marketplace-detail-item-id', String(itemId));
+    modal.style.display = 'block';
+}
+
+function closeMarketplaceItemDetailModal() {
+    var modal = document.getElementById('marketplace-item-detail-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function bindMarketplaceItemDetailModal() {
+    var modal = document.getElementById('marketplace-item-detail-modal');
+    var closeBtn = document.getElementById('marketplace-item-detail-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeMarketplaceItemDetailModal);
+    if (modal) {
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) closeMarketplaceItemDetailModal();
+        });
+    }
+}
+
+function loadMarketplaceTypesAndCategories() {
+    fetch('/api/marketplace/types').then(function (r) { return r.ok ? r.json() : []; }).then(function (types) {
+        var sel = document.getElementById('marketplace-filter-type');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">All types</option>';
+        types.forEach(function (t) {
+            var o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = t.name;
+            sel.appendChild(o);
+        });
+    });
+    fetch('/api/marketplace/categories').then(function (r) { return r.ok ? r.json() : []; }).then(function (cats) {
+        var sel = document.getElementById('marketplace-filter-category');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">All categories</option>';
+        cats.forEach(function (c) {
+            var o = document.createElement('option');
+            o.value = c.id;
+            o.textContent = c.name;
+            sel.appendChild(o);
+        });
+    });
+}
+
+function loadMarketplacePOApprovals() {
+    var list = document.getElementById('marketplace-po-approvals-list');
+    if (!list) return;
+    fetch('/api/purchase-orders')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (orders) {
+            var pending = orders.filter(function (o) { return o.status === 'pending'; });
+            if (!pending.length) {
+                list.innerHTML = '<p style="margin:0; color:#94a3b8;">No pending purchase orders.</p>';
+                return;
+            }
+            list.innerHTML = pending.map(function (o) {
+                return '<div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:10px; background:#fff;">' +
+                    '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' — $' + Number(o.item_price).toFixed(2) + '</div>' +
+                    '<div style="font-size:13px; color:#64748b;">Student: ' + (o.student_name || '').replace(/</g, '&lt;') + '</div>' +
+                    '<div style="font-size:13px; color:#64748b;">' + (o.created_at ? new Date(o.created_at).toLocaleString() : '') + '</div>' +
+                    '<div style="margin-top:10px; display:flex; gap:8px; align-items:center;">' +
+                    '<button type="button" class="btn-primary" style="padding:6px 12px;" data-po-approve="' + o.id + '">Fulfill</button>' +
+                    '<button type="button" class="btn-secondary" style="padding:6px 12px;" data-po-deny="' + o.id + '">Deny</button>' +
+                    '<input type="text" placeholder="Reason (optional)" data-po-deny-reason="' + o.id + '" style="flex:1; padding:6px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px;">' +
+                    '</div></div>';
+            }).join('');
+            list.querySelectorAll('[data-po-approve]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var id = parseInt(btn.getAttribute('data-po-approve'), 10);
+                    marketplaceUpdatePOStatus(id, 'approved');
+                });
+            });
+            list.querySelectorAll('[data-po-deny]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var id = parseInt(btn.getAttribute('data-po-deny'), 10);
+                    var reasonEl = document.querySelector('[data-po-deny-reason="' + id + '"]');
+                    var reason = reasonEl && reasonEl.value ? reasonEl.value.trim() : '';
+                    marketplaceUpdatePOStatus(id, 'denied', reason);
+                });
+            });
+        })
+        .catch(function () {
+            list.innerHTML = '<p style="margin:0; color:#dc2626;">Failed to load orders.</p>';
+        });
+}
+
+function marketplaceUpdatePOStatus(orderId, status, denialReason) {
+    var body = { status: status };
+    if (status === 'denied' && denialReason) body.denial_reason = denialReason;
+    fetch('/api/purchase-orders/' + orderId + '/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+            if (res.ok) {
+                showMessage(res.data.message || 'Updated', 'success');
+                loadMarketplacePOApprovals();
+                loadMarketplaceAnalytics();
+            } else {
+                showMessage(res.data.error || 'Error', 'error');
+            }
+        })
+        .catch(function () {
+            showMessage('Error updating order', 'error');
+        });
+}
+
+var marketplaceAnalyticsCharts = { most: null, least: null, grade: null, color: null };
+var marketplaceAnalyticsData = null;
+
+function destroyMarketplaceAnalyticsCharts() {
+    ['most', 'least', 'grade', 'color'].forEach(function (k) {
+        if (marketplaceAnalyticsCharts[k]) {
+            marketplaceAnalyticsCharts[k].destroy();
+            marketplaceAnalyticsCharts[k] = null;
+        }
+    });
+}
+
+function renderMarketplaceAnalyticsCharts(data) {
+    if (typeof Chart === 'undefined') return;
+    destroyMarketplaceAnalyticsCharts();
+    var palette = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
+    var hex = function (i) { return palette[i % palette.length]; };
+
+    var mostEl = document.getElementById('marketplace-analytics-most-chart');
+    var leastEl = document.getElementById('marketplace-analytics-least-chart');
+    var mostEmpty = document.getElementById('marketplace-analytics-most-empty');
+    var leastEmpty = document.getElementById('marketplace-analytics-least-empty');
+    var mostWrap = document.getElementById('marketplace-analytics-most-wrap');
+    var leastWrap = document.getElementById('marketplace-analytics-least-wrap');
+    if (mostEmpty && mostWrap) {
+        mostEmpty.style.display = data.most_purchased.length ? 'none' : 'block';
+        mostWrap.style.display = data.most_purchased.length ? 'block' : 'none';
+    }
+    if (leastEmpty && leastWrap) {
+        leastEmpty.style.display = data.least_purchased.length ? 'none' : 'block';
+        leastWrap.style.display = data.least_purchased.length ? 'block' : 'none';
+    }
+    if (mostEl && data.most_purchased.length) {
+        var mostCtx = mostEl.getContext('2d');
+        marketplaceAnalyticsCharts.most = new Chart(mostCtx, {
+            type: 'bar',
+            data: {
+                labels: data.most_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + '…' : x.item_name; }),
+                datasets: [{ label: 'Purchases', data: data.most_purchased.map(function (x) { return x.purchase_count; }), backgroundColor: data.most_purchased.map(function (_, i) { return hex(i); }) }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+    }
+    if (leastEl && data.least_purchased.length) {
+        var leastCtx = leastEl.getContext('2d');
+        marketplaceAnalyticsCharts.least = new Chart(leastCtx, {
+            type: 'bar',
+            data: {
+                labels: data.least_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + '…' : x.item_name; }),
+                datasets: [{ label: 'Purchases', data: data.least_purchased.map(function (x) { return x.purchase_count; }), backgroundColor: data.least_purchased.map(function (_, i) { return hex(i); }) }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+    }
+}
+
+function renderMarketplaceAnalyticsDemographics(itemId) {
+    var placeholder = document.getElementById('marketplace-analytics-demographics-placeholder');
+    var chartsWrap = document.getElementById('marketplace-analytics-demographics-charts');
+    var gradeCanvas = document.getElementById('marketplace-analytics-grade-chart');
+    var colorCanvas = document.getElementById('marketplace-analytics-color-chart');
+    if (!placeholder || !chartsWrap || !gradeCanvas || !colorCanvas || !marketplaceAnalyticsData || typeof Chart === 'undefined') return;
+    var demo = marketplaceAnalyticsData.demographics_by_item && (marketplaceAnalyticsData.demographics_by_item[itemId] || marketplaceAnalyticsData.demographics_by_item[String(itemId)]);
+    if (!itemId || !demo) {
+        placeholder.style.display = 'block';
+        chartsWrap.style.display = 'none';
+        if (marketplaceAnalyticsCharts.grade) { marketplaceAnalyticsCharts.grade.destroy(); marketplaceAnalyticsCharts.grade = null; }
+        if (marketplaceAnalyticsCharts.color) { marketplaceAnalyticsCharts.color.destroy(); marketplaceAnalyticsCharts.color = null; }
+        return;
+    }
+    var d = demo;
+    var byGrade = d.by_grade || {};
+    var byColor = d.by_card_color || {};
+    var gradeLabels = Object.keys(byGrade).sort();
+    var colorLabels = Object.keys(byColor).sort();
+    var gradeDisplay = function (k) { return k === '(none)' ? 'No grade' : k; };
+    var colorDisplay = function (k) { return k === 'none' ? 'No color' : (k.charAt(0).toUpperCase() + k.slice(1)); };
+    var palette = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
+    var hex = function (i) { return palette[i % palette.length]; };
+    placeholder.style.display = 'none';
+    chartsWrap.style.display = 'grid';
+    if (marketplaceAnalyticsCharts.grade) { marketplaceAnalyticsCharts.grade.destroy(); marketplaceAnalyticsCharts.grade = null; }
+    if (marketplaceAnalyticsCharts.color) { marketplaceAnalyticsCharts.color.destroy(); marketplaceAnalyticsCharts.color = null; }
+    if (gradeLabels.length) {
+        var gCtx = gradeCanvas.getContext('2d');
+        marketplaceAnalyticsCharts.grade = new Chart(gCtx, {
+            type: 'bar',
+            data: {
+                labels: gradeLabels.map(gradeDisplay),
+                datasets: [{ label: 'Purchases', data: gradeLabels.map(function (k) { return byGrade[k]; }), backgroundColor: gradeLabels.map(function (_, i) { return hex(i); }) }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+    }
+    if (colorLabels.length) {
+        var cCtx = colorCanvas.getContext('2d');
+        marketplaceAnalyticsCharts.color = new Chart(cCtx, {
+            type: 'doughnut',
+            data: {
+                labels: colorLabels.map(colorDisplay),
+                datasets: [{ data: colorLabels.map(function (k) { return byColor[k]; }), backgroundColor: colorLabels.map(function (_, i) { return hex(i); }) }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+    }
+}
+
+function loadMarketplaceAnalytics() {
+    var section = document.getElementById('marketplace-analytics-section');
+    var loadingEl = document.getElementById('marketplace-analytics-loading');
+    var contentEl = document.getElementById('marketplace-analytics-content');
+    var errorEl = document.getElementById('marketplace-analytics-error');
+    var neverMsg = document.getElementById('marketplace-analytics-never-msg');
+    var neverList = document.getElementById('marketplace-analytics-never-list');
+    var itemSelect = document.getElementById('marketplace-analytics-item-select');
+    if (!section || !loadingEl || !contentEl) return;
+    loadingEl.style.display = 'block';
+    contentEl.style.display = 'none';
+    if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    fetch('/api/marketplace/analytics')
+        .then(function (r) {
+            if (!r.ok) return Promise.reject(new Error('Analytics not available'));
+            return r.json();
+        })
+        .then(function (data) {
+            marketplaceAnalyticsData = data;
+            loadingEl.style.display = 'none';
+            if (errorEl) errorEl.style.display = 'none';
+            contentEl.style.display = 'block';
+            renderMarketplaceAnalyticsCharts(data);
+            if (neverMsg) neverMsg.textContent = data.never_purchased.length ? 'Active items with no purchases (approved/fulfilled):' : 'No active items have zero purchases.';
+            if (neverList) {
+                neverList.innerHTML = data.never_purchased.map(function (x) {
+                    return '<li style="margin-bottom:4px;">' + (x.item_name || '').replace(/</g, '&lt;') + '</li>';
+                }).join('');
+            }
+            if (itemSelect) {
+                var idx = data.item_index || {};
+                var opts = '<option value="">— Select item —</option>';
+                var ids = Object.keys(data.demographics_by_item || {}).map(Number).sort(function (a, b) {
+                    var na = idx[a] || idx[String(a)] || '';
+                    var nb = idx[b] || idx[String(b)] || '';
+                    return na.localeCompare(nb);
+                });
+                ids.forEach(function (id) {
+                    var name = idx[id] || idx[String(id)] || 'Item #' + id;
+                    opts += '<option value="' + id + '">' + (name || '').replace(/</g, '&lt;') + '</option>';
+                });
+                itemSelect.innerHTML = opts;
+                itemSelect.value = '';
+            }
+            renderMarketplaceAnalyticsDemographics(null);
+        })
+        .catch(function () {
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'none';
+            if (errorEl) {
+                errorEl.textContent = 'Could not load analytics.';
+                errorEl.style.display = 'block';
+            }
+        });
+}
+
+function openMarketplaceAddItemModal() {
+    var modal = document.getElementById('marketplace-add-item-modal');
+    var errEl = document.getElementById('marketplace-add-item-error');
+    var nameIn = document.getElementById('marketplace-add-item-name');
+    var descIn = document.getElementById('marketplace-add-item-description');
+    var priceIn = document.getElementById('marketplace-add-item-price');
+    var gradeSel = document.getElementById('marketplace-add-item-grade-range');
+    var typeInput = document.getElementById('marketplace-add-item-type-input');
+    var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
+    var typeDropdown = document.getElementById('marketplace-add-item-type-dropdown');
+    var catInput = document.getElementById('marketplace-add-item-category-input');
+    var catIdHidden = document.getElementById('marketplace-add-item-category-id');
+    var catDropdown = document.getElementById('marketplace-add-item-category-dropdown');
+    var imgIn = document.getElementById('marketplace-add-item-image-url');
+    if (!modal || !nameIn || !priceIn) return;
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    nameIn.value = '';
+    if (descIn) descIn.value = '';
+    priceIn.value = '';
+    if (gradeSel) gradeSel.value = '9_12';
+    if (typeInput) typeInput.value = '';
+    if (typeIdHidden) typeIdHidden.value = '';
+    if (catInput) catInput.value = '';
+    if (catIdHidden) catIdHidden.value = '';
+    if (imgIn) imgIn.value = '';
+    var isAdmin = window.currentUser && window.currentUser.role === 'admin';
+    if (gradeSel) {
+        var opt = gradeSel.querySelector('option[value="school_wide"]');
+        if (opt) opt.disabled = !isAdmin;
+    }
+    var typesList = [];
+    var catsList = [];
+    function renderTypeDropdown() {
+        if (!typeDropdown || !typeInput) return;
+        var q = (typeInput.value || '').trim().toLowerCase();
+        var frag = document.createDocumentFragment();
+        typesList.forEach(function (t) {
+            if (q && t.name.toLowerCase().indexOf(q) === -1) return;
+            var div = document.createElement('div');
+            div.className = 'marketplace-combobox-option';
+            div.setAttribute('role', 'option');
+            div.setAttribute('data-id', t.id);
+            div.textContent = t.name;
+            frag.appendChild(div);
+        });
+        if (q && !typesList.some(function (t) { return t.name.toLowerCase() === q; })) {
+            var addDiv = document.createElement('div');
+            addDiv.className = 'marketplace-combobox-option add-new';
+            addDiv.setAttribute('role', 'option');
+            addDiv.setAttribute('data-add', q);
+            addDiv.textContent = 'Add "' + q + '"';
+            frag.appendChild(addDiv);
+        }
+        typeDropdown.innerHTML = '';
+        typeDropdown.appendChild(frag);
+        typeDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && typeInput === document.activeElement);
+    }
+    function renderCatDropdown() {
+        if (!catDropdown || !catInput) return;
+        var q = (catInput.value || '').trim().toLowerCase();
+        var frag = document.createDocumentFragment();
+        catsList.forEach(function (c) {
+            if (q && c.name.toLowerCase().indexOf(q) === -1) return;
+            var div = document.createElement('div');
+            div.className = 'marketplace-combobox-option';
+            div.setAttribute('role', 'option');
+            div.setAttribute('data-id', c.id);
+            div.textContent = c.name;
+            frag.appendChild(div);
+        });
+        if (q && !catsList.some(function (c) { return c.name.toLowerCase() === q; })) {
+            var addDiv = document.createElement('div');
+            addDiv.className = 'marketplace-combobox-option add-new';
+            addDiv.setAttribute('role', 'option');
+            addDiv.setAttribute('data-add', q);
+            addDiv.textContent = 'Add "' + q + '"';
+            frag.appendChild(addDiv);
+        }
+        catDropdown.innerHTML = '';
+        catDropdown.appendChild(frag);
+        catDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && catInput === document.activeElement);
+    }
+    function setupTypeCombobox() {
+        if (!typeInput || !typeIdHidden || !typeDropdown) return;
+        var typeCloseTimer = null;
+        typeInput.addEventListener('focus', function () { renderTypeDropdown(); });
+        typeInput.addEventListener('input', function () {
+            var sel = typesList.find(function (t) { return String(t.id) === (typeIdHidden && typeIdHidden.value); });
+            if (sel && typeInput.value !== sel.name) { if (typeIdHidden) typeIdHidden.value = ''; }
+            renderTypeDropdown();
+        });
+        typeInput.addEventListener('blur', function () {
+            typeCloseTimer = setTimeout(function () { typeDropdown.classList.remove('is-open'); }, 150);
+        });
+        typeInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { typeDropdown.classList.remove('is-open'); }
+        });
+        typeDropdown.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        typeDropdown.addEventListener('click', function (e) {
+            var opt = e.target && e.target.closest && e.target.closest('.marketplace-combobox-option');
+            if (!opt) return;
+            if (typeCloseTimer) { clearTimeout(typeCloseTimer); typeCloseTimer = null; }
+            var id = opt.getAttribute('data-id');
+            var addName = opt.getAttribute('data-add');
+            if (id) {
+                typeIdHidden.value = id;
+                typeInput.value = opt.textContent;
+                typeDropdown.classList.remove('is-open');
+            } else if (addName) {
+                fetch('/api/marketplace/types', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: addName })
+                }).then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); }).then(function (res) {
+                    if (res.ok && res.data && res.data.id) {
+                        typesList.push({ id: res.data.id, name: res.data.name });
+                        typeIdHidden.value = String(res.data.id);
+                        typeInput.value = res.data.name;
+                        typeDropdown.classList.remove('is-open');
+                    } else {
+                        showMessage(res.data && res.data.error ? res.data.error : 'Could not add type.', 'error');
+                    }
+                }).catch(function () { showMessage('Could not add type.', 'error'); });
+            }
+        });
+    }
+    function setupCatCombobox() {
+        if (!catInput || !catIdHidden || !catDropdown) return;
+        var catCloseTimer = null;
+        catInput.addEventListener('focus', function () { renderCatDropdown(); });
+        catInput.addEventListener('input', function () {
+            var sel = catsList.find(function (c) { return String(c.id) === (catIdHidden && catIdHidden.value); });
+            if (sel && catInput.value !== sel.name) { if (catIdHidden) catIdHidden.value = ''; }
+            renderCatDropdown();
+        });
+        catInput.addEventListener('blur', function () {
+            catCloseTimer = setTimeout(function () { catDropdown.classList.remove('is-open'); }, 150);
+        });
+        catInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { catDropdown.classList.remove('is-open'); }
+        });
+        catDropdown.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        catDropdown.addEventListener('click', function (e) {
+            var opt = e.target && e.target.closest && e.target.closest('.marketplace-combobox-option');
+            if (!opt) return;
+            if (catCloseTimer) { clearTimeout(catCloseTimer); catCloseTimer = null; }
+            var id = opt.getAttribute('data-id');
+            var addName = opt.getAttribute('data-add');
+            if (id) {
+                catIdHidden.value = id;
+                catInput.value = opt.textContent;
+                catDropdown.classList.remove('is-open');
+            } else if (addName) {
+                fetch('/api/marketplace/categories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: addName })
+                }).then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); }).then(function (res) {
+                    if (res.ok && res.data && res.data.id) {
+                        catsList.push({ id: res.data.id, name: res.data.name });
+                        catIdHidden.value = String(res.data.id);
+                        catInput.value = res.data.name;
+                        catDropdown.classList.remove('is-open');
+                    } else {
+                        showMessage(res.data && res.data.error ? res.data.error : 'Could not add category.', 'error');
+                    }
+                }).catch(function () { showMessage('Could not add category.', 'error'); });
+            }
+        });
+    }
+    setupTypeCombobox();
+    setupCatCombobox();
+    fetch('/api/marketplace/types').then(function (r) { return r.ok ? r.json() : []; }).then(function (types) {
+        typesList = types;
+        renderTypeDropdown();
+    });
+    fetch('/api/marketplace/categories').then(function (r) { return r.ok ? r.json() : []; }).then(function (cats) {
+        catsList = cats;
+        renderCatDropdown();
+    });
+    modal.style.display = 'block';
+}
+
+function closeMarketplaceAddItemModal() {
+    var modal = document.getElementById('marketplace-add-item-modal');
+    if (modal) modal.style.display = 'none';
+    var popover = document.getElementById('marketplace-add-item-image-url-info');
+    if (popover) popover.classList.remove('is-visible');
+}
+
+function submitMarketplaceAddItem() {
+    var nameIn = document.getElementById('marketplace-add-item-name');
+    var descIn = document.getElementById('marketplace-add-item-description');
+    var priceIn = document.getElementById('marketplace-add-item-price');
+    var gradeSel = document.getElementById('marketplace-add-item-grade-range');
+    var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
+    var catIdHidden = document.getElementById('marketplace-add-item-category-id');
+    var imgIn = document.getElementById('marketplace-add-item-image-url');
+    var errEl = document.getElementById('marketplace-add-item-error');
+    var name = nameIn && nameIn.value ? nameIn.value.trim() : '';
+    var price = priceIn && priceIn.value ? parseFloat(priceIn.value, 10) : NaN;
+    if (!name) {
+        if (errEl) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; }
+        return;
+    }
+    if (!price || isNaN(price) || price <= 0) {
+        if (errEl) { errEl.textContent = 'Please enter a valid price.'; errEl.style.display = 'block'; }
+        return;
+    }
+    var rawType = typeIdHidden && typeIdHidden.value ? typeIdHidden.value.trim() : '';
+    var rawCat = catIdHidden && catIdHidden.value ? catIdHidden.value.trim() : '';
+    var typeId = rawType ? parseInt(rawType, 10) : null;
+    var catId = rawCat ? parseInt(rawCat, 10) : null;
+    var payload = {
+        name: name,
+        description: (descIn && descIn.value) ? descIn.value.trim() : '',
+        price: price,
+        grade_range: (gradeSel && gradeSel.value) ? gradeSel.value : '9_12',
+        item_type_id: typeId,
+        category_id: catId,
+        image_url: (imgIn && imgIn.value) ? imgIn.value.trim() : null
+    };
+    if (!payload.item_type_id) delete payload.item_type_id;
+    if (!payload.category_id) delete payload.category_id;
+    if (!payload.image_url) delete payload.image_url;
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    fetch('/api/marketplace-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+            if (res.ok) {
+                closeMarketplaceAddItemModal();
+                showMessage('Item added.', 'success');
+                if (getMarketplaceStudentId()) loadMarketplaceCatalog();
+            } else {
+                if (errEl) { errEl.textContent = res.data.error || 'Failed to add item.'; errEl.style.display = 'block'; }
+            }
+        })
+        .catch(function () {
+            if (errEl) { errEl.textContent = 'Failed to add item.'; errEl.style.display = 'block'; }
+        });
+}
+
+var marketplaceHideModalItemId = null;
+function openMarketplaceHideModal(itemId) {
+    marketplaceHideModalItemId = itemId;
+    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+    var modal = document.getElementById('marketplace-hide-modal');
+    var nameEl = document.getElementById('marketplace-hide-item-name');
+    if (nameEl) nameEl.textContent = item ? item.name : '';
+    document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
+    document.getElementById('marketplace-hide-value-student').style.display = 'none';
+    document.getElementById('marketplace-hide-value-color').style.display = 'none';
+    document.getElementById('marketplace-hide-value-grade').style.display = 'none';
+    document.getElementById('marketplace-hide-student-id').value = '';
+    document.getElementById('marketplace-hide-student-search').value = '';
+    document.getElementById('marketplace-hide-card-color').value = '';
+    document.getElementById('marketplace-hide-grade').value = '';
+    var errEl = document.getElementById('marketplace-hide-error');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (modal) modal.style.display = 'block';
+}
+function closeMarketplaceHideModal() {
+    marketplaceHideModalItemId = null;
+    var modal = document.getElementById('marketplace-hide-modal');
+    if (modal) modal.style.display = 'none';
+}
+function submitMarketplaceHide() {
+    var itemId = marketplaceHideModalItemId;
+    if (!itemId) return;
+    var typeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
+    var type = null;
+    typeRadios.forEach(function (r) { if (r.checked) type = r.value; });
+    var value = '';
+    if (type === 'student') {
+        value = document.getElementById('marketplace-hide-student-id').value.trim();
+        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a student.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+    } else if (type === 'card_color') {
+        value = document.getElementById('marketplace-hide-card-color').value.trim();
+        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a card color.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+    } else if (type === 'grade_section') {
+        value = document.getElementById('marketplace-hide-grade').value.trim();
+        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+    } else {
+        document.getElementById('marketplace-hide-error').textContent = 'Choose one: specific student, card color, or grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return;
+    }
+    var errEl = document.getElementById('marketplace-hide-error');
+    errEl.style.display = 'none';
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden_type: type, value: value })
+    })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+            if (res.ok || (res.data && res.data.id)) {
+                closeMarketplaceHideModal();
+                loadMarketplaceCatalog();
+            } else {
+                errEl.textContent = (res.data && res.data.error) || 'Failed to add rule.'; errEl.style.display = 'block';
+            }
+        })
+        .catch(function () { errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block'; });
+}
+
+var marketplaceUnhideModalItemId = null;
+function openMarketplaceUnhideModal(itemId) {
+    marketplaceUnhideModalItemId = itemId;
+    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+    var modal = document.getElementById('marketplace-unhide-modal');
+    var nameEl = document.getElementById('marketplace-unhide-item-name');
+    if (nameEl) nameEl.textContent = item ? item.name : '';
+    var listEl = document.getElementById('marketplace-unhide-rules-list');
+    if (!listEl) { if (modal) modal.style.display = 'block'; return; }
+    listEl.innerHTML = '';
+    var rules = (item && item.hidden_rules) ? item.hidden_rules : [];
+    if (!rules.length) {
+        listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
+    } else {
+        rules.forEach(function (r) {
+            var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+            var li = document.createElement('li');
+            li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
+            li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
+            listEl.appendChild(li);
+            li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
+        });
+    }
+    if (modal) modal.style.display = 'block';
+}
+function closeMarketplaceUnhideModal() {
+    marketplaceUnhideModalItemId = null;
+    var modal = document.getElementById('marketplace-unhide-modal');
+    if (modal) modal.style.display = 'none';
+}
+function removeMarketplaceHiddenRule(itemId, ruleId) {
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules/' + ruleId, { method: 'DELETE' })
+        .then(function (r) {
+            if (r.ok) {
+                loadMarketplaceCatalog();
+                fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
+                    .then(function (res) { return res.ok ? res.json() : []; })
+                    .then(function (rules) {
+                        var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+                        if (item) item.hidden_rules = rules;
+                        var listEl = document.getElementById('marketplace-unhide-rules-list');
+                        if (!listEl) return;
+                        listEl.innerHTML = '';
+                        if (!rules.length) {
+                            listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
+                            closeMarketplaceUnhideModal();
+                        } else {
+                            rules.forEach(function (r) {
+                                var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+                                var li = document.createElement('li');
+                                li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
+                                li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
+                                listEl.appendChild(li);
+                                li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
+                            });
+                        }
+                    });
+            }
+        });
+}
+function refreshMarketplaceUnhideModalList() {
+    if (marketplaceUnhideModalItemId == null) return;
+    fetch('/api/marketplace-items/' + marketplaceUnhideModalItemId + '/hidden-rules')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (rules) {
+            var item = marketplaceCatalog.find(function (x) { return x.id === marketplaceUnhideModalItemId; });
+            if (item) item.hidden_rules = rules;
+            var listEl = document.getElementById('marketplace-unhide-rules-list');
+            if (!listEl) return;
+            listEl.innerHTML = '';
+            if (!rules.length) {
+                listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
+                closeMarketplaceUnhideModal();
+            } else {
+                rules.forEach(function (r) {
+                    var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade: ' + r.value;
+                    var li = document.createElement('li');
+                    li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
+                    li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
+                    listEl.appendChild(li);
+                    li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(marketplaceUnhideModalItemId, r.id); });
+                });
+            }
+        });
+}
+
+var marketplaceEditModalItemId = null;
+function openMarketplaceEditModal(itemId) {
+    marketplaceEditModalItemId = itemId;
+    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+    if (!item) return;
+    var modal = document.getElementById('marketplace-edit-item-modal');
+    document.getElementById('marketplace-edit-item-name').value = item.name || '';
+    document.getElementById('marketplace-edit-item-description').value = item.description || '';
+    document.getElementById('marketplace-edit-item-price').value = item.price != null ? item.price : '';
+    document.getElementById('marketplace-edit-item-grade-range').value = item.grade_range || '9_12';
+    document.getElementById('marketplace-edit-item-image-url').value = item.image_url || '';
+    document.getElementById('marketplace-edit-item-error').style.display = 'none';
+    var typeSel = document.getElementById('marketplace-edit-item-type');
+    var catSel = document.getElementById('marketplace-edit-item-category');
+    if (typeSel && catSel) {
+        Promise.all([
+            fetch('/api/marketplace/types').then(function (r) { return r.ok ? r.json() : []; }),
+            fetch('/api/marketplace/categories').then(function (r) { return r.ok ? r.json() : []; })
+        ]).then(function (arr) {
+            var types = arr[0] || [];
+            var cats = arr[1] || [];
+            typeSel.innerHTML = '<option value="">— None —</option>' + types.map(function (t) { return '<option value="' + t.id + '">' + (t.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
+            catSel.innerHTML = '<option value="">— None —</option>' + cats.map(function (c) { return '<option value="' + c.id + '">' + (c.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
+            typeSel.value = item.item_type_id || '';
+            catSel.value = item.category_id || '';
+        });
+    }
+    if (modal) modal.style.display = 'block';
+}
+function closeMarketplaceEditModal() {
+    marketplaceEditModalItemId = null;
+    var modal = document.getElementById('marketplace-edit-item-modal');
+    if (modal) modal.style.display = 'none';
+}
+function submitMarketplaceEditItem() {
+    var itemId = marketplaceEditModalItemId;
+    if (!itemId) return;
+    var nameIn = document.getElementById('marketplace-edit-item-name');
+    var descIn = document.getElementById('marketplace-edit-item-description');
+    var priceIn = document.getElementById('marketplace-edit-item-price');
+    var gradeSel = document.getElementById('marketplace-edit-item-grade-range');
+    var typeSel = document.getElementById('marketplace-edit-item-type');
+    var catSel = document.getElementById('marketplace-edit-item-category');
+    var imgIn = document.getElementById('marketplace-edit-item-image-url');
+    var errEl = document.getElementById('marketplace-edit-item-error');
+    var name = nameIn && nameIn.value ? nameIn.value.trim() : '';
+    var price = priceIn && priceIn.value ? parseFloat(priceIn.value, 10) : NaN;
+    if (!name) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; return; }
+    if (!price || isNaN(price) || price <= 0) { errEl.textContent = 'Please enter a valid price.'; errEl.style.display = 'block'; return; }
+    var payload = {
+        name: name,
+        description: (descIn && descIn.value) ? descIn.value.trim() : '',
+        price: price,
+        grade_range: (gradeSel && gradeSel.value) ? gradeSel.value : '9_12',
+        item_type_id: (typeSel && typeSel.value) ? parseInt(typeSel.value, 10) : null,
+        category_id: (catSel && catSel.value) ? parseInt(catSel.value, 10) : null,
+        image_url: (imgIn && imgIn.value) ? imgIn.value.trim() : null
+    };
+    errEl.style.display = 'none';
+    fetch('/api/marketplace-items/' + itemId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+            if (res.ok) {
+                closeMarketplaceEditModal();
+                var idx = marketplaceCatalog.findIndex(function (x) { return x.id === itemId; });
+                if (idx >= 0 && res.data) marketplaceCatalog[idx] = Object.assign({}, marketplaceCatalog[idx], res.data);
+                loadMarketplaceCatalog();
+            } else {
+                errEl.textContent = (res.data && res.data.error) || 'Failed to update.'; errEl.style.display = 'block';
+            }
+        })
+        .catch(function () { errEl.textContent = 'Failed to update.'; errEl.style.display = 'block'; });
+}
+function confirmDeleteMarketplaceItem(itemId) {
+    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+    if (!item) return;
+    var delMsg = "Delete item \"" + (item.name || "").replace(/"/g, "") + "\"? This will deactivate the item.";
+    if (!confirm(delMsg)) return;
+    fetch('/api/marketplace-items/' + itemId, { method: 'DELETE' })
+        .then(function (r) {
+            if (r.ok) {
+                loadMarketplaceCatalog();
+            } else {
+                r.json().then(function (data) { alert((data && data.error) || 'Delete failed.'); });
+            }
+        })
+        .catch(function () { alert('Delete failed.'); });
+}
+
+function setupMarketplaceStudentSearch() {
+    var searchInput = document.getElementById('marketplace-student-search-input');
+    var dropdown = document.querySelector('.marketplace-student-autocomplete-dropdown');
+    var managedByMe = document.getElementById('marketplace-managed-by-me-checkbox');
+    if (!searchInput || !dropdown) return;
+    var list = [];
+    function showDropdown(items) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'block';
+        items.slice(0, 15).forEach(function (s) {
+            var div = document.createElement('div');
+            div.className = 'bank-search-autocomplete-item';
+            div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
+            div.textContent = s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
+            div.addEventListener('mousedown', function (e) { e.preventDefault(); selectMarketplaceStudent(s.student_id); searchInput.value = div.textContent; dropdown.style.display = 'none'; });
+            dropdown.appendChild(div);
+        });
+    }
+    function loadList() {
+        var params = new URLSearchParams();
+        if (managedByMe && managedByMe.checked) params.set('managed_by_me', 'true');
+        var q = searchInput.value.trim();
+        if (q) params.set('q', q);
+        fetch('/api/bank-account/search?' + params.toString()).then(function (r) { return r.ok ? r.json() : []; }).then(function (data) {
+            list = data;
+            showDropdown(list);
+        });
+    }
+    searchInput.addEventListener('input', loadList);
+    searchInput.addEventListener('focus', function () { if (list.length) showDropdown(list); else loadList(); });
+    document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) dropdown.style.display = 'none'; });
+    if (managedByMe) managedByMe.addEventListener('change', loadList);
+}
+
+function selectMarketplaceStudent(studentId) {
+    currentMarketplaceStudentId = studentId;
+    loadMarketplaceBalance();
+    loadMarketplaceCatalog();
+    loadMarketplaceMyOrders();
+    loadMarketplaceTypesAndCategories();
+}
+
+function loadMarketplaceMyOrders() {
+    var list = document.getElementById('marketplace-my-orders-list');
+    if (!list) return;
+    var sid = getMarketplaceStudentId();
+    if (!sid && window.currentUser && window.currentUser.role !== 'student') {
+        list.innerHTML = '<p style="margin:0; color:#94a3b8;">Select a student to view their orders.</p>';
+        return;
+    }
+    fetch('/api/purchase-orders')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (orders) {
+            if (sid && window.currentUser && window.currentUser.role !== 'student') {
+                orders = orders.filter(function (o) { return o.student_id === sid; });
+            }
+            if (!orders.length) {
+                list.innerHTML = '<p style="margin:0; color:#94a3b8;">No orders yet.</p>';
+                return;
+            }
+            list.innerHTML = orders.map(function (o) {
+                var statusColor = o.status === 'approved' ? '#059669' : o.status === 'denied' ? '#dc2626' : '#64748b';
+                var statusLabel = o.status === 'approved' ? 'fulfilled' : (o.status || '');
+                return '<div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">' +
+                    '<span style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + '</span> — $' + Number(o.item_price).toFixed(2) +
+                    ' <span style="color:' + statusColor + ';">(' + statusLabel + ')</span>' +
+                    (o.approved_by_name ? ' — Fulfilled by ' + o.approved_by_name.replace(/</g, '&lt;') : '') +
+                    (o.denial_reason ? ' — ' + o.denial_reason.replace(/</g, '&lt;') : '') +
+                    '</div>';
+            }).join('');
+        })
+        .catch(function () {
+            list.innerHTML = '<p style="margin:0; color:#dc2626;">Failed to load orders.</p>';
+        });
+}
+
+function bindMarketplaceCheckout() {
+    var btn = document.getElementById('marketplace-checkout-btn');
+    var msg = document.getElementById('marketplace-checkout-msg');
+    if (!btn || btn._marketplaceBound) return;
+    btn._marketplaceBound = true;
+    btn.addEventListener('click', function () {
+        if (!marketplaceCart.length) return;
+        var sid = getMarketplaceStudentId();
+        if (!sid) { if (msg) { msg.style.display = 'block'; msg.textContent = 'Select a student first.'; msg.style.color = '#dc2626'; } return; }
+        var cart = marketplaceCart.map(function (x) { return { item_id: x.item_id, quantity: x.quantity || 1 }; });
+        fetch('/api/marketplace/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cart: cart })
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    marketplaceCart = [];
+                    saveMarketplaceCartToStorage();
+                    renderMarketplaceCart();
+                    loadMarketplaceBalance();
+                    loadMarketplaceMyOrders();
+                    if (msg) { msg.style.display = 'block'; msg.textContent = 'Purchase orders submitted. Your support team will review them.'; msg.style.color = '#059669'; }
+                } else {
+                    if (msg) { msg.style.display = 'block'; msg.textContent = res.data.error || 'Checkout failed'; msg.style.color = '#dc2626'; }
+                }
+            })
+            .catch(function () {
+                if (msg) { msg.style.display = 'block'; msg.textContent = 'Checkout failed'; msg.style.color = '#dc2626'; }
+            });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var refreshBtn = document.getElementById('marketplace-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () {
+        loadMarketplaceBalance();
+        if (getMarketplaceStudentId()) loadMarketplaceCatalog();
+    });
+    var searchBtn = document.getElementById('marketplace-search-btn');
+    if (searchBtn) searchBtn.addEventListener('click', function () {
+        loadMarketplaceCatalog();
+    });
+    var addItemBtn = document.getElementById('marketplace-add-item-btn');
+    if (addItemBtn && !addItemBtn._marketplaceAddBound) {
+        addItemBtn._marketplaceAddBound = true;
+        addItemBtn.addEventListener('click', openMarketplaceAddItemModal);
+    }
+    var addItemSubmit = document.getElementById('marketplace-add-item-submit');
+    if (addItemSubmit && !addItemSubmit._marketplaceAddBound) {
+        addItemSubmit._marketplaceAddBound = true;
+        addItemSubmit.addEventListener('click', submitMarketplaceAddItem);
+    }
+    bindMarketplaceItemDetailModal();
+    (function bindMarketplaceHideUnhideEditModals() {
+        var hideClose = document.getElementById('marketplace-hide-modal-close');
+        var hideCancel = document.getElementById('marketplace-hide-cancel');
+        var hideSubmit = document.getElementById('marketplace-hide-submit');
+        var hideModal = document.getElementById('marketplace-hide-modal');
+        if (hideClose) hideClose.addEventListener('click', closeMarketplaceHideModal);
+        if (hideCancel) hideCancel.addEventListener('click', closeMarketplaceHideModal);
+        if (hideSubmit) hideSubmit.addEventListener('click', submitMarketplaceHide);
+        if (hideModal) hideModal.addEventListener('click', function (e) { if (e.target === hideModal) closeMarketplaceHideModal(); });
+        var hideTypeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
+        var hideValueStudent = document.getElementById('marketplace-hide-value-student');
+        var hideValueColor = document.getElementById('marketplace-hide-value-color');
+        var hideValueGrade = document.getElementById('marketplace-hide-value-grade');
+        hideTypeRadios.forEach(function (r) {
+            r.addEventListener('change', function () {
+                var t = this.value;
+                if (hideValueStudent) hideValueStudent.style.display = (t === 'student') ? 'block' : 'none';
+                if (hideValueColor) hideValueColor.style.display = (t === 'card_color') ? 'block' : 'none';
+                if (hideValueGrade) hideValueGrade.style.display = (t === 'grade_section') ? 'block' : 'none';
+            });
+        });
+        var hideStudentSearch = document.getElementById('marketplace-hide-student-search');
+        var hideStudentDropdown = document.getElementById('marketplace-hide-student-dropdown');
+        var hideStudentId = document.getElementById('marketplace-hide-student-id');
+        if (hideStudentSearch && hideStudentDropdown && hideStudentId) {
+            var hideStudentList = [];
+            function showHideStudentDropdown(items) {
+                hideStudentDropdown.innerHTML = '';
+                hideStudentDropdown.style.display = 'block';
+                (items || []).slice(0, 15).forEach(function (s) {
+                    var div = document.createElement('div');
+                    div.className = 'bank-search-autocomplete-item';
+                    div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
+                    div.textContent = (s.student_name || s.name || '') + (s.balance != null ? ' ($' + Number(s.balance).toFixed(2) + ')' : '');
+                    div.addEventListener('mousedown', function (e) {
+                        e.preventDefault();
+                        var sid = s.student_id != null ? s.student_id : s.id;
+                        hideStudentId.value = String(sid);
+                        hideStudentSearch.value = s.student_name || s.name || '';
+                        hideStudentDropdown.style.display = 'none';
+                    });
+                    hideStudentDropdown.appendChild(div);
+                });
+            }
+            hideStudentSearch.addEventListener('input', function () {
+                var q = hideStudentSearch.value.trim();
+                hideStudentId.value = '';
+                if (!q) { hideStudentDropdown.style.display = 'none'; return; }
+                var params = new URLSearchParams({ q: q });
+                fetch('/api/bank-account/search?' + params.toString()).then(function (r) { return r.ok ? r.json() : []; }).then(function (data) {
+                    hideStudentList = data;
+                    showHideStudentDropdown(data);
+                });
+            });
+            hideStudentSearch.addEventListener('focus', function () {
+                if (hideStudentList.length) showHideStudentDropdown(hideStudentList);
+                else if (hideStudentSearch.value.trim()) hideStudentSearch.dispatchEvent(new Event('input'));
+            });
+            document.addEventListener('click', function (e) {
+                if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) hideStudentDropdown.style.display = 'none';
+            });
+        }
+        var unhideClose = document.getElementById('marketplace-unhide-modal-close');
+        var unhideCloseBtn = document.getElementById('marketplace-unhide-close-btn');
+        var unhideAddMore = document.getElementById('marketplace-unhide-add-more');
+        var unhideModal = document.getElementById('marketplace-unhide-modal');
+        if (unhideClose) unhideClose.addEventListener('click', closeMarketplaceUnhideModal);
+        if (unhideCloseBtn) unhideCloseBtn.addEventListener('click', closeMarketplaceUnhideModal);
+        if (unhideModal) unhideModal.addEventListener('click', function (e) { if (e.target === unhideModal) closeMarketplaceUnhideModal(); });
+        if (unhideAddMore) unhideAddMore.addEventListener('click', function () {
+            if (marketplaceUnhideModalItemId != null) {
+                closeMarketplaceUnhideModal();
+                openMarketplaceHideModal(marketplaceUnhideModalItemId);
+            }
+        });
+        var editClose = document.getElementById('marketplace-edit-item-modal-close');
+        var editCancel = document.getElementById('marketplace-edit-item-cancel');
+        var editSubmit = document.getElementById('marketplace-edit-item-submit');
+        var editModal = document.getElementById('marketplace-edit-item-modal');
+        if (editClose) editClose.addEventListener('click', closeMarketplaceEditModal);
+        if (editCancel) editCancel.addEventListener('click', closeMarketplaceEditModal);
+        if (editSubmit) editSubmit.addEventListener('click', submitMarketplaceEditItem);
+        if (editModal) editModal.addEventListener('click', function (e) { if (e.target === editModal) closeMarketplaceEditModal(); });
+    })();
+    var viewAsCheck = document.getElementById('marketplace-show-view-as-student-checkbox');
+    var studentWrap = document.getElementById('marketplace-student-select-wrap');
+    var balanceSection = document.getElementById('marketplace-balance-section');
+    var cartSection = document.getElementById('marketplace-cart-section');
+    if (viewAsCheck && !viewAsCheck._viewAsBound) {
+        viewAsCheck._viewAsBound = true;
+        viewAsCheck.addEventListener('change', function () {
+            if (studentWrap) studentWrap.style.display = viewAsCheck.checked ? 'block' : 'none';
+            if (balanceSection) balanceSection.style.display = viewAsCheck.checked ? 'block' : 'none';
+            if (cartSection) cartSection.style.display = viewAsCheck.checked ? 'block' : 'none';
+            if (!viewAsCheck.checked) {
+                currentMarketplaceStudentId = null;
+                if (document.getElementById('marketplace-balance-amount')) document.getElementById('marketplace-balance-amount').textContent = '$0.00';
+                if (document.getElementById('marketplace-student-name')) document.getElementById('marketplace-student-name').textContent = '';
+            } else if (currentMarketplaceStudentId) {
+                loadMarketplaceBalance();
+                loadMarketplaceCatalog();
+                loadMarketplaceMyOrders();
+            }
+        });
+    }
+    var imageUrlInfoBtn = document.getElementById('marketplace-add-item-image-url-info-btn');
+    var imageUrlInfoPopover = document.getElementById('marketplace-add-item-image-url-info');
+    var imageUrlInfoWrap = imageUrlInfoBtn && imageUrlInfoBtn.closest('.marketplace-image-url-info-wrap');
+    if (imageUrlInfoBtn && imageUrlInfoPopover && imageUrlInfoWrap && !imageUrlInfoBtn._imageUrlInfoBound) {
+        imageUrlInfoBtn._imageUrlInfoBound = true;
+        var imageUrlInfoPinned = false;
+        function showImageUrlInfo() {
+            imageUrlInfoPopover.classList.add('is-visible');
+        }
+        function hideImageUrlInfo() {
+            if (!imageUrlInfoPinned) imageUrlInfoPopover.classList.remove('is-visible');
+        }
+        function toggleImageUrlInfo() {
+            imageUrlInfoPinned = !imageUrlInfoPinned;
+            if (imageUrlInfoPinned) showImageUrlInfo(); else hideImageUrlInfo();
+        }
+        imageUrlInfoWrap.addEventListener('mouseenter', showImageUrlInfo);
+        imageUrlInfoWrap.addEventListener('mouseleave', hideImageUrlInfo);
+        imageUrlInfoBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            toggleImageUrlInfo();
+        });
+        document.addEventListener('click', function (e) {
+            if (!imageUrlInfoPinned) return;
+            if (imageUrlInfoWrap.contains(e.target)) return;
+            imageUrlInfoPinned = false;
+            hideImageUrlInfo();
+        });
+    }
+    loadMarketplaceTypesAndCategories();
+    var analyticsItemSelect = document.getElementById('marketplace-analytics-item-select');
+    if (analyticsItemSelect && !analyticsItemSelect._analyticsBound) {
+        analyticsItemSelect._analyticsBound = true;
+        analyticsItemSelect.addEventListener('change', function () {
+            var v = this.value;
+            renderMarketplaceAnalyticsDemographics(v ? parseInt(v, 10) : null);
+        });
+    }
+    var analyticsHideCheck = document.getElementById('marketplace-analytics-hide-checkbox');
+    var analyticsBody = document.getElementById('marketplace-analytics-body');
+    if (analyticsHideCheck && analyticsBody && !analyticsHideCheck._hideBound) {
+        analyticsHideCheck._hideBound = true;
+        function toggleAnalyticsVisible() {
+            analyticsBody.style.display = analyticsHideCheck.checked ? 'none' : 'block';
+        }
+        analyticsHideCheck.addEventListener('change', toggleAnalyticsVisible);
+        toggleAnalyticsVisible();
+    }
+});
+window.closeMarketplaceAnalytics = destroyMarketplaceAnalyticsCharts;
+window.closeMarketplaceAddItemModal = closeMarketplaceAddItemModal;
+
+function loadNotifications() {
+    fetch('/api/notifications').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+        var unread = list.filter(function (n) { return !n.read_at; });
+        var badge = document.getElementById('notifications-badge');
+        if (badge) {
+            badge.style.display = unread.length ? 'inline-flex' : 'none';
+            badge.textContent = unread.length > 99 ? '99+' : unread.length;
+        }
+        var listEl = document.getElementById('notifications-list');
+        if (!listEl) return;
+        listEl.innerHTML = list.slice(0, 30).map(function (n) {
+            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
+                '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
+                '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+                '</div>';
+        }).join('');
+        listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
+            el.addEventListener('click', function () {
+                var id = parseInt(el.getAttribute('data-notification-id'), 10);
+                fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
+            });
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var bell = document.getElementById('notifications-bell-btn');
+    var wrap = document.getElementById('notifications-bell-wrap');
+    var dropdown = document.getElementById('notifications-dropdown');
+    if (bell && dropdown) {
+        bell.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var show = dropdown.style.display === 'block';
+            dropdown.style.display = show ? 'none' : 'block';
+            if (!show) loadNotifications();
+        });
+    }
+    document.addEventListener('click', function (e) {
+        var d = document.getElementById('notifications-dropdown');
+        var w = document.getElementById('notifications-bell-wrap');
+        if (d && w && !w.contains(e.target)) d.style.display = 'none';
+    });
+    var markAll = document.getElementById('notifications-mark-all-read');
+    if (markAll) markAll.addEventListener('click', function () {
+        fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications(); });
+    });
+});
+
 // ==================== BANK ACCOUNT FUNCTIONALITY ====================
 
 let allMarketplaceItems = [];
@@ -11677,12 +13166,8 @@ async function loadBankAccount(studentId) {
         if (balanceAmount) balanceAmount.textContent = '$0.00';
         if (studentName) studentName.textContent = window.currentUser.name || 'Student';
         
-        // Show empty states
         const transactionsList = document.getElementById('transactions-list');
         if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-        
-        // Load marketplace even without student ID
-        await loadMarketplaceItems();
         return;
     }
     
@@ -11702,8 +13187,6 @@ async function loadBankAccount(studentId) {
             
             const transactionsList = document.getElementById('transactions-list');
             if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-            
-            await loadMarketplaceItems();
             return;
         }
         
@@ -11729,14 +13212,6 @@ async function loadBankAccount(studentId) {
         // Load paychecks
         await loadPaychecks(studentId);
         
-        // Load marketplace
-        await loadMarketplaceItems();
-        
-        // Load purchase orders if staff
-        if (window.currentUser.role !== 'student') {
-            await loadPurchaseOrders();
-        }
-        
         currentBankStudentId = studentId;
     } catch (error) {
         console.error('Error loading bank account:', error);
@@ -11748,8 +13223,6 @@ async function loadBankAccount(studentId) {
         
         const transactionsList = document.getElementById('transactions-list');
         if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-        
-        await loadMarketplaceItems();
     }
 }
 
@@ -11782,20 +13255,16 @@ async function loadPaychecks(studentId) {
         
         const paychecks = await response.json();
         
-        // Find current paycheck that needs worksheet (not completed OR completed but not verified)
-        // This allows unlimited retries until verified
-        const currentPaycheck = paychecks.find(p => !p.worksheet_completed || (p.worksheet_completed && !p.is_verified));
-        
-        if (currentPaycheck) {
-            renderPaycheckWorksheet(currentPaycheck);
-        } else {
-            // Hide worksheet if no paycheck needs completion
-            const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-            if (worksheetDiv) worksheetDiv.style.display = 'none';
-        }
+        // Do not auto-show worksheet: worksheet is only shown when the student
+        // selects a paycheck from the Undeposited modal.
+        const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+        if (worksheetDiv) worksheetDiv.style.display = 'none';
         
         // Store paychecks for modal
         window.paychecksData = paychecks || [];
+        
+        // Highlight Undeposited button when there are one or more undeposited paychecks
+        updateUndepositedButtonHighlight();
     } catch (error) {
         console.error('Error loading paychecks:', error);
         window.paychecksData = [];
@@ -11820,7 +13289,7 @@ function renderPaycheckWorksheet(paycheck) {
     if (!worksheetDiv) return;
     
     worksheetDiv.style.display = 'block';
-    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(1);
+    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(2);
     
     // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
     const citationListEl = document.getElementById('worksheet-citation-list');
@@ -11905,6 +13374,8 @@ async function submitPaycheckWorksheet() {
             document.getElementById('worksheet-success').style.display = 'block';
             document.getElementById('worksheet-error').style.display = 'none';
             
+            // Reload paychecks so Undeposited button highlight updates
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) loadPaychecks(currentBankStudentId);
             // Reload bank account
             setTimeout(() => {
                 loadBankAccount(currentBankStudentId);
@@ -11923,6 +13394,34 @@ async function submitPaycheckWorksheet() {
         console.error('Error submitting worksheet:', error);
         document.getElementById('worksheet-error').textContent = 'Error submitting worksheet';
         document.getElementById('worksheet-error').style.display = 'block';
+    }
+}
+
+// Highlight Undeposited button when student has one or more undeposited paychecks
+function updateUndepositedButtonHighlight() {
+    const btn = document.getElementById('view-undeposited-paychecks-btn');
+    if (!btn) return;
+    const hasUndeposited = window.paychecksData && window.paychecksData.some(
+        p => !p.worksheet_completed || !p.is_verified
+    );
+    if (hasUndeposited) {
+        btn.classList.add('undeposited-highlight');
+    } else {
+        btn.classList.remove('undeposited-highlight');
+    }
+}
+
+// Open worksheet for a specific paycheck (called when student selects from Undeposited modal).
+// Fetches fresh paycheck data so citation_list and amounts reflect current infractions.
+async function openWorksheetForPaycheck(paycheckId) {
+    try {
+        const response = await fetch(`/api/paycheck/${paycheckId}`);
+        if (!response.ok) return;
+        const paycheck = await response.json();
+        renderPaycheckWorksheet(paycheck);
+        closePaychecksModal();
+    } catch (error) {
+        console.error('Error loading paycheck for worksheet:', error);
     }
 }
 
@@ -11957,25 +13456,36 @@ function viewPaychecksModal(filterType) {
         return;
     }
     
+    const isUndeposited = filterType === 'undeposited';
     let html = `<h3 style="margin-bottom: 15px;">${filterType === 'deposited' ? 'Deposited' : 'Undeposited'} Paychecks</h3>`;
+    if (isUndeposited) {
+        html += '<p style="margin-bottom: 15px; color: #64748b;">Select a paycheck to complete its worksheet.</p>';
+    }
     html += '<table style="width: 100%; border-collapse: collapse;"><thead><tr>';
     html += '<th style="padding: 10px; border: 1px solid #ddd;">Period</th>';
     html += '<th style="padding: 10px; border: 1px solid #ddd;">STAR %</th>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Base Pay</th>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Citations</th>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Deduction</th>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Final Pay</th>';
+    if (!isUndeposited) {
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">Base Pay</th>';
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">Citations</th>';
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">Deduction</th>';
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">Final Pay</th>';
+    }
     html += '<th style="padding: 10px; border: 1px solid #ddd;">Status</th>';
+    if (isUndeposited) {
+        html += '<th style="padding: 10px; border: 1px solid #ddd;">Action</th>';
+    }
     html += '</tr></thead><tbody>';
     
     filteredPaychecks.forEach(p => {
         html += '<tr>';
         html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.pay_period_start} - ${p.pay_period_end}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.average_star_percent}%</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.base_pay.toFixed(2)}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.citation_count}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.citation_deduction.toFixed(2)}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.final_pay.toFixed(2)}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid #ddd;">${Number(p.average_star_percent).toFixed(2)}%</td>`;
+        if (!isUndeposited) {
+            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.base_pay.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.citation_count}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.citation_deduction.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.final_pay.toFixed(2)}</td>`;
+        }
         let status = 'Incomplete';
         if (p.is_verified) {
             status = 'Deposited';
@@ -11983,6 +13493,9 @@ function viewPaychecksModal(filterType) {
             status = 'Pending Verification';
         }
         html += `<td style="padding: 10px; border: 1px solid #ddd;">${status}</td>`;
+        if (isUndeposited) {
+            html += `<td style="padding: 10px; border: 1px solid #ddd;"><button type="button" class="btn-primary" style="background: #10b981; border-color: #10b981; padding: 6px 12px; font-size: 13px;" onclick="openWorksheetForPaycheck(${p.id})">Complete worksheet</button></td>`;
+        }
         html += '</tr>';
     });
     
@@ -12157,7 +13670,7 @@ function renderPurchaseOrders(orders) {
             <p style="margin: 5px 0;"><strong>Actual Balance:</strong> $${order.actual_balance_after.toFixed(2)}</p>
             <p style="margin: 5px 0;"><strong>Correct:</strong> ${order.is_calculation_correct ? 'Yes' : 'No'}</p>
             <div style="margin-top: 15px; display: flex; gap: 10px;">
-                <button onclick="updatePurchaseOrderStatus(${order.id}, 'approved')" class="btn-primary" style="background: #10b981; border-color: #10b981;">Approve</button>
+                <button onclick="updatePurchaseOrderStatus(${order.id}, 'approved')" class="btn-primary" style="background: #10b981; border-color: #10b981;">Fulfill</button>
                 <button onclick="updatePurchaseOrderStatus(${order.id}, 'denied')" class="btn-secondary" style="background: #dc2626; border-color: #dc2626; color: white;">Deny</button>
             </div>
         </div>
@@ -12175,7 +13688,6 @@ async function updatePurchaseOrderStatus(orderId, status) {
         
         if (response.ok) {
             showMessage(`Purchase order ${status}`, 'success');
-            await loadPurchaseOrders();
             if (currentBankStudentId) {
                 await loadBankAccount(currentBankStudentId);
             }
@@ -12369,12 +13881,10 @@ function handleBankAccountView() {
         // Always show all sections for students, even if no data yet
         const balanceSection = document.getElementById('bank-balance-section');
         const paycheckSection = document.getElementById('bank-paycheck-section');
-        const marketplaceSection = document.getElementById('bank-marketplace-section');
         const transactionsSection = document.getElementById('bank-transactions-section');
         
         if (balanceSection) balanceSection.style.display = 'block';
         if (paycheckSection) paycheckSection.style.display = 'block';
-        if (marketplaceSection) marketplaceSection.style.display = 'block';
         if (transactionsSection) transactionsSection.style.display = 'block';
         
         // Set default student name if available
@@ -12386,80 +13896,227 @@ function handleBankAccountView() {
             const studentName = document.getElementById('bank-student-name');
             if (balanceAmount) balanceAmount.textContent = '$0.00';
             if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-            
-            // Load marketplace even without student ID
-            loadMarketplaceItems();
-            
-            // Show empty states
             const transactionsList = document.getElementById('transactions-list');
             if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
         }
     } else {
-        // Staff view - setup search
-        setupBankAccountSearch();
-        document.getElementById('bank-purchase-orders-section').style.display = 'block';
-        
-        // Setup student select change
-        const studentSelect = document.getElementById('bank-student-select');
-        if (studentSelect) {
-            studentSelect.addEventListener('change', (e) => {
-                const studentId = e.target.value;
-                if (studentId) {
-                    currentBankStudentId = parseInt(studentId);
-                    loadBankAccount(currentBankStudentId);
-                    document.getElementById('bank-balance-section').style.display = 'block';
-                    document.getElementById('bank-paycheck-section').style.display = 'block';
-                    document.getElementById('bank-marketplace-section').style.display = 'block';
-                    document.getElementById('bank-transactions-section').style.display = 'block';
+        // Staff/Admin view - searchable dropdown + "Show students managed by me"
+        const wrap = document.getElementById('bank-student-select-wrap');
+        const searchInput = document.getElementById('bank-student-search-input');
+        const wrapperEl = searchInput ? searchInput.closest('.bank-search-autocomplete-wrapper') : null;
+        const dropdown = wrapperEl ? wrapperEl.querySelector('.bank-search-autocomplete-dropdown') : null;
+        const managedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
+        const noMsg = document.getElementById('bank-no-student-msg');
+        const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
+        if (wrap) wrap.style.display = 'block';
+        if (noMsg) noMsg.style.display = 'none';
+        if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
+
+        let bankStudentList = [];
+        let isDropdownVisible = false;
+        let selectedIndex = -1;
+
+        function setSectionsVisible(visible) {
+            const balanceSection = document.getElementById('bank-balance-section');
+            const paycheckSection = document.getElementById('bank-paycheck-section');
+            const transactionsSection = document.getElementById('bank-transactions-section');
+            const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
+            const display = visible ? 'block' : 'none';
+            if (balanceSection) balanceSection.style.display = display;
+            if (paycheckSection) paycheckSection.style.display = display;
+            if (transactionsSection) transactionsSection.style.display = display;
+            if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
+        }
+
+        function displayLabel(s) {
+            return s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
+        }
+
+        function filterStudents(query) {
+            if (!query || !String(query).trim()) return bankStudentList.slice();
+            const q = String(query).trim().toLowerCase();
+            return bankStudentList.filter(function (s) {
+                return (s.student_name || '').toLowerCase().includes(q);
+            });
+        }
+
+        function hideDropdown() {
+            if (!dropdown) return;
+            dropdown.style.display = 'none';
+            dropdown.innerHTML = '';
+            isDropdownVisible = false;
+            selectedIndex = -1;
+        }
+
+        function updateHighlight() {
+            if (!dropdown) return;
+            const items = dropdown.querySelectorAll('.bank-search-autocomplete-item');
+            items.forEach(function (item, i) {
+                item.classList.toggle('highlighted', i === selectedIndex);
+            });
+        }
+
+        function showFilteredDropdown(filtered) {
+            if (!dropdown) return;
+            dropdown.innerHTML = '';
+            const hasSelection = currentBankStudentId != null;
+            let idx = 0;
+            if (hasSelection) {
+                const clearItem = document.createElement('div');
+                clearItem.className = 'bank-search-autocomplete-item';
+                clearItem.textContent = '— Clear selection —';
+                clearItem.dataset.clear = 'true';
+                clearItem.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    currentBankStudentId = null;
+                    if (searchInput) searchInput.value = '';
+                    hideDropdown();
+                    if (noMsg) noMsg.style.display = 'block';
+                    setSectionsVisible(false);
+                });
+                clearItem.addEventListener('mouseenter', function () { selectedIndex = 0; updateHighlight(); });
+                dropdown.appendChild(clearItem);
+                idx = 1;
+            }
+            filtered.forEach(function (s) {
+                const item = document.createElement('div');
+                item.className = 'bank-search-autocomplete-item';
+                item.textContent = displayLabel(s);
+                item.dataset.studentId = s.student_id;
+                const i = idx++;
+                item.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    currentBankStudentId = s.student_id;
+                    if (searchInput) searchInput.value = displayLabel(s);
+                    hideDropdown();
+                    if (noMsg) noMsg.style.display = 'none';
+                    setSectionsVisible(true);
+                    loadBankAccount(s.student_id);
+                });
+                item.addEventListener('mouseenter', function () { selectedIndex = i; updateHighlight(); });
+                dropdown.appendChild(item);
+            });
+            if (filtered.length === 0 && !hasSelection) {
+                hideDropdown();
+                return;
+            }
+            dropdown.style.display = 'block';
+            isDropdownVisible = true;
+            selectedIndex = hasSelection ? 0 : -1;
+            updateHighlight();
+        }
+
+        function fetchAndRefresh() {
+            const params = new URLSearchParams();
+            if (managedByMeCheckbox && managedByMeCheckbox.checked) params.append('managed_by_me', 'true');
+            return fetch('/api/bank-account/search?' + params)
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (t) { throw new Error('API ' + res.status); });
+                    return res.json();
+                })
+                .then(function (data) {
+                    bankStudentList = Array.isArray(data) ? data : [];
+                    const stillInList = currentBankStudentId && bankStudentList.some(function (s) { return s.student_id === currentBankStudentId; });
+                    if (!stillInList && currentBankStudentId) {
+                        currentBankStudentId = null;
+                        if (searchInput) searchInput.value = '';
+                        if (noMsg) noMsg.style.display = 'block';
+                        setSectionsVisible(false);
+                    }
+                    // Only show dropdown when the input is focused (handled by onInputOrFocus)
+                    if (searchInput && document.activeElement === searchInput) {
+                        const filtered = filterStudents(searchInput.value || '');
+                        showFilteredDropdown(filtered);
+                    } else {
+                        hideDropdown();
+                    }
+                })
+                .catch(function (err) {
+                    console.error('Bank Account student list error:', err);
+                    bankStudentList = [];
+                    hideDropdown();
+                });
+        }
+
+        function onInputOrFocus() {
+            // If the input contains a display label (format: "Name ($X.XX)"), clear it when user starts typing
+            if (searchInput && currentBankStudentId) {
+                const currentValue = searchInput.value;
+                // Check if the value matches the display label format
+                const sel = bankStudentList.find(function (s) { return s.student_id === currentBankStudentId; });
+                if (sel && currentValue === displayLabel(sel)) {
+                    // User is clicking/focusing on a selected student's display label
+                    // Clear it so they can search for another student
+                    searchInput.value = '';
+                    currentBankStudentId = null;
+                    if (noMsg) noMsg.style.display = 'block';
+                    setSectionsVisible(false);
+                }
+            }
+            const query = searchInput ? searchInput.value : '';
+            const filtered = filterStudents(query);
+            showFilteredDropdown(filtered);
+        }
+
+        if (managedByMeCheckbox && !managedByMeCheckbox._bankManagedBound) {
+            managedByMeCheckbox._bankManagedBound = true;
+            managedByMeCheckbox.addEventListener('change', function () {
+                fetchAndRefresh();
+            });
+        }
+
+        if (searchInput && dropdown && !searchInput._bankSearchBound) {
+            searchInput._bankSearchBound = true;
+            searchInput.addEventListener('focus', onInputOrFocus);
+            searchInput.addEventListener('input', onInputOrFocus);
+            searchInput.addEventListener('blur', function () {
+                setTimeout(function () {
+                    if (!dropdown.contains(document.activeElement) && document.activeElement !== searchInput) {
+                        hideDropdown();
+                    }
+                }, 200);
+            });
+            searchInput.addEventListener('keydown', function (e) {
+                if (!isDropdownVisible) return;
+                const items = dropdown.querySelectorAll('.bank-search-autocomplete-item');
+                if (items.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+                    updateHighlight();
+                    items[selectedIndex].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    selectedIndex = Math.max(selectedIndex - 1, 0);
+                    updateHighlight();
+                    items[selectedIndex].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    var i = selectedIndex >= 0 ? selectedIndex : 0;
+                    var el = items[i];
+                    if (el) {
+                        var ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+                        el.dispatchEvent(ev);
+                    }
                 }
             });
         }
-        
-        // Setup search and filter
-        const searchInput = document.getElementById('bank-search-input');
-        const managedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
-        
-        const performSearch = async () => {
-            const query = searchInput.value.trim();
-            const managedByMe = managedByMeCheckbox.checked;
-            
-            try {
-                const params = new URLSearchParams();
-                if (query) params.append('q', query);
-                if (managedByMe) params.append('managed_by_me', 'true');
-                
-                const response = await fetch(`/api/bank-account/search?${params}`);
-                if (!response.ok) {
-                    const text = await response.text();
-                    console.error('Bank Account student list failed:', response.status, response.statusText, text);
-                    return;
+
+        fetchAndRefresh().then(function () {
+            if (currentBankStudentId && searchInput) {
+                var sel = bankStudentList.find(function (s) { return s.student_id === currentBankStudentId; });
+                if (sel) {
+                    searchInput.value = displayLabel(sel);
+                    if (noMsg) noMsg.style.display = 'none';
+                    setSectionsVisible(true);
+                    loadBankAccount(currentBankStudentId);
+                } else {
+                    if (noMsg) noMsg.style.display = 'block';
                 }
-                const raw = await response.json();
-                const data = Array.isArray(raw) ? raw : [];
-                
-                const select = document.getElementById('bank-student-select');
-                if (!select) return;
-                select.innerHTML = '<option value="">Select Student</option>';
-                data.forEach(s => {
-                    const option = document.createElement('option');
-                    option.value = s.student_id;
-                    option.textContent = `${s.student_name} ($${(s.balance != null ? Number(s.balance) : 0).toFixed(2)})`;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error searching bank students:', error);
+            } else {
+                if (noMsg) noMsg.style.display = 'block';
             }
-        };
-        
-        if (searchInput) {
-            searchInput.addEventListener('input', performSearch);
-        }
-        if (managedByMeCheckbox) {
-            managedByMeCheckbox.addEventListener('change', performSearch);
-        }
-        
-        // Initial load
-        performSearch();
+        });
     }
     
     // Setup event listeners
@@ -12553,6 +14210,10 @@ async function generatePaychecksForAll() {
                 resultDiv.innerHTML = `<p style="color: #10b981;">${data.message}</p>`;
             }
             showMessage(data.message, 'success');
+            // Refresh paycheck list for currently selected student so updated paychecks are visible
+            if (currentStudentId) {
+                await loadPaychecks(currentStudentId);
+            }
         } else {
             if (resultDiv) {
                 resultDiv.innerHTML = `<p style="color: #dc2626;">${data.error || 'Error generating paychecks'}</p>`;
@@ -12573,6 +14234,7 @@ async function generatePaychecksForAll() {
 // Make functions globally accessible
 window.submitPaycheckWorksheet = submitPaycheckWorksheet;
 window.viewPaychecksModal = viewPaychecksModal;
+window.openWorksheetForPaycheck = openWorksheetForPaycheck;
 window.closePaychecksModal = closePaychecksModal;
 window.openPurchaseModal = openPurchaseModal;
 window.closePurchaseModal = closePurchaseModal;

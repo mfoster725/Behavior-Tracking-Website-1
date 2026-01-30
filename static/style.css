@@ -1216,6 +1216,15 @@ table th {
     text-align: center;
 }
 
+/* Grades taught by teachers/case managers - shown below role in same cell */
+.grades-taught-text {
+    font-size: 0.85em;
+    font-weight: normal;
+    color: #555;
+    display: block;
+    margin-top: 2px;
+}
+
 .reset-password-btn {
     background: #ffc107;
     color: #000;
@@ -1786,6 +1795,28 @@ table th {
     border-bottom: none;
 }
 
+.marketplace-student-autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    display: none;
+}
+
+@media (max-width: 768px) {
+    #marketplace-catalog-cart-wrap {
+        grid-template-columns: 1fr !important;
+    }
+}
+
 #transactions-list {
     background: white;
     border-radius: 8px;
@@ -1819,6 +1850,114 @@ table th {
     max-width: 800px;
 }
 
+#marketplace-add-item-modal .modal-content {
+    max-width: 520px;
+}
+
+.marketplace-image-url-label-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+.marketplace-image-url-info-wrap {
+    position: relative;
+}
+
+.marketplace-image-url-info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid #94a3b8;
+    border-radius: 50%;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+    font-style: italic;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.marketplace-image-url-info-btn:hover {
+    background: #e2e8f0;
+    border-color: #64748b;
+    color: #334155;
+}
+
+.marketplace-image-url-info-popover {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 6px;
+    z-index: 1001;
+    width: 320px;
+    max-width: 90vw;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+    font-size: 13px;
+    line-height: 1.45;
+    color: #334155;
+}
+
+.marketplace-image-url-info-popover.is-visible {
+    display: block;
+}
+
+.marketplace-image-url-info-popover code {
+    font-size: 12px;
+    padding: 1px 4px;
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+.marketplace-combobox-wrap {
+    position: relative;
+}
+.marketplace-combobox-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 2px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.marketplace-combobox-dropdown.is-open {
+    display: block;
+}
+.marketplace-combobox-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    border-bottom: 1px solid #f1f5f9;
+}
+.marketplace-combobox-option:last-child {
+    border-bottom: none;
+}
+.marketplace-combobox-option:hover {
+    background: #f1f5f9;
+}
+.marketplace-combobox-option.add-new {
+    color: #6366f1;
+    font-weight: 500;
+}
+
 #paychecks-modal table {
     width: 100%;
     border-collapse: collapse;
@@ -1842,7 +1981,20 @@ table th {
     background-color: #f8f9fa;
 }
 
-/* Responsive design for bank account */
+/* Undeposited button highlight when student has undeposited paychecks */
+#view-undeposited-paychecks-btn.undeposited-highlight {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+    border: 2px solid #b45309;
+    font-weight: 600;
+}
+
+#view-undeposited-paychecks-btn.undeposited-highlight:hover {
+    background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+    color: white;
+}
+
+/* Responsive design for bank account and marketplace analytics */
 @media (max-width: 768px) {
     .marketplace-item-card {
         min-width: 100%;
@@ -1858,5 +2010,12 @@ table th {
     
     #bank-balance-amount {
         font-size: 2em !important;
+    }
+
+    .marketplace-analytics-charts-grid {
+        grid-template-columns: 1fr !important;
+    }
+    #marketplace-analytics-demographics-charts {
+        grid-template-columns: 1fr !important;
     }
 }
