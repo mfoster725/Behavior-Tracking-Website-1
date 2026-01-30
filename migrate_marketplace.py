@@ -143,8 +143,10 @@ def main():
         run_sqlite_migration(conn)
         conn.close()
     else:
-        import psycopg2
-        conn = psycopg2.connect(database_url.replace('postgresql+psycopg://', 'postgresql://'))
+        import psycopg
+        # Use URI without SQLAlchemy driver prefix; strip sslmode for psycopg.connect
+        uri = database_url.replace('postgresql+psycopg://', 'postgresql://')
+        conn = psycopg.connect(uri)
         run_postgres_migration(conn)
         conn.close()
     print("Marketplace migration completed.")

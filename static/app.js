@@ -11925,6 +11925,24 @@ function loadMarketplaceCatalog() {
         });
 }
 
+/**
+ * Normalize image URL for display: convert Google Drive / Imgur page links to direct image URLs
+ * so they load when used as img src (Drive share links and Imgur page URLs often don't work as img src).
+ */
+function normalizeMarketplaceImageUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    var u = url.trim();
+    // Google Drive: .../file/d/FILE_ID/view... -> https://drive.google.com/uc?export=view&id=FILE_ID
+    var driveMatch = u.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (driveMatch) return 'https://drive.google.com/uc?export=view&id=' + driveMatch[1];
+    // Imgur page URL (e.g. imgur.com/abc123) -> direct image i.imgur.com/abc123 (no /a/ album path)
+    if (/^https?:\/\/(www\.)?imgur\.com\/[a-zA-Z0-9]+(\?.*)?$/.test(u)) {
+        var code = u.replace(/^https?:\/\/(www\.)?imgur\.com\/([a-zA-Z0-9]+).*$/, '$2');
+        if (code && code !== 'a') return 'https://i.imgur.com/' + code + '.jpg';
+    }
+    return u;
+}
+
 function renderMarketplaceCatalog(items) {
     var grid = document.getElementById('marketplace-items-grid');
     if (!grid) return;
@@ -11936,9 +11954,11 @@ function renderMarketplaceCatalog(items) {
     var isStaffOrAdmin = window.currentUser && (window.currentUser.role === 'staff' || window.currentUser.role === 'admin');
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
     grid.innerHTML = items.map(function (item) {
+        var imgSrc = item.image_url ? normalizeMarketplaceImageUrl(item.image_url).replace(/"/g, '&quot;') : '';
+        var noImgDiv = '<div class="marketplace-card-no-img" style="width:100%; height:140px; background:#e2e8f0; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:#94a3b8;">No image</div>';
         var imgHtml = item.image_url
-            ? '<img src="' + item.image_url.replace(/"/g, '&quot;') + '" alt="" style="width:100%; height:140px; object-fit:cover; border-radius:8px; margin-bottom:10px;">'
-            : '<div style="width:100%; height:140px; background:#e2e8f0; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:#94a3b8;">No image</div>';
+            ? '<img src="' + imgSrc + '" alt="" referrerpolicy="no-referrer" style="width:100%; height:140px; object-fit:cover; border-radius:8px; margin-bottom:10px;" onerror="this.outerHTML=\'<div class=&quot;marketplace-card-no-img&quot; style=&quot;width:100%;height:140px;background:#e2e8f0;border-radius:8px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#94a3b8;&quot;>No image</div>\';">'
+            : noImgDiv;
         var btnHtml = isStudent
             ? '<button type="button" class="btn-primary marketplace-card-add-btn" style="padding:6px 12px; font-size:13px;" data-item-id="' + item.id + '" data-item-name="' + (item.name || '').replace(/"/g, '&quot;') + '" data-item-price="' + item.price + '">Add to cart</button>'
             : '';
@@ -12020,11 +12040,16 @@ function openMarketplaceItemDetailModal(itemId) {
     var noImgEl = document.getElementById('marketplace-item-detail-no-image');
     if (imgEl && imgWrap) {
         if (item.image_url) {
-            imgEl.src = item.image_url;
+            imgEl.src = normalizeMarketplaceImageUrl(item.image_url);
+            imgEl.referrerPolicy = 'no-referrer';
             imgEl.alt = item.name || '';
             imgEl.style.display = 'block';
             imgWrap.style.display = 'block';
             if (noImgEl) noImgEl.style.display = 'none';
+            imgEl.onerror = function () {
+                imgEl.style.display = 'none';
+                if (noImgEl) { noImgEl.style.display = 'flex'; noImgEl.style.alignItems = 'center'; noImgEl.style.justifyContent = 'center'; }
+            };
         } else {
             imgEl.style.display = 'none';
             if (noImgEl) { noImgEl.style.display = 'flex'; noImgEl.style.alignItems = 'center'; noImgEl.style.justifyContent = 'center'; }
