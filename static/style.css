@@ -1755,6 +1755,11 @@ table th {
     box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
 }
 
+.marketplace-cart-remove-btn:hover {
+    background: #fecaca !important;
+    color: #dc2626 !important;
+}
+
 .purchase-order-card {
     transition: background-color 0.3s ease;
 }

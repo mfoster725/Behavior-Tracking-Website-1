@@ -62,7 +62,8 @@
                 username: {{ user.username|tojson }},
                 name: {{ (user.name|default(user.username))|tojson }},
                 role: {{ user.role|tojson }},
-                studentId: {% if user.student_id is not none %}{{ user.student_id }}{% else %}null{% endif %}
+                studentId: {% if user.student_id is not none %}{{ user.student_id }}{% else %}null{% endif %},
+                is_outside_staff: {{ 'true' if user.is_outside_staff else 'false' }}
             };
         </script>
 
@@ -299,9 +300,17 @@
                     <!-- Student Schedule Section -->
                     <div class="schedule-section">
                         <h3>Student Schedules</h3>
-                        <div class="form-group" style="max-width: 300px;">
-                            <label for="schedule-student-select">Select Student:</label>
-                            <select id="schedule-student-select">
+                        <div class="form-group">
+                            <div style="display: flex; align-items: center; flex-wrap: nowrap; gap: 2em; margin-bottom: 6px;">
+                                <label for="schedule-student-select" style="margin: 0; white-space: nowrap;">Select Student:</label>
+                                {% if user.role in ['staff', 'admin'] %}
+                                <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; flex-shrink: 0;">
+                                    <input type="checkbox" id="schedule-managed-by-me-checkbox" style="cursor: pointer;">
+                                    <span>Show students managed by me</span>
+                                </label>
+                                {% endif %}
+                            </div>
+                            <select id="schedule-student-select" style="max-width: 300px;">
                                 <option value="">Select Student</option>
                             </select>
                         </div>

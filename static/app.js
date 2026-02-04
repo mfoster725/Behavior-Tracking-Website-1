@@ -278,6 +278,27 @@ function canEdit() {
     return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
 }
 
+/** Set "Show students managed by me" checkboxes based on role: staff = checked, admin = unchecked. */
+function applyManagedByMeDefaultForRole() {
+    if (!window.currentUser || !['staff', 'admin'].includes(window.currentUser.role)) return;
+    const shouldCheck = window.currentUser.role === 'staff';
+    const ids = [
+        'daily-managed-by-me-checkbox',
+        'summary-managed-by-me-checkbox',
+        'frenzy-managed-by-me-checkbox',
+        'schedule-managed-by-me-checkbox',
+        'bank-managed-by-me-checkbox',
+        'marketplace-managed-by-me-checkbox'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.checked !== shouldCheck) {
+            el.checked = shouldCheck;
+        }
+    });
+    dailyEntryManagedByMe = shouldCheck;
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -307,6 +328,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!submittedStudents[currentDate]) {
             submittedStudents[currentDate] = new Set();
         }
+        
+        // Set "Show students managed by me" default by role (staff = checked, admin = unchecked) before first load
+        applyManagedByMeDefaultForRole();
         
         loadStudents();
         setupEventListeners();
@@ -1046,6 +1070,16 @@ async function switchView(viewName) {
     
     // If switching to daily entry view, reload data
     if (viewName === 'entry') {
+        // Sync "managed by me" checkbox to role (staff = checked, admin = unchecked)
+        const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
+        if (dailyManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (dailyManagedByMeCheckbox.checked !== shouldCheck) {
+                dailyManagedByMeCheckbox.checked = shouldCheck;
+                dailyEntryManagedByMe = shouldCheck;
+                dailyManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
+        }
         // Ensure staff members are loaded for search functionality
         if (allStaffMembers.length === 0) {
             await loadUsers();
@@ -1059,12 +1093,14 @@ async function switchView(viewName) {
     
     // If switching to summary view, reload summary data
     if (viewName === 'summary') {
-        // Automatically check the "Show students managed by me" checkbox
+        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
         const summaryManagedByMeCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-        if (summaryManagedByMeCheckbox && !summaryManagedByMeCheckbox.checked) {
-            summaryManagedByMeCheckbox.checked = true;
-            // Trigger the change event to update the student list
-            summaryManagedByMeCheckbox.dispatchEvent(new Event('change'));
+        if (summaryManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (summaryManagedByMeCheckbox.checked !== shouldCheck) {
+                summaryManagedByMeCheckbox.checked = shouldCheck;
+                summaryManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
         }
         
         // Check if summary has been loaded before (has student/quarter selected)
@@ -1080,12 +1116,14 @@ async function switchView(viewName) {
     
     // If switching to frenzy view, reload frenzy stats if timeframe is selected
     if (viewName === 'frenzy') {
-        // Automatically check the "Show students managed by me" checkbox
+        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
         const frenzyManagedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
-        if (frenzyManagedByMeCheckbox && !frenzyManagedByMeCheckbox.checked) {
-            frenzyManagedByMeCheckbox.checked = true;
-            // Trigger the change event to update the student list
-            frenzyManagedByMeCheckbox.dispatchEvent(new Event('change'));
+        if (frenzyManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (frenzyManagedByMeCheckbox.checked !== shouldCheck) {
+                frenzyManagedByMeCheckbox.checked = shouldCheck;
+                frenzyManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
         }
         
         const timeframeSelect = document.getElementById('frenzy-timeframe-select');
@@ -1109,8 +1147,20 @@ async function switchView(viewName) {
     
     // If switching to schedules view, initialize schedules
     if (viewName === 'schedules') {
-        // Load students to ensure dropdown is up to date
-        loadStudents();
+        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
+        const scheduleManagedByMeCheckbox = document.getElementById('schedule-managed-by-me-checkbox');
+        if (scheduleManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (scheduleManagedByMeCheckbox.checked !== shouldCheck) {
+                scheduleManagedByMeCheckbox.checked = shouldCheck;
+                scheduleManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
+        }
+        if (scheduleManagedByMeCheckbox && scheduleManagedByMeCheckbox.checked) {
+            loadStudents(true, false, true);
+        } else {
+            loadStudents();
+        }
         // Load users to populate staff members for dropdown
         loadUsers().then(() => {
             // Update staff datalist after users are loaded
@@ -1141,9 +1191,27 @@ async function switchView(viewName) {
     
     // If switching to bank account view
     if (viewName === 'bank-account') {
+        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
+        const bankManagedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
+        if (bankManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (bankManagedByMeCheckbox.checked !== shouldCheck) {
+                bankManagedByMeCheckbox.checked = shouldCheck;
+                bankManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
+        }
         handleBankAccountView();
     }
     if (viewName === 'marketplace') {
+        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
+        const marketplaceManagedByMeCheckbox = document.getElementById('marketplace-managed-by-me-checkbox');
+        if (marketplaceManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (marketplaceManagedByMeCheckbox.checked !== shouldCheck) {
+                marketplaceManagedByMeCheckbox.checked = shouldCheck;
+                marketplaceManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
+        }
         handleMarketplaceView();
     }
     if (viewName === 'accounts') {
@@ -1544,7 +1612,7 @@ function autoSelectCurrentPeriod() {
     }
 }
 
-async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false) {
+async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false, updateScheduleOnly = false) {
     try {
         let url = '/api/students';
         if (filterManagedByMe) {
@@ -1561,8 +1629,8 @@ async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false
             return nameA.localeCompare(nameB);
         }) : [];
         
-        // Only update allStudents if not filtering for summary only
-        if (!updateSummaryOnly) {
+        // Only update allStudents if not filtering for summary only or schedule only
+        if (!updateSummaryOnly && !updateScheduleOnly) {
             allStudents = studentsList;
             // Initialize filteredDailyStudents to all students if no filters are active
             if (!dailyEntrySearchQuery && !dailyEntryManagedByMe) {
@@ -1579,9 +1647,14 @@ async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false
         const scheduleSelect = document.getElementById('schedule-student-select');
         
         // Determine which selects to update
-        const selectsToUpdate = updateSummaryOnly 
-            ? [summarySelect].filter(s => s !== null)
-            : [select, summarySelect, frenzySelect, scheduleSelect].filter(s => s !== null);
+        let selectsToUpdate;
+        if (updateSummaryOnly) {
+            selectsToUpdate = [summarySelect].filter(s => s !== null);
+        } else if (updateScheduleOnly) {
+            selectsToUpdate = [scheduleSelect].filter(s => s !== null);
+        } else {
+            selectsToUpdate = [select, summarySelect, frenzySelect, scheduleSelect].filter(s => s !== null);
+        }
         
         selectsToUpdate.forEach(sel => {
             if (sel) {
@@ -1594,8 +1667,8 @@ async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false
                     : 'Select Student';
                 sel.innerHTML = `<option value="">${defaultText}</option>`;
                 
-                // Populate with students (use filtered list for summary, allStudents for others)
-                const studentsToUse = (updateSummaryOnly && sel.id === 'summary-student-select') 
+                // Populate with students (use filtered list for summary/schedule when in their update-only mode, allStudents for others)
+                const studentsToUse = (updateSummaryOnly && sel.id === 'summary-student-select') || (updateScheduleOnly && sel.id === 'schedule-student-select')
                     ? studentsList 
                     : allStudents;
                 
@@ -9645,6 +9718,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Note: Student dropdown is now populated by loadStudents() function
     }
     
+    // Schedule "Show students managed by me" checkbox
+    const scheduleManagedByMeCheckbox = document.getElementById('schedule-managed-by-me-checkbox');
+    if (scheduleManagedByMeCheckbox) {
+        scheduleManagedByMeCheckbox.addEventListener('change', async () => {
+            const currentSelection = scheduleStudentSelect ? scheduleStudentSelect.value : null;
+            await loadStudents(scheduleManagedByMeCheckbox.checked, false, true);
+            if (currentSelection && scheduleStudentSelect) {
+                const optionExists = Array.from(scheduleStudentSelect.options).some(opt => opt.value === currentSelection);
+                if (!optionExists) {
+                    scheduleStudentSelect.value = '';
+                    currentScheduleStudentId = null;
+                    studentScheduleData = [];
+                    renderStudentSchedule();
+                }
+            }
+        });
+    }
+    
     // Add period buttons
     const addTeacherPeriodBtn = document.getElementById('add-teacher-period-btn');
     if (addTeacherPeriodBtn) {
@@ -11806,11 +11897,19 @@ function renderMarketplaceCart() {
         var price = Number(line.price || 0);
         var subtotal = price * (line.quantity || 1);
         total += subtotal;
-        return '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px;">' +
-            '<span>' + (line.name || 'Item') + ' × ' + (line.quantity || 1) + '</span>' +
+        var itemId = line.item_id;
+        return '<div class="marketplace-cart-line" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; gap:8px;">' +
+            '<span style="flex:1; min-width:0;">' + (line.name || 'Item') + ' × ' + (line.quantity || 1) + '</span>' +
             '<span>$' + subtotal.toFixed(2) + '</span>' +
+            '<button type="button" class="marketplace-cart-remove-btn" data-item-id="' + itemId + '" title="Remove from cart" style="flex-shrink:0; padding:2px 6px; font-size:12px; color:#64748b; background:#e2e8f0; border:none; border-radius:4px; cursor:pointer;">✕</button>' +
             '</div>';
     }).join('');
+    el.querySelectorAll('.marketplace-cart-remove-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var id = parseInt(btn.getAttribute('data-item-id'), 10);
+            removeFromMarketplaceCart(id);
+        });
+    });
     if (totalEl) totalEl.textContent = 'Total: $' + total.toFixed(2);
     var checkoutMsg = document.getElementById('marketplace-checkout-msg');
     if (marketplaceBalance !== null && total > marketplaceBalance) {
@@ -11851,6 +11950,13 @@ function handleMarketplaceView() {
         loadMarketplacePOApprovals();
         setupMarketplaceStudentSearch();
         loadMarketplaceAnalytics();
+        // Staff/admin: default to "Hide analytics" checked so analytics are collapsed
+        var analyticsHideCheck = document.getElementById('marketplace-analytics-hide-checkbox');
+        var analyticsBody = document.getElementById('marketplace-analytics-body');
+        if (analyticsHideCheck && analyticsBody) {
+            analyticsHideCheck.checked = true;
+            analyticsBody.style.display = 'none';
+        }
         loadMarketplaceTypesAndCategories();
         currentMarketplaceStudentId = null;
         document.getElementById('marketplace-balance-amount').textContent = '$0.00';
