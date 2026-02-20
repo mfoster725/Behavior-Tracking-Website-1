@@ -20,29 +20,35 @@ from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 
-# Database configuration: Use PostgreSQL on Render, SQLite locally
+# Database configuration: Use PostgreSQL (Aiven, Render, Neon, etc.) or SQLite locally
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
-    # Render provides DATABASE_URL with postgres://, but SQLAlchemy needs postgresql+psycopg:// for psycopg3
-    # Also handle postgresql:// URLs that might come from newer Render setups
+    # Aiven/Render/Neon provide postgres:// or postgresql://; SQLAlchemy needs postgresql+psycopg:// for psycopg3
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql+psycopg://', 1)
     elif database_url.startswith('postgresql://') and '+psycopg' not in database_url:
         database_url = database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
     
-    # Render PostgreSQL requires SSL - add SSL parameters if not already present
+    # Production Postgres (Aiven, Render, etc.) requires SSL - add if not already present
     if 'sslmode' not in database_url.lower():
-        # Add sslmode=require to the connection string
         separator = '&' if '?' in database_url else '?'
         database_url = f"{database_url}{separator}sslmode=require"
-    
+    # On Windows, SSL "certificate verify failed" with Aiven: use Aiven's CA. Set DB_SSL_ROOT_CERT to path to the downloaded CA .pem file.
+    ssl_root_cert = os.environ.get('DB_SSL_ROOT_CERT')
+    if ssl_root_cert and os.path.isfile(ssl_root_cert):
+        import re
+        cert_path = os.path.abspath(ssl_root_cert).replace('\\', '/')
+        database_url = re.sub(r'([?&])sslmode=[^&]*', r'\1sslmode=verify-ca', database_url, flags=re.IGNORECASE)
+        database_url = f"{database_url}&sslrootcert={cert_path}"
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     # Configure connection pool for production (Flask-SQLAlchemy uses these via SQLALCHEMY_ENGINE_OPTIONS)
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_size': 10,
+    pool_size = int(os.environ.get('DB_POOL_SIZE', 5))
+    engine_options = {
+        'pool_size': pool_size,
         'pool_recycle': 300,
-        'pool_pre_ping': True,  # Verify connections before using them
+        'pool_pre_ping': True,
     }
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
 else:
     # Local development: Use instance folder for database (Flask convention)
     instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
@@ -344,10 +350,9 @@ class User(UserMixin, db.Model):
 def ensure_ui_preferences_column():
     """
     Ensure the ui_preferences column exists on the users table in Postgres.
-    This is needed for Render where we cannot run a shell.
     Safe to run multiple times thanks to IF NOT EXISTS.
     """
-    # Only run this when using the external Postgres DATABASE_URL (Render)
+    # Only run when using external Postgres (Aiven, Render, etc.)
     if not os.environ.get('DATABASE_URL'):
         return
 

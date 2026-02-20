@@ -14,6 +14,12 @@ if database_url:
     if 'sslmode' not in database_url.lower():
         separator = '&' if '?' in database_url else '?'
         database_url = f"{database_url}{separator}sslmode=require"
+    ssl_root_cert = os.environ.get('DB_SSL_ROOT_CERT')
+    if ssl_root_cert and os.path.isfile(ssl_root_cert):
+        import re
+        cert_path = os.path.abspath(ssl_root_cert).replace('\\', '/')
+        database_url = re.sub(r'([?&])sslmode=[^&]*', r'\1sslmode=verify-ca', database_url, flags=re.IGNORECASE)
+        database_url = f"{database_url}&sslrootcert={cert_path}"
 else:
     instance_path = os.path.join(os.path.dirname(__file__), 'instance')
     os.makedirs(instance_path, exist_ok=True)
@@ -61,8 +67,9 @@ def main():
         run_sqlite_migration(conn)
         conn.close()
     else:
-        import psycopg2
-        conn = psycopg2.connect(database_url.replace('postgresql+psycopg://', 'postgresql://'))
+        import psycopg
+        uri = database_url.replace('postgresql+psycopg://', 'postgresql://')
+        conn = psycopg.connect(uri)
         run_postgres_migration(conn)
         conn.close()
     print("Marketplace hidden rules migration completed.")

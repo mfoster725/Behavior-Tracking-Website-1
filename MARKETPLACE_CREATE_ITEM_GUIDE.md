@@ -143,3 +143,4 @@ Leave the field blank if you do not have an image.
 | "Outside staff cannot create marketplace items" | Outside Staff accounts cannot create items. Ask a regular Staff or Admin to create it. |
 | "Name and valid price required" | Ensure Name is not empty and Price is a positive number. |
 | Type or Category not saving | Use the "Add [name]" option in the dropdown to create it first. |
+

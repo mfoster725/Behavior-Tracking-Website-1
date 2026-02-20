@@ -3205,6 +3205,11 @@ async function submitStudentData(e) {
     // Get attendance status
     const attendance = attendanceData[currentDate]?.[studentId] || 'present';
 
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(function () {
+        abortController.abort();
+    }, 45000); // 45 second timeout
+
     try {
         const response = await fetch('/api/daily-records', {
             method: 'POST',
@@ -3215,8 +3220,11 @@ async function submitStudentData(e) {
                 attendance_status: attendance,
                 periods: periods,
                 frenzies: []
-            })
+            }),
+            signal: abortController.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             // Mark this student as submitted for the current date
@@ -3237,11 +3245,20 @@ async function submitStudentData(e) {
             // Reload the grid to show cleared data
             renderDailyGrid();
         } else {
-            throw new Error('Failed to submit data');
+            var err = new Error('Failed to submit data');
+            err.status = response.status;
+            throw err;
         }
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error('Error submitting student data:', error);
-        showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+        var isTimeout = error.name === 'AbortError';
+        var isServerBusy = error.status >= 502 && error.status <= 504;
+        if (isTimeout || isServerBusy) {
+            showMessage('Submission didn\'t go through (server may be busy). Please try again in a minute or two.', 'error');
+        } else {
+            showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+        }
         
         // Re-enable button
         button.disabled = false;
