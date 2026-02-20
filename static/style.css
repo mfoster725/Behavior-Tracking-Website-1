@@ -317,6 +317,17 @@ nav {
     color: #000;
 }
 
+/* Section graph modal (Summary & Frenzy Stats) */
+#section-graph-modal .modal-content {
+    max-width: 700px;
+}
+#section-graph-container {
+    min-height: 350px;
+}
+.btn-graph {
+    cursor: pointer;
+}
+
 .summary-card {
     background: #f8f9fa;
     border-radius: 8px;

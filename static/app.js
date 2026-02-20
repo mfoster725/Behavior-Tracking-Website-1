@@ -3891,10 +3891,11 @@ async function loadSummary() {
             html += `</tr>`;
             
             html += `</tbody></table></div>`;
+            html += `<div style="margin-top: 10px;"><button type="button" class="btn-secondary btn-graph" style="padding: 4px 10px; font-size: 12px;" onclick="showSectionGraph('summary_comparison_main', 'summary')">Graph Main Metrics</button></div>`;
             
             // STAR Percentages section - Separate Table
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">STAR Percentages</h4>
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">STAR Percentages <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_star', 'summary')">Graph</button></h4>
                 <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                     <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                         <thead style="position: sticky; top: 0; z-index: 20;">
@@ -3953,7 +3954,7 @@ async function loadSummary() {
             
             // Day of Week Statistics section - Separate Table
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics</h4>
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_day', 'summary')">Graph</button></h4>
                 <div class="form-group" style="margin-bottom: 10px;">
                     <label for="summary-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                     <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
@@ -4038,7 +4039,7 @@ async function loadSummary() {
             
             if (sortedClasses.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_class', 'summary')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="summary-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
@@ -4286,7 +4287,7 @@ async function loadSummary() {
                     <p style="margin-bottom: 15px;"><strong>Total Days:</strong> ${data.total_days}</p>
                     ${dataPointsInfo}
                     
-                    <h4 style="margin-bottom: 15px;">STAR Averages</h4>
+                    <h4 style="margin-bottom: 15px;">STAR Averages <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_single_star', 'summary')">Graph</button></h4>
                     <table class="star-averages-table" style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                         <thead>
                             <tr>
@@ -4370,7 +4371,7 @@ async function loadSummary() {
                     </table>
                     
                     ${data.by_day_of_week ? `
-                    <h4 style="margin-top: 30px;">Day of Week Statistics</h4>
+                    <h4 style="margin-top: 30px;">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_single_day', 'summary')">Graph</button></h4>
                     <div style="overflow-x: auto; margin-top: 15px;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
                             <thead>
@@ -4439,7 +4440,7 @@ async function loadSummary() {
                     ` : ''}
                     
                     ${data.by_class ? `
-                    <h4 style="margin-top: 30px;">Class Statistics</h4>
+                    <h4 style="margin-top: 30px;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_single_class', 'summary')">Graph</button></h4>
                     <div style="overflow-x: auto; margin-top: 15px;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
                             <thead>
@@ -4529,6 +4530,456 @@ async function loadSummary() {
             printSummaryBtn.disabled = true;
         }
     }
+}
+
+// Section graph modal (Summary & Frenzy Stats)
+let sectionGraphChartInstance = null;
+let sectionGraphCurrentState = { sectionType: null, source: null };
+
+function closeSectionGraphModal() {
+    const modal = document.getElementById('section-graph-modal');
+    if (modal) modal.style.display = 'none';
+    if (sectionGraphChartInstance) {
+        sectionGraphChartInstance.destroy();
+        sectionGraphChartInstance = null;
+    }
+    const viewBySelect = document.getElementById('section-graph-view-by');
+    if (viewBySelect) viewBySelect.onchange = null;
+}
+
+function getSectionGraphGroupBy() {
+    const sel = document.getElementById('section-graph-view-by');
+    return sel ? sel.value : 'month';
+}
+
+function parsePeriodKeyToGroup(pk, groupBy) {
+    // pk examples: "January 25", "October 24", "Q1 2024", "2023-2024", "Most Recent 30 Days"
+    const m = pk.match(/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{2})$/);
+    if (m) {
+        const yy = parseInt(m[2], 10);
+        const yyyy = yy >= 90 ? 1900 + yy : 2000 + yy;
+        const monthNum = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(m[1]) + 1;
+        const q = Math.ceil(monthNum / 3);
+        if (groupBy === 'month') return pk;
+        if (groupBy === 'quarter') return `Q${q} ${yyyy}`;
+        if (groupBy === 'year') return monthNum >= 8 ? `${yyyy}-${yyyy + 1}` : `${yyyy - 1}-${yyyy}`;
+        return 'Overall';
+    }
+    const qm = pk.match(/^Q([1-4])\s+(\d{4})$/);
+    if (qm) {
+        if (groupBy === 'month' || groupBy === 'quarter') return pk;
+        const y = parseInt(qm[2], 10);
+        if (groupBy === 'year') return `${y}-${y + 1}`;
+        return 'Overall';
+    }
+    const ym = pk.match(/^(\d{4})-(\d{4})$/);
+    if (ym) {
+        if (groupBy === 'year') return pk;
+        if (groupBy === 'month' || groupBy === 'quarter') return pk;
+        return 'Overall';
+    }
+    return groupBy === 'overall' ? 'Overall' : pk;
+}
+
+function aggregatePeriodsByGroup(periods, periodsData, groupBy, source) {
+    const groups = {};
+    periods.forEach(pk => {
+        const g = parsePeriodKeyToGroup(pk, groupBy);
+        if (!groups[g]) groups[g] = [];
+        groups[g].push({ key: pk, data: periodsData[pk] });
+    });
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+        if (a === 'Overall' && b !== 'Overall') return 1;
+        if (b === 'Overall' && a !== 'Overall') return -1;
+        if (a.match(/^\d{4}-\d{4}$/) && b.match(/^\d{4}-\d{4}$/)) return a.localeCompare(b);
+        if (a.match(/^Q[1-4]\s+\d{4}$/) && b.match(/^Q[1-4]\s+\d{4}$/)) {
+            const [aq, ay] = a.split(' '), [bq, by] = b.split(' ');
+            return ay !== by ? ay.localeCompare(by) : aq.localeCompare(bq);
+        }
+        return a.localeCompare(b);
+    });
+    const aggregated = {};
+    sortedKeys.forEach(g => {
+        const items = groups[g];
+        if (items.length === 1) {
+            aggregated[g] = items[0].data;
+            return;
+        }
+        const first = items[0].data;
+        const merged = {};
+        if (source === 'summary') {
+            merged.total_days = items.reduce((s, x) => s + (x.data.total_days || 0), 0);
+            merged.infractions = {};
+            items.forEach(x => {
+                Object.entries(x.data.infractions || {}).forEach(([k, v]) => {
+                    merged.infractions[k] = (merged.infractions[k] || 0) + v;
+                });
+            });
+            merged.additional_info = {
+                total_reminders: items.reduce((s, x) => s + (x.data.additional_info?.total_reminders || 0), 0),
+                total_resets: items.reduce((s, x) => s + (x.data.additional_info?.total_resets || 0), 0)
+            };
+            const pct = items[0].data.percentages;
+            if (pct) {
+                merged.percentages = {};
+                ['safety','teamwork','accountability','relationships','overall'].forEach(k => {
+                    const vals = items.map(x => parseFloat(String(x.data.percentages?.[k] || 0).replace('%','')) || 0);
+                    merged.percentages[k] = vals.reduce((a,b)=>a+b,0) / vals.length;
+                });
+            }
+            merged.by_day_of_week = {};
+            ['Monday','Tuesday','Wednesday','Thursday','Friday'].forEach(day => {
+                const vals = items.map(x => (x.data.by_day_of_week?.[day]?.percentages?.overall || 0));
+                if (vals.some(v => v > 0)) {
+                    merged.by_day_of_week[day] = { percentages: { overall: vals.reduce((a,b)=>a+b,0)/vals.length }, total_days: 0, total_infractions: 0 };
+                }
+            });
+            merged.by_class = {};
+            const allClasses = new Set();
+            items.forEach(x => Object.keys(x.data.by_class || {}).forEach(c => allClasses.add(c)));
+            allClasses.forEach(c => {
+                const vals = items.map(x => (x.data.by_class?.[c]?.percentages?.overall || 0));
+                merged.by_class[c] = { percentages: { overall: vals.reduce((a,b)=>a+b,0)/vals.length } };
+            });
+        } else {
+            merged.total_count = items.reduce((s, x) => s + (x.data.total_count || 0), 0);
+            merged.total_duration = items.reduce((s, x) => s + (x.data.total_duration || 0), 0);
+            const tc = merged.total_count;
+            merged.avg_duration = tc > 0 ? items.reduce((s, x) => s + (x.data.total_duration || 0), 0) / tc : 0;
+            merged.by_day = {};
+            ['Monday','Tuesday','Wednesday','Thursday','Friday'].forEach(day => {
+                const cnt = items.reduce((s, x) => s + (x.data.by_day?.[day]?.count || 0), 0);
+                const dur = items.reduce((s, x) => s + (x.data.by_day?.[day]?.duration || 0), 0);
+                if (cnt > 0) merged.by_day[day] = { count: cnt, duration: dur, avg_duration: dur / cnt };
+            });
+            merged.by_location = {};
+            const allLocs = new Set();
+            items.forEach(x => Object.keys(x.data.by_location || {}).forEach(c => allLocs.add(c)));
+            allLocs.forEach(c => {
+                const cnt = items.reduce((s, x) => s + (x.data.by_location?.[c]?.count || 0), 0);
+                const dur = items.reduce((s, x) => s + (x.data.by_location?.[c]?.duration || 0), 0);
+                merged.by_location[c] = { count: cnt, duration: dur, avg_duration: cnt > 0 ? dur / cnt : 0 };
+            });
+            merged.by_purpose = {};
+            const allPurps = new Set();
+            items.forEach(x => Object.keys(x.data.by_purpose || {}).forEach(p => allPurps.add(p)));
+            allPurps.forEach(p => {
+                const cnt = items.reduce((s, x) => s + (x.data.by_purpose?.[p]?.count || 0), 0);
+                const dur = items.reduce((s, x) => s + (x.data.by_purpose?.[p]?.duration || 0), 0);
+                merged.by_purpose[p] = { count: cnt, duration: dur, avg_duration: cnt > 0 ? dur / cnt : 0 };
+            });
+        }
+        aggregated[g] = merged;
+    });
+    return { labels: sortedKeys, periodsData: aggregated };
+}
+
+function refreshSectionGraphChart() {
+    const { sectionType, source } = sectionGraphCurrentState;
+    if (!sectionType || !source) return;
+    const data = source === 'summary' ? window.currentSummaryData : window.currentFrenzyStatsData;
+    if (!data) return;
+    const groupBy = getSectionGraphGroupBy();
+    const chartConfig = buildSectionChartConfig(sectionType, data, source, groupBy);
+    if (!chartConfig) return;
+    const titleEl = document.getElementById('section-graph-modal-title');
+    if (titleEl) titleEl.textContent = chartConfig.title;
+    if (sectionGraphChartInstance) {
+        sectionGraphChartInstance.destroy();
+        sectionGraphChartInstance = null;
+    }
+    const canvas = document.getElementById('section-graph-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    sectionGraphChartInstance = new Chart(ctx, {
+        type: chartConfig.type || 'bar',
+        data: chartConfig.data,
+        options: chartConfig.options || {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true } },
+            scales: { x: { beginAtZero: true }, y: { beginAtZero: true } }
+        }
+    });
+}
+
+function showSectionGraph(sectionType, source) {
+    const data = source === 'summary' ? window.currentSummaryData : window.currentFrenzyStatsData;
+    if (!data) {
+        showMessage('No data available to graph. Please load the data first.', 'error');
+        return;
+    }
+    if (typeof Chart === 'undefined') {
+        showMessage('Chart library not loaded.', 'error');
+        return;
+    }
+    const modal = document.getElementById('section-graph-modal');
+    const titleEl = document.getElementById('section-graph-modal-title');
+    const canvas = document.getElementById('section-graph-canvas');
+    const viewByWrap = document.getElementById('section-graph-view-by-wrap');
+    const viewBySelect = document.getElementById('section-graph-view-by');
+    if (!modal || !titleEl || !canvas) return;
+
+    sectionGraphCurrentState = { sectionType, source };
+    if (viewByWrap) viewByWrap.style.display = 'flex';
+    if (viewBySelect) viewBySelect.value = 'month';
+
+    const chartConfig = buildSectionChartConfig(sectionType, data, source, getSectionGraphGroupBy());
+    if (!chartConfig) {
+        showMessage('Unable to create graph for this section.', 'error');
+        return;
+    }
+
+    if (sectionGraphChartInstance) {
+        sectionGraphChartInstance.destroy();
+        sectionGraphChartInstance = null;
+    }
+
+    titleEl.textContent = chartConfig.title;
+    modal.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+    sectionGraphChartInstance = new Chart(ctx, {
+        type: chartConfig.type || 'bar',
+        data: chartConfig.data,
+        options: chartConfig.options || {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true } },
+            scales: {
+                x: { beginAtZero: true },
+                y: { beginAtZero: true }
+            }
+        }
+    });
+
+    if (viewBySelect) {
+        viewBySelect.onchange = refreshSectionGraphChart;
+    }
+}
+
+function buildSectionChartConfig(sectionType, data, source, groupBy) {
+    const palette = ['#667eea', '#764ba2', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#84cc16'];
+    const hex = (i) => palette[i % palette.length];
+    groupBy = groupBy || 'month';
+
+    if (source === 'summary') {
+        if (data.comparison_mode && data.periods) {
+            const periods = Object.keys(data.periods);
+            const { labels, periodsData } = aggregatePeriodsByGroup(periods, data.periods, groupBy, source);
+            if (sectionType === 'summary_comparison_main') {
+                const metrics = [
+                    { key: 'total_days', label: 'Total Days' },
+                    { key: 'infractions', label: 'Infractions', get: (p) => Object.values(p.infractions || {}).reduce((s, c) => s + c, 0) },
+                    { key: 'reminders', label: 'Reminders', get: (p) => p.additional_info?.total_reminders || 0 },
+                    { key: 'resets', label: 'Resets', get: (p) => p.additional_info?.total_resets || 0 }
+                ];
+                const datasets = metrics.map((m, i) => ({
+                    label: m.label,
+                    data: labels.map(pk => m.get ? m.get(periodsData[pk]) : (periodsData[pk][m.key] || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Summary - Main Metrics',
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'summary_comparison_star') {
+                const starKeys = ['safety', 'teamwork', 'accountability', 'relationships', 'overall'];
+                const starLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships', 'Overall'];
+                const datasets = starKeys.map((k, i) => ({
+                    label: starLabels[i],
+                    data: labels.map(pk => (periodsData[pk].percentages?.[k] || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Summary - STAR Percentages',
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+            if (sectionType === 'summary_comparison_day') {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                const datasets = labels.map((pk, i) => ({
+                    label: pk,
+                    data: weekdays.map(d => (periodsData[pk].by_day_of_week?.[d]?.percentages?.overall || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Summary - Day of Week (Overall %)',
+                    type: 'bar',
+                    data: { labels: weekdays.map(d => d.slice(0, 3)), datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+            if (sectionType === 'summary_comparison_class') {
+                const allClasses = new Set();
+                labels.forEach(pk => {
+                    Object.keys(periodsData[pk].by_class || {}).forEach(c => allClasses.add(c));
+                });
+                const sortedClasses = Array.from(allClasses).sort();
+                const datasets = labels.map((pk, i) => ({
+                    label: pk,
+                    data: sortedClasses.map(c => (periodsData[pk].by_class?.[c]?.percentages?.overall || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Summary - Class Statistics (Overall %)',
+                    type: 'bar',
+                    data: { labels: sortedClasses, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+        } else {
+            if (sectionType === 'summary_single_star') {
+                const numPeriods = data.totals?.possible ? data.totals.possible / 4 : 0;
+                const maxPerCategory = numPeriods * 2;
+                const labels = ['Safety', 'Teamwork', 'Accountability', 'Relationships', 'Overall'];
+                const keys = ['safety', 'teamwork', 'accountability', 'relationships'];
+                let values = keys.map(k => maxPerCategory > 0 ? ((data.totals[k] || 0) / maxPerCategory * 100).toFixed(0) : 0);
+                const overall = values.length ? (values.reduce((a, b) => a + parseFloat(b), 0) / values.length).toFixed(0) : 0;
+                values.push(overall);
+                return {
+                    title: 'Summary - STAR Averages',
+                    type: 'bar',
+                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: labels.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+            if (sectionType === 'summary_single_day') {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                const getDay = (d) => data.by_day_of_week?.[d] || { percentages: { overall: 0 } };
+                const values = weekdays.map(d => getDay(d).percentages?.overall || 0);
+                return {
+                    title: 'Summary - Day of Week (Overall %)',
+                    type: 'bar',
+                    data: { labels: weekdays.map(d => d.slice(0, 3)), datasets: [{ label: 'Overall %', data: values, backgroundColor: weekdays.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+            if (sectionType === 'summary_single_class') {
+                const classes = Object.keys(data.by_class || {}).sort();
+                const values = classes.map(c => data.by_class[c]?.percentages?.overall || 0);
+                return {
+                    title: 'Summary - Class Statistics (Overall %)',
+                    type: 'bar',
+                    data: { labels: classes, datasets: [{ label: 'Overall %', data: values, backgroundColor: classes.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+                };
+            }
+        }
+    }
+
+    if (source === 'frenzy') {
+        if (data.comparison_mode && data.periods) {
+            const periods = Object.keys(data.periods);
+            const { labels, periodsData } = aggregatePeriodsByGroup(periods, data.periods, groupBy, source);
+            if (sectionType === 'frenzy_comparison_main') {
+                const datasets = [
+                    { label: 'Total Frenzies', data: labels.map(pk => periodsData[pk].total_count || 0), backgroundColor: hex(0) },
+                    { label: 'Total Duration (min)', data: labels.map(pk => periodsData[pk].total_duration || 0), backgroundColor: hex(1) },
+                    { label: 'Avg Duration (min)', data: labels.map(pk => periodsData[pk].avg_duration || 0), backgroundColor: hex(2) }
+                ];
+                return {
+                    title: 'Frenzy Stats - Main Metrics',
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_comparison_day') {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                const datasets = labels.map((pk, i) => ({
+                    label: pk,
+                    data: weekdays.map(d => (periodsData[pk].by_day?.[d]?.count || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Frenzy Stats - Day of Week (Count)',
+                    type: 'bar',
+                    data: { labels: weekdays.map(d => d.slice(0, 3)), datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_comparison_class') {
+                const allClasses = new Set();
+                labels.forEach(pk => Object.keys(periodsData[pk].by_location || {}).forEach(c => allClasses.add(c)));
+                const sortedClasses = Array.from(allClasses).sort();
+                const datasets = labels.map((pk, i) => ({
+                    label: pk,
+                    data: sortedClasses.map(c => (periodsData[pk].by_location?.[c]?.count || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Frenzy Stats - Class (Count)',
+                    type: 'bar',
+                    data: { labels: sortedClasses, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_comparison_purpose') {
+                const allPurposes = new Set();
+                labels.forEach(pk => Object.keys(periodsData[pk].by_purpose || {}).forEach(p => allPurposes.add(p)));
+                const sortedPurposes = Array.from(allPurposes).sort();
+                const datasets = labels.map((pk, i) => ({
+                    label: pk,
+                    data: sortedPurposes.map(p => (periodsData[pk].by_purpose?.[p]?.count || 0)),
+                    backgroundColor: hex(i)
+                }));
+                return {
+                    title: 'Frenzy Stats - Purpose (Count)',
+                    type: 'bar',
+                    data: { labels: sortedPurposes, datasets },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+        } else {
+            if (sectionType === 'frenzy_single_main') {
+                return {
+                    title: 'Frenzy Stats - Overview',
+                    type: 'bar',
+                    data: {
+                        labels: ['Total Frenzies', 'Total Duration (min)', 'Avg Duration (min)'],
+                        datasets: [{ label: 'Value', data: [data.total_count || 0, data.total_duration || 0, data.avg_duration || 0], backgroundColor: [hex(0), hex(1), hex(2)] }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_single_day') {
+                const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+                const values = weekdays.map(d => (data.by_day?.[d]?.count || 0));
+                return {
+                    title: 'Frenzy Stats - Day of Week (Count)',
+                    type: 'bar',
+                    data: { labels: weekdays.map(d => d.slice(0, 3)), datasets: [{ label: 'Count', data: values, backgroundColor: weekdays.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_single_class') {
+                const classes = Object.keys(data.by_location || {}).sort();
+                const values = classes.map(c => data.by_location[c]?.count || 0);
+                return {
+                    title: 'Frenzy Stats - Class (Count)',
+                    type: 'bar',
+                    data: { labels: classes, datasets: [{ label: 'Count', data: values, backgroundColor: classes.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+            if (sectionType === 'frenzy_single_purpose') {
+                const purposes = Object.keys(data.by_purpose || {}).sort();
+                const values = purposes.map(p => data.by_purpose[p]?.count || 0);
+                return {
+                    title: 'Frenzy Stats - Purpose (Count)',
+                    type: 'bar',
+                    data: { labels: purposes, datasets: [{ label: 'Count', data: values, backgroundColor: purposes.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                };
+            }
+        }
+    }
+    return null;
 }
 
 async function loadCaseManagerComparison() {
@@ -5533,6 +5984,7 @@ async function loadFrenzyStats() {
             html += `</tr>`;
             
             html += `</tbody></table></div>`;
+            html += `<div style="margin-top: 10px;"><button type="button" class="btn-secondary btn-graph" style="padding: 4px 10px; font-size: 12px;" onclick="showSectionGraph('frenzy_comparison_main', 'frenzy')">Graph Main Metrics</button></div>`;
             
             // By Day of Week section - Separate Table (weekdays only)
             const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -5552,7 +6004,7 @@ async function loadFrenzyStats() {
             
             if (sortedDays.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics</h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_day', 'frenzy')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
@@ -5632,7 +6084,7 @@ async function loadFrenzyStats() {
             const sortedClasses = Array.from(allClasses).sort();
             
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>`;
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_class', 'frenzy')">Graph</button></h4>`;
             
             if (sortedClasses.length > 0) {
                 html += `
@@ -5719,7 +6171,7 @@ async function loadFrenzyStats() {
             
             if (sortedPurposes.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Purpose Statistics</h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Purpose Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_purpose', 'frenzy')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-purpose-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Purpose:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
@@ -6007,7 +6459,8 @@ async function loadFrenzyStats() {
                             <div class="value">${data.avg_duration ? data.avg_duration.toFixed(1) : '0.0'} min</div>
                         </div>
                     </div>
-                    <h4 style="margin-top: 20px;">By Day of Week</h4>
+                    <div style="margin-top: 10px;"><button type="button" class="btn-secondary btn-graph" style="padding: 4px 10px; font-size: 12px;" onclick="showSectionGraph('frenzy_single_main', 'frenzy')">Graph Overview</button></div>
+                    <h4 style="margin-top: 20px;">By Day of Week <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_day', 'frenzy')">Graph</button></h4>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                         <thead>
                             <tr style="background: #f8f9fa;">
@@ -6046,7 +6499,7 @@ async function loadFrenzyStats() {
                             })()}
                         </tbody>
                     </table>
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics</h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_class', 'frenzy')">Graph</button></h4>
                     ${data.by_location && Object.keys(data.by_location).length > 0 ? `
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-single-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
@@ -6082,7 +6535,7 @@ async function loadFrenzyStats() {
                         <p style="color: #999; font-style: italic;">No class data available for the selected timeframe.</p>
                     </div>
                     `}
-                    <h4 style="margin-top: 20px;">By Purpose</h4>
+                    <h4 style="margin-top: 20px;">By Purpose <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_purpose', 'frenzy')">Graph</button></h4>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                         <thead>
                             <tr style="background: #f8f9fa;">

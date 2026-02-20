@@ -4791,17 +4791,29 @@ def get_paychecks(student_id):
         citation_list = list_weekly_citations(p.student_id, p.pay_period_start, p.pay_period_end)
         live_count = len(citation_list)
         live_deduction = float(Decimal(str(live_count * 2)))
-        live_final = float(p.base_pay) - live_deduction
+        # For undeposited paychecks, use live STAR percent so popup shows current data (e.g. 100% not stale 0%)
+        if not p.is_verified and p.deposited_at is None:
+            live_avg = calculate_weekly_star_percent(p.student_id, p.pay_period_start, p.pay_period_end)
+            live_base = float((live_avg / 100) * Decimal('100'))
+            live_final = live_base - live_deduction
+            avg_pct = float(live_avg)
+            base_pay_val = live_base
+            final_pay_val = live_final
+        else:
+            avg_pct = float(p.average_star_percent)
+            base_pay_val = float(p.base_pay)
+            live_final = base_pay_val - live_deduction
+            final_pay_val = live_final
         return {
             'id': p.id,
             'pay_period_start': p.pay_period_start.isoformat(),
             'pay_period_end': p.pay_period_end.isoformat(),
-            'average_star_percent': float(p.average_star_percent),
-            'base_pay': float(p.base_pay),
+            'average_star_percent': avg_pct,
+            'base_pay': base_pay_val,
             'citation_count': live_count,
             'citation_list': citation_list,
             'citation_deduction': live_deduction,
-            'final_pay': live_final,
+            'final_pay': final_pay_val,
             'worksheet_completed': p.worksheet_completed,
             'is_verified': p.is_verified,
             'deposited_at': p.deposited_at.isoformat() if p.deposited_at else None,
@@ -4823,14 +4835,24 @@ def get_paycheck(paycheck_id):
     citation_list = list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
     live_citation_count = len(citation_list)
     live_citation_deduction = Decimal(str(live_citation_count * 2))
-    live_final_pay = paycheck.base_pay - live_citation_deduction
+    # For undeposited paychecks, use live STAR percent so worksheet shows current data (e.g. 100% not stale 0%)
+    if not paycheck.is_verified and paycheck.deposited_at is None:
+        live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+        live_base_pay = (live_avg / 100) * Decimal('100')
+        live_final_pay = live_base_pay - live_citation_deduction
+        avg_pct = float(live_avg)
+        base_pay_val = float(live_base_pay)
+    else:
+        avg_pct = float(paycheck.average_star_percent)
+        base_pay_val = float(paycheck.base_pay)
+        live_final_pay = paycheck.base_pay - live_citation_deduction
     return jsonify({
         'id': paycheck.id,
         'student_id': paycheck.student_id,
         'pay_period_start': paycheck.pay_period_start.isoformat(),
         'pay_period_end': paycheck.pay_period_end.isoformat(),
-        'average_star_percent': float(paycheck.average_star_percent),
-        'base_pay': float(paycheck.base_pay),
+        'average_star_percent': avg_pct,
+        'base_pay': base_pay_val,
         'citation_count': live_citation_count,
         'citation_list': citation_list,
         'citation_deduction': float(live_citation_deduction),
@@ -4954,6 +4976,25 @@ def generate_paychecks():
         return jsonify({'error': f'Paycheck generation failed: {e}'}), 500
 
 
+@app.route('/api/paycheck/cron-debug', methods=['GET'])
+def cron_debug():
+    """
+    Debug helper: returns whether X-Cron-Secret is present and length only.
+    Use same URL as cron but path .../cron-debug. Remove this route after fixing cron.
+    """
+    provided = request.headers.get('X-Cron-Secret') or (
+        (request.headers.get('Authorization') or '').replace('Bearer ', '').strip()
+    )
+    secret = os.environ.get('CRON_SECRET')
+    return jsonify({
+        'x_cron_secret_present': bool(request.headers.get('X-Cron-Secret')),
+        'provided_length': len(provided) if provided else 0,
+        'cron_secret_configured': bool(secret),
+        'expected_length': len(secret) if secret else 0,
+        'match': secrets.compare_digest(secret or '', provided) if (secret and provided) else False,
+    })
+
+
 @app.route('/api/paycheck/generate-cron', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def generate_paychecks_cron():
@@ -5035,18 +5076,29 @@ def verify_paycheck(paycheck_id):
     # Use live citation count so verification matches current infractions (not stale paycheck record)
     live_citation_count = count_weekly_infractions(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
     live_citation_deduction = Decimal(str(live_citation_count * 2))
-    live_final_pay = paycheck.base_pay - live_citation_deduction
+    # Use live STAR percent for undeposited paychecks so verification matches worksheet display (e.g. 100% not stale 0%)
+    live_avg = None
+    if not paycheck.is_verified and paycheck.deposited_at is None:
+        live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+        live_base_pay = (live_avg / 100) * Decimal('100')
+        live_final_pay = live_base_pay - live_citation_deduction
+    else:
+        live_base_pay = paycheck.base_pay
+        live_final_pay = paycheck.base_pay - live_citation_deduction
 
     # Verify calculations
     tolerance = Decimal('0.01')  # Allow small rounding differences
     
-    pay_correct = abs(paycheck.student_calculated_pay - paycheck.base_pay) <= tolerance
+    pay_correct = abs(paycheck.student_calculated_pay - live_base_pay) <= tolerance
     citations_correct = paycheck.student_calculated_citations == live_citation_count
     deduction_correct = abs(paycheck.student_calculated_deduction - live_citation_deduction) <= tolerance
     final_correct = abs(paycheck.student_calculated_final - live_final_pay) <= tolerance
     
     if pay_correct and citations_correct and deduction_correct and final_correct:
         # Sync paycheck record with live values before depositing so ledger is correct
+        if live_avg is not None:
+            paycheck.average_star_percent = live_avg
+            paycheck.base_pay = (live_avg / 100) * Decimal('100')
         paycheck.citation_count = live_citation_count
         paycheck.citation_deduction = live_citation_deduction
         paycheck.final_pay = live_final_pay

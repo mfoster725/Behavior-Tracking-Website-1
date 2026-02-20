@@ -1464,6 +1464,26 @@
         </div>
     </div>
 
+    <!-- Section Graph Modal (Summary & Frenzy Stats) -->
+    <div id="section-graph-modal" class="modal" onclick="if(event.target===this) closeSectionGraphModal()">
+        <div class="modal-content" style="max-width: 700px;" onclick="event.stopPropagation()">
+            <span class="close" onclick="closeSectionGraphModal()">&times;</span>
+            <h2 id="section-graph-modal-title">Data Graph</h2>
+            <div id="section-graph-view-by-wrap" style="margin-top: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <label for="section-graph-view-by" style="font-weight: 600; font-size: 14px;">View by:</label>
+                <select id="section-graph-view-by" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 120px;">
+                    <option value="month">Month</option>
+                    <option value="quarter">Quarter</option>
+                    <option value="year">Year</option>
+                    <option value="overall">Overall</option>
+                </select>
+            </div>
+            <div id="section-graph-container" style="position: relative; height: 400px; margin-top: 20px;">
+                <canvas id="section-graph-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
     <!-- Paychecks Modal -->
     <div id="paychecks-modal" class="modal">
         <div class="modal-content" style="max-width: 800px;">
