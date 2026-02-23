@@ -325,10 +325,7 @@ function attachNavAndHamburger() {
             }
             var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
             if (hamburger) {
-                e.preventDefault();
-                e.stopPropagation();
-                document.body.classList.toggle('nav-menu-open');
-                setNavDropdownPosition();
+                return;
             }
             if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav') && !e.target.closest('#nav-hamburger')) {
                 document.body.classList.remove('nav-menu-open');
@@ -348,14 +345,6 @@ function attachNavAndHamburger() {
         }, true);
     }
 
-        var hamburgerEl = document.getElementById('nav-hamburger');
-        if (hamburgerEl) {
-            hamburgerEl.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                toggleNavMenu();
-            });
-        }
         window.addEventListener('resize', setNavDropdownPosition);
 }
 
