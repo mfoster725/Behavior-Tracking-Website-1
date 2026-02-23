@@ -1281,6 +1281,8 @@ async function switchView(viewName) {
         handleMarketplaceView();
     }
 }
+
+function loadQuarterConfig() {
     const container = document.getElementById('quarter-config');
     if (!container) return;
     
