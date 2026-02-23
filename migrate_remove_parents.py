@@ -4,7 +4,7 @@ Migration script to remove parent accounts and related data.
 This script deletes:
 - All parent user accounts
 - All parent-student relationships
-- All FERPA notifications for parent accounts
+- All rights notifications for parent accounts
 
 WARNING: This operation cannot be undone. Make sure to backup your database before running this script.
 """
@@ -46,15 +46,15 @@ def remove_parent_accounts():
             print("No parent IDs found.")
             return True
         
-        # Delete FERPA notifications for parents
+        # Delete rights notifications for parents
         cursor.execute(
             "DELETE FROM ferpa_rights_notifications WHERE user_id IN ({})".format(
                 ','.join('?' * len(parent_ids))
             ),
             parent_ids
         )
-        ferpa_deleted = cursor.rowcount
-        print(f"Deleted {ferpa_deleted} FERPA notification(s) for parent accounts.")
+        notifications_deleted = cursor.rowcount
+        print(f"Deleted {notifications_deleted} rights notification(s) for parent accounts.")
         
         # Delete parent-student relationships
         cursor.execute(
@@ -79,7 +79,7 @@ def remove_parent_accounts():
         print(f"Summary:")
         print(f"  - Parent accounts deleted: {users_deleted}")
         print(f"  - Parent-student relationships deleted: {relationships_deleted}")
-        print(f"  - FERPA notifications deleted: {ferpa_deleted}")
+        print(f"  - Rights notifications deleted: {notifications_deleted}")
         
         return True
         
@@ -107,7 +107,7 @@ if __name__ == '__main__':
     print("WARNING: This script will permanently delete:")
     print("  - All parent user accounts")
     print("  - All parent-student relationships")
-    print("  - All FERPA notifications for parent accounts")
+    print("  - All rights notifications for parent accounts")
     print()
     
     if not auto_confirm:

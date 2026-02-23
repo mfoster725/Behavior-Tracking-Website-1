@@ -6,7 +6,7 @@ git add -A
 
 echo.
 echo Committing...
-git commit -m "Recent changes: marketplace plan, paycheck cron, migrations (grades_taught, marketplace, hidden_rules), HIPAA, UI, app and static updates"
+git commit -m "Recent changes: marketplace plan, paycheck cron, migrations (grades_taught, marketplace, hidden_rules), UI, app and static updates"
 
 echo.
 echo Pushing to origin...

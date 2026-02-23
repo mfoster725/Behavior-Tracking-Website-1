@@ -2,7 +2,7 @@
 
 ## Issue Analysis
 
-The HIPAA and FERPA compliance features were successfully pushed to git and are in the codebase, but you're not seeing them because:
+The compliance features were successfully pushed to git and are in the codebase, but you're not seeing them because:
 
 1. **Backend-only implementation**: We added API endpoints but no frontend UI
 2. **Database migrations**: New tables need to be created on Render

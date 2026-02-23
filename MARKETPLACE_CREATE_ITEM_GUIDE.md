@@ -144,3 +144,4 @@ Leave the field blank if you do not have an image.
 | "Name and valid price required" | Ensure Name is not empty and Price is a positive number. |
 | Type or Category not saving | Use the "Add [name]" option in the dropdown to create it first. |
 
+

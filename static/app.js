@@ -9790,7 +9790,12 @@ async function saveStaffUser() {
             if (staffGradesTaughtGrp) staffGradesTaughtGrp.style.display = 'none';
             await loadUsers();
         } else {
-            const data = await response.json();
+            let data;
+            try {
+                data = await response.json();
+            } catch (_) {
+                throw new Error(response.status === 401 ? 'Session expired. Please log in again.' : 'Server error. Please try again.');
+            }
             throw new Error(data.error || 'Failed to create staff user');
         }
     } catch (error) {
@@ -9849,7 +9854,12 @@ async function saveOutsideStaffUser() {
             document.getElementById('outside-staff-password-confirm').value = '';
             await loadUsers();
         } else {
-            const data = await response.json();
+            let data;
+            try {
+                data = await response.json();
+            } catch (_) {
+                throw new Error(response.status === 401 ? 'Session expired. Please log in again.' : 'Server error. Please try again.');
+            }
             throw new Error(data.error || 'Failed to create Outside Staff user');
         }
     } catch (error) {
@@ -9900,7 +9910,12 @@ async function saveAdminUser() {
             document.getElementById('admin-password-confirm').value = '';
             await loadUsers();
         } else {
-            const data = await response.json();
+            let data;
+            try {
+                data = await response.json();
+            } catch (_) {
+                throw new Error(response.status === 401 ? 'Session expired. Please log in again.' : 'Server error. Please try again.');
+            }
             throw new Error(data.error || 'Failed to create admin user');
         }
     } catch (error) {
@@ -14856,7 +14871,7 @@ window.closeCreateItemModal = closeCreateItemModal;
 window.saveMarketplaceItem = saveMarketplaceItem;
 window.generatePaychecksForAll = generatePaychecksForAll;
 
-// ==================== FERPA Compliance: Parent Portal Functions ====================
+// ==================== Parent Portal Functions ====================
 
 // Load parent's verified children
 async function loadParentChildren() {

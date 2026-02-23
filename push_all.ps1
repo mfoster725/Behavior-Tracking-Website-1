@@ -7,7 +7,7 @@ Write-Host "Staging all changes..." -ForegroundColor Cyan
 git add -A
 
 Write-Host "Committing..." -ForegroundColor Cyan
-git commit -m "Recent changes: marketplace plan, paycheck cron, migrations (grades_taught, marketplace, hidden_rules), HIPAA, UI, app and static updates"
+git commit -m "Recent changes: marketplace plan, paycheck cron, migrations (grades_taught, marketplace, hidden_rules), UI, app and static updates"
 
 Write-Host "Pushing to origin..." -ForegroundColor Cyan
 git push -u origin main

@@ -69,7 +69,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# HIPAA/FERPA Compliance: Audit Logging Setup
+# Audit Logging Setup
 audit_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(audit_log_dir, exist_ok=True)
 
@@ -87,10 +87,10 @@ audit_handler.setFormatter(audit_formatter)
 audit_logger.addHandler(audit_handler)
 audit_logger.propagate = False  # Don't propagate to root logger
 
-# HIPAA/FERPA Compliance: Audit logging function
+# Audit logging function
 def log_phi_access(action, user_id=None, username=None, role=None, resource_type=None, resource_id=None, details=None, ip_address=None):
     """
-    Log access to Protected Health Information (PHI) / Education Records for HIPAA/FERPA compliance.
+    Log access to sensitive data for audit purposes.
     
     Args:
         action: Action performed (e.g., 'VIEW', 'CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'EXPORT')
@@ -247,10 +247,10 @@ def is_case_manager(user):
     return user.role in ('staff', 'admin') and getattr(user, 'designation', None) == 'Case Manager'
 
 
-# HIPAA/FERPA Compliance: Password validation
+# Password validation
 def validate_password_strength(password):
     """
-    Validate password strength for HIPAA/FERPA compliance.
+    Validate password strength.
     Returns (is_valid, error_message) tuple.
     """
     if not password:
@@ -269,7 +269,7 @@ def validate_password_strength(password):
     
     return True, None
 
-# FERPA Compliance: Helper function to filter students based on directory information opt-out
+# Helper function to filter students based on directory information opt-out
 def filter_directory_info(students, include_opted_out=False):
     """
     Filter students based on directory information opt-out status.
@@ -383,7 +383,7 @@ class Student(db.Model):
     email = db.Column(db.String(100))
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
-    # FERPA Compliance: Directory information opt-out
+    # Directory information opt-out
     directory_info_opt_out = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -508,7 +508,7 @@ class OutsideStaffStudent(db.Model):
     
     __table_args__ = (db.UniqueConstraint('user_id', 'student_id', name='unique_outside_staff_student'),)
 
-# FERPA Compliance: Parent-Student Relationship
+# Parent-Student Relationship
 class ParentStudent(db.Model):
     __tablename__ = 'parent_students'
     id = db.Column(db.Integer, primary_key=True)
@@ -526,7 +526,7 @@ class ParentStudent(db.Model):
     
     __table_args__ = (db.UniqueConstraint('parent_user_id', 'student_id', name='unique_parent_student'),)
 
-# FERPA Compliance: Amendment Request
+# Amendment Request
 class AmendmentRequest(db.Model):
     __tablename__ = 'amendment_requests'
     id = db.Column(db.Integer, primary_key=True)
@@ -548,8 +548,8 @@ class AmendmentRequest(db.Model):
     requested_by = db.relationship('User', foreign_keys=[requested_by_user_id], backref='amendment_requests')
     reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_amendment_requests')
 
-# FERPA Compliance: FERPA Rights Notification Tracking
-class FERPARightsNotification(db.Model):
+# Rights Notification Tracking
+class RightsNotification(db.Model):
     __tablename__ = 'ferpa_rights_notifications'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -560,8 +560,8 @@ class FERPARightsNotification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref='ferpa_notifications')
-    student = db.relationship('Student', backref='ferpa_notifications')
+    user = db.relationship('User', foreign_keys=[user_id], backref='rights_notifications')
+    student = db.relationship('Student', backref='rights_notifications')
     acknowledged_by = db.relationship('User', foreign_keys=[acknowledged_by_user_id])
 
 class Schedule(db.Model):
@@ -895,7 +895,7 @@ def login():
         
         if user and user.check_password(password):
             login_user(user)
-            # HIPAA Compliance: Log successful login
+            # Audit: Log successful login
             log_phi_access(
                 action='LOGIN',
                 user_id=user.id,
@@ -906,7 +906,7 @@ def login():
             )
             return jsonify({'success': True}), 200
         else:
-            # HIPAA Compliance: Log failed login attempt
+            # Audit: Log failed login attempt
             if user:
                 log_phi_access(
                     action='LOGIN_FAILED',
@@ -1047,7 +1047,7 @@ def register():
 @app.route('/logout')
 @login_required
 def logout():
-    # HIPAA Compliance: Log logout
+    # Audit: Log logout
     log_phi_access(
         action='LOGOUT',
         user_id=current_user.id,
@@ -1095,7 +1095,7 @@ def students():
                 db.session.rollback()
                 return jsonify({'error': 'Username already exists'}), 400
             
-            # HIPAA Compliance: Validate password strength
+            # Audit: Validate password strength
             password = data['password']
             is_valid, error_msg = validate_password_strength(password)
             if not is_valid:
@@ -1138,7 +1138,7 @@ def students():
         
         db.session.commit()
         
-        # HIPAA Compliance: Log student creation
+        # Audit: Log student creation
         log_phi_access(
             action='CREATE',
             user_id=current_user.id,
@@ -1156,7 +1156,7 @@ def students():
         if current_user.role == 'student':
             if current_user.student_id:
                 student = Student.query.get(current_user.student_id)
-                # HIPAA Compliance: Log student data access
+                # Audit: Log student data access
                 log_phi_access(
                     action='VIEW',
                     user_id=current_user.id,
@@ -1169,7 +1169,7 @@ def students():
                 return jsonify([{'id': student.id, 'name': student.name, 'email': student.email}])
             return jsonify([])
         else:
-            # HIPAA Compliance: Log student list access
+            # Audit: Log student list access
             log_phi_access(
                 action='VIEW',
                 user_id=current_user.id,
@@ -1234,7 +1234,7 @@ def students():
             # Filter students list down to those with student user accounts
             students = [s for s in students if s.id in student_user_ids]
             
-            # FERPA Compliance: Filter out students who opted out of directory information
+            # Filter out students who opted out of directory information
             # Directory information includes name, email, grade, etc.
             students = filter_directory_info(students, include_opted_out=False)
             
@@ -1265,7 +1265,7 @@ def delete_student(student_id):
     db.session.delete(student)
     db.session.commit()
     
-    # HIPAA Compliance: Log student deletion
+    # Audit: Log student deletion
     log_phi_access(
         action='DELETE',
         user_id=current_user.id,
@@ -1323,7 +1323,7 @@ def students_by_staff_period():
         student_user_ids = {u.student_id for u in student_users if u.student_id}
         students = [s for s in students if s.id in student_user_ids]
         
-        # FERPA Compliance: Filter out students who opted out of directory information
+        # Filter out students who opted out of directory information
         students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
     else:
@@ -1399,7 +1399,7 @@ def students_by_staff_name():
         student_user_ids = {u.student_id for u in student_users if u.student_id}
         students = [s for s in students if s.id in student_user_ids]
         
-        # FERPA Compliance: Filter out students who opted out of directory information
+        # Filter out students who opted out of directory information
         students = filter_directory_info(students, include_opted_out=False)
         return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
     else:
@@ -1427,7 +1427,7 @@ def archived_students():
     """
     students = get_archived_students()
     
-    # HIPAA/FERPA: This is an internal administrative view of historical data.
+    # Internal administrative view of historical data.
     # We include all students here, including those who opted out of directory
     # information, because this is not a public directory but an internal log.
     # Still, we minimize the fields we return.
@@ -1620,7 +1620,7 @@ def period_data():
         
         db.session.commit()
         
-        # HIPAA Compliance: Log period data creation/update
+        # Audit: Log period data creation/update
         log_phi_access(
             action='CREATE',
             user_id=current_user.id,
@@ -1638,7 +1638,7 @@ def period_data():
         record_date = datetime.strptime(request.args.get('date'), '%Y-%m-%d').date()
         period = request.args.get('period')
         
-        # HIPAA Compliance: Log period data access
+        # Audit: Log period data access
         log_phi_access(
             action='VIEW',
             user_id=current_user.id,
@@ -1780,7 +1780,7 @@ def daily_records():
         
         db.session.commit()
         
-        # HIPAA Compliance: Log daily record creation/update
+        # Audit: Log daily record creation/update
         action = 'UPDATE' if existing else 'CREATE'
         log_phi_access(
             action=action,
@@ -1798,7 +1798,7 @@ def daily_records():
     else:
         student_id = request.args.get('student_id', type=int)
         
-        # HIPAA Compliance: Log daily record access
+        # Audit: Log daily record access
         log_phi_access(
             action='VIEW',
             user_id=current_user.id,
@@ -1904,7 +1904,7 @@ def summary():
     period = request.args.get('period', None)
     timeframe = request.args.get('quarter') or request.args.get('timeframe', None)  # Support both old and new param names
     
-    # HIPAA Compliance: Log summary access
+    # Audit: Log summary access
     log_phi_access(
         action='VIEW',
         user_id=current_user.id,
@@ -3136,7 +3136,7 @@ def frenzy_stats():
     period = request.args.get('period', None)
     timeframe = request.args.get('timeframe', None)  # "30day", "month", "quarter", "year", "alltime"
     
-    # HIPAA Compliance: Log frenzy stats access
+    # Audit: Log frenzy stats access
     log_phi_access(
         action='VIEW',
         user_id=current_user.id,
@@ -3912,6 +3912,14 @@ def manage_users():
         if not data:
             return jsonify({'error': 'Invalid request. JSON data required.'}), 400
         
+        username = (data.get('username') or '').strip()
+        password = data.get('password')
+        role = data.get('role')
+        
+        # Audit: Validate password strength
+        is_valid, error_msg = validate_password_strength(password)
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
         
         if not username:
             return jsonify({'error': 'Username is required'}), 400
@@ -3919,7 +3927,6 @@ def manage_users():
             return jsonify({'error': 'Password is required'}), 400
         if not role:
             return jsonify({'error': 'Role is required'}), 400
-            return jsonify({'error': error_msg}), 400
         
         # Permission check: Admin can create anyone, staff can only create students
         if current_user.role == 'admin':
@@ -3953,7 +3960,7 @@ def manage_users():
         db.session.add(user)
         db.session.commit()
         
-        # HIPAA Compliance: Log user creation
+        # Audit: Log user creation
         log_phi_access(
             action='CREATE',
             user_id=current_user.id,
@@ -3995,7 +4002,7 @@ def manage_users():
             if 'username' in data:
                 user.username = data['username']
             if 'password' in data:
-                # HIPAA Compliance: Validate password strength
+                # Audit: Validate password strength
                 is_valid, error_msg = validate_password_strength(data['password'])
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
@@ -4035,7 +4042,7 @@ def manage_users():
                     if student:
                         student.name = data['name']
             if 'password' in data:
-                # HIPAA Compliance: Validate password strength
+                # Audit: Validate password strength
                 is_valid, error_msg = validate_password_strength(data['password'])
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
@@ -4056,7 +4063,7 @@ def manage_users():
         elif current_user.role == 'staff' and current_user.id == user_id:
             # Staff can only update their own password
             if 'password' in data:
-                # HIPAA Compliance: Validate password strength
+                # Audit: Validate password strength
                 is_valid, error_msg = validate_password_strength(data['password'])
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
@@ -4067,7 +4074,7 @@ def manage_users():
         elif current_user.id == user_id and user.role == 'student':
             # Students can only update their own password
             if 'password' in data:
-                # HIPAA Compliance: Validate password strength
+                # Audit: Validate password strength
                 is_valid, error_msg = validate_password_strength(data['password'])
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
@@ -4273,7 +4280,7 @@ def team_members(student_id):
         db.session.commit()
         return jsonify({'message': 'Team members updated successfully'}), 200
 
-# FERPA Compliance: Amendment Request Endpoints
+# Amendment Request Endpoints
 @app.route('/api/amendment-requests', methods=['GET', 'POST'])
 @limiter.limit("30 per minute")
 @login_required
@@ -4404,7 +4411,7 @@ def review_amendment_request(request_id):
         'message': f'Amendment request {status}'
     }), 200
 
-# FERPA Compliance: Directory Information Opt-Out
+# Directory Information Opt-Out
 @app.route('/api/students/<int:student_id>/directory-opt-out', methods=['POST', 'DELETE'])
 @limiter.limit("30 per minute")
 @login_required
@@ -4447,12 +4454,12 @@ def directory_opt_out(student_id):
         'message': f'Directory information opt-{"out" if student.directory_info_opt_out else "in"} successful'
     }), 200
 
-# FERPA Compliance: Data Export Endpoint
+# Data Export Endpoint
 @app.route('/api/export-student-data/<int:student_id>', methods=['GET'])
 @limiter.limit("10 per minute")
 @login_required
 def export_student_data(student_id):
-    """Export all student data (FERPA requirement: parents/students can request copies)"""
+    """Export all student data (parents/students can request copies)"""
     # Verify user has access
     if not has_student_access(current_user, student_id):
         return jsonify({'error': 'Access denied'}), 403
@@ -4527,14 +4534,14 @@ def export_student_data(student_id):
     
     return jsonify(export_data), 200
 
-# FERPA Compliance: FERPA Rights Notification Endpoint
-@app.route('/api/ferpa-notification', methods=['GET', 'POST'])
+# Rights Notification Endpoint
+@app.route('/api/rights-notification', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 @login_required
-def ferpa_notification():
-    """Handle FERPA rights notification acknowledgment"""
+def rights_notification():
+    """Handle rights notification acknowledgment"""
     if request.method == 'POST':
-        # Acknowledge FERPA rights notification
+        # Acknowledge rights notification
         data = request.json or {}
         notification_year = data.get('notification_year')
         student_id = data.get('student_id')  # Optional, for parent users
@@ -4543,7 +4550,7 @@ def ferpa_notification():
             return jsonify({'error': 'Notification year is required'}), 400
         
         # Check if notification already exists for this year
-        existing = FERPARightsNotification.query.filter_by(
+        existing = RightsNotification.query.filter_by(
             user_id=current_user.id,
             notification_year=notification_year
         ).first()
@@ -4556,7 +4563,7 @@ def ferpa_notification():
                 existing.student_id = student_id
         else:
             # Create new acknowledgment
-            notification = FERPARightsNotification(
+            notification = RightsNotification(
                 user_id=current_user.id,
                 student_id=student_id,
                 notification_year=notification_year,
@@ -4569,16 +4576,16 @@ def ferpa_notification():
         
         # Log acknowledgment
         log_phi_access(
-            action='FERPA_RIGHTS_ACKNOWLEDGED',
+            action='RIGHTS_ACKNOWLEDGED',
             user_id=current_user.id,
             username=current_user.username,
             role=current_user.role,
-            resource_type='ferpa_notifications',
-            details=f'FERPA rights acknowledged for year {notification_year}',
+            resource_type='rights_notifications',
+            details=f'Rights acknowledged for year {notification_year}',
             ip_address=get_remote_address()
         )
         
-        return jsonify({'message': 'FERPA rights acknowledgment recorded', 'acknowledged': True}), 200
+        return jsonify({'message': 'Rights acknowledgment recorded', 'acknowledged': True}), 200
     
     else:
         # GET: Check if notification has been acknowledged
@@ -4586,7 +4593,7 @@ def ferpa_notification():
         if not notification_year:
             notification_year = datetime.now().year
         
-        notification = FERPARightsNotification.query.filter_by(
+        notification = RightsNotification.query.filter_by(
             user_id=current_user.id,
             notification_year=notification_year
         ).first()
@@ -5001,7 +5008,6 @@ def cron_debug():
 
 
 @app.route('/api/paycheck/generate-cron', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")
 def generate_paychecks_cron():
     """
     Cron endpoint for external schedulers (e.g. cron-job.org).
