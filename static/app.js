@@ -370,8 +370,16 @@ function setupEventListeners() {
                 const view = e.target.dataset.view;
                 console.log('Switching to view:', view);
                 switchView(view);
+                document.body.classList.remove('nav-menu-open');
             });
         });
+
+        const navHamburger = document.getElementById('nav-hamburger');
+        if (navHamburger) {
+            navHamburger.addEventListener('click', () => {
+                document.body.classList.toggle('nav-menu-open');
+            });
+        }
 
         // Student selection
         const studentSelect = document.getElementById('student-select');
@@ -1214,217 +1222,7 @@ async function switchView(viewName) {
         }
         handleMarketplaceView();
     }
-    if (viewName === 'accounts') {
-        initAccountsView();
-    }
 }
-
-// --- Accounts tab (Python/vanilla JS) ---
-var accountsData = {
-    accounts: [],
-    transactions: []
-};
-var ACCOUNTS_TYPE_LABELS = { deposit: 'Deposit', withdrawal: 'Withdrawal', interest: 'Interest Payment', transfer_in: 'Transfer In', transfer_out: 'Transfer Out', purchase: 'Purchase', other: 'Other' };
-var currentBankStudentId = null;
-
-function getAccountsStudentId() {
-    if (window.currentUser && window.currentUser.role === 'student') {
-        return window.currentUser.studentId || null;
-    }
-    if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) return currentBankStudentId;
-    var sel = document.getElementById('accounts-student-select');
-    if (sel && sel.value) return parseInt(sel.value, 10);
-    return null;
-}
-
-function renderAccountsFromData() {
-    var totalEl = document.getElementById('accounts-total-amount');
-    var cardsEl = document.getElementById('accounts-cards-container');
-    var filterAccount = document.getElementById('accounts-filter-account');
-    if (!cardsEl) return;
-    var total = accountsData.accounts.reduce(function (s, a) { return s + a.balance; }, 0);
-    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    cardsEl.innerHTML = '';
-    accountsData.accounts.forEach(function (a) {
-        var typeLabel = a.type === 'checking' ? 'Checking' : a.type === 'savings' ? 'Savings' : 'Investment';
-        var card = document.createElement('div');
-        card.style.cssText = 'border: 2px solid #e2e8f0; border-radius: 16px; padding: 18px; background: #fff; cursor: pointer;';
-        card.onmouseover = function () { card.style.borderColor = '#0ea5e9'; card.style.boxShadow = '0 4px 12px rgba(14,165,233,0.15)'; };
-        card.onmouseout = function () { card.style.borderColor = '#e2e8f0'; card.style.boxShadow = 'none'; }
-        var lastInt = a.lastInterestDate ? '<p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">Last interest: ' + new Date(a.lastInterestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '</p>' : '';
-        card.innerHTML = '<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;color:#64748b;">' + typeLabel + '</p><p style="margin:0;font-weight:600;">' + (a.name || '') + '</p><p style="margin:4px 0 0 0;font-size:13px;color:#64748b;">' + (a.maskedNumber || '') + '</p><p style="margin:10px 0 0 0;font-size:1.25rem;font-weight:700;">$' + Number(a.balance).toLocaleString('en-US', { minimumFractionDigits: 2 }) + '</p>' + lastInt;
-        cardsEl.appendChild(card);
-    });
-    if (filterAccount) {
-        filterAccount.innerHTML = '<option value="all">All accounts</option>';
-        accountsData.accounts.forEach(function (a) { var o = document.createElement('option'); o.value = a.id; o.textContent = a.name; filterAccount.appendChild(o); });
-    }
-    renderAccountsTransactions();
-}
-
-function loadAccountsForStudent(studentId) {
-    return fetch('/api/bank-account/' + studentId)
-        .then(function (res) { return res.ok ? res.json() : Promise.reject(res); })
-        .then(function (data) {
-            var sid = String(studentId);
-            accountsData.accounts = [{ id: 'chk-1', type: 'checking', name: 'Primary Checking', maskedNumber: '•••• ' + sid.slice(-4), balance: data.balance }];
-            accountsData.transactions = (data.transactions || []).map(function (t) {
-                return {
-                    id: t.id,
-                    accountId: 'chk-1',
-                    date: t.created_at,
-                    description: t.description || '',
-                    type: t.type || 'other',
-                    amount: t.amount,
-                    balanceAfter: t.balance_after
-                };
-            });
-            renderAccountsFromData();
-        })
-        .catch(function () {
-            accountsData.accounts = [];
-            accountsData.transactions = [];
-            renderAccountsFromData();
-        });
-}
-
-function initAccountsView() {
-    var totalEl = document.getElementById('accounts-total-amount');
-    var cardsEl = document.getElementById('accounts-cards-container');
-    var filterAccount = document.getElementById('accounts-filter-account');
-    var filterType = document.getElementById('accounts-filter-type');
-    var wrap = document.getElementById('accounts-student-select-wrap');
-    var sel = document.getElementById('accounts-student-select');
-    var noMsg = document.getElementById('accounts-no-student-msg');
-    if (!cardsEl) return;
-
-    var isStudent = window.currentUser && window.currentUser.role === 'student';
-
-    if (isStudent) {
-        if (wrap) wrap.style.display = 'none';
-        var studentId = window.currentUser.studentId || null;
-        if (!studentId) {
-            accountsData.accounts = [];
-            accountsData.transactions = [];
-            if (totalEl) totalEl.textContent = '$0.00';
-            cardsEl.innerHTML = '';
-            if (filterAccount) filterAccount.innerHTML = '<option value="all">All accounts</option>';
-            renderAccountsTransactions();
-            bindAccountsEvents();
-            return;
-        }
-        loadAccountsForStudent(studentId).finally(bindAccountsEvents);
-        return;
-    }
-
-    if (wrap) wrap.style.display = 'block';
-    if (noMsg) noMsg.style.display = 'none';
-
-    function onStudentChosen() {
-        var studentId = getAccountsStudentId();
-        if (!studentId) {
-            if (noMsg) noMsg.style.display = 'block';
-            accountsData.accounts = [];
-            accountsData.transactions = [];
-            renderAccountsFromData();
-            return;
-        }
-        if (noMsg) noMsg.style.display = 'none';
-        if (typeof currentBankStudentId !== 'undefined') currentBankStudentId = studentId;
-        loadAccountsForStudent(studentId);
-    }
-
-    var params = new URLSearchParams();
-    fetch('/api/bank-account/search?' + params)
-        .then(function (res) {
-            if (!res.ok) {
-                return res.text().then(function (text) {
-                    console.error('Accounts student list failed:', res.status, res.statusText, text);
-                    return Promise.reject(new Error('API ' + res.status));
-                });
-            }
-            return res.json();
-        })
-        .then(function (students) {
-            if (!sel) return;
-            sel.innerHTML = '<option value="">— Select student —</option>';
-            var list = Array.isArray(students) ? students : [];
-            console.log('Accounts student list loaded:', list.length, 'students');
-            list.forEach(function (s) {
-                var o = document.createElement('option');
-                o.value = s.student_id;
-                o.textContent = s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
-                sel.appendChild(o);
-            });
-            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
-                sel.value = currentBankStudentId;
-            }
-            if (!sel._accountsBound) {
-                sel._accountsBound = true;
-                sel.addEventListener('change', function () {
-                    var v = sel.value;
-                    if (v && typeof currentBankStudentId !== 'undefined') currentBankStudentId = parseInt(v, 10);
-                    onStudentChosen();
-                });
-            }
-            onStudentChosen();
-        })
-        .catch(function (err) {
-            console.error('Accounts student list error:', err);
-            if (sel) sel.innerHTML = '<option value="">— Select student —</option>';
-            onStudentChosen();
-        })
-        .then(bindAccountsEvents);
-}
-
-function renderAccountsTransactions() {
-    var tbody = document.getElementById('accounts-transactions-tbody');
-    var filterAccount = document.getElementById('accounts-filter-account');
-    var filterType = document.getElementById('accounts-filter-type');
-    if (!tbody) return;
-    var accountId = filterAccount && filterAccount.value !== 'all' ? filterAccount.value : null;
-    var typeVal = filterType && filterType.value !== 'all' ? filterType.value : null;
-    var list = accountsData.transactions.filter(function (t) { return (!accountId || t.accountId === accountId) && (!typeVal || t.type === typeVal); });
-    list.sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
-    if (list.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8;">No transactions match the filters.</td></tr>'; return; }
-    tbody.innerHTML = list.map(function (tx) {
-        var typeLabel = ACCOUNTS_TYPE_LABELS[tx.type] || tx.type;
-        var amtStr = (tx.amount >= 0 ? '+' : '−') + '$' + Math.abs(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2 });
-        var amtStyle = 'padding:12px 14px;text-align:right;font-weight:600;' + (tx.amount >= 0 ? 'color:#059669;' : 'color:#dc2626;');
-        return '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:12px 14px;">' + new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '</td><td style="padding:12px 14px;">' + (tx.description || '') + '</td><td style="padding:12px 14px;">' + typeLabel + '</td><td style="' + amtStyle + '">' + amtStr + '</td><td style="padding:12px 14px;text-align:right;">$' + Number(tx.balanceAfter).toLocaleString('en-US', { minimumFractionDigits: 2 }) + '</td></tr>';
-    }).join('');
-}
-
-function bindAccountsEvents() {
-    var refreshBtn = document.getElementById('accounts-refresh-btn');
-    var filterAccount = document.getElementById('accounts-filter-account');
-    var filterType = document.getElementById('accounts-filter-type');
-    var addBtn = document.getElementById('accounts-add-investment-btn');
-    var modal = document.getElementById('accounts-add-investment-modal');
-    var closeBtn = document.getElementById('accounts-add-investment-close');
-    var cancelBtn = document.getElementById('accounts-add-investment-cancel');
-    var submitBtn = document.getElementById('accounts-add-investment-submit');
-    var nameIn = document.getElementById('accounts-add-investment-name');
-    var last4In = document.getElementById('accounts-add-investment-last4');
-    function closeModal() { if (modal) modal.style.display = 'none'; }
-    if (refreshBtn && !refreshBtn._accountsBound) {
-        refreshBtn._accountsBound = true;
-        refreshBtn.addEventListener('click', function () {
-            var studentId = getAccountsStudentId();
-            if (!studentId) return;
-            loadAccountsForStudent(studentId);
-        });
-    }
-    if (filterAccount && !filterAccount._accountsBound) { filterAccount._accountsBound = true; filterAccount.addEventListener('change', renderAccountsTransactions); }
-    if (filterType && !filterType._accountsBound) { filterType._accountsBound = true; filterType.addEventListener('change', renderAccountsTransactions); }
-    if (addBtn && !addBtn._accountsBound) { addBtn._accountsBound = true; addBtn.addEventListener('click', function () { if (modal) { modal.style.display = 'flex'; } if (nameIn) nameIn.value = ''; if (last4In) last4In.value = ''; }); }
-    if (closeBtn && !closeBtn._accountsBound) { closeBtn._accountsBound = true; closeBtn.addEventListener('click', closeModal); }
-    if (cancelBtn && !cancelBtn._accountsBound) { cancelBtn._accountsBound = true; cancelBtn.addEventListener('click', closeModal); }
-    if (modal && !modal._accountsBound) { modal._accountsBound = true; modal.addEventListener('click', closeModal); }
-    if (submitBtn && !submitBtn._accountsBound) { submitBtn._accountsBound = true; submitBtn.addEventListener('click', function () { var name = nameIn && nameIn.value ? nameIn.value.trim() : ''; if (!name) return; var last4 = last4In && last4In.value ? String(last4In.value).replace(/\D/g, '').slice(-4) : ''; accountsData.accounts.push({ id: 'inv-' + Date.now(), type: 'investment', name: name, maskedNumber: last4 ? '•••• ' + last4 : '•••• ----', balance: 0 }); closeModal(); initAccountsView(); }); }
-}
-
-function loadQuarterConfig() {
     const container = document.getElementById('quarter-config');
     if (!container) return;
     
