@@ -166,14 +166,22 @@ body.nav-menu-open .nav-hamburger span:nth-child(3) {
     .nav-btn:last-child {
         border-bottom: none;
     }
+    /* Ensure only one content view is visible on mobile */
+    .view {
+        display: none !important;
+    }
+    .view.active {
+        display: block !important;
+    }
 }
 
-    display: none;
+.view {
+    display: none !important;
     padding: 30px;
 }
 
 .view.active {
-    display: block;
+    display: block !important;
 }
 
 .form-section {
