@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Behavior Tracking System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=acc7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=acc8">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -20,7 +20,7 @@
                     <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
-                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu" onclick="document.body.classList.toggle('nav-menu-open'); return false;">
+                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu" onclick="if(typeof toggleNavMenu==='function')toggleNavMenu();else document.body.classList.toggle('nav-menu-open'); return false;">
                         <span></span><span></span><span></span>
                     </button>
                     <div id="notifications-bell-wrap" style="position: relative;">
@@ -39,20 +39,20 @@
             </div>
             <nav id="main-nav" role="navigation">
                 <!-- Template version: acc5 (no Accounts tab) -->
-                <button class="nav-btn active" data-view="period-entry">Period Entry</button>
-                <button class="nav-btn" data-view="entry">Daily Entry</button>
-                <button class="nav-btn" data-view="summary">Summary</button>
-                <button class="nav-btn" data-view="frenzy">Frenzy Stats</button>
+                <button type="button" class="nav-btn active" data-view="period-entry">Period Entry</button>
+                <button type="button" class="nav-btn" data-view="entry">Daily Entry</button>
+                <button type="button" class="nav-btn" data-view="summary">Summary</button>
+                <button type="button" class="nav-btn" data-view="frenzy">Frenzy Stats</button>
                 {% if user.role in ['staff', 'admin'] %}
-                <button class="nav-btn" data-view="schedules">Schedules</button>
+                <button type="button" class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
-                <button class="nav-btn" data-view="bank-account">Bank Account</button>
-                <button class="nav-btn" data-view="marketplace">Marketplace</button>
+                <button type="button" class="nav-btn" data-view="bank-account">Bank Account</button>
+                <button type="button" class="nav-btn" data-view="marketplace">Marketplace</button>
                 {% if user.role == 'admin' %}
-                <button class="nav-btn" data-view="admin">Admin Panel</button>
+                <button type="button" class="nav-btn" data-view="admin">Admin Panel</button>
                 {% endif %}
                 {% if user.role in ['staff', 'admin'] %}
-                <button class="nav-btn" data-view="users">User Management</button>
+                <button type="button" class="nav-btn" data-view="users">User Management</button>
                 {% endif %}
             </nav>
         </header>
@@ -1697,7 +1697,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc8"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc9"></script>
 </body>
 </html>
 

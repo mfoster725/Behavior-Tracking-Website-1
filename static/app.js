@@ -300,6 +300,17 @@ function applyManagedByMeDefaultForRole() {
 }
 
 // Initialize: attach nav/hamburger so it works even if DOMContentLoaded already fired
+function setNavDropdownPosition() {
+    if (!document.body.classList.contains('nav-menu-open')) return;
+    var header = document.querySelector('header');
+    if (header) document.documentElement.style.setProperty('--nav-dropdown-top', header.offsetHeight + 'px');
+}
+function toggleNavMenu() {
+    document.body.classList.toggle('nav-menu-open');
+    setNavDropdownPosition();
+}
+window.toggleNavMenu = toggleNavMenu;
+
 function attachNavAndHamburger() {
     if (window._navHamburgerAttached) return;
     window._navHamburgerAttached = true;
@@ -316,6 +327,7 @@ function attachNavAndHamburger() {
                 e.preventDefault();
                 e.stopPropagation();
                 document.body.classList.toggle('nav-menu-open');
+                setNavDropdownPosition();
             }
         });
 
@@ -324,9 +336,10 @@ function attachNavAndHamburger() {
             hamburgerEl.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                document.body.classList.toggle('nav-menu-open');
+                toggleNavMenu();
             });
         }
+        window.addEventListener('resize', setNavDropdownPosition);
     }
 }
 
