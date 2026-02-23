@@ -114,6 +114,7 @@ nav {
     background: currentColor;
     border-radius: 1px;
     transition: transform 0.3s, opacity 0.3s;
+    pointer-events: none;
 }
 .nav-hamburger:hover {
     background: rgba(255, 255, 255, 0.3);

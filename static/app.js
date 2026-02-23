@@ -343,6 +343,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update quarter display
         updateQuarterDisplay();
         
+        // Restore last selected tab (or leave default period-entry)
+        try {
+            const lastView = localStorage.getItem('lastView');
+            if (lastView && document.querySelector(`[data-view="${lastView}"]`)) {
+                switchView(lastView);
+            }
+        } catch (e) {}
+        
         // Load teacher schedule and auto-select period if in period-entry view
         if (canEdit()) {
             loadSchedules('teacher');
@@ -367,7 +375,8 @@ function setupEventListeners() {
         console.log(`Found ${navButtons.length} navigation buttons`);
         navButtons.forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const view = e.target.dataset.view;
+                const view = e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.view;
+                if (!view) return;
                 console.log('Switching to view:', view);
                 switchView(view);
                 document.body.classList.remove('nav-menu-open');
@@ -376,7 +385,8 @@ function setupEventListeners() {
 
         const navHamburger = document.getElementById('nav-hamburger');
         if (navHamburger) {
-            navHamburger.addEventListener('click', () => {
+            navHamburger.addEventListener('click', (e) => {
+                e.preventDefault();
                 document.body.classList.toggle('nav-menu-open');
             });
         }
@@ -1063,8 +1073,12 @@ async function switchView(viewName) {
     if (navButton) {
         navButton.classList.add('active');
     }
+
+    // Persist last selected tab so we reopen to it on next load
+    try {
+        localStorage.setItem('lastView', viewName);
+    } catch (e) {}
     
-    // If switching to period entry view, load teacher schedule and auto-select period
     if (viewName === 'period-entry') {
         // Load teacher schedule if user is staff/admin
         if (canEdit()) {
@@ -5496,6 +5510,10 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                 </table>
             </div>
             
+            <div style="margin-top: 12px;">
+                <button type="button" class="btn-secondary" id="add-point-card-row-btn" style="padding: 6px 12px; font-size: 13px;">+ Add row</button>
+            </div>
+            
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
                 <button class="btn-primary" onclick="saveEditedPointCard(${record.id}, ${studentId}, '${date}')">Save Changes</button>
                 <button class="btn-secondary" onclick="document.getElementById('edit-point-card-modal').remove()">Cancel</button>
@@ -5506,8 +5524,10 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     modal.innerHTML = modalContent;
     document.body.appendChild(modal);
     
-    // Store the record data for saving
+    // Store the record data for saving (and student context for add row)
     window.editingPointCardRecord = record;
+    window.editingPointCardStudentId = studentId;
+    window.editingPointCardStudentName = studentName;
     
     // Add event listeners to info buttons
     const infoButtons = modal.querySelectorAll('.info-btn-small');
@@ -5539,6 +5559,106 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             showInfoModal(syntheticEvent);
         });
     });
+    
+    const addRowBtn = document.getElementById('add-point-card-row-btn');
+    if (addRowBtn) {
+        addRowBtn.addEventListener('click', addPointCardRow);
+    }
+}
+
+function addPointCardRow() {
+    const record = window.editingPointCardRecord;
+    const studentId = window.editingPointCardStudentId;
+    const studentName = window.editingPointCardStudentName;
+    const modal = document.getElementById('edit-point-card-modal');
+    if (!record || !modal) return;
+    
+    const index = record.periods.length;
+    const newPeriod = {
+        time_range: '',
+        location: '',
+        safety_points: null,
+        teamwork_points: null,
+        accountability_points: null,
+        relationships_points: null,
+        points_possible: 4,
+        reset: false,
+        frenzy: false,
+        notes: '',
+        reminders: '',
+        info: '',
+        infractions: []
+    };
+    record.periods.push(newPeriod);
+    
+    const tbody = modal.querySelector('.point-card-edit-table tbody');
+    if (!tbody) return;
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="text" class="edit-input" data-period-index="${index}" data-category="time_range" placeholder="Time" style="width: 100%; padding: 4px; box-sizing: border-box;">
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd;">
+            <input type="text" class="edit-input" data-period-index="${index}" data-category="location" placeholder="Location" style="width: 100%; padding: 4px; box-sizing: border-box;">
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 226, 226, 0.3);">
+            <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
+                <option value="">-</option>
+                <option value="2">2</option>
+                <option value="1">1</option>
+                <option value="0">0</option>
+            </select>
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(219, 234, 254, 0.3);">
+            <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
+                <option value="">-</option>
+                <option value="2">2</option>
+                <option value="1">1</option>
+                <option value="0">0</option>
+            </select>
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(209, 250, 229, 0.3);">
+            <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
+                <option value="">-</option>
+                <option value="2">2</option>
+                <option value="1">1</option>
+                <option value="0">0</option>
+            </select>
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 243, 199, 0.3);">
+            <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
+                <option value="">-</option>
+                <option value="2">2</option>
+                <option value="1">1</option>
+                <option value="0">0</option>
+            </select>
+        </td>
+        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(229, 231, 235, 0.3); text-align: center;">
+            <button class="info-btn-small" data-period-index="${index}" type="button" style="padding: 4px 8px; font-size: 11px;">Add</button>
+        </td>
+    `;
+    tbody.appendChild(tr);
+    
+    const infoBtn = tr.querySelector('.info-btn-small');
+    if (infoBtn) {
+        infoBtn.addEventListener('click', () => {
+            const period = record.periods[index];
+            const syntheticEvent = {
+                target: {
+                    dataset: {
+                        studentId: studentId,
+                        period: period.time_range,
+                        studentName: studentName,
+                        info: period.info || '',
+                        periodIndex: index,
+                        isEditPointCard: 'true'
+                    }
+                }
+            };
+            showInfoModal(syntheticEvent);
+        });
+    }
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
@@ -5552,14 +5672,19 @@ async function saveEditedPointCard(recordId, studentId, date) {
     
     // Collect updated values from the form
     const updatedPeriods = record.periods.map((period, index) => {
+        const timeInput = modal.querySelector(`input.edit-input[data-period-index="${index}"][data-category="time_range"]`);
+        const locationInput = modal.querySelector(`input.edit-input[data-period-index="${index}"][data-category="location"]`);
+        const time_range = (timeInput ? timeInput.value : null) ?? period.time_range;
+        const location = (locationInput ? locationInput.value : null) ?? period.location;
+        
         const safetySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="safety"]`);
         const teamworkSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="teamwork"]`);
         const accountabilitySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="accountability"]`);
         const relationshipsSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="relationships"]`);
         
         return {
-            time_range: period.time_range,
-            location: period.location,
+            time_range: (time_range && String(time_range).trim()) ? String(time_range).trim() : (period.time_range || ''),
+            location: (location && String(location).trim()) ? String(location).trim() : (period.location || ''),
             safety_points: safetySelect.value === '' ? null : parseInt(safetySelect.value),
             teamwork_points: teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value),
             accountability_points: accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value),
@@ -5574,6 +5699,9 @@ async function saveEditedPointCard(recordId, studentId, date) {
         };
     });
     
+    // Omit periods that have neither time nor location (e.g. added but left blank)
+    const periodsToSave = updatedPeriods.filter(p => (p.time_range && p.time_range.trim()) || (p.location && p.location.trim()));
+    
     try {
         const response = await fetch('/api/daily-records', {
             method: 'POST',
@@ -5582,7 +5710,7 @@ async function saveEditedPointCard(recordId, studentId, date) {
                 student_id: studentId,
                 date: date,
                 present: true,
-                periods: updatedPeriods,
+                periods: periodsToSave,
                 frenzies: []
             })
         });
