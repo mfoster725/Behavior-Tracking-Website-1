@@ -302,6 +302,22 @@ function applyManagedByMeDefaultForRole() {
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     try {
+        // Nav and hamburger: use delegation so clicks work even if setupEventListeners fails
+        document.addEventListener('click', function navAndHamburgerClick(e) {
+            var navBtn = e.target && e.target.closest && e.target.closest('.nav-btn');
+            if (navBtn && navBtn.dataset && navBtn.dataset.view) {
+                e.preventDefault();
+                switchView(navBtn.dataset.view);
+                document.body.classList.remove('nav-menu-open');
+                return;
+            }
+            var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
+            if (hamburger) {
+                e.preventDefault();
+                document.body.classList.toggle('nav-menu-open');
+            }
+        });
+
         console.log('Initializing Behavior Tracking System...');
         console.log('Current user:', window.currentUser);
         
@@ -370,26 +386,7 @@ function setupEventListeners() {
     try {
         console.log('Setting up event listeners...');
         
-        // Navigation
-        const navButtons = document.querySelectorAll('.nav-btn');
-        console.log(`Found ${navButtons.length} navigation buttons`);
-        navButtons.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const view = e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.view;
-                if (!view) return;
-                console.log('Switching to view:', view);
-                switchView(view);
-                document.body.classList.remove('nav-menu-open');
-            });
-        });
-
-        const navHamburger = document.getElementById('nav-hamburger');
-        if (navHamburger) {
-            navHamburger.addEventListener('click', (e) => {
-                e.preventDefault();
-                document.body.classList.toggle('nav-menu-open');
-            });
-        }
+        // Navigation and hamburger are handled by delegation in DOMContentLoaded (see top of init)
 
         // Student selection
         const studentSelect = document.getElementById('student-select');
