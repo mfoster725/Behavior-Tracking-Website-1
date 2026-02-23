@@ -299,11 +299,11 @@ function applyManagedByMeDefaultForRole() {
     dailyEntryManagedByMe = shouldCheck;
 }
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    try {
-        // Nav and hamburger: use delegation so clicks work even if setupEventListeners fails
-        document.addEventListener('click', function navAndHamburgerClick(e) {
+// Initialize: attach nav/hamburger so it works even if DOMContentLoaded already fired
+function attachNavAndHamburger() {
+    if (window._navHamburgerAttached) return;
+    window._navHamburgerAttached = true;
+    document.addEventListener('click', function navAndHamburgerClick(e) {
             var navBtn = e.target && e.target.closest && e.target.closest('.nav-btn');
             if (navBtn && navBtn.dataset && navBtn.dataset.view) {
                 e.preventDefault();
@@ -314,11 +314,29 @@ document.addEventListener('DOMContentLoaded', () => {
             var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
             if (hamburger) {
                 e.preventDefault();
+                e.stopPropagation();
                 document.body.classList.toggle('nav-menu-open');
             }
         });
 
-        console.log('Initializing Behavior Tracking System...');
+        var hamburgerEl = document.getElementById('nav-hamburger');
+        if (hamburgerEl) {
+            hamburgerEl.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.body.classList.toggle('nav-menu-open');
+            });
+        }
+    }
+}
+
+if (document.readyState !== 'loading') {
+    attachNavAndHamburger();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        attachNavAndHamburger();
         console.log('Current user:', window.currentUser);
         
         // Set default date if not already set

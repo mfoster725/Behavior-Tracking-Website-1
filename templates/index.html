@@ -20,7 +20,7 @@
                     <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
-                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu">
+                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu" onclick="document.body.classList.toggle('nav-menu-open'); return false;">
                         <span></span><span></span><span></span>
                     </button>
                     <div id="notifications-bell-wrap" style="position: relative;">
@@ -1697,7 +1697,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc7"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc8"></script>
 </body>
 </html>
 

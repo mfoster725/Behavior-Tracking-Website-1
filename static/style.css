@@ -85,11 +85,14 @@ nav {
     cursor: pointer;
     color: white;
     transition: all 0.3s;
+    position: relative;
+    z-index: 201;
 }
 
 /* Nav list: hidden by default, shown below header when hamburger is open */
 header {
     position: relative;
+    z-index: 200;
 }
 header nav#main-nav {
     display: none;
