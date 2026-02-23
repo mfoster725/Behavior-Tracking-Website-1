@@ -19,10 +19,7 @@
                     <h1>Behavior Tracking System</h1>
                     <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu" onclick="document.body.classList.toggle('nav-menu-open'); var h=document.querySelector('header'); if(h) document.documentElement.style.setProperty('--nav-dropdown-top', h.offsetHeight+'px'); return false;">
-                        <span></span><span></span><span></span>
-                    </button>
+                <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
                     <div id="notifications-bell-wrap" style="position: relative;">
                         <button type="button" id="notifications-bell-btn" title="Notifications" style="background: none; border: none; cursor: pointer; padding: 6px; font-size: 1.2rem;">🔔</button>
                         <span id="notifications-badge" style="display: none; position: absolute; top: -2px; right: -2px; background: #dc2626; color: white; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; align-items: center; justify-content: center; padding: 0 4px;">0</span>
@@ -34,7 +31,9 @@
                             <div id="notifications-list" style="padding: 8px;"></div>
                         </div>
                     </div>
-                    <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+                    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="Open menu" onclick="toggleNavMenu(); return false;">
+                        <span></span><span></span><span></span>
+                    </button>
                 </div>
             </div>
             <nav id="main-nav" role="navigation">
@@ -54,6 +53,7 @@
                 {% if user.role in ['staff', 'admin'] %}
                 <button type="button" class="nav-btn" data-view="users">User Management</button>
                 {% endif %}
+                <button type="button" class="nav-btn nav-btn-logout" onclick="window.location.href='/logout'">Logout</button>
             </nav>
         </header>
         
@@ -92,7 +92,7 @@
                     </div>
                     <div class="form-group">
                         <label for="location-input">Location:</label>
-                        <input type="text" id="location-input" placeholder="e.g., English, Math">
+                        <input type="text" id="location-input" placeholder="e.g., English, Math" autocomplete="off">
                     </div>
                 </div>
 
@@ -1301,7 +1301,7 @@
                 <!-- Alternate Location -->
                 <div class="form-group">
                     <label for="info-alternate-location">Alternate Location:</label>
-                    <input type="text" id="info-alternate-location" list="alternate-location-options" autocomplete="on" placeholder="Type or select location...">
+                    <input type="text" id="info-alternate-location" list="alternate-location-options" autocomplete="off" placeholder="Type or select location...">
                     <datalist id="alternate-location-options">
                         <!-- Options will be populated dynamically -->
                     </datalist>

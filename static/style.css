@@ -33,6 +33,10 @@ header {
     margin-bottom: 20px;
 }
 
+.header-actions {
+    position: relative;
+}
+
 header h1 {
     margin-bottom: 10px;
     font-size: 2em;
@@ -114,12 +118,12 @@ header nav#main-nav {
 body.nav-menu-open header nav#main-nav {
     display: flex;
     position: fixed;
-    top: var(--nav-dropdown-top, 120px);
-    right: 20px;
-    left: auto;
-    width: max-content;
+    top: var(--nav-dropdown-top, 70px);
+    left: var(--nav-dropdown-left, 20px);
+    right: auto;
+    width: min(320px, calc(100vw - 20px));
     min-width: 200px;
-    max-width: min(320px, calc(100vw - 40px));
+    max-width: calc(100vw - 20px);
     margin-left: auto;
     margin-right: 0;
     border-radius: 0 0 12px 12px;
@@ -141,9 +145,15 @@ body.nav-menu-open header nav#main-nav {
     pointer-events: auto;
     border: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    white-space: normal;
+    word-break: break-word;
 }
 .nav-btn:last-child {
     border-bottom: none;
+}
+
+.nav-btn-logout {
+    color: #ffe4e6;
 }
 
 .nav-btn:hover {
@@ -167,6 +177,44 @@ body.nav-menu-open header nav#main-nav {
 }
 .nav-hamburger:hover {
     background: rgba(255, 255, 255, 0.3);
+}
+
+#notifications-dropdown {
+    max-width: calc(100vw - 24px);
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+
+    .container {
+        border-radius: 10px;
+    }
+
+    header {
+        padding: 18px;
+    }
+
+    .header-content {
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+    header h1 {
+        font-size: clamp(1.2rem, 5vw, 1.5rem);
+        overflow-wrap: anywhere;
+    }
+
+    .header-actions {
+        margin-left: auto;
+        flex-shrink: 0;
+    }
+
+    #notifications-dropdown {
+        width: min(360px, calc(100vw - 24px)) !important;
+        right: 0 !important;
+    }
 }
 body.nav-menu-open .nav-hamburger span:nth-child(1) {
     transform: translateY(7px) rotate(45deg);

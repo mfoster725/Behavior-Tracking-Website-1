@@ -302,8 +302,19 @@ function applyManagedByMeDefaultForRole() {
 // Initialize: attach nav/hamburger so it works even if DOMContentLoaded already fired
 function setNavDropdownPosition() {
     if (!document.body.classList.contains('nav-menu-open')) return;
-    var header = document.querySelector('header');
-    if (header) document.documentElement.style.setProperty('--nav-dropdown-top', header.offsetHeight + 'px');
+    var hamburger = document.getElementById('nav-hamburger');
+    var nav = document.getElementById('main-nav');
+    if (!hamburger || !nav) return;
+
+    var rect = hamburger.getBoundingClientRect();
+    var navWidth = nav.offsetWidth || Math.min(320, Math.max(180, window.innerWidth - 20));
+    var left = rect.right - navWidth;
+    var minLeft = 10;
+    var maxLeft = Math.max(minLeft, window.innerWidth - navWidth - 10);
+
+    left = Math.min(maxLeft, Math.max(minLeft, left));
+    document.documentElement.style.setProperty('--nav-dropdown-top', (rect.bottom + 8) + 'px');
+    document.documentElement.style.setProperty('--nav-dropdown-left', left + 'px');
 }
 function toggleNavMenu() {
     document.body.classList.toggle('nav-menu-open');
@@ -3203,7 +3214,7 @@ function addPeriod(timeRange = '', location = '', safety = 0, teamwork = 0, acco
         </div>
         <div class="form-group">
             <label>Location:</label>
-            <input type="text" class="period-location" value="${location}" placeholder="e.g., English, Math">
+            <input type="text" class="period-location" value="${location}" placeholder="e.g., English, Math" autocomplete="off">
         </div>
         <div class="points-grid">
             <div class="points-input">
@@ -3311,7 +3322,7 @@ function addFrenzy(timeRange = '', location = '', purpose = '', purpose2 = '', d
         </div>
         <div class="form-group">
             <label>Location:</label>
-            <input type="text" class="frenzy-location" value="${location}">
+            <input type="text" class="frenzy-location" value="${location}" autocomplete="off">
         </div>
         <div class="form-group">
             <label>Purpose:</label>
@@ -5635,7 +5646,7 @@ function addPointCardRow() {
             <input type="text" class="edit-input" data-period-index="${index}" data-category="time_range" placeholder="Time" style="width: 100%; padding: 4px; box-sizing: border-box;">
         </td>
         <td style="padding: 8px; border: 1px solid #ddd;">
-            <input type="text" class="edit-input" data-period-index="${index}" data-category="location" placeholder="Location" style="width: 100%; padding: 4px; box-sizing: border-box;">
+            <input type="text" class="edit-input" data-period-index="${index}" data-category="location" placeholder="Location" autocomplete="off" style="width: 100%; padding: 4px; box-sizing: border-box;">
         </td>
         <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 226, 226, 0.3);">
             <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
