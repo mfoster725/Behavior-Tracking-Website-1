@@ -6737,15 +6737,6 @@ function switchImportTab(tab) {
     const staffSection = document.getElementById('import-staff-section');
     const studentSection = document.getElementById('import-student-section');
     const results = document.getElementById('import-results');
-    const buttons = document.querySelectorAll('.import-tab-btn');
-    buttons.forEach(btn => {
-        const type = btn.getAttribute('data-import-tab');
-        if (type === tab) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    });
     if (staffSection && studentSection) {
         if (tab === 'staff') {
             staffSection.style.display = 'block';
@@ -6758,6 +6749,16 @@ function switchImportTab(tab) {
     if (results) {
         results.style.display = 'none';
         results.innerHTML = '';
+    }
+}
+
+function importUsersFromCsv() {
+    const select = document.getElementById('import-type-select');
+    const type = select ? select.value : 'staff';
+    if (type === 'student') {
+        importStudentCSV();
+    } else {
+        importStaffCSV();
     }
 }
 

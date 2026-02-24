@@ -3183,6 +3183,56 @@ def import_frenzy_csv(rows):
     return jsonify({'message': 'Frenzy import functionality - customize based on your CSV structure'}), 200
 
 
+def _grade_to_int(s: str) -> int | None:
+    """Parse a grade token to numeric form. K -> 0, 1-12 -> 1-12. None if invalid."""
+    s = s.strip().upper()
+    if s == 'K':
+        return 0
+    try:
+        n = int(s)
+        return n if 1 <= n <= 12 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _int_to_grade(n: int) -> str:
+    """Format numeric grade for display. 0 -> K, 1-12 -> '1'-'12'."""
+    return 'K' if n == 0 else str(n)
+
+
+def normalize_grades_taught(raw: str) -> str:
+    """
+    Normalize flexible grades-taught input to a consistent comma-separated form.
+    Accepts: single grade (e.g. "7", "K"), range (e.g. "6-9", "K-2"), or comma list (e.g. "6, 7, 8").
+    K = Kindergarten. Returns: comma-separated grades (e.g. "7" or "K, 1, 2" or "6, 7, 8, 9"). Empty string if invalid/empty.
+    """
+    if not raw or not raw.strip():
+        return ''
+    raw = raw.strip()
+    seen = set()
+    for part in raw.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            a, b = part.split('-', 1)
+            lo, hi = _grade_to_int(a), _grade_to_int(b)
+            if lo is not None and hi is not None and lo <= hi:
+                for g in range(lo, hi + 1):
+                    seen.add(g)
+            else:
+                single = _grade_to_int(part.replace('-', '').strip())
+                if single is not None:
+                    seen.add(single)
+        else:
+            n = _grade_to_int(part)
+            if n is not None:
+                seen.add(n)
+    if not seen:
+        return ''
+    return ', '.join(_int_to_grade(g) for g in sorted(seen))
+
+
 def generate_staff_username(full_name: str) -> str:
     """Generate a unique staff username based on full name."""
     if not full_name:
@@ -3289,6 +3339,7 @@ def import_users():
             username = generate_staff_username(name)
             password = f"{username}123"
 
+            normalized_grades = normalize_grades_taught(grades_taught) if role == 'Case Manager' and grades_taught else None
             user = User(
                 name=name,
                 username=username,
@@ -3296,7 +3347,7 @@ def import_users():
                 designation=role,
                 user_number=user_number,
                 must_change_password=True,
-                grades_taught=grades_taught if role == 'Case Manager' else None,
+                grades_taught=normalized_grades if normalized_grades else None,
             )
 
             if role == 'Paraprofessional' and case_manager_name:
@@ -4249,7 +4300,7 @@ def manage_users():
             student_id=data.get('student_id'),
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
             district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None,
-            grades_taught=data.get('grades_taught') if role == 'staff' else None,
+            grades_taught=(normalize_grades_taught(data.get('grades_taught') or '') or None) if role == 'staff' else None,
             linked_case_manager_id=data.get('linked_case_manager_id') if (role == 'staff' and data.get('designation') == 'Paraprofessional') else None
         )
         user.set_password(password)
@@ -4311,7 +4362,8 @@ def manage_users():
             if 'designation' in data:
                 user.designation = data['designation'] if data['designation'] else None
             if 'grades_taught' in data:
-                user.grades_taught = data['grades_taught'] if data['grades_taught'] else None
+                raw = data['grades_taught'] or ''
+                user.grades_taught = normalize_grades_taught(raw) or None
             if 'student_id' in data:
                 user.student_id = data['student_id']
             if 'is_outside_staff' in data:

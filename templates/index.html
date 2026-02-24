@@ -559,12 +559,15 @@
                     <!-- Import Users from CSV -->
                     <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
                         <h3>Import Users from CSV</h3>
-                        <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
-                            Upload a .csv file to bulk-create user accounts. Staff and student imports are separate.
+                        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                            Upload a .csv file to bulk-create user accounts.
                         </p>
-                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                            <button type="button" class="btn-primary import-tab-btn active" data-import-tab="staff" onclick="switchImportTab('staff')">Staff Import</button>
-                            <button type="button" class="btn-secondary import-tab-btn" data-import-tab="student" onclick="switchImportTab('student')">Student Import</button>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap;">
+                            <label for="import-type-select" style="font-size: 13px; color: #444;">Import type:</label>
+                            <select id="import-type-select" onchange="switchImportTab(this.value)" style="padding: 6px 10px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 13px;">
+                                <option value="staff">Staff</option>
+                                <option value="student">Student</option>
+                            </select>
                         </div>
                         <div id="import-staff-section">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
@@ -572,10 +575,9 @@
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional.
-                                Grades Taught is used for Case Managers. Case Manager column is used for Paraprofessionals.
+                                Grades Taught is used for Case Managers (e.g. <strong>7</strong> for 7th only, <strong>6-9</strong> for 6th through 9th). Case Manager column is used for Paraprofessionals.
                             </p>
                             <input type="file" id="import-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
-                            <button type="button" class="btn-primary" onclick="importStaffCSV()">Import Staff</button>
                         </div>
                         <div id="import-student-section" style="display: none;">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
@@ -585,8 +587,8 @@
                                 Card Color: yellow, green, or blue. Team member columns are optional.
                             </p>
                             <input type="file" id="import-student-file" accept=".csv" style="margin-bottom: 10px; display: block;">
-                            <button type="button" class="btn-primary" onclick="importStudentCSV()">Import Students</button>
                         </div>
+                        <button type="button" class="btn-primary" onclick="importUsersFromCsv()">Import</button>
                         <div id="import-results" style="display: none; margin-top: 15px;"></div>
                     </div>
                     
