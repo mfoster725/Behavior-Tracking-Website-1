@@ -394,6 +394,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Set "Show students managed by me" default by role (staff = checked, admin = unchecked) before first load
         applyManagedByMeDefaultForRole();
+
+        // Password-change banner is rendered server-side; nothing extra needed here beyond dismissal handler inline.
         
         loadStudents();
         setupEventListeners();
@@ -688,7 +690,6 @@ function setupEventListeners() {
                 populateTeamMemberRows('practitioner-container', [], ['practitioner']);
                 populateTeamMemberRows('professional-container', [], ['professional']);
                 populateTeamMemberRows('group-leader-container', [], ['group_leader']);
-                populateTeamMemberRows('paraprofessional-container', [], ['paraprofessional']);
                 
                 document.getElementById('student-modal').style.display = 'block';
             });
@@ -936,6 +937,7 @@ function setupEventListeners() {
                 const sg = document.getElementById('staff-grades-taught-group');
                 const sr = document.getElementById('staff-role');
                 if (sg && sr) sg.style.display = sr.value === 'Case Manager' ? 'block' : 'none';
+                updateStaffCaseManagerGroup();
             });
         }
 
@@ -964,6 +966,7 @@ function setupEventListeners() {
                 const sg = document.getElementById('staff-grades-taught-group');
                 const sr = document.getElementById('staff-role');
                 if (sg && sr) sg.style.display = sr.value === 'Case Manager' ? 'block' : 'none';
+                updateStaffCaseManagerGroup();
             });
         }
         
@@ -992,7 +995,12 @@ function setupEventListeners() {
         if (staffRoleSelect && staffGradesTaughtGroup) {
             staffRoleSelect.addEventListener('change', () => {
                 staffGradesTaughtGroup.style.display = staffRoleSelect.value === 'Case Manager' ? 'block' : 'none';
+                updateStaffCaseManagerGroup();
             });
+        }
+        const staffCaseManagerGroup = document.getElementById('staff-case-manager-group');
+        if (staffRoleSelect && staffCaseManagerGroup) {
+            updateStaffCaseManagerGroup();
         }
 
         const saveOutsideStaffUserBtn = document.getElementById('save-outside-staff-user-btn');
@@ -1051,6 +1059,24 @@ function setupEventListeners() {
                     // Show grades taught for Case Manager / Teacher
                     if (gradesTaughtGroup) {
                         gradesTaughtGroup.style.display = (selectedRole === 'Case Manager' || selectedRole === 'Teacher') ? 'block' : 'none';
+                    }
+                    // Show Case Manager dropdown for Paraprofessional
+                    const editCaseManagerGroup = document.getElementById('edit-user-case-manager-group');
+                    const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
+                    if (editCaseManagerGroup && editCaseManagerSelect) {
+                        editCaseManagerGroup.style.display = selectedRole === 'Paraprofessional' ? 'block' : 'none';
+                        if (selectedRole === 'Paraprofessional') {
+                            const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
+                                u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+                            );
+                            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
+                            caseManagers.forEach(cm => {
+                                const opt = document.createElement('option');
+                                opt.value = cm.id;
+                                opt.textContent = cm.name || cm.username;
+                                editCaseManagerSelect.appendChild(opt);
+                            });
+                        }
                     }
                 }
             });
@@ -3446,7 +3472,6 @@ async function saveStudent() {
     const practitioner = getSelectedTeamMembers('practitioner-container');
     const professional = getSelectedTeamMembers('professional-container');
     const groupLeader = getSelectedTeamMembers('group-leader-container');
-    const paraprofessional = getSelectedTeamMembers('paraprofessional-container');
 
     // Validation
     if (!name || !name.trim()) {
@@ -3488,7 +3513,7 @@ async function saveStudent() {
                 practitioner: practitioner,
                 professional: professional,
                 group_leader: groupLeader,
-                paraprofessional: paraprofessional
+                paraprofessional: []
             })
         });
 
@@ -3509,7 +3534,6 @@ async function saveStudent() {
             document.getElementById('practitioner-container').innerHTML = '';
             document.getElementById('professional-container').innerHTML = '';
             document.getElementById('group-leader-container').innerHTML = '';
-            document.getElementById('paraprofessional-container').innerHTML = '';
             
             await loadStudents();
             showMessage('Student and user account created successfully!', 'success');
@@ -6709,6 +6733,157 @@ async function importCSV() {
     }
 }
 
+function switchImportTab(tab) {
+    const staffSection = document.getElementById('import-staff-section');
+    const studentSection = document.getElementById('import-student-section');
+    const results = document.getElementById('import-results');
+    const buttons = document.querySelectorAll('.import-tab-btn');
+    buttons.forEach(btn => {
+        const type = btn.getAttribute('data-import-tab');
+        if (type === tab) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    if (staffSection && studentSection) {
+        if (tab === 'staff') {
+            staffSection.style.display = 'block';
+            studentSection.style.display = 'none';
+        } else {
+            staffSection.style.display = 'none';
+            studentSection.style.display = 'block';
+        }
+    }
+    if (results) {
+        results.style.display = 'none';
+        results.innerHTML = '';
+    }
+}
+
+function renderImportResults(data, type) {
+    const container = document.getElementById('import-results');
+    if (!container) return;
+
+    let html = '';
+    const success = data.success || [];
+    const errors = data.errors || [];
+    const warnings = data.warnings || [];
+
+    if (success.length > 0) {
+        const heading =
+            type === 'staff'
+                ? 'Successfully created staff user(s):'
+                : 'Successfully created student user(s):';
+        html += `<div class="import-results-success"><strong>${heading}</strong>`;
+        html += `<br>Count: ${success.length}`;
+        html += '<table class="import-results-table"><thead>';
+        if (type === 'staff') {
+            html += '<tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>User #</th></tr></thead><tbody>';
+            success.forEach(row => {
+                html += `<tr><td>${row.name || ''}</td><td>${row.username || ''}</td><td>${row.password || ''}</td><td>${row.role || ''}</td><td>${row.user_number || ''}</td></tr>`;
+            });
+        } else {
+            html += '<tr><th>Initials</th><th>Username</th><th>Password</th><th>Lunch #</th><th>Grade</th></tr></thead><tbody>';
+            success.forEach(row => {
+                html += `<tr><td>${row.initials || ''}</td><td>${row.username || ''}</td><td>${row.password || ''}</td><td>${row.lunch_number || ''}</td><td>${row.grade || ''}</td></tr>`;
+            });
+        }
+        html += '</tbody></table></div>';
+    }
+
+    if (warnings.length > 0) {
+        html += '<div class="import-results-warning">';
+        warnings.forEach(msg => {
+            html += `<p>${msg}</p>`;
+        });
+        html += '</div>';
+    }
+
+    if (errors.length > 0) {
+        html += '<div class="import-results-error"><strong>Some rows were not imported:</strong><ul>';
+        errors.forEach(msg => {
+            html += `<li>${msg}</li>`;
+        });
+        html += '</ul></div>';
+    }
+
+    if (!html) {
+        html = '<div class="import-results-success">No rows were processed.</div>';
+    }
+
+    container.innerHTML = html;
+    container.style.display = 'block';
+}
+
+async function importStaffCSV() {
+    const input = document.getElementById('import-staff-file');
+    const container = document.getElementById('import-results');
+    if (!input || !container) return;
+
+    if (!input.files || input.files.length === 0) {
+        showMessage('Please select a staff CSV file to import.', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+    formData.append('type', 'staff');
+
+    container.style.display = 'block';
+    container.innerHTML = '<div class="loading">Importing staff users...</div>';
+
+    try {
+        const response = await fetch('/api/import-users', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            return;
+        }
+        renderImportResults(data, 'staff');
+    } catch (err) {
+        console.error('Error importing staff CSV:', err);
+        container.innerHTML = '<div class="import-results-error">Error importing staff CSV. Please try again.</div>';
+    }
+}
+
+async function importStudentCSV() {
+    const input = document.getElementById('import-student-file');
+    const container = document.getElementById('import-results');
+    if (!input || !container) return;
+
+    if (!input.files || input.files.length === 0) {
+        showMessage('Please select a student CSV file to import.', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+    formData.append('type', 'student');
+
+    container.style.display = 'block';
+    container.innerHTML = '<div class="loading">Importing students...</div>';
+
+    try {
+        const response = await fetch('/api/import-users', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            return;
+        }
+        renderImportResults(data, 'student');
+    } catch (err) {
+        console.error('Error importing student CSV:', err);
+        container.innerHTML = '<div class="import-results-error">Error importing student CSV. Please try again.</div>';
+    }
+}
+
 function showMessage(message, type) {
     const container = document.querySelector('.view.active');
     const msgDiv = document.createElement('div');
@@ -8754,6 +8929,7 @@ function createAdminStaffRow(user, displayRole) {
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
     const gradesTaught = user.grades_taught ? `'${String(user.grades_taught).replace(/'/g, "\\'")}'` : 'null';
     const cardColorVal = user.card_color ? `'${user.card_color}'` : 'null';
+    const linkedCaseManagerId = user.linked_case_manager_id != null ? user.linked_case_manager_id : 'null';
     const isTeacherOrCaseManager = user.role === 'staff' && (user.designation === 'Case Manager' || user.designation === 'Teacher');
     const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
         ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
@@ -8769,7 +8945,7 @@ function createAdminStaffRow(user, displayRole) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught})">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -9004,7 +9180,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -9042,6 +9218,32 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     const isCaseManagerOrTeacher = role === 'staff' && (designation === 'Case Manager' || designation === 'Teacher');
     if (gradesTaughtGroup) {
         gradesTaughtGroup.style.display = isCaseManagerOrTeacher ? 'block' : 'none';
+    }
+    
+    // Set Case Manager dropdown if staff Paraprofessional
+    const editCaseManagerGroup = document.getElementById('edit-user-case-manager-group');
+    const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
+    const isParaprofessional = role === 'staff' && designation === 'Paraprofessional';
+    if (editCaseManagerGroup && editCaseManagerSelect) {
+        editCaseManagerGroup.style.display = isParaprofessional ? 'block' : 'none';
+        if (isParaprofessional) {
+            const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
+                u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+            );
+            const currentVal = linkedCaseManagerId != null && linkedCaseManagerId !== '' ? String(linkedCaseManagerId) : '';
+            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
+            caseManagers.forEach(cm => {
+                const opt = document.createElement('option');
+                opt.value = cm.id;
+                opt.textContent = cm.name || cm.username;
+                editCaseManagerSelect.appendChild(opt);
+            });
+            if (currentVal && caseManagers.some(cm => String(cm.id) === currentVal)) {
+                editCaseManagerSelect.value = currentVal;
+            } else {
+                editCaseManagerSelect.value = '';
+            }
+        }
     }
     
     // Set grade if student
@@ -9430,8 +9632,7 @@ function setupTeamMemberButtons() {
         { id: 'add-case-manager-btn', container: 'case-manager-container', roles: ['case_manager', 'teacher'] },
         { id: 'add-practitioner-btn', container: 'practitioner-container', roles: ['practitioner'] },
         { id: 'add-professional-btn', container: 'professional-container', roles: ['professional'] },
-        { id: 'add-group-leader-btn', container: 'group-leader-container', roles: ['group_leader'] },
-        { id: 'add-paraprofessional-btn', container: 'paraprofessional-container', roles: ['paraprofessional'] }
+        { id: 'add-group-leader-btn', container: 'group-leader-container', roles: ['group_leader'] }
     ];
     
     addButtons.forEach(config => {
@@ -9596,6 +9797,11 @@ async function saveEditUser() {
             const gradesTaught = gradesTaughtInput.value.trim();
             updateData.grades_taught = gradesTaught || null;
         }
+        if (designation === 'Paraprofessional') {
+            const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
+            const linkedId = editCaseManagerSelect ? editCaseManagerSelect.value : '';
+            updateData.linked_case_manager_id = linkedId ? parseInt(linkedId, 10) : null;
+        }
     }
     
     // Include card_color for student users
@@ -9702,6 +9908,31 @@ function hideModalError(modalId) {
     }
 }
 
+/** Show/hide and populate the Case Manager dropdown in Add Staff modal when role is Paraprofessional. */
+function updateStaffCaseManagerGroup() {
+    const staffRoleSelect = document.getElementById('staff-role');
+    const staffCaseManagerGroup = document.getElementById('staff-case-manager-group');
+    const staffCaseManagerSelect = document.getElementById('staff-case-manager-select');
+    if (!staffRoleSelect || !staffCaseManagerGroup || !staffCaseManagerSelect) return;
+    const isParaprofessional = staffRoleSelect.value === 'Paraprofessional';
+    staffCaseManagerGroup.style.display = isParaprofessional ? 'block' : 'none';
+    if (!isParaprofessional) return;
+    const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
+        u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+    );
+    const currentValue = staffCaseManagerSelect.value;
+    staffCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
+    caseManagers.forEach(cm => {
+        const opt = document.createElement('option');
+        opt.value = cm.id;
+        opt.textContent = cm.name || cm.username;
+        staffCaseManagerSelect.appendChild(opt);
+    });
+    if (currentValue && caseManagers.some(cm => String(cm.id) === currentValue)) {
+        staffCaseManagerSelect.value = currentValue;
+    }
+}
+
 async function saveStaffUser() {
     // Clear any previous errors
     hideModalError('staff-modal');
@@ -9741,6 +9972,11 @@ async function saveStaffUser() {
         if (role === 'Case Manager' && gradesTaught) {
             payload.grades_taught = gradesTaught;
         }
+        if (role === 'Paraprofessional') {
+            const staffCaseManagerSelect = document.getElementById('staff-case-manager-select');
+            const linkedId = staffCaseManagerSelect ? staffCaseManagerSelect.value : '';
+            if (linkedId) payload.linked_case_manager_id = parseInt(linkedId, 10);
+        }
         const response = await fetch('/api/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -9760,6 +9996,10 @@ async function saveStaffUser() {
             if (staffGradesTaughtEl) staffGradesTaughtEl.value = '';
             const staffGradesTaughtGrp = document.getElementById('staff-grades-taught-group');
             if (staffGradesTaughtGrp) staffGradesTaughtGrp.style.display = 'none';
+            const staffCaseManagerGrp = document.getElementById('staff-case-manager-group');
+            if (staffCaseManagerGrp) staffCaseManagerGrp.style.display = 'none';
+            const staffCaseManagerSel = document.getElementById('staff-case-manager-select');
+            if (staffCaseManagerSel) staffCaseManagerSel.value = '';
             await loadUsers();
         } else {
             let data;

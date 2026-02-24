@@ -36,7 +36,6 @@ if database_url:
     # On Windows, SSL "certificate verify failed" with Aiven: use Aiven's CA. Set DB_SSL_ROOT_CERT to path to the downloaded CA .pem file.
     ssl_root_cert = os.environ.get('DB_SSL_ROOT_CERT')
     if ssl_root_cert and os.path.isfile(ssl_root_cert):
-        import re
         cert_path = os.path.abspath(ssl_root_cert).replace('\\', '/')
         database_url = re.sub(r'([?&])sslmode=[^&]*', r'\1sslmode=verify-ca', database_url, flags=re.IGNORECASE)
         database_url = f"{database_url}&sslrootcert={cert_path}"
@@ -312,6 +311,12 @@ class User(UserMixin, db.Model):
     ui_preferences = db.Column(db.Text, nullable=True)
     # Grades taught by teachers/case managers (e.g. "9, 10, 11" or "9-12")
     grades_taught = db.Column(db.String(50), nullable=True)
+    # Paraprofessional: link to a Case Manager; "Show students managed by me" shows that CM's students
+    linked_case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # Staff import: external identifier from CSV
+    user_number = db.Column(db.String(50), nullable=True)
+    # Imported staff must change their generated password after first login
+    must_change_password = db.Column(db.Boolean, default=False, nullable=False)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -367,6 +372,18 @@ def ensure_ui_preferences_column():
                 conn.execute(text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS grades_taught VARCHAR(50)"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_case_manager_id INTEGER REFERENCES users(id)"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS user_number VARCHAR(50)"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE students ADD COLUMN IF NOT EXISTS lunch_number VARCHAR(50)"
+                ))
                 conn.commit()
     except Exception as e:
         # Log but don't crash the app if migration fails
@@ -385,6 +402,8 @@ class Student(db.Model):
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
     # Directory information opt-out
     directory_info_opt_out = db.Column(db.Boolean, default=False, nullable=False)
+    # Import: lunch number used as external unique identifier
+    lunch_number = db.Column(db.String(50), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -904,7 +923,10 @@ def login():
                 resource_type='authentication',
                 ip_address=get_remote_address()
             )
-            return jsonify({'success': True}), 200
+            return jsonify({
+                'success': True,
+                'must_change_password': getattr(user, 'must_change_password', False) and user.role == 'staff'
+            }), 200
         else:
             # Audit: Log failed login attempt
             if user:
@@ -1062,7 +1084,12 @@ def logout():
 @app.route('/')
 @login_required
 def index():
-    return render_template('index.html', user=current_user, date=date)
+    return render_template(
+        'index.html',
+        user=current_user,
+        date=date,
+        must_change_password=getattr(current_user, 'must_change_password', False) and current_user.role == 'staff'
+    )
 
 @app.route('/api/students', methods=['GET', 'POST'])
 @limiter.limit("30 per minute")
@@ -1195,30 +1222,57 @@ def students():
                 query = Student.query
             
             if managed_by_me:
-                # Get current user's name and username - team members might be stored with either
-                user_name = current_user.name or current_user.username
-                user_username = current_user.username
-                
-                # Find all students where this user is a team member
-                # Check both name and username since team members might be stored with either
-                team_members = TeamMember.query.filter(
-                    (TeamMember.name == user_name) | (TeamMember.name == user_username)
-                ).all()
-                student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
-                
-                if student_ids:
-                    # Intersect with Outside Staff assignments if applicable
-                    if current_user.role == 'staff' and current_user.is_outside_staff:
-                        assigned_student_ids = [assoc.student_id for assoc in 
-                                              OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
-                        student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
-                    
-                    if student_ids:
-                        students = query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                # Paraprofessional with a linked Case Manager: show that case manager's students
+                linked_cm_id = getattr(current_user, 'linked_case_manager_id', None)
+                if (current_user.role == 'staff' and getattr(current_user, 'designation', None) == 'Paraprofessional'
+                        and linked_cm_id):
+                    linked_cm = User.query.get(linked_cm_id)
+                    if linked_cm and linked_cm.designation == 'Case Manager':
+                        cm_name = linked_cm.name or linked_cm.username
+                        cm_username = linked_cm.username
+                        team_members = TeamMember.query.filter(
+                            TeamMember.role == 'Case Manager',
+                            (TeamMember.name == cm_name) | (TeamMember.name == cm_username)
+                        ).all()
+                        student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                        if student_ids:
+                            if current_user.role == 'staff' and current_user.is_outside_staff:
+                                assigned_student_ids = [assoc.student_id for assoc in
+                                                      OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+                                student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
+                            if student_ids:
+                                students = query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                            else:
+                                students = []
+                        else:
+                            students = []
                     else:
                         students = []
                 else:
-                    students = []
+                    # Get current user's name and username - team members might be stored with either
+                    user_name = current_user.name or current_user.username
+                    user_username = current_user.username
+                    
+                    # Find all students where this user is a team member
+                    # Check both name and username since team members might be stored with either
+                    team_members = TeamMember.query.filter(
+                        (TeamMember.name == user_name) | (TeamMember.name == user_username)
+                    ).all()
+                    student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                    
+                    if student_ids:
+                        # Intersect with Outside Staff assignments if applicable
+                        if current_user.role == 'staff' and current_user.is_outside_staff:
+                            assigned_student_ids = [assoc.student_id for assoc in 
+                                                  OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+                            student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
+                        
+                        if student_ids:
+                            students = query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                        else:
+                            students = []
+                    else:
+                        students = []
             else:
                 students = query.order_by(Student.name).all()
             
@@ -3128,6 +3182,247 @@ def import_frenzy_csv(rows):
     # This would need to be customized based on your exact CSV structure
     return jsonify({'message': 'Frenzy import functionality - customize based on your CSV structure'}), 200
 
+
+def generate_staff_username(full_name: str) -> str:
+    """Generate a unique staff username based on full name."""
+    if not full_name:
+        base = 'staff'
+    else:
+        parts = full_name.strip().split()
+        first = parts[0]
+        last = parts[-1]
+        base = (first[0] + last).lower()
+    candidate = base
+    # If collision, progressively add more of the first name, then numbers
+    idx = 1
+    extra_idx = 1
+    while User.query.filter_by(username=candidate).first() is not None:
+        if full_name and idx < len(parts[0]):
+            candidate = (parts[0][: idx + 1] + parts[-1]).lower()
+            idx += 1
+        else:
+            extra_idx += 1
+            candidate = f"{base}{extra_idx}"
+    return candidate
+
+
+def generate_student_username(initials: str) -> str:
+    """Generate a unique student username from initials."""
+    if not initials:
+        base = 'student'
+    else:
+        base = initials.strip().lower()
+    candidate = base
+    suffix = 2
+    while User.query.filter_by(username=candidate).first() is not None:
+        candidate = f"{base}{suffix}"
+        suffix += 1
+    return candidate
+
+
+@app.route('/api/import-users', methods=['POST'])
+@login_required
+def import_users():
+    """Import staff or student users from CSV."""
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Permission denied'}), 403
+
+    file = request.files.get('file')
+    import_type = request.form.get('type')
+
+    if not file or not import_type:
+        return jsonify({'error': 'File and type are required'}), 400
+
+    try:
+        content = file.read().decode('utf-8')
+        csv_reader = csv.reader(StringIO(content))
+        rows = list(csv_reader)
+    except Exception as e:
+        return jsonify({'error': f'Failed to read CSV: {e}'}), 400
+
+    if not rows:
+        return jsonify({'error': 'CSV file is empty'}), 400
+
+    header_offset = 1  # skip header row
+    success = []
+    errors = []
+    warnings = []
+
+    if import_type == 'staff':
+        valid_roles = {'Case Manager', 'Practitioner', 'Paraprofessional', 'Professional'}
+
+        # Two-pass: first non-Paraprofessionals, then Paraprofessionals
+        staff_rows = rows[header_offset:]
+        non_para_rows = [r for r in staff_rows if len(r) > 2 and r[2].strip() != 'Paraprofessional']
+        para_rows = [r for r in staff_rows if len(r) > 2 and r[2].strip() == 'Paraprofessional']
+
+        def process_staff_row(row, row_index):
+            if not row or all(not (c or '').strip() for c in row):
+                return
+            user_number = (row[0] or '').strip() if len(row) > 0 else ''
+            name = (row[1] or '').strip() if len(row) > 1 else ''
+            role = (row[2] or '').strip() if len(row) > 2 else ''
+            grades_taught = (row[3] or '').strip() if len(row) > 3 else ''
+            case_manager_name = (row[4] or '').strip() if len(row) > 4 else ''
+
+            if not user_number or not name:
+                errors.append(f"Row {row_index}: missing User Number or Name.")
+                return
+
+            if role not in valid_roles:
+                errors.append(
+                    f"{name} was not added: invalid role '{role}'. "
+                    "Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional."
+                )
+                return
+
+            existing = User.query.filter_by(user_number=user_number).first()
+            if existing:
+                errors.append(
+                    f"{name} was not added due to duplicate User Number ({user_number}). "
+                    "This user may already exist in the system. To resolve: check the User Management "
+                    "tab for an existing user with this number. If you need to update their info, edit "
+                    "them there. If this is a different person, assign a unique User Number."
+                )
+                return
+
+            username = generate_staff_username(name)
+            password = f"{username}123"
+
+            user = User(
+                name=name,
+                username=username,
+                role='staff',
+                designation=role,
+                user_number=user_number,
+                must_change_password=True,
+                grades_taught=grades_taught if role == 'Case Manager' else None,
+            )
+
+            if role == 'Paraprofessional' and case_manager_name:
+                # Case insensitive match on name
+                from sqlalchemy import func
+
+                cm = (
+                    User.query.filter(
+                        User.designation == 'Case Manager',
+                        func.lower(User.name) == case_manager_name.lower(),
+                    )
+                    .first()
+                )
+                if cm:
+                    user.linked_case_manager_id = cm.id
+                else:
+                    warnings.append(
+                        f"{name} was created but their Case Manager '{case_manager_name}' "
+                        "was not found in the system. You can assign a Case Manager manually in User Management."
+                    )
+
+            user.set_password(password)
+            db.session.add(user)
+            success.append(
+                {
+                    'name': name,
+                    'username': username,
+                    'password': password,
+                    'role': 'staff',
+                    'user_number': user_number,
+                }
+            )
+
+        # First pass: non-Paraprofessionals
+        for idx, row in enumerate(non_para_rows, start=header_offset + 1):
+            process_staff_row(row, idx)
+        # Commit so Case Managers exist
+        db.session.commit()
+
+        # Second pass: Paraprofessionals
+        for idx, row in enumerate(para_rows, start=header_offset + 1):
+            process_staff_row(row, idx)
+
+        db.session.commit()
+        return jsonify({'success': success, 'errors': errors, 'warnings': warnings}), 200
+
+    elif import_type == 'student':
+        student_rows = rows[header_offset:]
+        for idx, row in enumerate(student_rows, start=header_offset + 1):
+            if not row or all(not (c or '').strip() for c in row):
+                continue
+            lunch_number = (row[0] or '').strip() if len(row) > 0 else ''
+            initials = (row[1] or '').strip() if len(row) > 1 else ''
+            grade = (row[2] or '').strip() if len(row) > 2 else ''
+            card_color = (row[3] or '').strip().lower() if len(row) > 3 else ''
+
+            if not lunch_number:
+                errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
+                continue
+            if not initials:
+                errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
+                continue
+
+            existing_student = Student.query.filter_by(lunch_number=lunch_number).first()
+            if existing_student:
+                errors.append(
+                    f"{initials} (Lunch #{lunch_number}) was not added due to duplicate Lunch Number. "
+                    "This student may already exist. To resolve: check User Management for an existing student "
+                    "with this lunch number. If you need to update their info, edit them there. If this is a "
+                    "different student, assign a unique Lunch Number."
+                )
+                continue
+
+            student = Student(
+                name=initials,
+                grade=grade or None,
+                card_color=card_color or None,
+                lunch_number=lunch_number,
+            )
+            db.session.add(student)
+            db.session.flush()
+
+            username = generate_student_username(initials)
+            password = f"{initials.upper()}{lunch_number}"
+
+            user = User(
+                name=initials,
+                username=username,
+                role='student',
+                student_id=student.id,
+            )
+            user.set_password(password)
+            db.session.add(user)
+
+            # Team members: E/F case managers, G/H practitioners, I professional, J group leader
+            role_map = [
+                ('Case Manager', 4),
+                ('Case Manager', 5),
+                ('Practitioner', 6),
+                ('Practitioner', 7),
+                ('Professional', 8),
+                ('Group Leader', 9),
+            ]
+            for role_name, col_idx in role_map:
+                if len(row) > col_idx:
+                    val = (row[col_idx] or '').strip()
+                    if val:
+                        tm = TeamMember(student_id=student.id, role=role_name, name=val)
+                        db.session.add(tm)
+
+            success.append(
+                {
+                    'initials': initials,
+                    'username': username,
+                    'password': password,
+                    'lunch_number': lunch_number,
+                    'grade': grade,
+                }
+            )
+
+        db.session.commit()
+        return jsonify({'success': success, 'errors': errors}), 200
+
+    else:
+        return jsonify({'error': 'Invalid import type'}), 400
+
 @app.route('/api/frenzy-stats', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
@@ -3865,6 +4160,7 @@ def manage_users():
                 'is_outside_staff': user.is_outside_staff if hasattr(user, 'is_outside_staff') else False,
                 'district': user.district if hasattr(user, 'district') else None,
                 'grades_taught': getattr(user, 'grades_taught', None),
+                'linked_case_manager_id': getattr(user, 'linked_case_manager_id', None),
                 'created_at': user.created_at.isoformat() if user.created_at else None
             }
             
@@ -3953,7 +4249,8 @@ def manage_users():
             student_id=data.get('student_id'),
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
             district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None,
-            grades_taught=data.get('grades_taught') if role == 'staff' else None
+            grades_taught=data.get('grades_taught') if role == 'staff' else None,
+            linked_case_manager_id=data.get('linked_case_manager_id') if (role == 'staff' and data.get('designation') == 'Paraprofessional') else None
         )
         user.set_password(password)
         
@@ -4007,6 +4304,8 @@ def manage_users():
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
+                if hasattr(user, 'must_change_password'):
+                    user.must_change_password = False
             if 'role' in data:
                 user.role = data['role']
             if 'designation' in data:
@@ -4019,6 +4318,8 @@ def manage_users():
                 user.is_outside_staff = data['is_outside_staff']
             if 'district' in data:
                 user.district = data['district'] if data['district'] else None
+            if 'linked_case_manager_id' in data:
+                user.linked_case_manager_id = data['linked_case_manager_id'] if data['linked_case_manager_id'] else None
             
             # Update student grade if provided and user is a student
             if 'grade' in data and user.student_id:
@@ -4047,6 +4348,8 @@ def manage_users():
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
+                if hasattr(user, 'must_change_password'):
+                    user.must_change_password = False
             
             # Update student grade if provided
             if 'grade' in data and user.student_id:
@@ -4068,6 +4371,8 @@ def manage_users():
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
+                if hasattr(user, 'must_change_password'):
+                    user.must_change_password = False
             else:
                 return jsonify({'error': 'Staff can only change their own password'}), 403
         
@@ -4079,6 +4384,8 @@ def manage_users():
                 if not is_valid:
                     return jsonify({'error': error_msg}), 400
                 user.set_password(data['password'])
+                if hasattr(user, 'must_change_password'):
+                    user.must_change_password = False
             else:
                 return jsonify({'error': 'Students can only change their own password'}), 403
         

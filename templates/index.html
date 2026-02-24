@@ -13,6 +13,20 @@
 </head>
 <body>
     <div class="container">
+        {% if must_change_password %}
+        <div id="password-change-banner" class="password-change-banner">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <strong>Action Required:</strong> Your password needs to be changed from the default.
+                    <br><span style="font-size: 13px;">To change it: open the menu, go to <strong>User Management</strong>, find your name, click <strong>Reset Password</strong>, and set a new password.</span>
+                </div>
+                <button type="button" onclick="document.getElementById('password-change-banner').style.display='none'"
+                        style="background: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.5); color: white; padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                    Dismiss
+                </button>
+            </div>
+        </div>
+        {% endif %}
         <header>
             <div class="header-content">
                 <div>
@@ -542,6 +556,40 @@
                         </div>
                     </div>
                     
+                    <!-- Import Users from CSV -->
+                    <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                        <h3>Import Users from CSV</h3>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+                            Upload a .csv file to bulk-create user accounts. Staff and student imports are separate.
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                            <button type="button" class="btn-primary import-tab-btn active" data-import-tab="staff" onclick="switchImportTab('staff')">Staff Import</button>
+                            <button type="button" class="btn-secondary import-tab-btn" data-import-tab="student" onclick="switchImportTab('student')">Student Import</button>
+                        </div>
+                        <div id="import-staff-section">
+                            <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                                CSV columns: <strong>User Number | Name | Role | Grades Taught | Case Manager</strong>
+                            </p>
+                            <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
+                                Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional.
+                                Grades Taught is used for Case Managers. Case Manager column is used for Paraprofessionals.
+                            </p>
+                            <input type="file" id="import-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
+                            <button type="button" class="btn-primary" onclick="importStaffCSV()">Import Staff</button>
+                        </div>
+                        <div id="import-student-section" style="display: none;">
+                            <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                                CSV columns: <strong>Lunch Number | Initials | Grade | Card Color | Case Manager | Case Manager | Practitioner | Practitioner | Professional | Group Leader</strong>
+                            </p>
+                            <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
+                                Card Color: yellow, green, or blue. Team member columns are optional.
+                            </p>
+                            <input type="file" id="import-student-file" accept=".csv" style="margin-bottom: 10px; display: block;">
+                            <button type="button" class="btn-primary" onclick="importStudentCSV()">Import Students</button>
+                        </div>
+                        <div id="import-results" style="display: none; margin-top: 15px;"></div>
+                    </div>
+                    
                     <!-- Quarter Configuration -->
                     <div class="admin-section" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
                         <h3>Quarter Date Configuration</h3>
@@ -1000,11 +1048,6 @@
                         <div id="group-leader-container" class="team-member-container"></div>
                         <button type="button" id="add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
                     </div>
-                    <div class="form-group">
-                        <label>Paraprofessional:</label>
-                        <div id="paraprofessional-container" class="team-member-container"></div>
-                        <button type="button" id="add-paraprofessional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Paraprofessional</button>
-                    </div>
                 </div>
             </div>
             
@@ -1056,6 +1099,13 @@
                     <label for="staff-grades-taught">Grades taught:</label>
                     <input type="text" id="staff-grades-taught" placeholder="e.g. 9, 10, 11 or 9-12">
                     <small style="color: #666;">Which grade(s) they teach (for Case Managers/Teachers)</small>
+                </div>
+                <div class="form-group" id="staff-case-manager-group" style="display: none;">
+                    <label for="staff-case-manager-select">Case Manager:</label>
+                    <select id="staff-case-manager-select">
+                        <option value="">— Select Case Manager (optional) —</option>
+                    </select>
+                    <small style="color: #666;">When set, "Show students managed by me" will show this case manager's students</small>
                 </div>
             </div>
             
@@ -1182,6 +1232,13 @@
                         <label for="edit-user-grades-taught">Grades taught:</label>
                         <input type="text" id="edit-user-grades-taught" placeholder="e.g. 9, 10, 11 or 9-12">
                         <small style="color: #666;">For teachers/case managers: which grade(s) they teach</small>
+                    </div>
+                    <div class="form-group" id="edit-user-case-manager-group" style="display: none;">
+                        <label for="edit-user-case-manager-select">Case Manager:</label>
+                        <select id="edit-user-case-manager-select">
+                            <option value="">— Select Case Manager (optional) —</option>
+                        </select>
+                        <small style="color: #666;">When set, "Show students managed by me" will show this case manager's students</small>
                     </div>
                     <div class="form-group" id="edit-user-grade-group" style="display: none;">
                         <label for="edit-user-grade">Grade:</label>
