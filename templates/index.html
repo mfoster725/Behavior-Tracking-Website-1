@@ -168,6 +168,10 @@
                 </div>
 
                 <div id="daily-grid-container" style="display: none;">
+                    <div id="daily-grid-loading" class="daily-grid-loading" style="display: none;" aria-live="polite">
+                        <div class="daily-grid-loading-spinner"></div>
+                        <p class="daily-grid-loading-text">Loading point cards...</p>
+                    </div>
                     <div id="daily-staff-filter-title" class="daily-staff-filter-title" style="display: none;"></div>
                     {% if user.role == 'staff' %}
                     <div class="grid-controls">

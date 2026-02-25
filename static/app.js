@@ -2268,6 +2268,12 @@ async function loadDailyData() {
             return;
         }
 
+        // Show loading animation while fetching point card data
+        const loadingEl = document.getElementById('daily-grid-loading');
+        const dailyGridEl = document.getElementById('daily-grid');
+        if (loadingEl) loadingEl.style.display = 'flex';
+        if (dailyGridEl) dailyGridEl.style.visibility = 'hidden';
+
         // Load data for all accessible students for the current date in a single request
         const response = await fetch(`/api/daily-records?start_date=${currentDate}&end_date=${currentDate}`);
         const allRecords = await response.json();
@@ -2318,6 +2324,12 @@ async function loadDailyData() {
     } catch (error) {
         console.error('Error loading daily data:', error);
     }
+
+    // Hide loading animation and show grid
+    const loadingEl = document.getElementById('daily-grid-loading');
+    const dailyGridEl = document.getElementById('daily-grid');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (dailyGridEl) dailyGridEl.style.visibility = '';
 
     renderDailyGrid();
 }
@@ -2378,8 +2390,13 @@ function calculateStudentPercentages(studentId) {
 function renderDailyGrid() {
     const header = document.getElementById('daily-header');
     const body = document.getElementById('daily-body');
+    const loadingEl = document.getElementById('daily-grid-loading');
+    const dailyGridEl = document.getElementById('daily-grid');
     if (!header || !body) return;
-    
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (dailyGridEl) dailyGridEl.style.visibility = '';
+
     header.innerHTML = '';
     body.innerHTML = '';
 
