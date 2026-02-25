@@ -620,7 +620,7 @@ table th {
 .daily-selector .daily-search-row {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 20px;
     flex-wrap: wrap;
 }
 
