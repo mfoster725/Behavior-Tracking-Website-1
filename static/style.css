@@ -605,10 +605,47 @@ table th {
 /* Daily Overview Entry Styles - Minimalist */
 .daily-selector {
     display: flex;
+    flex-wrap: wrap;
     gap: 20px;
     align-items: flex-end;
     margin-bottom: 30px;
     padding: 0;
+}
+
+.daily-selector .daily-search-in-row {
+    flex: 1;
+    min-width: 200px;
+}
+
+.daily-selector .daily-search-autocomplete-wrapper {
+    width: 100%;
+    max-width: 280px;
+    position: relative;
+}
+
+.daily-selector .daily-search-autocomplete-wrapper input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.daily-selector .daily-checkbox-in-row {
+    margin-bottom: 0;
+}
+
+.daily-selector .daily-managed-by-me-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: normal;
+    cursor: pointer;
+    white-space: nowrap;
+    margin-bottom: 0;
+}
+
+.daily-selector .daily-managed-by-me-label input[type="checkbox"] {
+    cursor: pointer;
 }
 
 .quarter-display {

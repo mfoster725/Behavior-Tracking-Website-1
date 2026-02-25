@@ -146,21 +146,22 @@
                             <span id="quarter-value">-</span>
                         </div>
                     </div>
-                </div>
-
-                {% if user.role in ['staff', 'admin'] %}
-                <div class="form-group" style="margin-top: 20px;">
-                    <label for="daily-search-input" style="display: block; margin-bottom: 8px;">Search:</label>
-                    <div class="daily-search-autocomplete-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                        <input type="text" id="daily-search-input" placeholder="Search by staff or student name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                        <div class="daily-search-autocomplete-dropdown"></div>
+                    {% if user.role in ['staff', 'admin'] %}
+                    <div class="form-group daily-search-in-row">
+                        <label for="daily-search-input">Search:</label>
+                        <div class="daily-search-autocomplete-wrapper">
+                            <input type="text" id="daily-search-input" placeholder="Search by staff or student name">
+                            <div class="daily-search-autocomplete-dropdown"></div>
+                        </div>
                     </div>
-                    <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin-top: 10px;">
-                        <input type="checkbox" id="daily-managed-by-me-checkbox" style="cursor: pointer;">
-                        <span>Show students managed by me</span>
-                    </label>
+                    <div class="form-group daily-checkbox-in-row">
+                        <label for="daily-managed-by-me-checkbox" class="daily-managed-by-me-label">
+                            <input type="checkbox" id="daily-managed-by-me-checkbox">
+                            <span>Show students managed by me</span>
+                        </label>
+                    </div>
+                    {% endif %}
                 </div>
-                {% endif %}
 
                 <div id="daily-no-students" class="info-message" style="display: none; padding: 40px; text-align: center;">
                     <p>No students found. Click "Add Student" to create one.</p>
