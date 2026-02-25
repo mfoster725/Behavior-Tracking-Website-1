@@ -57,6 +57,7 @@ let dailyData = {}; // Store data for daily overview: dailyData[studentId][perio
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
+let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
 let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
 
@@ -2160,55 +2161,52 @@ async function filterDailyStudents() {
     if (dailyEntrySearchQuery && dailyEntrySearchQuery.trim()) {
         const query = dailyEntrySearchQuery.trim().toLowerCase();
         
-        // First, try to find if query matches a staff name
-        // Check if any staff member name contains the query
-        const matchingStaff = allStaffMembers.filter(staff => {
-            const staffName = (staff.name || staff.username || '').toLowerCase();
-            return staffName.includes(query);
-        });
+        // Prefer student name match: filter students whose name contains the query
+        const studentsMatchingName = studentsToFilter.filter(s =>
+            (s.name || '').toLowerCase().includes(query)
+        );
         
-        if (matchingStaff.length > 0) {
-            // Search by staff name - get all students with this staff member
-            try {
-                const staffName = matchingStaff[0].name || matchingStaff[0].username;
-                console.log('Searching by staff name:', staffName);
-                console.log('All staff members:', allStaffMembers);
-                const response = await fetch(`/api/students/by-staff-name?staff_name=${encodeURIComponent(staffName)}`);
-                if (response.ok) {
-                    const staffStudents = await response.json();
-                    console.log('Found students for staff:', staffStudents);
-                    console.log('Number of students found:', staffStudents.length);
-                    if (staffStudents.length > 0) {
-                        const staffStudentIds = new Set(staffStudents.map(s => s.id));
-                        // Intersect with current filter (if managed by me is also checked)
-                        studentsToFilter = studentsToFilter.filter(s => staffStudentIds.has(s.id));
-                        console.log('Filtered students after staff search:', studentsToFilter.length);
-                    } else {
-                        console.warn('No students found for staff member:', staffName);
-                        // If no students found, show empty result (don't fall back to student search)
-                        studentsToFilter = [];
-                    }
-                } else {
-                    const errorText = await response.text();
-                    console.error('Error response from staff search API:', response.status, errorText);
-                    // Fall back to student name search
-                    studentsToFilter = studentsToFilter.filter(s => 
-                        (s.name || '').toLowerCase().includes(query)
-                    );
-                }
-            } catch (error) {
-                console.error('Error searching by staff name:', error);
-                // Fall back to student name search
-                studentsToFilter = studentsToFilter.filter(s => 
-                    (s.name || '').toLowerCase().includes(query)
-                );
-            }
+        if (studentsMatchingName.length > 0) {
+            // At least one student name matches — use student name search (expected behavior)
+            studentsToFilter = studentsMatchingName;
+            dailyEntryStaffFilterName = null;
         } else {
-            // Search by student name
-            studentsToFilter = studentsToFilter.filter(s => 
-                (s.name || '').toLowerCase().includes(query)
-            );
+            // No student name match — try staff name search (full name match only)
+            const matchingStaff = allStaffMembers.filter(staff => {
+                const staffName = (staff.name || staff.username || '').toLowerCase();
+                return staffName === query;
+            });
+            
+            if (matchingStaff.length > 0) {
+                try {
+                    const staffName = matchingStaff[0].name || matchingStaff[0].username;
+                    const response = await fetch(`/api/students/by-staff-name?staff_name=${encodeURIComponent(staffName)}`);
+                    if (response.ok) {
+                        const staffStudents = await response.json();
+                        if (staffStudents.length > 0) {
+                            const staffStudentIds = new Set(staffStudents.map(s => s.id));
+                            studentsToFilter = studentsToFilter.filter(s => staffStudentIds.has(s.id));
+                            dailyEntryStaffFilterName = staffName;
+                        } else {
+                            studentsToFilter = [];
+                            dailyEntryStaffFilterName = null;
+                        }
+                    } else {
+                        studentsToFilter = [];
+                        dailyEntryStaffFilterName = null;
+                    }
+                } catch (error) {
+                    console.error('Error searching by staff name:', error);
+                    studentsToFilter = [];
+                    dailyEntryStaffFilterName = null;
+                }
+            } else {
+                studentsToFilter = [];
+                dailyEntryStaffFilterName = null;
+            }
         }
+    } else {
+        dailyEntryStaffFilterName = null;
     }
     
     filteredDailyStudents = studentsToFilter;
@@ -2225,15 +2223,26 @@ async function loadDailyData() {
     if (!currentDate || !filteredDailyStudents || filteredDailyStudents.length === 0) {
         const container = document.getElementById('daily-grid-container');
         const noStudents = document.getElementById('daily-no-students');
+        const staffFilterTitle = document.getElementById('daily-staff-filter-title');
         if (container) container.style.display = 'none';
+        if (staffFilterTitle) staffFilterTitle.style.display = 'none';
         if (noStudents) noStudents.style.display = (filteredDailyStudents.length === 0 && allStudents.length > 0) ? 'block' : (allStudents.length === 0 ? 'block' : 'none');
         return;
     }
 
     const container = document.getElementById('daily-grid-container');
     const noStudents = document.getElementById('daily-no-students');
+    const staffFilterTitle = document.getElementById('daily-staff-filter-title');
     if (container) container.style.display = 'block';
     if (noStudents) noStudents.style.display = 'none';
+    if (staffFilterTitle) {
+        if (dailyEntryStaffFilterName) {
+            staffFilterTitle.textContent = `Showing students for: ${dailyEntryStaffFilterName}`;
+            staffFilterTitle.style.display = 'block';
+        } else {
+            staffFilterTitle.style.display = 'none';
+        }
+    }
 
     // Initialize submitted students tracking for current date if needed
     if (!submittedStudents[currentDate]) {

@@ -845,6 +845,54 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add claimed_relationship column (may already exist): {e}")
+                    
+                    if 'ui_preferences' not in columns:
+                        print("Adding ui_preferences column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN ui_preferences TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add ui_preferences column (may already exist): {e}")
+                    
+                    if 'grades_taught' not in columns:
+                        print("Adding grades_taught column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN grades_taught VARCHAR(50)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add grades_taught column (may already exist): {e}")
+                    
+                    if 'linked_case_manager_id' not in columns:
+                        print("Adding linked_case_manager_id column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN linked_case_manager_id INTEGER REFERENCES users(id)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add linked_case_manager_id column (may already exist): {e}")
+                    
+                    if 'user_number' not in columns:
+                        print("Adding user_number column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN user_number VARCHAR(50)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add user_number column (may already exist): {e}")
+                    
+                    if 'must_change_password' not in columns:
+                        print("Adding must_change_password column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE NOT NULL"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0 NOT NULL"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add must_change_password column (may already exist): {e}")
             except Exception as inner_e:
                 print(f"Error during database migration: {inner_e}")
                 import traceback
