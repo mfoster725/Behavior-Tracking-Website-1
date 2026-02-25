@@ -7884,10 +7884,8 @@ function populateTeacherScheduleStaffSearch() {
     const role = window.currentUser.role;
     if (role !== 'staff' && role !== 'admin') return;
 
-    let list = (allStaffMembers || []).slice();
-    if (role === 'staff') {
-        list = list.filter(u => u.id === window.currentUser.id);
-    }
+    // Only show staff users in this dropdown (not admins)
+    let list = (allStaffMembers || []).filter(u => u.role === 'staff');
     list.sort((a, b) => (a.name || a.username || '').localeCompare(b.name || b.username || ''));
 
     const currentVal = select.value;
@@ -7898,10 +7896,15 @@ function populateTeacherScheduleStaffSearch() {
         opt.textContent = u.name || u.username || `User ${u.id}`;
         select.appendChild(opt);
     });
-    if (list.length && (currentVal === '' || currentVal === 'Loading…' || !list.some(u => String(u.id) === currentVal))) {
-        select.value = String(window.currentUser.id);
-    } else if (currentVal && list.some(u => String(u.id) === currentVal)) {
-        select.value = currentVal;
+    if (list.length) {
+        const hasCurrent = list.some(u => u.id === window.currentUser.id);
+        if (currentVal && list.some(u => String(u.id) === currentVal)) {
+            select.value = currentVal;
+        } else if (hasCurrent) {
+            select.value = String(window.currentUser.id);
+        } else {
+            select.value = String(list[0].id);
+        }
     }
 }
 

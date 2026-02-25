@@ -4414,16 +4414,16 @@ def schedules():
         
         query = Schedule.query.filter_by(schedule_type=schedule_type)
         if schedule_type == 'teacher':
-            # Whose teacher schedule to return: default to current user; optional user_id for staff search
+            # Whose teacher schedule to return:
+            # - Staff/admin: can view any staff member's schedule via user_id
+            # - Default (no user_id): return current user's schedule
             if teacher_user_id is not None:
-                if current_user.role == 'admin':
-                    query = query.filter_by(user_id=teacher_user_id)
-                elif current_user.role == 'staff' and teacher_user_id == current_user.id:
-                    query = query.filter_by(user_id=current_user.id)
-                else:
-                    # Staff cannot view another user's teacher schedule
+                if current_user.role not in ['staff', 'admin']:
                     return jsonify({'error': 'Permission denied'}), 403
+                query = query.filter_by(user_id=teacher_user_id)
             else:
+                if current_user.role not in ['staff', 'admin']:
+                    return jsonify({'error': 'Permission denied'}), 403
                 query = query.filter_by(user_id=current_user.id)
         elif schedule_type == 'student' and student_id:
             query = query.filter_by(student_id=student_id)
