@@ -2139,6 +2139,7 @@ async function filterDailyStudents() {
     // Initialize with all students if no filters
     if (!dailyEntrySearchQuery && !dailyEntryManagedByMe) {
         filteredDailyStudents = [...allStudents];
+        dailyEntryStaffFilterName = null;
         return;
     }
     
