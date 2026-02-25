@@ -1291,10 +1291,11 @@ async function switchView(viewName) {
         } else {
             loadStudents();
         }
-        // Load users to populate staff members for dropdown
+        // Load users to populate staff members for dropdown and teacher schedule search
         loadUsers().then(() => {
             // Update staff datalist after users are loaded
             updateStaffDatalist();
+            populateTeacherScheduleStaffSearch();
         });
         // Load teacher schedule if user is staff or admin
         // Use setTimeout to ensure DOM is ready after view is activated
@@ -1306,7 +1307,7 @@ async function switchView(viewName) {
                 // Always render teacher schedule immediately with default periods
                 // This ensures the periods are shown even before API call completes
                 renderTeacherSchedule();
-                // Also try to load from API (will update if saved data exists)
+                // Load current user's teacher schedule (always load own schedule when tab opens)
                 loadSchedules('teacher');
             }
             // Always render student schedule table with default periods, even if no student is selected
@@ -7769,6 +7770,7 @@ window.showInfoViewPopup = showInfoViewPopup;
 let teacherScheduleData = [];
 let studentScheduleData = [];
 let currentScheduleStudentId = null;
+let currentTeacherScheduleUserId = null; // User ID whose teacher schedule is being viewed (null = current user)
 let allTeacherClassNames = []; // Store all class names from all teacher schedules
 
 // Function to fetch all class names from all teacher schedules
@@ -7799,18 +7801,29 @@ function updateAllClassAutocompletes() {
     // when they are focused or typed in, so no manual update needed
 }
 
-function loadSchedules(type, studentId = null) {
+function loadSchedules(type, studentId = null, teacherUserId = null) {
     let url = `/api/schedules?schedule_type=${type}`;
     if (studentId) {
         url += `&student_id=${studentId}`;
     }
-    
+    if (type === 'teacher' && teacherUserId != null) {
+        url += `&user_id=${teacherUserId}`;
+    }
+
     return fetch(url)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok && response.status === 403) {
+                return response.json().then(err => Promise.reject(new Error(err.error || 'Permission denied')));
+            }
+            return response.json();
+        })
         .then(data => {
             if (type === 'teacher') {
-                teacherScheduleData = data;
+                currentTeacherScheduleUserId = teacherUserId != null ? teacherUserId : (window.currentUser && window.currentUser.id);
+                teacherScheduleData = Array.isArray(data) ? data : [];
                 renderTeacherSchedule();
+                updateTeacherScheduleSubtitle();
+                updateTeacherScheduleEditability();
                 // Auto-select current period if we're in period-entry view
                 if (document.getElementById('period-entry-view')?.classList.contains('active')) {
                     setTimeout(() => {
@@ -7827,6 +7840,68 @@ function loadSchedules(type, studentId = null) {
             console.error('Error loading schedules:', error);
             throw error;
         });
+}
+
+function updateTeacherScheduleSubtitle() {
+    const el = document.getElementById('teacher-schedule-subtitle');
+    if (!el || !window.currentUser) return;
+    const uid = currentTeacherScheduleUserId != null ? currentTeacherScheduleUserId : window.currentUser.id;
+    const name = (uid === window.currentUser.id)
+        ? (window.currentUser.name || window.currentUser.username)
+        : (allStaffMembers.find(u => u.id === uid)?.name || allStaffMembers.find(u => u.id === uid)?.username || 'Staff');
+    el.textContent = `${name}'s Schedule`;
+}
+
+function updateTeacherScheduleEditability() {
+    const canEdit = window.currentUser && (
+        currentTeacherScheduleUserId == null ||
+        currentTeacherScheduleUserId === window.currentUser.id ||
+        window.currentUser.role === 'admin'
+    );
+    const addBtn = document.getElementById('add-teacher-period-btn');
+    const saveBtn = document.getElementById('save-teacher-schedule-btn');
+    const tbody = document.getElementById('teacher-schedule-body');
+    if (addBtn) addBtn.style.display = canEdit ? '' : 'none';
+    if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
+    if (tbody) {
+        tbody.querySelectorAll('.time-input, .class-input, .btn-add-class, .btn-remove-class').forEach(el => {
+            if (el.classList && (el.classList.contains('time-input') || el.classList.contains('class-input'))) {
+                el.readOnly = !canEdit;
+                el.disabled = !canEdit;
+            }
+            if (el.classList && (el.classList.contains('btn-add-class') || el.classList.contains('btn-remove-class'))) {
+                el.style.display = canEdit ? '' : 'none';
+                el.disabled = !canEdit;
+            }
+        });
+    }
+}
+
+function populateTeacherScheduleStaffSearch() {
+    const select = document.getElementById('teacher-schedule-staff-search');
+    if (!select || !window.currentUser || !window.currentUser.role) return;
+    const role = window.currentUser.role;
+    if (role !== 'staff' && role !== 'admin') return;
+
+    let list = (allStaffMembers || []).slice();
+    if (role === 'staff') {
+        list = list.filter(u => u.id === window.currentUser.id);
+    }
+    list.sort((a, b) => (a.name || a.username || '').localeCompare(b.name || b.username || ''));
+
+    const currentVal = select.value;
+    select.innerHTML = '';
+    list.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.textContent = u.name || u.username || `User ${u.id}`;
+        select.appendChild(opt);
+    });
+    if (list.length && (currentVal === '' || currentVal === 'Loading…' || !list.some(u => String(u.id) === currentVal))) {
+        select.value = String(window.currentUser.id);
+    } else if (currentVal && list.some(u => String(u.id) === currentVal)) {
+        select.value = currentVal;
+    }
 }
 
 function renderTeacherSchedule() {
@@ -8752,6 +8827,9 @@ async function saveSchedule(type) {
     
     if (type === 'student' && currentScheduleStudentId) {
         payload.student_id = currentScheduleStudentId;
+    }
+    if (type === 'teacher' && currentTeacherScheduleUserId != null && currentTeacherScheduleUserId !== (window.currentUser && window.currentUser.id) && window.currentUser && window.currentUser.role === 'admin') {
+        payload.user_id = currentTeacherScheduleUserId;
     }
     
     try {
@@ -10502,6 +10580,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // Note: Schedules will be rendered when schedules view is shown
     // We don't load here to avoid unnecessary API calls if user never visits schedules tab
     
+    // Teacher schedule staff search (view another staff's schedule)
+    const teacherScheduleStaffSearch = document.getElementById('teacher-schedule-staff-search');
+    if (teacherScheduleStaffSearch) {
+        teacherScheduleStaffSearch.addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (!val) return;
+            const userId = parseInt(val, 10);
+            loadSchedules('teacher', null, userId).catch(err => {
+                showMessage(err.message || 'Could not load schedule.', 'error');
+                if (window.currentUser) {
+                    teacherScheduleStaffSearch.value = String(window.currentUser.id);
+                    loadSchedules('teacher');
+                }
+            });
+        });
+    }
+
     // Schedule student selector
     const scheduleStudentSelect = document.getElementById('schedule-student-select');
     if (scheduleStudentSelect) {

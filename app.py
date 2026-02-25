@@ -18,6 +18,14 @@ from urllib.error import URLError, HTTPError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+# Optional: Google Sheets sync (install gspread, google-auth)
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    _GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    _GOOGLE_SHEETS_AVAILABLE = False
+
 app = Flask(__name__)
 
 # Database configuration: Use PostgreSQL (Aiven, Render, Neon, etc.) or SQLite locally
@@ -893,6 +901,38 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add must_change_password column (may already exist): {e}")
+                
+                # Verify columns exist in students table
+                if 'students' in table_names:
+                    is_postgres = 'postgresql' in str(db.engine.url).lower()
+                    columns = [col['name'] for col in inspector.get_columns('students')]
+                    if 'lunch_number' not in columns:
+                        print("Adding lunch_number column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE students ADD COLUMN lunch_number VARCHAR(50)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add lunch_number column (may already exist): {e}")
+                    if 'card_color' not in columns:
+                        print("Adding card_color column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE students ADD COLUMN card_color VARCHAR(20)"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add card_color column (may already exist): {e}")
+                    if 'directory_info_opt_out' not in columns:
+                        print("Adding directory_info_opt_out column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT FALSE NOT NULL"))
+                                else:
+                                    conn.execute(text("ALTER TABLE students ADD COLUMN directory_info_opt_out BOOLEAN DEFAULT 0 NOT NULL"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add directory_info_opt_out column (may already exist): {e}")
             except Exception as inner_e:
                 print(f"Error during database migration: {inner_e}")
                 import traceback
@@ -3571,6 +3611,134 @@ def import_users():
     else:
         return jsonify({'error': 'Invalid import type'}), 400
 
+
+# ----- Google Sheets sync (students) -----
+# Expected sheet columns (first row = headers): Name, Email, Grade, Card Color, Lunch Number
+# Lunch Number is used as the unique key for update vs create. See GOOGLE_SHEETS_SYNC_README.md for setup.
+
+def _get_google_sheets_client():
+    """Build a gspread client from env: GOOGLE_SHEETS_CREDENTIALS_JSON (JSON string) or GOOGLE_APPLICATION_CREDENTIALS (path)."""
+    if not _GOOGLE_SHEETS_AVAILABLE:
+        return None, 'Google Sheets libraries not installed. Add gspread and google-auth to requirements.txt.'
+    creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_JSON')
+    creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    if creds_json:
+        try:
+            info = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
+            client = gspread.authorize(creds)
+            return client, None
+        except Exception as e:
+            return None, f'Invalid GOOGLE_SHEETS_CREDENTIALS_JSON: {e}'
+    if creds_path and os.path.isfile(creds_path):
+        try:
+            creds = Credentials.from_service_account_file(creds_path, scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
+            client = gspread.authorize(creds)
+            return client, None
+        except Exception as e:
+            return None, f'Failed to load credentials from file: {e}'
+    return None, 'Set GOOGLE_SHEETS_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS.'
+
+
+def _normalize_header(h):
+    """Normalize header for column mapping: strip, lower, replace spaces with underscores."""
+    if h is None:
+        return ''
+    return str(h).strip().lower().replace(' ', '_').replace('-', '_')
+
+
+def sync_students_from_google_sheet(sheet_id=None, worksheet_name_or_index=None):
+    """
+    Read students from a Google Sheet and upsert into Student table.
+    Sheet must have header row. Columns (case-insensitive): Name, Email, Grade, Card Color, Lunch Number.
+    Lunch Number is the unique key; rows with same Lunch Number update existing student.
+    Returns: dict with created, updated, errors (list of strings).
+    """
+    sheet_id = sheet_id or os.environ.get('GOOGLE_SHEET_ID')
+    if not sheet_id:
+        return {'created': 0, 'updated': 0, 'errors': ['GOOGLE_SHEET_ID not set.']}
+    client, err = _get_google_sheets_client()
+    if err:
+        return {'created': 0, 'updated': 0, 'errors': [err]}
+    try:
+        workbook = client.open_by_key(sheet_id)
+        if worksheet_name_or_index is not None:
+            if isinstance(worksheet_name_or_index, int):
+                worksheet = workbook.get_worksheet(worksheet_name_or_index)
+            else:
+                worksheet = workbook.worksheet(worksheet_name_or_index)
+        else:
+            worksheet = workbook.sheet1
+        rows = worksheet.get_all_values()
+    except Exception as e:
+        return {'created': 0, 'updated': 0, 'errors': [f'Could not open sheet: {e}']}
+    if not rows:
+        return {'created': 0, 'updated': 0, 'errors': ['Sheet is empty.']}
+    headers = [_normalize_header(r) for r in rows[0]]
+    name_col = next((i for i, h in enumerate(headers) if h in ('name', 'student_name')), None)
+    email_col = next((i for i, h in enumerate(headers) if h == 'email'), None)
+    grade_col = next((i for i, h in enumerate(headers) if h == 'grade'), None)
+    card_color_col = next((i for i, h in enumerate(headers) if h in ('card_color', 'cardcolor')), None)
+    lunch_number_col = next((i for i, h in enumerate(headers) if h in ('lunch_number', 'lunchnumber')), None)
+    if name_col is None:
+        return {'created': 0, 'updated': 0, 'errors': ['Sheet must have a "Name" (or "Student Name") column.']}
+    created = 0
+    updated = 0
+    errors = []
+    for row_index, row in enumerate(rows[1:], start=2):
+        name = (row[name_col] or '').strip() if name_col is not None and len(row) > name_col else ''
+        if not name:
+            continue
+        email = (row[email_col] or '').strip() if email_col is not None and len(row) > email_col else None
+        grade = (row[grade_col] or '').strip() if grade_col is not None and len(row) > grade_col else None
+        card_color = (row[card_color_col] or '').strip() or None if card_color_col is not None and len(row) > card_color_col else None
+        lunch_number = (row[lunch_number_col] or '').strip() or None if lunch_number_col is not None and len(row) > lunch_number_col else None
+        try:
+            if lunch_number:
+                existing = Student.query.filter_by(lunch_number=lunch_number).first()
+            else:
+                existing = None
+            if existing:
+                existing.name = name
+                if email is not None:
+                    existing.email = email or None
+                if grade is not None:
+                    existing.grade = grade or None
+                if card_color is not None:
+                    existing.card_color = card_color
+                if lunch_number is not None:
+                    existing.lunch_number = lunch_number
+                updated += 1
+            else:
+                student = Student(
+                    name=name,
+                    email=email or None,
+                    grade=grade or None,
+                    card_color=card_color,
+                    lunch_number=lunch_number,
+                )
+                db.session.add(student)
+                created += 1
+        except Exception as e:
+            errors.append(f'Row {row_index} ({name}): {e}')
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        errors.append(f'Commit failed: {e}')
+    return {'created': created, 'updated': updated, 'errors': errors}
+
+
+@app.route('/api/admin/sync-google-sheet', methods=['POST'])
+@admin_required
+def api_sync_google_sheet():
+    """Trigger sync of students from the configured Google Sheet. Admin only."""
+    sheet_id = request.json.get('sheet_id') if request.is_json else None
+    worksheet = request.json.get('worksheet') if request.is_json else None
+    result = sync_students_from_google_sheet(sheet_id=sheet_id, worksheet_name_or_index=worksheet)
+    return jsonify(result), 200
+
+
 @app.route('/api/frenzy-stats', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
@@ -4191,6 +4359,7 @@ def schedules():
             data = request.json
             schedule_type = data.get('schedule_type')  # 'teacher' or 'student'
             student_id = data.get('student_id')  # Only for student schedules
+            teacher_user_id = data.get('user_id')  # Optional: for teacher schedule, which user to save (admin only)
             periods = data.get('periods', [])
             
             # Validate schedule_type
@@ -4204,9 +4373,14 @@ def schedules():
                     return jsonify({'error': f'Time period is required for period {index + 1}'}), 400
             
             # Delete existing schedules
+            target_user_id = current_user.id  # for teacher schedule
             if schedule_type == 'teacher':
-                # Delete only the current user's teacher schedule
-                Schedule.query.filter_by(schedule_type='teacher', user_id=current_user.id).delete()
+                # Staff can only save their own; admin can save for any user via user_id
+                if teacher_user_id is not None:
+                    if current_user.role != 'admin':
+                        return jsonify({'error': 'Only admin can save another user\'s teacher schedule'}), 403
+                    target_user_id = int(teacher_user_id)
+                Schedule.query.filter_by(schedule_type='teacher', user_id=target_user_id).delete()
             else:
                 if not student_id:
                     return jsonify({'error': 'student_id is required for student schedules'}), 400
@@ -4216,7 +4390,7 @@ def schedules():
             for index, period in enumerate(periods):
                 schedule = Schedule(
                     schedule_type=schedule_type,
-                    user_id=current_user.id if schedule_type == 'teacher' else None,
+                    user_id=target_user_id if schedule_type == 'teacher' else None,
                     student_id=student_id if schedule_type == 'student' else None,
                     time_period=period.get('time_period', '').strip(),
                     class_name=period.get('class_name', '').strip() or None,
@@ -4236,11 +4410,21 @@ def schedules():
         # GET request
         schedule_type = request.args.get('schedule_type', 'teacher')
         student_id = request.args.get('student_id', type=int)
+        teacher_user_id = request.args.get('user_id', type=int)  # For teacher schedule: whose schedule to load
         
         query = Schedule.query.filter_by(schedule_type=schedule_type)
         if schedule_type == 'teacher':
-            # Filter teacher schedules by current user
-            query = query.filter_by(user_id=current_user.id)
+            # Whose teacher schedule to return: default to current user; optional user_id for staff search
+            if teacher_user_id is not None:
+                if current_user.role == 'admin':
+                    query = query.filter_by(user_id=teacher_user_id)
+                elif current_user.role == 'staff' and teacher_user_id == current_user.id:
+                    query = query.filter_by(user_id=current_user.id)
+                else:
+                    # Staff cannot view another user's teacher schedule
+                    return jsonify({'error': 'Permission denied'}), 403
+            else:
+                query = query.filter_by(user_id=current_user.id)
         elif schedule_type == 'student' and student_id:
             query = query.filter_by(student_id=student_id)
         

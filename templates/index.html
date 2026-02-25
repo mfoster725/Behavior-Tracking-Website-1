@@ -295,7 +295,15 @@
                     <!-- Teacher Schedule Section -->
                     <div class="schedule-section">
                         <h3>Teacher Schedule</h3>
-                        <h4 style="margin-top: 10px; margin-bottom: 20px; color: #555; font-weight: bold; font-size: 1.17em;">{{ user.name if user.name else user.username }}'s Schedule</h4>
+                        {% if user.role in ['staff', 'admin'] %}
+                        <div class="form-group" style="margin-top: 10px; margin-bottom: 10px;">
+                            <label for="teacher-schedule-staff-search" style="margin-right: 8px;">Search staff schedule:</label>
+                            <select id="teacher-schedule-staff-search" style="max-width: 320px; padding: 6px 10px;">
+                                <option value="">Loading…</option>
+                            </select>
+                        </div>
+                        {% endif %}
+                        <h4 id="teacher-schedule-subtitle" style="margin-top: 10px; margin-bottom: 20px; color: #555; font-weight: bold; font-size: 1.17em;">{{ user.name if user.name else user.username }}'s Schedule</h4>
                         <div id="teacher-schedule-container">
                             <table class="schedule-table teacher-schedule-table">
                                 <thead>
