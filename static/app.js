@@ -368,6 +368,43 @@ document.addEventListener('DOMContentLoaded', () => {
         attachNavAndHamburger();
         console.log('Current user:', window.currentUser);
         
+        // Disable browser autocomplete/autofill on all inputs in the main app
+        // (login page does not load this script, so its username/password can still be autofilled)
+        try {
+            const inputs = document.querySelectorAll('input');
+            inputs.forEach((input) => {
+                const type = (input.type || '').toLowerCase();
+                if (input.dataset && input.dataset.allowAutocomplete === 'true') return;
+                if (['hidden', 'checkbox', 'radio', 'file', 'button', 'submit', 'reset'].includes(type)) return;
+                input.setAttribute('autocomplete', 'off');
+                input.setAttribute('autocapitalize', 'off');
+                input.setAttribute('autocorrect', 'off');
+                input.setAttribute('spellcheck', 'false');
+            });
+
+            // Further discourage third‑party password managers on non-login screens
+            const passwordInputs = document.querySelectorAll('input[type="password"]');
+            passwordInputs.forEach((input) => {
+                if (input.dataset && input.dataset.allowPasswordManager === 'true') return;
+                // Hint that these are "new" passwords, not login fields
+                if (!input.hasAttribute('autocomplete')) {
+                    input.setAttribute('autocomplete', 'new-password');
+                }
+                // Some managers scan password fields on load; delay exposing type="password" until user interacts
+                if (!input.value) {
+                    input.dataset.originalType = 'password';
+                    input.type = 'text';
+                    input.addEventListener('focus', () => {
+                        if (input.dataset.originalType === 'password') {
+                            input.type = 'password';
+                        }
+                    }, { once: true });
+                }
+            });
+        } catch (e) {
+            console.error('Error disabling autocomplete:', e);
+        }
+        
         // Set default date if not already set
         const dateInput = document.getElementById('date-input');
         if (dateInput && !dateInput.value) {
@@ -2207,66 +2244,65 @@ async function loadDailyData() {
     dailyData = {};
     
     try {
-        // Load data for each student for the current date (skip submitted students)
-        const promises = filteredDailyStudents.map(student => {
-            // Skip loading data for students who have been submitted today
-            if (submittedStudents[currentDate].has(student.id)) {
-                console.log(`Skipping data load for submitted student: ${student.name}`);
-                return Promise.resolve(null);
-            }
-            
-            return fetch(`/api/daily-records?student_id=${student.id}&start_date=${currentDate}&end_date=${currentDate}`)
-                .then(response => response.json());
-        });
-        
-        const results = await Promise.all(promises);
+        // Build a set of visible student IDs for this view
+        const visibleStudentIds = new Set(filteredDailyStudents.map(s => s.id));
+        // Determine which visible students still need data loaded (not yet submitted)
+        const nonSubmittedVisibleIds = new Set(
+            Array.from(visibleStudentIds).filter(id => !submittedStudents[currentDate].has(id))
+        );
+
+        // If all visible students have already been submitted, we don't need to load anything
+        if (nonSubmittedVisibleIds.size === 0) {
+            renderDailyGrid();
+            return;
+        }
+
+        // Load data for all accessible students for the current date in a single request
+        const response = await fetch(`/api/daily-records?start_date=${currentDate}&end_date=${currentDate}`);
+        const allRecords = await response.json();
         
         // Initialize attendance data for current date if not exists
         if (!attendanceData[currentDate]) {
             attendanceData[currentDate] = {};
         }
-        
-        results.forEach((records, index) => {
-            const studentId = filteredDailyStudents[index].id;
-            
-            // Skip if this student was submitted (records will be null)
-            if (records === null) {
+
+        // Map records by student, but only for visible, non-submitted students
+        allRecords.forEach(record => {
+            const studentId = record.student_id;
+
+            // Only process students that are currently visible in the daily view
+            if (!visibleStudentIds.has(studentId)) {
                 return;
             }
-            
+            // Skip students that have already been submitted for this date
+            if (submittedStudents[currentDate].has(studentId)) {
+                return;
+            }
+
             dailyData[studentId] = {};
-            
-            if (records && records.length > 0) {
-                const record = records[0];
-                
-                // Load attendance status - prefer attendance_status, fallback to present boolean for backward compatibility
-                if (record.attendance_status) {
-                    attendanceData[currentDate][studentId] = record.attendance_status;
-                } else if (record.present !== undefined) {
-                    // Migration: convert old present boolean to new attendance_status
-                    attendanceData[currentDate][studentId] = record.present ? 'present' : 'unexcused';
-                } else {
-                    // Default to present if not set
-                    if (!attendanceData[currentDate][studentId]) {
-                        attendanceData[currentDate][studentId] = 'present';
-                    }
-                }
-                
-                record.periods.forEach(period => {
-                    dailyData[studentId][period.time_range] = {
-                        s: period.safety_points,
-                        t: period.teamwork_points,
-                        a: period.accountability_points,
-                        r: period.relationships_points,
-                        info: period.info || ''
-                    };
-                });
+
+            // Load attendance status - prefer attendance_status, fallback to present boolean for backward compatibility
+            if (record.attendance_status) {
+                attendanceData[currentDate][studentId] = record.attendance_status;
+            } else if (record.present !== undefined) {
+                // Migration: convert old present boolean to new attendance_status
+                attendanceData[currentDate][studentId] = record.present ? 'present' : 'unexcused';
             } else {
-                // No records exist, default to present
+                // Default to present if not set
                 if (!attendanceData[currentDate][studentId]) {
                     attendanceData[currentDate][studentId] = 'present';
                 }
             }
+
+            record.periods.forEach(period => {
+                dailyData[studentId][period.time_range] = {
+                    s: period.safety_points,
+                    t: period.teamwork_points,
+                    a: period.accountability_points,
+                    r: period.relationships_points,
+                    info: period.info || ''
+                };
+            });
         });
     } catch (error) {
         console.error('Error loading daily data:', error);
@@ -6735,16 +6771,13 @@ async function importCSV() {
 
 function switchImportTab(tab) {
     const staffSection = document.getElementById('import-staff-section');
+    const outsideStaffSection = document.getElementById('import-outside-staff-section');
     const studentSection = document.getElementById('import-student-section');
     const results = document.getElementById('import-results');
     if (staffSection && studentSection) {
-        if (tab === 'staff') {
-            staffSection.style.display = 'block';
-            studentSection.style.display = 'none';
-        } else {
-            staffSection.style.display = 'none';
-            studentSection.style.display = 'block';
-        }
+        staffSection.style.display = tab === 'staff' ? 'block' : 'none';
+        if (outsideStaffSection) outsideStaffSection.style.display = tab === 'outside_staff' ? 'block' : 'none';
+        studentSection.style.display = tab === 'student' ? 'block' : 'none';
     }
     if (results) {
         results.style.display = 'none';
@@ -6757,6 +6790,8 @@ function importUsersFromCsv() {
     const type = select ? select.value : 'staff';
     if (type === 'student') {
         importStudentCSV();
+    } else if (type === 'outside_staff') {
+        importOutsideStaffCSV();
     } else {
         importStaffCSV();
     }
@@ -6775,7 +6810,9 @@ function renderImportResults(data, type) {
         const heading =
             type === 'staff'
                 ? 'Successfully created staff user(s):'
-                : 'Successfully created student user(s):';
+                : type === 'outside_staff'
+                    ? 'Successfully created outside staff user(s):'
+                    : 'Successfully created student user(s):';
         html += `<div class="import-results-success"><strong>${heading}</strong>`;
         html += `<br>Count: ${success.length}`;
         html += '<table class="import-results-table"><thead>';
@@ -6783,6 +6820,11 @@ function renderImportResults(data, type) {
             html += '<tr><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>User #</th></tr></thead><tbody>';
             success.forEach(row => {
                 html += `<tr><td>${row.name || ''}</td><td>${row.username || ''}</td><td>${row.password || ''}</td><td>${row.role || ''}</td><td>${row.user_number || ''}</td></tr>`;
+            });
+        } else if (type === 'outside_staff') {
+            html += '<tr><th>Name</th><th>Username</th><th>Password</th><th>User #</th><th>District</th></tr></thead><tbody>';
+            success.forEach(row => {
+                html += `<tr><td>${row.name || ''}</td><td>${row.username || ''}</td><td>${row.password || ''}</td><td>${row.user_number || ''}</td><td>${row.district || ''}</td></tr>`;
             });
         } else {
             html += '<tr><th>Initials</th><th>Username</th><th>Password</th><th>Lunch #</th><th>Grade</th></tr></thead><tbody>';
@@ -6848,6 +6890,40 @@ async function importStaffCSV() {
     } catch (err) {
         console.error('Error importing staff CSV:', err);
         container.innerHTML = '<div class="import-results-error">Error importing staff CSV. Please try again.</div>';
+    }
+}
+
+async function importOutsideStaffCSV() {
+    const input = document.getElementById('import-outside-staff-file');
+    const container = document.getElementById('import-results');
+    if (!input || !container) return;
+
+    if (!input.files || input.files.length === 0) {
+        showMessage('Please select an Outside Staff CSV file to import.', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+    formData.append('type', 'outside_staff');
+
+    container.style.display = 'block';
+    container.innerHTML = '<div class="loading">Importing outside staff users...</div>';
+
+    try {
+        const response = await fetch('/api/import-users', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            return;
+        }
+        renderImportResults(data, 'outside_staff');
+    } catch (err) {
+        console.error('Error importing outside staff CSV:', err);
+        container.innerHTML = '<div class="import-results-error">Error importing outside staff CSV. Please try again.</div>';
     }
 }
 
@@ -8819,46 +8895,50 @@ async function loadUsers() {
             return 'Student';
         };
         
-        // Populate Admin table
+        // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
             adminTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
         } else {
+            const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
-                const row = createAdminStaffRow(user, getDisplayRole(user));
-                adminTbody.appendChild(row);
+                adminFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
             });
+            adminTbody.appendChild(adminFrag);
         }
         
-        // Populate Staff table
+        // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
             staffTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
+            const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
-                const row = createAdminStaffRow(user, getDisplayRole(user));
-                staffTbody.appendChild(row);
+                staffFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
             });
+            staffTbody.appendChild(staffFrag);
         }
         
-        // Populate Outside Staff table
+        // Populate Outside Staff table (DocumentFragment for single reflow)
         if (outsideStaffTbody) {
             if (outsideStaffUsers.length === 0) {
                 outsideStaffTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
             } else {
+                const outsideFrag = document.createDocumentFragment();
                 outsideStaffUsers.forEach(user => {
-                    const row = createOutsideStaffRow(user);
-                    outsideStaffTbody.appendChild(row);
+                    outsideFrag.appendChild(createOutsideStaffRow(user));
                 });
+                outsideStaffTbody.appendChild(outsideFrag);
             }
         }
         
-        // Populate Student table
+        // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
             studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
+            const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
-                const row = createStudentRow(user);
-                studentTbody.appendChild(row);
+                studentFrag.appendChild(createStudentRow(user));
             });
+            studentTbody.appendChild(studentFrag);
         }
         
         // Load admin stats if on admin panel
@@ -8875,6 +8955,7 @@ async function loadUsers() {
                     if (archivedStudents.length === 0) {
                         archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
+                        const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
                             const row = document.createElement('tr');
                             const createdAt = student.created_at
@@ -8896,8 +8977,9 @@ async function loadUsers() {
                                     </button>
                                 </td>
                             `;
-                            archivedStudentsTbody.appendChild(row);
+                            archivedFrag.appendChild(row);
                         });
+                        archivedStudentsTbody.appendChild(archivedFrag);
                     }
                 } else {
                     archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
@@ -8935,10 +9017,17 @@ function createAdminStaffRow(user, displayRole) {
     const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
         ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
         : '';
-    
+    const isParaprofessional = user.role === 'staff' && user.designation === 'Paraprofessional';
+    const linkedCaseManager = isParaprofessional && user.linked_case_manager_id
+        ? (typeof allStaffMembers !== 'undefined' ? allStaffMembers.find(s => s.id === user.linked_case_manager_id) : null)
+        : null;
+    const linkedCaseManagerHtml = linkedCaseManager
+        ? `<br><span class="grades-taught-text">${escapeHtml(linkedCaseManager.name || linkedCaseManager.username || '')}</span>`
+        : '';
+
     row.innerHTML = `
         <td><strong>${name}</strong></td>
-        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${escapeHtml(displayRole)}${gradesTaughtHtml}</td>
+        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `

@@ -3273,7 +3273,7 @@ def generate_student_username(initials: str) -> str:
 @app.route('/api/import-users', methods=['POST'])
 @login_required
 def import_users():
-    """Import staff or student users from CSV."""
+    """Import staff, outside staff, or student users from CSV."""
     if current_user.role != 'admin':
         return jsonify({'error': 'Permission denied'}), 403
 
@@ -3390,6 +3390,55 @@ def import_users():
         # Second pass: Paraprofessionals
         for idx, row in enumerate(para_rows, start=header_offset + 1):
             process_staff_row(row, idx)
+
+        db.session.commit()
+        return jsonify({'success': success, 'errors': errors, 'warnings': warnings}), 200
+
+    elif import_type == 'outside_staff':
+        # CSV columns: A=User Number, B=Name, C=District
+        outside_staff_rows = rows[header_offset:]
+        for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
+            if not row or all(not (c or '').strip() for c in row):
+                continue
+            user_number = (row[0] or '').strip() if len(row) > 0 else ''
+            name = (row[1] or '').strip() if len(row) > 1 else ''
+            district = (row[2] or '').strip() if len(row) > 2 else ''
+
+            if not user_number or not name:
+                errors.append(f"Row {idx}: missing User Number or Name.")
+                continue
+
+            existing = User.query.filter_by(user_number=user_number).first()
+            if existing:
+                errors.append(
+                    f"{name} was not added due to duplicate User Number ({user_number}). "
+                    "This user may already exist in the system."
+                )
+                continue
+
+            username = generate_staff_username(name)
+            password = f"{username}123"
+
+            user = User(
+                name=name,
+                username=username,
+                role='staff',
+                user_number=user_number,
+                is_outside_staff=True,
+                district=district or None,
+                must_change_password=True,
+            )
+            user.set_password(password)
+            db.session.add(user)
+            success.append(
+                {
+                    'name': name,
+                    'username': username,
+                    'password': password,
+                    'user_number': user_number,
+                    'district': district or '',
+                }
+            )
 
         db.session.commit()
         return jsonify({'success': success, 'errors': errors, 'warnings': warnings}), 200
@@ -4199,6 +4248,28 @@ def manage_users():
             # Students can only see themselves
             users = [current_user]
         
+        # Batch load related data to avoid N+1 queries
+        student_ids = list({u.student_id for u in users if u.student_id})
+        students_by_id = {}
+        if student_ids:
+            for s in Student.query.filter(Student.id.in_(student_ids)).all():
+                students_by_id[s.id] = s
+        team_by_student = {}
+        if student_ids:
+            for tm in TeamMember.query.filter(TeamMember.student_id.in_(student_ids)).all():
+                team_by_student.setdefault(tm.student_id, []).append(tm)
+        outside_staff_ids = [u.id for u in users if getattr(u, 'role', None) == 'staff' and getattr(u, 'is_outside_staff', False)]
+        assignments_by_user = {}
+        assigned_student_ids = set()
+        if outside_staff_ids:
+            for oss in OutsideStaffStudent.query.filter(OutsideStaffStudent.user_id.in_(outside_staff_ids)).all():
+                assignments_by_user.setdefault(oss.user_id, []).append(oss.student_id)
+                assigned_student_ids.add(oss.student_id)
+        assigned_students_by_id = {}
+        if assigned_student_ids:
+            for s in Student.query.filter(Student.id.in_(assigned_student_ids)).all():
+                assigned_students_by_id[s.id] = {'id': s.id, 'name': s.name}
+        
         result = []
         for user in users:
             user_data = {
@@ -4214,41 +4285,26 @@ def manage_users():
                 'linked_case_manager_id': getattr(user, 'linked_case_manager_id', None),
                 'created_at': user.created_at.isoformat() if user.created_at else None
             }
-            
-            # Include assigned students for Outside Staff users
-            if user.role == 'staff' and (hasattr(user, 'is_outside_staff') and user.is_outside_staff):
-                assignments = OutsideStaffStudent.query.filter_by(user_id=user.id).all()
-                assigned_students = []
-                for assignment in assignments:
-                    student = Student.query.get(assignment.student_id)
-                    if student:
-                        assigned_students.append({
-                            'id': student.id,
-                            'name': student.name
-                        })
-                user_data['assigned_students'] = assigned_students
-            
-            # Include student info and team members if available
-            if user.student_id:
-                student = Student.query.get(user.student_id)
-                if student:
-                    user_data['student_name'] = student.name
-                    user_data['grade'] = student.grade
-                    user_data['card_color'] = student.card_color
-                    
-                    # Get team members
-                    team_members = TeamMember.query.filter_by(student_id=user.student_id).all()
-                    user_data['team_members'] = {
-                        'case_manager': [],
-                        'practitioner': [],
-                        'professional': [],
-                        'group_leader': [],
-                        'paraprofessional': []
-                    }
-                    for tm in team_members:
-                        role_key = tm.role.lower().replace(' ', '_')
-                        if role_key in user_data['team_members']:
-                            user_data['team_members'][role_key].append(tm.name)
+            # Assigned students for Outside Staff (from batch)
+            if user.id in assignments_by_user:
+                user_data['assigned_students'] = [
+                    assigned_students_by_id[sid] for sid in assignments_by_user[user.id]
+                    if sid in assigned_students_by_id
+                ]
+            # Student info and team members (from batch)
+            if user.student_id and user.student_id in students_by_id:
+                student = students_by_id[user.student_id]
+                user_data['student_name'] = student.name
+                user_data['grade'] = student.grade
+                user_data['card_color'] = student.card_color
+                user_data['team_members'] = {
+                    'case_manager': [], 'practitioner': [], 'professional': [],
+                    'group_leader': [], 'paraprofessional': []
+                }
+                for tm in team_by_student.get(user.student_id, []):
+                    role_key = (tm.role or '').lower().replace(' ', '_')
+                    if role_key in user_data['team_members']:
+                        user_data['team_members'][role_key].append(tm.name)
             result.append(user_data)
         
         return jsonify(result)

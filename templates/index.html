@@ -566,6 +566,7 @@
                             <label for="import-type-select" style="font-size: 13px; color: #444;">Import type:</label>
                             <select id="import-type-select" onchange="switchImportTab(this.value)" style="padding: 6px 10px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 13px;">
                                 <option value="staff">Staff</option>
+                                <option value="outside_staff">Outside Staff</option>
                                 <option value="student">Student</option>
                             </select>
                         </div>
@@ -578,6 +579,15 @@
                                 Grades Taught is used for Case Managers (e.g. <strong>7</strong> for 7th only, <strong>6-9</strong> for 6th through 9th). Case Manager column is used for Paraprofessionals.
                             </p>
                             <input type="file" id="import-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
+                        </div>
+                        <div id="import-outside-staff-section" style="display: none;">
+                            <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                                CSV columns: <strong>User Number (A) | Name (B) | District (C)</strong>
+                            </p>
+                            <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
+                                Username and password are generated the same way as staff (e.g. username from name, password username123). Users are added as Outside Staff.
+                            </p>
+                            <input type="file" id="import-outside-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
                         </div>
                         <div id="import-student-section" style="display: none;">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
@@ -1017,12 +1027,12 @@
                     </div>
                     <div class="form-group">
                         <label for="student-password">Password: *</label>
-                        <input type="password" id="student-password" required placeholder="Minimum 6 characters">
+                        <input type="password" id="student-password" required placeholder="Minimum 6 characters" autocomplete="new-password" data-allow-password-manager="false">
                         <small style="color: #666;">Student will use this to log in</small>
                     </div>
                     <div class="form-group">
                         <label for="student-password-confirm">Confirm Password: *</label>
-                        <input type="password" id="student-password-confirm" required placeholder="Re-enter password">
+                        <input type="password" id="student-password-confirm" required placeholder="Re-enter password" autocomplete="new-password" data-allow-password-manager="false">
                         <small style="color: #666;">Passwords must match</small>
                     </div>
                 </div>
@@ -1081,11 +1091,11 @@
                 </div>
                 <div class="form-group">
                     <label for="staff-password">Password: *</label>
-                    <input type="password" id="staff-password" required placeholder="Minimum 6 characters">
+                    <input type="password" id="staff-password" required placeholder="Minimum 6 characters" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
                 <div class="form-group">
                     <label for="staff-password-confirm">Confirm Password: *</label>
-                    <input type="password" id="staff-password-confirm" required placeholder="Re-enter password">
+                    <input type="password" id="staff-password-confirm" required placeholder="Re-enter password" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
                 <div class="form-group">
                     <label for="staff-role">Role: *</label>
@@ -1141,11 +1151,11 @@
                 </div>
                 <div class="form-group">
                     <label for="outside-staff-password">Password: *</label>
-                    <input type="password" id="outside-staff-password" required placeholder="Minimum 6 characters">
+                    <input type="password" id="outside-staff-password" required placeholder="Minimum 6 characters" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
                 <div class="form-group">
                     <label for="outside-staff-password-confirm">Confirm Password: *</label>
-                    <input type="password" id="outside-staff-password-confirm" required placeholder="Re-enter password">
+                    <input type="password" id="outside-staff-password-confirm" required placeholder="Re-enter password" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
             </div>
             
@@ -1177,11 +1187,11 @@
                 </div>
                 <div class="form-group">
                     <label for="admin-password">Password: *</label>
-                    <input type="password" id="admin-password" required placeholder="Minimum 6 characters">
+                    <input type="password" id="admin-password" required placeholder="Minimum 6 characters" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
                 <div class="form-group">
                     <label for="admin-password-confirm">Confirm Password: *</label>
-                    <input type="password" id="admin-password-confirm" required placeholder="Re-enter password">
+                    <input type="password" id="admin-password-confirm" required placeholder="Re-enter password" autocomplete="new-password" data-allow-password-manager="false">
                 </div>
             </div>
             
@@ -1272,12 +1282,12 @@
                     </div>
                     <div class="form-group">
                         <label for="edit-user-password">New Password:</label>
-                        <input type="password" id="edit-user-password" placeholder="Leave blank to keep current password">
+                        <input type="password" id="edit-user-password" placeholder="Leave blank to keep current password" autocomplete="new-password" data-allow-password-manager="false">
                         <small style="color: #666;">Only enter if you want to change the password</small>
                     </div>
                     <div class="form-group">
                         <label for="edit-user-password-confirm">Confirm New Password:</label>
-                        <input type="password" id="edit-user-password-confirm" placeholder="Re-enter new password">
+                        <input type="password" id="edit-user-password-confirm" placeholder="Re-enter new password" autocomplete="new-password" data-allow-password-manager="false">
                     </div>
                 </div>
                 
