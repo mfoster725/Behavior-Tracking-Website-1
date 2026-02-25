@@ -337,6 +337,7 @@ function attachNavAndHamburger() {
             }
             var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
             if (hamburger) {
+                toggleNavMenu();
                 return;
             }
             if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav') && !e.target.closest('#nav-hamburger')) {
