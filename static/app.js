@@ -2246,6 +2246,12 @@ async function loadDailyData() {
         }
     }
 
+    // Show loading immediately so it appears without delay while we fetch
+    const loadingEl = document.getElementById('daily-grid-loading');
+    const dailyGridEl = document.getElementById('daily-grid');
+    if (loadingEl) loadingEl.style.display = 'flex';
+    if (dailyGridEl) dailyGridEl.style.visibility = 'hidden';
+
     // Initialize submitted students tracking for current date if needed
     if (!submittedStudents[currentDate]) {
         submittedStudents[currentDate] = new Set();
@@ -2267,12 +2273,6 @@ async function loadDailyData() {
             renderDailyGrid();
             return;
         }
-
-        // Show loading animation while fetching point card data
-        const loadingEl = document.getElementById('daily-grid-loading');
-        const dailyGridEl = document.getElementById('daily-grid');
-        if (loadingEl) loadingEl.style.display = 'flex';
-        if (dailyGridEl) dailyGridEl.style.visibility = 'hidden';
 
         // Load data for all accessible students for the current date in a single request
         const response = await fetch(`/api/daily-records?start_date=${currentDate}&end_date=${currentDate}`);
@@ -2452,8 +2452,8 @@ function renderDailyGrid() {
         studentHeader.dataset.studentIndex = index;
         studentHeader.style.display = 'flex';
         studentHeader.style.flexDirection = 'column';
-        studentHeader.style.gap = '8px';
-        studentHeader.style.padding = '12px 8px';
+        studentHeader.style.gap = '4px';
+        studentHeader.style.padding = '6px 8px';
         
         // Apply card color background
         const bgColor = getCardColor(student.card_color);
@@ -2815,7 +2815,7 @@ function renderDailyGrid() {
             const submitCell = document.createElement('div');
             submitCell.className = 'daily-data-cell daily-submit-cell';
             submitCell.style.gridColumn = 'span 4'; // Span S, T, A, R columns
-            submitCell.style.padding = '8px';
+            submitCell.style.padding = '4px 6px';
             submitCell.style.display = 'flex';
             submitCell.style.justifyContent = 'center';
             submitCell.style.alignItems = 'center';

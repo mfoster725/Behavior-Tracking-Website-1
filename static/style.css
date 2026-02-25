@@ -673,7 +673,7 @@ table th {
 
 .daily-grid {
     overflow-x: auto;
-    margin-top: 30px;
+    margin-top: 16px;
 }
 
 .daily-header {
@@ -685,12 +685,12 @@ table th {
 }
 
 .daily-header-cell {
-    padding: 12px 8px;
+    padding: 6px 6px;
     background: transparent;
     font-weight: 500;
     text-align: center;
     border: none;
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: #666;
@@ -701,7 +701,7 @@ table th {
     color: #000;
     font-weight: 600;
     text-align: left;
-    padding-left: 12px;
+    padding-left: 8px;
 }
 
 .daily-header-location {
@@ -716,10 +716,12 @@ table th {
     border: none;
     grid-column: span 4;
     font-weight: 600;
-    font-size: 16px;
+    font-size: 14px;
     text-transform: none;
     letter-spacing: -0.3px;
     border-bottom: 1px solid #e0e0e0;
+    padding: 6px 6px;
+    gap: 4px;
 }
 
 .daily-body {
@@ -729,34 +731,34 @@ table th {
 }
 
 .daily-period-cell {
-    padding: 12px;
+    padding: 5px 8px;
     background: transparent;
     color: #333;
     font-weight: 400;
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    font-size: 12px;
+    font-size: 11px;
     border-bottom: 1px solid #f0f0f0;
 }
 
 .daily-location-cell {
-    padding: 12px;
+    padding: 5px 8px;
     background: transparent;
     color: #333;
     font-weight: 400;
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .daily-data-cell {
-    padding: 8px;
+    padding: 4px;
     background: transparent;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     border-bottom: 1px solid #f0f0f0;
 }
 
@@ -804,8 +806,8 @@ table th {
 }
 
 .daily-input {
-    width: 36px;
-    height: 32px;
+    width: 34px;
+    height: 26px;
     padding: 0;
     border: 1px solid #ddd;
     border-radius: 3px;
@@ -851,7 +853,7 @@ table th {
 }
 
 .star-category-header {
-    padding: 6px 4px;
+    padding: 4px 2px;
     background: transparent;
     font-weight: 700;
     text-align: center;
@@ -913,8 +915,8 @@ table th {
 
 /* Info button styling - Grey */
 .info-btn {
-    width: 36px;
-    height: 32px;
+    width: 34px;
+    height: 26px;
     padding: 0;
     border: 1px solid #ddd;
     background: #E5E7EB;
@@ -1639,13 +1641,13 @@ table th {
 /* Student Submit Button Styling */
 .student-submit-btn {
     width: 100%;
-    padding: 10px 16px;
+    padding: 6px 10px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    border-radius: 6px;
+    border-radius: 5px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     transition: all 0.3s ease;
     text-transform: none;
@@ -1669,6 +1671,7 @@ table th {
 
 .daily-submit-cell {
     background: #fafafa;
+    padding: 4px 6px;
 }
 
 /* Point Card Data Styling */
