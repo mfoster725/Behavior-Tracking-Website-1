@@ -614,12 +614,20 @@ table th {
 
 .daily-selector .daily-search-in-row {
     flex: 1;
-    min-width: 200px;
+    min-width: 260px;
+}
+
+.daily-selector .daily-search-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .daily-selector .daily-search-autocomplete-wrapper {
-    width: 100%;
-    max-width: 280px;
+    flex: 1;
+    min-width: 200px;
+    max-width: 320px;
     position: relative;
 }
 
@@ -628,10 +636,6 @@ table th {
     padding: 8px;
     border: 1px solid #ddd;
     border-radius: 4px;
-}
-
-.daily-selector .daily-checkbox-in-row {
-    margin-bottom: 0;
 }
 
 .daily-selector .daily-managed-by-me-label {

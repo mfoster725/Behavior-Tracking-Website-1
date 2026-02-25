@@ -149,16 +149,16 @@
                     {% if user.role in ['staff', 'admin'] %}
                     <div class="form-group daily-search-in-row">
                         <label for="daily-search-input">Search:</label>
-                        <div class="daily-search-autocomplete-wrapper">
-                            <input type="text" id="daily-search-input" placeholder="Search by staff or student name">
-                            <div class="daily-search-autocomplete-dropdown"></div>
+                        <div class="daily-search-row">
+                            <div class="daily-search-autocomplete-wrapper">
+                                <input type="text" id="daily-search-input" placeholder="Search by staff or student name">
+                                <div class="daily-search-autocomplete-dropdown"></div>
+                            </div>
+                            <label for="daily-managed-by-me-checkbox" class="daily-managed-by-me-label">
+                                <input type="checkbox" id="daily-managed-by-me-checkbox">
+                                <span>Show students managed by me</span>
+                            </label>
                         </div>
-                    </div>
-                    <div class="form-group daily-checkbox-in-row">
-                        <label for="daily-managed-by-me-checkbox" class="daily-managed-by-me-label">
-                            <input type="checkbox" id="daily-managed-by-me-checkbox">
-                            <span>Show students managed by me</span>
-                        </label>
                     </div>
                     {% endif %}
                 </div>
