@@ -1845,6 +1845,11 @@ table tbody tr:hover {
     display: grid;
     margin-top: 0.5rem;
     overflow-x: auto;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .pc-grid-header {
@@ -1863,7 +1868,7 @@ table tbody tr:hover {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-secondary);
-    border-bottom: 2px solid var(--text-primary);
+    border-bottom: 1px solid var(--border);
 }
 
 .pc-header-cell.pc-header-time,
@@ -1888,9 +1893,9 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-header-cell[data-category="r"] {
-    /* Softer yellow for Relationships column */
-    background: #F5E6B3;
-    color: #92400E;
+    /* Relationships column: move away from strong yellow into a soft neutral */
+    background: #F3F4F6;
+    color: #4B5563;
 }
 .pc-header-cell[data-category="i"] {
     background: #E5E7EB;
@@ -1935,8 +1940,8 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(245, 230, 179, 0.65);
-    color: #92400E;
+    background: rgba(243, 244, 246, 0.9);
+    color: #4B5563;
 }
 
 .pc-cell.pc-info-cell {
@@ -1984,7 +1989,7 @@ table tbody tr:hover {
     background: rgba(209, 250, 229, 0.35);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(245, 230, 179, 0.5);
+    background: rgba(243, 244, 246, 0.9);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-info-cell {
     background: rgba(241, 239, 233, 0.5);
@@ -2024,7 +2029,7 @@ table tbody tr:hover {
 }
 .pc-edit-input[data-category="r"],
 .pc-edit-input[data-category="relationships"] {
-    background: rgba(245, 230, 179, 0.65);
+    background: rgba(243, 244, 246, 0.9);
 }
 
 .pc-edit-input:focus {

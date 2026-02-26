@@ -1903,8 +1903,8 @@ function renderStudentsGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            // Softer palette to match overall UI
-            'yellow': '#F5E6B3',  // Soft yellow, Relationships (R)
+            // Softer, more neutral palette to match overall UI
+            'yellow': '#F3F4F6',  // Neutral light for Relationships (R)
             'green': '#D1FAE5',   // Light green, Accountability (A)
             'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
@@ -2603,8 +2603,8 @@ function renderDailyGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            // Softer palette to match overall UI
-            'yellow': '#F5E6B3',  // Soft yellow, Relationships (R)
+            // Softer, more neutral palette to match overall UI
+            'yellow': '#F3F4F6',  // Neutral light for Relationships (R)
             'green': '#D1FAE5',   // Light green, Accountability (A)
             'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
@@ -4024,10 +4024,10 @@ async function loadSummary() {
             html += `</tr>`;
             
             // Relationships
-            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: #F3F4F6; position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${periodData.percentages.relationships}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(243, 244, 246, 0.8);">${periodData.percentages.relationships}%</td>`;
             });
             html += `</tr>`;
             
@@ -4383,7 +4383,7 @@ async function loadSummary() {
                                 <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border); text-align: center;">Safety (S)</th>
                                 <th style="padding: 12px; background: #E0E7FF; color: #1E3A8A; border: 1px solid var(--border); text-align: center;">Teamwork (T)</th>
                                 <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid var(--border); text-align: center;">Accountability (A)</th>
-                                <th style="padding: 12px; background: #F5E6B3; color: #92400E; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
+                                <th style="padding: 12px; background: #F3F4F6; color: #4B5563; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
                                 <th style="padding: 12px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); text-align: center; font-weight: 700;">Overall Average</th>
                             </tr>
                         </thead>
