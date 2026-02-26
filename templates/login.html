@@ -4,8 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Behavior Tracking System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-page: #F8F7F4;
+            --bg-surface: #FFFFFF;
+            --bg-elevated: #F1EFE9;
+            --bg-header: #1C1917;
+            --text-primary: #1C1917;
+            --text-secondary: #78716C;
+            --text-inverse: #FAFAF9;
+            --accent: #0EA5E9;
+            --accent-hover: #0284C7;
+            --accent-subtle: #E0F2FE;
+            --border: #E7E5E0;
+            --border-strong: #D6D3CD;
+            --danger: #DC2626;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --font-heading: 'Instrument Sans', 'Inter', system-ui, sans-serif;
+            --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-page);
+            min-height: 100vh;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
         .login-container {
             display: flex;
             justify-content: center;
@@ -15,31 +53,35 @@
         }
         
         .login-card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border);
+            padding: 2.5rem;
             width: 100%;
             max-width: 400px;
         }
         
         .login-card h1 {
-            color: #667eea;
-            margin-bottom: 10px;
-            font-size: 2em;
+            font-family: var(--font-heading);
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+            font-weight: 700;
             text-align: center;
+            letter-spacing: -0.02em;
         }
         
         .login-card p {
             text-align: center;
-            color: #666;
-            margin-bottom: 30px;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
         }
         
         .login-form {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 1.25rem;
         }
         
         .form-group {
@@ -48,80 +90,90 @@
         
         .form-group label {
             display: block;
-            margin-bottom: 8px;
-            color: #555;
+            margin-bottom: 0.375rem;
+            color: var(--text-secondary);
             font-weight: 500;
+            font-size: 0.875rem;
         }
         
         .form-group input {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.3s;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-body);
+            color: var(--text-primary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+            min-height: 38px;
         }
         
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
         }
         
         .login-btn {
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            padding: 0.625rem 1.25rem;
+            background: var(--accent);
+            color: #fff;
             border: none;
-            border-radius: 6px;
-            font-size: 16px;
+            border-radius: var(--radius-sm);
+            font-size: 0.9375rem;
             font-weight: 500;
+            font-family: var(--font-body);
             cursor: pointer;
-            transition: all 0.3s;
+            transition: background 0.15s;
+            min-height: 42px;
         }
         
         .login-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            background: var(--accent-hover);
         }
         
         .error-message {
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 20px;
+            background: #FEF2F2;
+            color: var(--danger);
+            padding: 0.75rem;
+            border-radius: var(--radius-sm);
+            margin-bottom: 1.25rem;
             text-align: center;
+            border: 1px solid #FECACA;
+            font-size: 0.875rem;
         }
         
         .role-selector {
             display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 0.625rem;
+            margin-bottom: 1.25rem;
         }
         
         .role-btn {
             flex: 1;
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            background: white;
-            border-radius: 6px;
+            padding: 0.625rem;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-surface);
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.15s;
             font-weight: 500;
+            font-family: var(--font-body);
+            color: var(--text-primary);
         }
         
         .role-btn.active {
-            border-color: #667eea;
-            background: #667eea;
-            color: white;
+            border-color: var(--accent);
+            background: var(--accent);
+            color: #fff;
         }
         
         .info-text {
             text-align: center;
-            margin-top: 20px;
-            font-size: 12px;
-            color: #999;
+            margin-top: 1.25rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
         }
         
         .modal {
@@ -132,113 +184,111 @@
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(28, 25, 23, 0.5);
             overflow: auto;
         }
         
         .modal-content {
-            background-color: white;
+            background: var(--bg-surface);
             margin: 5% auto;
-            padding: 30px;
-            border-radius: 12px;
+            padding: 2rem;
+            border-radius: var(--radius-lg);
             width: 90%;
             max-width: 500px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
         }
         
         .close {
-            color: #aaa;
+            color: var(--text-secondary);
             float: right;
-            font-size: 28px;
+            font-size: 1.5rem;
             font-weight: bold;
             cursor: pointer;
         }
         
         .close:hover {
-            color: #000;
+            color: var(--text-primary);
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 1.25rem;
         }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }
-        
-        .form-group input,
+
         .form-group select {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.3s;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            font-family: var(--font-body);
+            color: var(--text-primary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+            min-height: 38px;
         }
-        
-        .form-group input:focus,
+
         .form-group select:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
         }
         
         .register-btn {
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            padding: 0.625rem 1.25rem;
+            background: var(--accent);
+            color: #fff;
             border: none;
-            border-radius: 6px;
-            font-size: 16px;
+            border-radius: var(--radius-sm);
+            font-size: 0.9375rem;
             font-weight: 500;
+            font-family: var(--font-body);
             cursor: pointer;
-            transition: all 0.3s;
+            transition: background 0.15s;
+            min-height: 42px;
         }
         
         .register-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            background: var(--accent-hover);
         }
         
         .role-selection {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 0.625rem;
+            margin-bottom: 1.25rem;
         }
         
         .role-option {
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
+            padding: 1rem;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
-            background: white;
+            transition: all 0.15s;
+            background: var(--bg-surface);
         }
         
         .role-option:hover {
-            border-color: #667eea;
-            background: #f5f5ff;
+            border-color: var(--accent);
+            background: var(--accent-subtle);
         }
         
         .role-option.selected {
-            border-color: #667eea;
-            background: #667eea;
-            color: white;
+            border-color: var(--accent);
+            background: var(--accent);
+            color: #fff;
         }
         
         .role-option h3 {
-            margin: 0 0 5px 0;
-            font-size: 16px;
+            margin: 0 0 0.25rem 0;
+            font-size: 1rem;
+            font-family: var(--font-heading);
+            font-weight: 600;
         }
         
         .role-option p {
             margin: 0;
-            font-size: 12px;
+            font-size: 0.75rem;
             opacity: 0.8;
         }
     </style>
@@ -273,7 +323,6 @@
     </div>
 
     <script>
-        // Login form submission
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -290,15 +339,12 @@
                     body: JSON.stringify({ username, password })
                 });
                 
-                // Check if response is ok before parsing JSON
                 if (!response.ok) {
-                    // Try to parse JSON error, but handle non-JSON responses
                     let errorMessage = 'Login failed. Please try again.';
                     try {
                         const errorData = await response.json();
                         errorMessage = errorData.error || errorMessage;
                     } catch (e) {
-                        // If response is not JSON, use status text
                         if (response.status === 429) {
                             errorMessage = 'Too many login attempts. Please wait a minute and try again.';
                         } else if (response.status === 500) {
@@ -329,4 +375,3 @@
     </script>
 </body>
 </html>
-

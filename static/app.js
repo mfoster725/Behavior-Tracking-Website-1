@@ -859,7 +859,7 @@ function setupEventListeners() {
                     if (!warningMsg) {
                         warningMsg = document.createElement('small');
                         warningMsg.className = 'initials-warning';
-                        warningMsg.style.color = '#dc3545';
+                        warningMsg.style.color = 'var(--danger)';
                         warningMsg.style.display = 'block';
                         warningMsg.style.marginTop = '5px';
                         formGroup.appendChild(warningMsg);
@@ -1473,14 +1473,14 @@ function loadQuarterConfig() {
             <div style="display: grid; grid-template-columns: 150px 1fr 1fr; gap: 10px; align-items: center; padding: 10px; background: white; border-radius: 4px;">
                 <label style="font-weight: 600;">${dates.label}:</label>
                 <div>
-                    <label style="font-size: 12px; color: #666;">Start Date (MM/DD/YYYY):</label>
+                    <label style="font-size: 12px; color: var(--text-secondary);">Start Date (MM/DD/YYYY):</label>
                     <input type="text" id="quarter-${quarter}-start" value="${dates.start || ''}" 
-                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 4px; margin-top: 4px;">
                 </div>
                 <div>
-                    <label style="font-size: 12px; color: #666;">End Date (MM/DD/YYYY):</label>
+                    <label style="font-size: 12px; color: var(--text-secondary);">End Date (MM/DD/YYYY):</label>
                     <input type="text" id="quarter-${quarter}-end" value="${dates.end || ''}" 
-                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px;">
+                           placeholder="MM/DD/YYYY" pattern="\\d{2}/\\d{2}/\\d{4}" style="width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 4px; margin-top: 4px;">
                 </div>
             </div>
         `;
@@ -1896,7 +1896,7 @@ function renderStudentsGrid() {
     header.appendChild(periodHeader);
 
     const periodSpacer = document.createElement('div');
-    periodSpacer.style.background = '#e9ecef';
+    periodSpacer.style.background = 'var(--bg-elevated)';
     header.appendChild(periodSpacer);
 
     // Helper function to get background color from card_color (opaque, similar to STAR colors)
@@ -1927,7 +1927,7 @@ function renderStudentsGrid() {
         
         if (index < studentsToDisplay.length - 1) {
             const spacerHeader = document.createElement('div');
-            spacerHeader.style.background = '#e9ecef';
+            spacerHeader.style.background = 'var(--bg-elevated)';
             header.appendChild(spacerHeader);
         }
     });
@@ -1940,7 +1940,7 @@ function renderStudentsGrid() {
     header.appendChild(emptyCell);
     
     const emptySpacerCell = document.createElement('div');
-    emptySpacerCell.style.background = '#e9ecef';
+    emptySpacerCell.style.background = 'var(--bg-elevated)';
     header.appendChild(emptySpacerCell);
     
     studentsToDisplay.forEach((student, index) => {
@@ -1955,7 +1955,7 @@ function renderStudentsGrid() {
         
         if (index < studentsToDisplay.length - 1) {
             const spacerSubHeader = document.createElement('div');
-            spacerSubHeader.style.background = '#e9ecef';
+            spacerSubHeader.style.background = 'var(--bg-elevated)';
             header.appendChild(spacerSubHeader);
         }
     });
@@ -1968,7 +1968,7 @@ function renderStudentsGrid() {
     grid.appendChild(periodCell);
 
     const rowSpacer = document.createElement('div');
-    rowSpacer.style.background = '#e9ecef';
+    rowSpacer.style.background = 'var(--bg-elevated)';
     grid.appendChild(rowSpacer);
 
     // Data cells for each student
@@ -2067,7 +2067,7 @@ function renderStudentsGrid() {
         
         if (studentIndex < studentsToDisplay.length - 1) {
             const spacerCell = document.createElement('div');
-            spacerCell.style.background = '#e9ecef';
+            spacerCell.style.background = 'var(--bg-elevated)';
             grid.appendChild(spacerCell);
         }
     });
@@ -2082,7 +2082,7 @@ function renderStudentsGrid() {
     grid.appendChild(percentLabel);
     
     const percentSpacer = document.createElement('div');
-    percentSpacer.style.background = '#e9ecef';
+    percentSpacer.style.background = 'var(--bg-elevated)';
     percentSpacer.style.borderTop = '2px solid #000';
     grid.appendChild(percentSpacer);
     
@@ -2142,8 +2142,8 @@ function renderStudentsGrid() {
         overallCell.style.borderTop = '2px solid #000';
         overallCell.style.fontWeight = '700';
         overallCell.style.fontSize = '11px';
-        overallCell.style.background = '#f8f9fa';
-        overallCell.style.color = '#667eea';
+        overallCell.style.background = 'var(--bg-elevated)';
+        overallCell.style.color = 'var(--accent)';
         
         if (countedCategories > 0) {
             const maxPossible = countedCategories * 2;
@@ -2157,7 +2157,7 @@ function renderStudentsGrid() {
         
         if (studentIndex < studentsToDisplay.length - 1) {
             const spacerCell = document.createElement('div');
-            spacerCell.style.background = '#e9ecef';
+            spacerCell.style.background = 'var(--bg-elevated)';
             spacerCell.style.borderTop = '2px solid #000';
             grid.appendChild(spacerCell);
         }
@@ -2595,7 +2595,7 @@ function renderDailyGrid() {
 
     // Add spacer after period column
     const periodSpacer = document.createElement('div');
-    periodSpacer.style.background = '#e9ecef';
+    periodSpacer.style.background = 'var(--bg-elevated)';
     header.appendChild(periodSpacer);
 
     // Helper function to get background color from card_color (opaque, similar to STAR colors)
@@ -2685,7 +2685,7 @@ function renderDailyGrid() {
         // Add spacer cell after each student (except the last)
         if (index < studentsToDisplay.length - 1) {
             const spacerHeader = document.createElement('div');
-            spacerHeader.style.background = '#e9ecef';
+            spacerHeader.style.background = 'var(--bg-elevated)';
             spacerHeader.style.gridColumn = 'span 1';
             header.appendChild(spacerHeader);
         }
@@ -2704,7 +2704,7 @@ function renderDailyGrid() {
     
     // Empty spacer cell after period column
     const emptySpacerCell = document.createElement('div');
-    emptySpacerCell.style.background = '#e9ecef';
+    emptySpacerCell.style.background = 'var(--bg-elevated)';
     header.appendChild(emptySpacerCell);
     
     // S, T, A, R, I headers for each student
@@ -2722,7 +2722,7 @@ function renderDailyGrid() {
         // Add spacer cell after each student (except the last)
         if (index < studentsToDisplay.length - 1) {
             const spacerSubHeader = document.createElement('div');
-            spacerSubHeader.style.background = '#e9ecef';
+            spacerSubHeader.style.background = 'var(--bg-elevated)';
             spacerSubHeader.style.gridColumn = 'span 1';
             header.appendChild(spacerSubHeader);
         }
@@ -2739,7 +2739,7 @@ function renderDailyGrid() {
 
         // Add spacer after period column
         const periodRowSpacer = document.createElement('div');
-        periodRowSpacer.style.background = '#e9ecef';
+        periodRowSpacer.style.background = 'var(--bg-elevated)';
         periodRowSpacer.dataset.periodIndex = periodIndex;
         body.appendChild(periodRowSpacer);
 
@@ -2833,7 +2833,7 @@ function renderDailyGrid() {
             // Add spacer cell after each student (except the last)
             if (studentIndex < studentsToDisplay.length - 1) {
                 const spacerCell = document.createElement('div');
-                spacerCell.style.background = '#e9ecef';
+                spacerCell.style.background = 'var(--bg-elevated)';
                 spacerCell.dataset.periodIndex = periodIndex;
                 body.appendChild(spacerCell);
             }
@@ -2852,7 +2852,7 @@ function renderDailyGrid() {
     
     // Add spacer after period column
     const percentSpacer = document.createElement('div');
-    percentSpacer.style.background = '#e9ecef';
+    percentSpacer.style.background = 'var(--bg-elevated)';
     percentSpacer.style.borderTop = '2px solid #000';
     body.appendChild(percentSpacer);
     
@@ -2901,8 +2901,8 @@ function renderDailyGrid() {
         overallPercentCell.style.borderTop = '2px solid #000';
         overallPercentCell.style.fontWeight = '700';
         overallPercentCell.style.fontSize = '11px';
-        overallPercentCell.style.background = '#f8f9fa';
-        overallPercentCell.style.color = '#667eea';
+        overallPercentCell.style.background = 'var(--bg-elevated)';
+        overallPercentCell.style.color = 'var(--accent)';
         
         const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
         overallPercentCell.textContent = overallText;
@@ -2912,7 +2912,7 @@ function renderDailyGrid() {
         // Add spacer cell after each student (except the last)
         if (studentIndex < studentsToDisplay.length - 1) {
             const spacerCell = document.createElement('div');
-            spacerCell.style.background = '#e9ecef';
+            spacerCell.style.background = 'var(--bg-elevated)';
             spacerCell.style.borderTop = '2px solid #000';
             body.appendChild(spacerCell);
         }
@@ -2928,7 +2928,7 @@ function renderDailyGrid() {
         
         // Add spacer after period column
         const submitSpacer = document.createElement('div');
-        submitSpacer.style.background = '#e9ecef';
+        submitSpacer.style.background = 'var(--bg-elevated)';
         submitSpacer.style.borderTop = '2px solid #e0e0e0';
         body.appendChild(submitSpacer);
         
@@ -2968,7 +2968,7 @@ function renderDailyGrid() {
             // Add spacer cell after each student (except the last)
             if (studentIndex < studentsToDisplay.length - 1) {
                 const spacerCell = document.createElement('div');
-                spacerCell.style.background = '#e9ecef';
+                spacerCell.style.background = 'var(--bg-elevated)';
                 spacerCell.style.borderTop = '2px solid #e0e0e0';
                 body.appendChild(spacerCell);
             }
@@ -3882,7 +3882,7 @@ async function loadSummary() {
                 html += `
                     <div class="form-group" style="margin-top: 15px; margin-bottom: 15px;">
                         <label for="summary-school-year-select" style="display: inline-block; margin-right: 10px;">School Year:</label>
-                        <select id="summary-school-year-select" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <select id="summary-school-year-select" style="padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px;">
                 `;
                 data.available_school_years.forEach(sy => {
                     html += `<option value="${sy}" ${sy === currentSchoolYear ? 'selected' : ''}>${sy}</option>`;
@@ -3914,45 +3914,45 @@ async function loadSummary() {
                     <div style="overflow-x: auto; margin-top: 20px; max-height: 80vh; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Metric</th>
             `;
             
             // Add period headers
             periods.forEach(periodKey => {
-                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+                html += `<th style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${periodKey}</th>`;
             });
             
             html += `</tr></thead><tbody>`;
             
             // Data Points row (only for 30day and 30day_to_30day comparisons)
             if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
                 periods.forEach(periodKey => {
                     const periodData = data.periods[periodKey];
                     const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
                     const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
                     const displayText = hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`;
-                    html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
+                    html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
                 });
                 html += `</tr>`;
             }
             
             // Total Days
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_days}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.total_days}</td>`;
             });
             html += `</tr>`;
             
             // Infractions
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
             periods.forEach((periodKey, periodIndex) => {
                 const periodData = data.periods[periodKey];
                 const totalInfractions = Object.values(periodData.infractions || {}).reduce((sum, count) => sum + count, 0);
                 const hasInfractions = totalInfractions > 0;
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">
                     <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
                         <span>${totalInfractions}</span>
                         ${hasInfractions ? `<button onclick="showInfractionsSummary(${periodIndex}, '${period.replace(/'/g, "\\'")}')" class="btn-secondary" style="padding: 4px 8px; font-size: 12px; cursor: pointer;">View Details</button>` : ''}
@@ -3962,18 +3962,18 @@ async function loadSummary() {
             html += `</tr>`;
             
             // Reminders
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.additional_info.total_reminders || 0}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.additional_info.total_reminders || 0}</td>`;
             });
             html += `</tr>`;
             
             // Resets
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.additional_info.total_resets || 0}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.additional_info.total_resets || 0}</td>`;
             });
             html += `</tr>`;
             
@@ -3982,58 +3982,58 @@ async function loadSummary() {
             
             // STAR Percentages section - Separate Table
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">STAR Percentages <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_star', 'summary')">Graph</button></h4>
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">STAR Percentages <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_star', 'summary')">Graph</button></h4>
                 <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                     <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                         <thead style="position: sticky; top: 0; z-index: 20;">
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Metric</th>
             `;
             
             // Add period headers
             periods.forEach(periodKey => {
-                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+                html += `<th style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${periodKey}</th>`;
             });
             
             html += `</tr></thead><tbody>`;
             
             // Safety
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety (S)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety (S)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${periodData.percentages.safety}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${periodData.percentages.safety}%</td>`;
             });
             html += `</tr>`;
             
             // Teamwork
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork (T)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork (T)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${periodData.percentages.teamwork}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${periodData.percentages.teamwork}%</td>`;
             });
             html += `</tr>`;
             
             // Accountability
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability (A)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability (A)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${periodData.percentages.accountability}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${periodData.percentages.accountability}%</td>`;
             });
             html += `</tr>`;
             
             // Relationships
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${periodData.percentages.relationships}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${periodData.percentages.relationships}%</td>`;
             });
             html += `</tr>`;
             
             // Overall
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 700; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall Average</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 700; background: var(--bg-elevated); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall Average</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 700; font-size: 18px; background: #f0f0f0; color: #667eea;">${periodData.percentages.overall}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 700; font-size: 18px; background: var(--bg-elevated); color: var(--accent);">${periodData.percentages.overall}%</td>`;
             });
             html += `</tr>`;
             
@@ -4041,71 +4041,71 @@ async function loadSummary() {
             
             // Day of Week Statistics section - Separate Table
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_day', 'summary')">Graph</button></h4>
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_day', 'summary')">Graph</button></h4>
                 <div class="form-group" style="margin-bottom: 10px;">
                     <label for="summary-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                     <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                        <input type="text" id="summary-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="summary-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                         <div class="table-column-search-dropdown"></div>
                     </div>
                 </div>
                 <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                     <table id="summary-day-of-week-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                         <thead style="position: sticky; top: 0; z-index: 20;">
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1; rowspan="2">Metric</th>
             `;
             
             const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
             
             // First header row with timeframe names
             periods.forEach((periodKey, periodIndex) => {
-                html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
+                html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
             });
             
-            html += `</tr><tr style="background: #f8f9fa;">`;
+            html += `</tr><tr style="background: var(--bg-elevated);">`;
             
             // Second header row with day names
             periods.forEach((periodKey, periodIndex) => {
                 weekdays.forEach((day, dayIndex) => {
-                    html += `<th class="summary-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${day}</th>`;
+                    html += `<th class="summary-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${day}</th>`;
                 });
             });
             
             html += `</tr></thead><tbody>`;
             
             // Overall % row
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
             periods.forEach((periodKey, periodIndex) => {
                 weekdays.forEach((day, dayIndex) => {
                     const periodData = data.periods[periodKey];
                     const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
                     const overallPercent = dayData ? dayData.percentages.overall : 0;
-                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
                 });
             });
             html += `</tr>`;
             
             // Total Days row
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
             periods.forEach((periodKey, periodIndex) => {
                 weekdays.forEach((day, dayIndex) => {
                     const periodData = data.periods[periodKey];
                     const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
                     const totalDays = dayData ? dayData.total_days : 0;
-                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
                 });
             });
             html += `</tr>`;
             
             // Total Infractions row
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
             periods.forEach((periodKey, periodIndex) => {
                 weekdays.forEach((day, dayIndex) => {
                     const periodData = data.periods[periodKey];
                     const dayData = periodData.by_day_of_week && periodData.by_day_of_week[day] ? periodData.by_day_of_week[day] : null;
                     const totalInfractions = dayData ? dayData.total_infractions : 0;
-                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
+                    html += `<td class="summary-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
                 });
             });
             html += `</tr>`;
@@ -4126,69 +4126,69 @@ async function loadSummary() {
             
             if (sortedClasses.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_class', 'summary')">Graph</button></h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_comparison_class', 'summary')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="summary-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="summary-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="text" id="summary-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table id="summary-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1; rowspan="2">Metric</th>
                 `;
                 
                 // First header row with timeframe names
                 periods.forEach((periodKey, periodIndex) => {
-                    html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
+                    html += `<th class="summary-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
                 });
                 
-                html += `</tr><tr style="background: #f8f9fa;">`;
+                html += `</tr><tr style="background: var(--bg-elevated);">`;
                 
                 // Second header row with class names
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
-                        html += `<th class="summary-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${className}</th>`;
+                        html += `<th class="summary-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${className}</th>`;
                     });
                 });
                 
                 html += `</tr></thead><tbody>`;
                 
                 // Overall % row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
                         const overallPercent = classData ? classData.percentages.overall : 0;
-                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.2);">${overallPercent}%</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Total Days row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
                         const totalDays = classData ? classData.total_days : 0;
-                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${totalDays}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Total Infractions row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Infractions</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_class && periodData.by_class[className] ? periodData.by_class[className] : null;
                         const totalInfractions = classData ? classData.total_infractions : 0;
-                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
+                        html += `<td class="summary-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${totalInfractions}</td>`;
                     });
                 });
                 html += `</tr>`;
@@ -4378,20 +4378,20 @@ async function loadSummary() {
                     <table class="star-averages-table" style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                         <thead>
                             <tr>
-                                <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid #ddd; text-align: center;">Safety (S)</th>
-                                <th style="padding: 12px; background: #DBEAFE; color: #1E40AF; border: 1px solid #ddd; text-align: center;">Teamwork (T)</th>
-                                <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid #ddd; text-align: center;">Accountability (A)</th>
-                                <th style="padding: 12px; background: #FEF3C7; color: #B45309; border: 1px solid #ddd; text-align: center;">Relationships (R)</th>
-                                <th style="padding: 12px; background: #f8f9fa; color: #333; border: 1px solid #ddd; text-align: center; font-weight: 700;">Overall Average</th>
+                                <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border); text-align: center;">Safety (S)</th>
+                                <th style="padding: 12px; background: #DBEAFE; color: #1E40AF; border: 1px solid var(--border); text-align: center;">Teamwork (T)</th>
+                                <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid var(--border); text-align: center;">Accountability (A)</th>
+                                <th style="padding: 12px; background: #FEF3C7; color: #B45309; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
+                                <th style="padding: 12px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); text-align: center; font-weight: 700;">Overall Average</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${safetyPercent}%</td>
-                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${teamworkPercent}%</td>
-                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${accountabilityPercent}%</td>
-                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${relationshipsPercent}%</td>
-                                <td style="padding: 15px; border: 1px solid #ddd; text-align: center; font-size: 28px; font-weight: 700; background: #f0f0f0; color: #667eea;">${overallPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid var(--border); text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 226, 226, 0.2);">${safetyPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid var(--border); text-align: center; font-size: 24px; font-weight: 600; background: rgba(219, 234, 254, 0.2);">${teamworkPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid var(--border); text-align: center; font-size: 24px; font-weight: 600; background: rgba(209, 250, 229, 0.2);">${accountabilityPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid var(--border); text-align: center; font-size: 24px; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${relationshipsPercent}%</td>
+                                <td style="padding: 15px; border: 1px solid var(--border); text-align: center; font-size: 28px; font-weight: 700; background: var(--bg-elevated); color: var(--accent);">${overallPercent}%</td>
                             </tr>
                         </tbody>
                     </table>
@@ -4399,17 +4399,17 @@ async function loadSummary() {
                     <h4 style="margin-top: 20px;">Infractions</h4>
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Category</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Details</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Category</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Details</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${data.additional_info ? `
                                 <!-- Infractions -->
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);">
                                         ${Object.keys(data.additional_info.infractions || {}).length > 0 ? 
                                             `<div style="display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
                                                 <div style="flex: 1;">
@@ -4426,32 +4426,32 @@ async function loadSummary() {
                                 
                                 <!-- Reminders -->
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);">
                                         Total: ${data.additional_info.total_reminders || 0}
                                     </td>
                                 </tr>
                                 
                                 <!-- Resets -->
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;">
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);">
                                         Total: ${data.additional_info.total_resets || 0}
                                     </td>
                                 </tr>
                                 
                             ` : `
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;"><span style="color: #999; font-style: italic;">None</span></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Infractions</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);"><span style="color: #999; font-style: italic;">None</span></td>
                                 </tr>
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;">Total: 0</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Reminders</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);">Total: 0</td>
                                 </tr>
                                 <tr>
-                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
-                                    <td style="padding: 12px; border: 1px solid #ddd;">Total: 0</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Resets</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border);">Total: 0</td>
                                 </tr>
                             `}
                         </tbody>
@@ -4462,13 +4462,13 @@ async function loadSummary() {
                     <div style="overflow-x: auto; margin-top: 15px;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
                             <thead>
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Metric</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Monday</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Tuesday</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Wednesday</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Thursday</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Friday</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -4484,40 +4484,40 @@ async function loadSummary() {
                                     
                                     return `
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_days || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).total_days || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 226, 226, 0.2);">${getDayData(day).percentages.safety || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(254, 226, 226, 0.2);">${getDayData(day).percentages.safety || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(219, 234, 254, 0.2);">${getDayData(day).percentages.teamwork || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(219, 234, 254, 0.2);">${getDayData(day).percentages.teamwork || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(209, 250, 229, 0.2);">${getDayData(day).percentages.accountability || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(209, 250, 229, 0.2);">${getDayData(day).percentages.accountability || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 243, 199, 0.2);">${getDayData(day).percentages.relationships || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(254, 243, 199, 0.2);">${getDayData(day).percentages.relationships || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: #f0f0f0;">${getDayData(day).percentages.overall || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: var(--bg-elevated); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: var(--bg-elevated);">${getDayData(day).percentages.overall || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_infractions || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).total_infractions || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_reminders || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).total_reminders || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).total_resets || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).total_resets || 0}</td>`).join('')}
                                         </tr>
                                     `;
                                 })()}
@@ -4531,10 +4531,10 @@ async function loadSummary() {
                     <div style="overflow-x: auto; margin-top: 15px;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
                             <thead>
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Metric</th>
                                     ${Object.keys(data.by_class).sort().map(className => 
-                                        `<th style="padding: 12px; border: 1px solid #ddd; text-align: center;">${className}</th>`
+                                        `<th style="padding: 12px; border: 1px solid var(--border); text-align: center;">${className}</th>`
                                     ).join('')}
                                 </tr>
                             </thead>
@@ -4551,40 +4551,40 @@ async function loadSummary() {
                                     
                                     return `
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_days || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Days</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getClassData(className).total_days || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 226, 226, 0.2);">${getClassData(className).percentages.safety || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(254, 226, 226); position: sticky; left: 0; z-index: 10; opacity: 1;">Safety %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(254, 226, 226, 0.2);">${getClassData(className).percentages.safety || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(219, 234, 254, 0.2);">${getClassData(className).percentages.teamwork || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(219, 234, 254); position: sticky; left: 0; z-index: 10; opacity: 1;">Teamwork %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(219, 234, 254, 0.2);">${getClassData(className).percentages.teamwork || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(209, 250, 229, 0.2);">${getClassData(className).percentages.accountability || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(209, 250, 229); position: sticky; left: 0; z-index: 10; opacity: 1;">Accountability %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(209, 250, 229, 0.2);">${getClassData(className).percentages.accountability || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(254, 243, 199, 0.2);">${getClassData(className).percentages.relationships || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(254, 243, 199, 0.2);">${getClassData(className).percentages.relationships || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: #f0f0f0; position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: #f0f0f0;">${getClassData(className).percentages.overall || 0}%</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: var(--bg-elevated); position: sticky; left: 0; z-index: 10; opacity: 1;">Overall %</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: var(--bg-elevated);">${getClassData(className).percentages.overall || 0}%</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_infractions || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Infractions</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getClassData(className).total_infractions || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_reminders || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Reminders</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getClassData(className).total_reminders || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
-                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getClassData(className).total_resets || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Resets</td>
+                                            ${classes.map(className => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getClassData(className).total_resets || 0}</td>`).join('')}
                                         </tr>
                                     `;
                                 })()}
@@ -4845,7 +4845,7 @@ function showSectionGraph(sectionType, source) {
 }
 
 function buildSectionChartConfig(sectionType, data, source, groupBy) {
-    const palette = ['#667eea', '#764ba2', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#84cc16'];
+    const palette = ['#0EA5E9', '#0284C7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#84cc16', '#6366f1'];
     const hex = (i) => palette[i % palette.length];
     groupBy = groupBy || 'month';
 
@@ -5164,38 +5164,38 @@ function renderCaseManagerComparison(data, timeframeLabel) {
     // STAR percentages rows
     tableRows += `
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(254, 226, 226, 0.3);">Safety %</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(254, 226, 226, 0.3);">Safety %</td>
             ${sortedManagers.map(cmName => {
                 const percent = caseManagers[cmName].star_percentages.safety;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${percent}%</td>`;
             }).join('')}
         </tr>
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(219, 234, 254, 0.3);">Teamwork %</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(219, 234, 254, 0.3);">Teamwork %</td>
             ${sortedManagers.map(cmName => {
                 const percent = caseManagers[cmName].star_percentages.teamwork;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${percent}%</td>`;
             }).join('')}
         </tr>
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(209, 250, 229, 0.3);">Accountability %</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(209, 250, 229, 0.3);">Accountability %</td>
             ${sortedManagers.map(cmName => {
                 const percent = caseManagers[cmName].star_percentages.accountability;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${percent}%</td>`;
             }).join('')}
         </tr>
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(254, 243, 199, 0.3);">Relationships %</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(254, 243, 199, 0.3);">Relationships %</td>
             ${sortedManagers.map(cmName => {
                 const percent = caseManagers[cmName].star_percentages.relationships;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${percent}%</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${percent}%</td>`;
             }).join('')}
         </tr>
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 700; background: #f0f0f0; font-size: 16px;">Overall STAR %</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 700; background: var(--bg-elevated); font-size: 16px;">Overall STAR %</td>
             ${sortedManagers.map(cmName => {
                 const percent = caseManagers[cmName].star_percentages.overall;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 700; font-size: 16px;">${percent}%</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 700; font-size: 16px;">${percent}%</td>`;
             }).join('')}
         </tr>
     `;
@@ -5204,10 +5204,10 @@ function renderCaseManagerComparison(data, timeframeLabel) {
     sortedInfractionTypes.forEach(infractionType => {
         tableRows += `
             <tr>
-                <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">${infractionType.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">${infractionType.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
                 ${sortedManagers.map(cmName => {
                     const count = caseManagers[cmName].infractions[infractionType] || 0;
-                    return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${count}</td>`;
+                    return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${count}</td>`;
                 }).join('')}
             </tr>
         `;
@@ -5216,17 +5216,17 @@ function renderCaseManagerComparison(data, timeframeLabel) {
     // Student count and total days rows
     tableRows += `
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Student Count</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Student Count</td>
             ${sortedManagers.map(cmName => {
                 const count = caseManagers[cmName].student_count || 0;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${count}</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${count}</td>`;
             }).join('')}
         </tr>
         <tr>
-            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Days</td>
+            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Days</td>
             ${sortedManagers.map(cmName => {
                 const days = caseManagers[cmName].total_days || 0;
-                return `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${days}</td>`;
+                return `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${days}</td>`;
             }).join('')}
         </tr>
     `;
@@ -5234,14 +5234,14 @@ function renderCaseManagerComparison(data, timeframeLabel) {
     container.innerHTML = `
         <div class="summary-card">
             <h3>Case Manager Comparison - ${timeframeLabel}</h3>
-            <p style="margin-bottom: 15px; color: #666;">Case managers ordered by highest to lowest Overall STAR %</p>
+            <p style="margin-bottom: 15px; color: var(--text-secondary);">Case managers ordered by highest to lowest Overall STAR %</p>
             <div style="overflow-x: auto; margin-top: 20px;">
                 <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                     <thead>
-                        <tr style="background: #f8f9fa;">
-                            <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; background: #f8f9fa; z-index: 10;">Metric</th>
+                        <tr style="background: var(--bg-elevated);">
+                            <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; background: var(--bg-elevated); z-index: 10;">Metric</th>
                             ${sortedManagers.map(cmName => 
-                                `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; min-width: 120px;">${cmName.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`
+                                `<th style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); min-width: 120px;">${cmName.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`
                             ).join('')}
                         </tr>
                     </thead>
@@ -5360,8 +5360,8 @@ async function loadPointCardData() {
                 <h3>Point Card Data - ${studentName}</h3>
                 <p>${timeframe === 'alltime' ? 'All Time' : timeframe === '30day' ? '30 Day' : timeframe === 'month' ? 'Month to Month' : timeframe === 'quarter' ? 'Quarter to Quarter' : timeframe === 'year' ? 'Year to Year' : 'All Time'}</p>
                 <div class="point-card-search" style="margin-top: 15px;">
-                    <input type="text" id="point-card-search-input" placeholder="🔍 Search dates, times, locations, STAR values, or info..." style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;">
-                    <p style="font-size: 12px; color: #666; margin-top: 8px;">Search by date, time period, location, STAR values (0-2), or info data</p>
+                    <input type="text" id="point-card-search-input" placeholder="🔍 Search dates, times, locations, STAR values, or info..." style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">Search by date, time period, location, STAR values (0-2), or info data</p>
                 </div>
             </div>
         `;
@@ -5640,12 +5640,12 @@ function renderPointCardGrid(record) {
     // Add percentage row
     html += `
             <tr style="border-top: 2px solid #000; font-weight: 700;">
-                <td colspan="2" style="text-align: right; padding-right: 10px; background: #f8f9fa;">Percent:</td>
+                <td colspan="2" style="text-align: right; padding-right: 10px; background: var(--bg-elevated);">Percent:</td>
                 <td style="background: rgba(254, 226, 226, 0.5); text-align: center; color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</td>
                 <td style="background: rgba(219, 234, 254, 0.5); text-align: center; color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</td>
                 <td style="background: rgba(209, 250, 229, 0.5); text-align: center; color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</td>
                 <td style="background: rgba(254, 243, 199, 0.5); text-align: center; color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</td>
-                <td style="background: #f8f9fa; text-align: center; color: #667eea; font-size: 13px;">${overallPercent !== '-' ? overallPercent + '%' : '-'}</td>
+                <td style="background: var(--bg-elevated); text-align: center; color: var(--accent); font-size: 13px;">${overallPercent !== '-' ? overallPercent + '%' : '-'}</td>
             </tr>
             </tbody>
         </table>
@@ -5705,13 +5705,13 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                 <table class="point-card-edit-table" style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr>
-                            <th style="padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">Time</th>
-                            <th style="padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">Location</th>
-                            <th style="padding: 10px; background: #FEE2E2; color: #B91C1C; border: 1px solid #ddd;">S</th>
-                            <th style="padding: 10px; background: #DBEAFE; color: #1E40AF; border: 1px solid #ddd;">T</th>
-                            <th style="padding: 10px; background: #D1FAE5; color: #047857; border: 1px solid #ddd;">A</th>
-                            <th style="padding: 10px; background: #FEF3C7; color: #B45309; border: 1px solid #ddd;">R</th>
-                            <th style="padding: 10px; background: #E5E7EB; color: #374151; border: 1px solid #ddd;">Info</th>
+                            <th style="padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border);">Time</th>
+                            <th style="padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border);">Location</th>
+                            <th style="padding: 10px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border);">S</th>
+                            <th style="padding: 10px; background: #DBEAFE; color: #1E40AF; border: 1px solid var(--border);">T</th>
+                            <th style="padding: 10px; background: #D1FAE5; color: #047857; border: 1px solid var(--border);">A</th>
+                            <th style="padding: 10px; background: #FEF3C7; color: #B45309; border: 1px solid var(--border);">R</th>
+                            <th style="padding: 10px; background: #E5E7EB; color: #374151; border: 1px solid var(--border);">Info</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5722,9 +5722,9 @@ function showEditPointCardModal(record, studentId, studentName, date) {
         
         modalContent += `
             <tr>
-                <td style="padding: 8px; border: 1px solid #ddd;">${period.time_range}</td>
-                <td style="padding: 8px; border: 1px solid #ddd;">${period.location}</td>
-                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 226, 226, 0.3);">
+                <td style="padding: 8px; border: 1px solid var(--border);">${period.time_range}</td>
+                <td style="padding: 8px; border: 1px solid var(--border);">${period.location}</td>
+                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 226, 226, 0.3);">
                     <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
                         <option value="">-</option>
                         <option value="2" ${period.safety_points === 2 ? 'selected' : ''}>2</option>
@@ -5732,7 +5732,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         <option value="0" ${period.safety_points === 0 ? 'selected' : ''}>0</option>
                     </select>
                 </td>
-                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(219, 234, 254, 0.3);">
+                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(219, 234, 254, 0.3);">
                     <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
                         <option value="">-</option>
                         <option value="2" ${period.teamwork_points === 2 ? 'selected' : ''}>2</option>
@@ -5740,7 +5740,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         <option value="0" ${period.teamwork_points === 0 ? 'selected' : ''}>0</option>
                     </select>
                 </td>
-                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(209, 250, 229, 0.3);">
+                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(209, 250, 229, 0.3);">
                     <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
                         <option value="">-</option>
                         <option value="2" ${period.accountability_points === 2 ? 'selected' : ''}>2</option>
@@ -5748,7 +5748,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         <option value="0" ${period.accountability_points === 0 ? 'selected' : ''}>0</option>
                     </select>
                 </td>
-                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 243, 199, 0.3);">
+                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 243, 199, 0.3);">
                     <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
                         <option value="">-</option>
                         <option value="2" ${period.relationships_points === 2 ? 'selected' : ''}>2</option>
@@ -5756,7 +5756,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         <option value="0" ${period.relationships_points === 0 ? 'selected' : ''}>0</option>
                     </select>
                 </td>
-                <td style="padding: 8px; border: 1px solid #ddd; background: rgba(229, 231, 235, 0.3); text-align: center;">
+                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(229, 231, 235, 0.3); text-align: center;">
                     <button class="info-btn-small" data-period-index="${index}" style="padding: 4px 8px; font-size: 11px;">${hasInfo ? 'Edit' : 'Add'}</button>
                 </td>
             </tr>
@@ -5854,13 +5854,13 @@ function addPointCardRow() {
     
     const tr = document.createElement('tr');
     tr.innerHTML = `
-        <td style="padding: 8px; border: 1px solid #ddd;">
+        <td style="padding: 8px; border: 1px solid var(--border);">
             <input type="text" class="edit-input" data-period-index="${index}" data-category="time_range" placeholder="Time" style="width: 100%; padding: 4px; box-sizing: border-box;">
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd;">
+        <td style="padding: 8px; border: 1px solid var(--border);">
             <input type="text" class="edit-input" data-period-index="${index}" data-category="location" placeholder="Location" autocomplete="off" style="width: 100%; padding: 4px; box-sizing: border-box;">
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 226, 226, 0.3);">
+        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 226, 226, 0.3);">
             <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
                 <option value="">-</option>
                 <option value="2">2</option>
@@ -5868,7 +5868,7 @@ function addPointCardRow() {
                 <option value="0">0</option>
             </select>
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(219, 234, 254, 0.3);">
+        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(219, 234, 254, 0.3);">
             <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
                 <option value="">-</option>
                 <option value="2">2</option>
@@ -5876,7 +5876,7 @@ function addPointCardRow() {
                 <option value="0">0</option>
             </select>
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(209, 250, 229, 0.3);">
+        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(209, 250, 229, 0.3);">
             <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
                 <option value="">-</option>
                 <option value="2">2</option>
@@ -5884,7 +5884,7 @@ function addPointCardRow() {
                 <option value="0">0</option>
             </select>
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(254, 243, 199, 0.3);">
+        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 243, 199, 0.3);">
             <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
                 <option value="">-</option>
                 <option value="2">2</option>
@@ -5892,7 +5892,7 @@ function addPointCardRow() {
                 <option value="0">0</option>
             </select>
         </td>
-        <td style="padding: 8px; border: 1px solid #ddd; background: rgba(229, 231, 235, 0.3); text-align: center;">
+        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(229, 231, 235, 0.3); text-align: center;">
             <button class="info-btn-small" data-period-index="${index}" type="button" style="padding: 4px 8px; font-size: 11px;">Add</button>
         </td>
     `;
@@ -6104,7 +6104,7 @@ async function loadFrenzyStats() {
                 html += `
                     <div class="form-group" style="margin-top: 15px; margin-bottom: 15px;">
                         <label for="frenzy-school-year-select" style="display: inline-block; margin-right: 10px;">School Year:</label>
-                        <select id="frenzy-school-year-select" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <select id="frenzy-school-year-select" style="padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px;">
                 `;
                 data.available_school_years.forEach(sy => {
                     html += `<option value="${sy}" ${sy === currentSchoolYear ? 'selected' : ''}>${sy}</option>`;
@@ -6136,51 +6136,51 @@ async function loadFrenzyStats() {
                     <div style="overflow-x: auto; margin-top: 20px; max-height: 80vh; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Metric</th>
             `;
             
             // Add period headers
             periods.forEach(periodKey => {
-                html += `<th style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${periodKey}</th>`;
+                html += `<th style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${periodKey}</th>`;
             });
             
             html += `</tr></thead><tbody>`;
             
             // Data Points row (only for 30day and 30day_to_30day comparisons)
             if ((timeframe === '30day' || timeframe === '30day_to_30day') || (period === '30day')) {
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10;">Data Points</td>`;
                 periods.forEach(periodKey => {
                     const periodData = data.periods[periodKey];
                     const dataPoints = periodData.available_data_points !== undefined ? periodData.available_data_points : periodData.total_days || 0;
                     const hasFull30 = periodData.has_full_30_days !== undefined ? periodData.has_full_30_days : false;
                     const displayText = hasFull30 ? `${dataPoints} (Full 30 Days)` : `${dataPoints}`;
-                    html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
+                    html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(229, 231, 235, 0.5);">${displayText}</td>`;
                 });
                 html += `</tr>`;
             }
             
             // Total Frenzies
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Frenzies</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Frenzies</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_count || 0}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.total_count || 0}</td>`;
             });
             html += `</tr>`;
             
             // Total Duration
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Duration (min)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Total Duration (min)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.total_duration || 0}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.total_duration || 0}</td>`;
             });
             html += `</tr>`;
             
             // Average Duration
-            html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Average Duration (min)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Average Duration (min)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${periodData.avg_duration ? periodData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${periodData.avg_duration ? periodData.avg_duration.toFixed(1) : '0.0'}</td>`;
             });
             html += `</tr>`;
             
@@ -6205,66 +6205,66 @@ async function loadFrenzyStats() {
             
             if (sortedDays.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_day', 'frenzy')">Graph</button></h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Day of Week Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_day', 'frenzy')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="text" id="frenzy-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table id="frenzy-day-of-week-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1; rowspan="2">Metric</th>
                 `;
                 
                 // First header row with timeframe names
                 periods.forEach((periodKey, periodIndex) => {
-                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); font-weight: 700;" colspan="${weekdays.length}">${periodKey}</th>`;
                 });
                 
-                html += `</tr><tr style="background: #f8f9fa;">`;
+                html += `</tr><tr style="background: var(--bg-elevated);">`;
                 
                 // Second header row with day names
                 periods.forEach((periodKey, periodIndex) => {
                     weekdays.forEach((day, dayIndex) => {
-                        html += `<th class="frenzy-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${day}</th>`;
+                        html += `<th class="frenzy-day-header" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${day}</th>`;
                     });
                 });
                 
                 html += `</tr></thead><tbody>`;
                 
                 // Count row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     weekdays.forEach((day, dayIndex) => {
                         const periodData = data.periods[periodKey];
                         const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.count || 0}</td>`;
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.count || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     weekdays.forEach((day, dayIndex) => {
                         const periodData = data.periods[periodKey];
                         const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.duration || 0}</td>`;
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.duration || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Avg Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     weekdays.forEach((day, dayIndex) => {
                         const periodData = data.periods[periodKey];
                         const dayData = periodData.by_day && periodData.by_day[day] ? periodData.by_day[day] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.avg_duration ? dayData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                        html += `<td class="frenzy-day-data" data-period-index="${periodIndex}" data-day="${day}" data-column-index="${dayIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${dayData.avg_duration ? dayData.avg_duration.toFixed(1) : '0.0'}</td>`;
                     });
                 });
                 html += `</tr>`;
@@ -6285,69 +6285,69 @@ async function loadFrenzyStats() {
             const sortedClasses = Array.from(allClasses).sort();
             
             html += `
-                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_class', 'frenzy')">Graph</button></h4>`;
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_class', 'frenzy')">Graph</button></h4>`;
             
             if (sortedClasses.length > 0) {
                 html += `
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="text" id="frenzy-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table id="frenzy-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1; rowspan="2">Metric</th>
                 `;
                 
                 // First header row with timeframe names
                 periods.forEach((periodKey, periodIndex) => {
-                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); font-weight: 700;" colspan="${sortedClasses.length}">${periodKey}</th>`;
                 });
                 
-                html += `</tr><tr style="background: #f8f9fa;">`;
+                html += `</tr><tr style="background: var(--bg-elevated);">`;
                 
                 // Second header row with class names
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
-                        html += `<th class="frenzy-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${className}</th>`;
+                        html += `<th class="frenzy-class-header" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${className}</th>`;
                     });
                 });
                 
                 html += `</tr></thead><tbody>`;
                 
                 // Count row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.count || 0}</td>`;
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.count || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.duration || 0}</td>`;
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.duration || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Avg Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedClasses.forEach((className, classIndex) => {
                         const periodData = data.periods[periodKey];
                         const classData = periodData.by_location && periodData.by_location[className] ? periodData.by_location[className] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.avg_duration ? classData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                        html += `<td class="frenzy-class-data" data-period-index="${periodIndex}" data-class="${className}" data-column-index="${classIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${classData.avg_duration ? classData.avg_duration.toFixed(1) : '0.0'}</td>`;
                     });
                 });
                 html += `</tr>`;
@@ -6355,7 +6355,7 @@ async function loadFrenzyStats() {
                 html += `</tbody></table></div>`;
             } else {
                 html += `
-                    <div style="padding: 20px; text-align: center; background: #f8f9fa; border-radius: 4px; margin-top: 10px;">
+                    <div style="padding: 20px; text-align: center; background: var(--bg-elevated); border-radius: 4px; margin-top: 10px;">
                         <p style="color: #999; font-style: italic;">No class data available for the selected timeframe.</p>
                     </div>`;
             }
@@ -6372,66 +6372,66 @@ async function loadFrenzyStats() {
             
             if (sortedPurposes.length > 0) {
                 html += `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Purpose Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_purpose', 'frenzy')">Graph</button></h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Purpose Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_comparison_purpose', 'frenzy')">Graph</button></h4>
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-purpose-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Purpose:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-purpose-search" placeholder="Type to search purpose name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="text" id="frenzy-purpose-search" placeholder="Type to search purpose name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table id="frenzy-purpose-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1; rowspan="2">Metric</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1; rowspan="2">Metric</th>
                 `;
                 
                 // First header row with timeframe names
                 periods.forEach((periodKey, periodIndex) => {
-                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: #f8f9fa; font-weight: 700;" colspan="${sortedPurposes.length}">${periodKey}</th>`;
+                    html += `<th class="frenzy-timeframe-header" data-period-index="${periodIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: var(--bg-elevated); font-weight: 700;" colspan="${sortedPurposes.length}">${periodKey}</th>`;
                 });
                 
-                html += `</tr><tr style="background: #f8f9fa;">`;
+                html += `</tr><tr style="background: var(--bg-elevated);">`;
                 
                 // Second header row with purpose names
                 periods.forEach((periodKey, periodIndex) => {
                     sortedPurposes.forEach((purpose, purposeIndex) => {
-                        html += `<th class="frenzy-purpose-header" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; min-width: 120px; background: #f8f9fa;">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`;
+                        html += `<th class="frenzy-purpose-header" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; min-width: 120px; background: var(--bg-elevated);">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</th>`;
                     });
                 });
                 
                 html += `</tr></thead><tbody>`;
                 
                 // Count row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Count</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedPurposes.forEach((purpose, purposeIndex) => {
                         const periodData = data.periods[periodKey];
                         const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.count || 0}</td>`;
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.count || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedPurposes.forEach((purpose, purposeIndex) => {
                         const periodData = data.periods[periodKey];
                         const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.duration || 0}</td>`;
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.duration || 0}</td>`;
                     });
                 });
                 html += `</tr>`;
                 
                 // Avg Duration row
-                html += `<tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
+                html += `<tr><td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">Avg Duration (min)</td>`;
                 periods.forEach((periodKey, periodIndex) => {
                     sortedPurposes.forEach((purpose, purposeIndex) => {
                         const periodData = data.periods[periodKey];
                         const purposeData = periodData.by_purpose && periodData.by_purpose[purpose] ? periodData.by_purpose[purpose] : {count: 0, duration: 0, avg_duration: 0};
-                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.avg_duration ? purposeData.avg_duration.toFixed(1) : '0.0'}</td>`;
+                        html += `<td class="frenzy-purpose-data" data-period-index="${periodIndex}" data-purpose="${purpose.replace(/"/g, '&quot;')}" data-column-index="${purposeIndex}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${purposeData.avg_duration ? purposeData.avg_duration.toFixed(1) : '0.0'}</td>`;
                     });
                 });
                 html += `</tr>`;
@@ -6664,13 +6664,13 @@ async function loadFrenzyStats() {
                     <h4 style="margin-top: 20px;">By Day of Week <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_day', 'frenzy')">Graph</button></h4>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                         <thead>
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Metric</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Metric</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Monday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Tuesday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Wednesday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Thursday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Friday</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6682,81 +6682,81 @@ async function loadFrenzyStats() {
                                 if (hasData) {
                                     return `
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
                                         </tr>
                                     `;
                                 } else {
-                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by day</td></tr>';
+                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #999;">No frenzy data by day</td></tr>';
                                 }
                             })()}
                         </tbody>
                     </table>
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_class', 'frenzy')">Graph</button></h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">Class Statistics <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_class', 'frenzy')">Graph</button></h4>
                     ${data.by_location && Object.keys(data.by_location).length > 0 ? `
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-single-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-single-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="text" id="frenzy-single-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table id="frenzy-single-class-table" style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Class</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Count</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Total Duration</th>
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Avg Duration</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Class</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Count</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Total Duration</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Avg Duration</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${Object.entries(data.by_location).sort((a, b) => a[0].localeCompare(b[0])).map(([className, stats]) => `
                                     <tr>
-                                        <td class="frenzy-single-class-name" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${className}</td>
-                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.count || 0}</td>
-                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.duration || 0} min</td>
-                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid #ddd; text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
+                                        <td class="frenzy-single-class-name" data-class="${className}" style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${className}</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.count || 0}</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.duration || 0} min</td>
+                                        <td class="frenzy-single-class-data" data-class="${className}" style="padding: 12px; border: 1px solid var(--border); text-align: center; background: rgba(229, 231, 235, 0.2);">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
                         </table>
                     </div>
                     ` : `
-                    <div style="padding: 20px; text-align: center; background: #f8f9fa; border-radius: 4px; margin-top: 10px;">
+                    <div style="padding: 20px; text-align: center; background: var(--bg-elevated); border-radius: 4px; margin-top: 10px;">
                         <p style="color: #999; font-style: italic;">No class data available for the selected timeframe.</p>
                     </div>
                     `}
                     <h4 style="margin-top: 20px;">By Purpose <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('frenzy_single_purpose', 'frenzy')">Graph</button></h4>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                         <thead>
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Purpose</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Count</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Total Duration</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Avg Duration</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Purpose</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Count</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Total Duration</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Avg Duration</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${Object.entries(data.by_purpose || {}).length > 0 ? 
                                 Object.entries(data.by_purpose).map(([purpose, stats]) => `
                                     <tr>
-                                        <td style="padding: 12px; border: 1px solid #ddd;">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
-                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.count}</td>
-                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.duration} min</td>
-                                        <td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
+                                        <td style="padding: 12px; border: 1px solid var(--border);">${purpose.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                        <td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${stats.count}</td>
+                                        <td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${stats.duration} min</td>
+                                        <td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${stats.avg_duration ? stats.avg_duration.toFixed(1) : '0.0'} min</td>
                                     </tr>
                                 `).join('') 
-                                : '<tr><td colspan="4" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by purpose</td></tr>'
+                                : '<tr><td colspan="4" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #999;">No frenzy data by purpose</td></tr>'
                             }
                         </tbody>
                     </table>
@@ -6770,18 +6770,18 @@ async function loadFrenzyStats() {
                         // Only show "All Purposes" section if there are purposes not already in the table
                         if (purposesNotInTable.length > 0) {
                             return `
-                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: #333;">All Purposes</h4>
+                    <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 18px; font-weight: 700; color: var(--text-primary);">All Purposes</h4>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 80vh; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left; position: sticky; left: 0; top: 0; background: #f8f9fa; z-index: 30; opacity: 1;">Purpose</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left; position: sticky; left: 0; top: 0; background: var(--bg-elevated); z-index: 30; opacity: 1;">Purpose</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${purposesNotInTable.map(purpose => `
                                     <tr>
-                                        <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${(purpose || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                        <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgb(229, 231, 235); position: sticky; left: 0; z-index: 10; opacity: 1;">${(purpose || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -6795,34 +6795,34 @@ async function loadFrenzyStats() {
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 300px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
-                                <tr style="background: #f8f9fa;">
-                                    <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Result</th>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Result</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${(data.all_results && data.all_results.length > 0) ? 
                                     data.all_results.map(result => 
                                         `<tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; white-space: pre-wrap;">${(result || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+                                            <td style="padding: 12px; border: 1px solid var(--border); white-space: pre-wrap;">${(result || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
                                         </tr>`
                                     ).join('') 
-                                    : '<tr><td style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999; font-style: italic;">None</td></tr>'
+                                    : '<tr><td style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #999; font-style: italic;">None</td></tr>'
                                 }
                             </tbody>
                         </table>
                     </div>
                     
                     <h4 style="margin-top: 30px;">Additional Information</h4>
-                    <h5 style="margin-top: 15px; margin-bottom: 10px; color: #667eea;">Day of Week Comparison</h5>
+                    <h5 style="margin-top: 15px; margin-bottom: 10px; color: var(--accent);">Day of Week Comparison</h5>
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                         <thead>
-                            <tr style="background: #f8f9fa;">
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Metric</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Monday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Tuesday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Wednesday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Thursday</th>
-                                <th style="padding: 12px; border: 1px solid #ddd; text-align: center;">Friday</th>
+                            <tr style="background: var(--bg-elevated);">
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Metric</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Monday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Tuesday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Wednesday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Thursday</th>
+                                <th style="padding: 12px; border: 1px solid var(--border); text-align: center;">Friday</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6834,20 +6834,20 @@ async function loadFrenzyStats() {
                                 if (hasData) {
                                     return `
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Count</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).count || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Total Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).duration || 0}</td>`).join('')}
                                         </tr>
                                         <tr>
-                                            <td style="padding: 12px; border: 1px solid #ddd; font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
-                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid #ddd; text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
+                                            <td style="padding: 12px; border: 1px solid var(--border); font-weight: 600; background: rgba(229, 231, 235, 0.3);">Avg Duration (min)</td>
+                                            ${weekdays.map(day => `<td style="padding: 12px; border: 1px solid var(--border); text-align: center;">${getDayData(day).avg_duration ? getDayData(day).avg_duration.toFixed(1) : '0.0'}</td>`).join('')}
                                         </tr>
                                     `;
                                 } else {
-                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid #ddd; text-align: center; color: #999;">No frenzy data by day</td></tr>';
+                                    return '<tr><td colspan="6" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #999;">No frenzy data by day</td></tr>';
                                 }
                             })()}
                         </tbody>
@@ -7775,19 +7775,19 @@ function showInfoViewPopup(infoDataString, time, location) {
         <div class="modal-content info-modal-large" style="max-width: 700px;">
             <span class="close" onclick="document.getElementById('info-view-modal').remove()">&times;</span>
             <h2>Additional Information</h2>
-            <p style="color: #666; margin-bottom: 20px;"><strong>Time:</strong> ${time || 'N/A'} | <strong>Location:</strong> ${location || 'N/A'}</p>
+            <p style="color: var(--text-secondary); margin-bottom: 20px;"><strong>Time:</strong> ${time || 'N/A'} | <strong>Location:</strong> ${location || 'N/A'}</p>
             
             <div class="info-form-grid" style="pointer-events: none;">
                 <!-- Notes -->
                 <div class="form-group">
                     <label>Notes:</label>
-                    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
 
                 <!-- Reminders -->
                 <div class="form-group">
                     <label>Reminders:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">
                         Reminders: ${(infoData.reminder1 ? 1 : 0) + (infoData.reminder2 ? 1 : 0) + (infoData.reminder3 ? 1 : 0)}
                     </div>
                 </div>
@@ -7795,21 +7795,21 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <!-- Reset -->
                 <div class="form-group">
                     <label>Reset:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.reset ? '✓ Yes' : '✗ No'}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.reset ? '✓ Yes' : '✗ No'}</div>
                 </div>
 
                 <!-- Alternate Location -->
                 ${infoData.alternate_location ? `
                 <div class="form-group">
                     <label>Alternate Location:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${(infoData.alternate_location || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${(infoData.alternate_location || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
                 ` : ''}
 
                 <!-- Infractions -->
                 <div class="form-group infraction-group">
                     <label>Infractions:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">
                         ${(() => {
                             let infractionsHtml = '';
                             if (infoData.infractions && Array.isArray(infoData.infractions)) {
@@ -7840,13 +7840,13 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <!-- Frenzy -->
                 <div class="form-group">
                     <label>Frenzy:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
                 </div>
 
                 <!-- Purposes -->
                 <div class="form-group">
                     <label>Purposes:</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">
                         ${(() => {
                             let purposesHtml = '';
                             if (infoData.purposes && Array.isArray(infoData.purposes)) {
@@ -7875,13 +7875,13 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <!-- Duration -->
                 <div class="form-group">
                     <label>Duration (minutes):</label>
-                    <div style="padding: 10px; background: #f8f9fa; border-radius: 4px;">${infoData.duration || 'None'}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.duration || 'None'}</div>
                 </div>
 
                 <!-- Results of Behavior -->
                 <div class="form-group">
                     <label>Results of Behavior:</label>
-                    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.results || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.results || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
             </div>
 
@@ -8815,7 +8815,7 @@ function addClassInputGroup(container, value = '') {
     group.className = 'class-input-group';
     group.innerHTML = `
         <input type="text" value="${value}" class="class-input" placeholder="Enter class/activity">
-        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">×</button>
+        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
     `;
     
     // Add delete button event listener
@@ -8886,7 +8886,7 @@ function addScheduleRow(type, timePeriod = '', data = null) {
                 <div class="classes-container">
                     ${initialClassValue ? `<div class="class-input-group">
                         <input type="text" value="${initialClassValue}" class="class-input" placeholder="Enter class/activity">
-                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">×</button>
+                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
                     </div>` : ''}
                 </div>
             </td>
@@ -9277,7 +9277,7 @@ function createAdminStaffRow(user, displayRole) {
 
     row.innerHTML = `
         <td><strong>${name}</strong></td>
-        <td style="font-weight: 500; color: ${user.role === 'admin' ? '#d32f2f' : '#1976d2'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
+        <td style="font-weight: 500; color: ${user.role === 'admin' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
@@ -9441,7 +9441,7 @@ function createOutsideStaffRow(user) {
     row.innerHTML = `
         <td><strong>${name}</strong></td>
         <td>${district}</td>
-        <td style="cursor: pointer; color: #1976d2; text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
+        <td style="cursor: pointer; color: var(--accent); text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
             ${studentsAssignedDisplay}
         </td>
         <td>${user.username}</td>
@@ -9715,7 +9715,7 @@ async function loadParentStudentsForEdit(parentId) {
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 8px; background: #f5f5f5; border-radius: 4px;">
                     <div>
                         <strong>${student.student_name || 'Unknown'}</strong>
-                        <span style="color: #666; margin-left: 10px;">(${student.relationship})</span>
+                        <span style="color: var(--text-secondary); margin-left: 10px;">(${student.relationship})</span>
                         ${student.verified ? '<span style="color: green; margin-left: 10px;">✓ Verified</span>' : '<span style="color: orange; margin-left: 10px;">Pending Verification</span>'}
                     </div>
                     <div style="display: flex; gap: 8px;">
@@ -9725,7 +9725,7 @@ async function loadParentStudentsForEdit(parentId) {
                 </div>
             `).join('');
         } else {
-            studentsList.innerHTML = '<p style="color: #666;">No linked students.</p>';
+            studentsList.innerHTML = '<p style="color: var(--text-secondary);">No linked students.</p>';
         }
         
         if (claimedDiv) {
@@ -10556,11 +10556,11 @@ async function manageOutsideStaffStudents(userId, name) {
         <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
             <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
             <h2>Manage Students for ${displayName}</h2>
-            <p style="margin-bottom: 15px; color: #666;">Select students to assign to this Outside Staff user:</p>
+            <p style="margin-bottom: 15px; color: var(--text-secondary);">Select students to assign to this Outside Staff user:</p>
             <div class="form-group" style="margin-bottom: 15px;">
-                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;">
             </div>
-            <div id="student-assignment-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+            <div id="student-assignment-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 4px;">
                 ${allStudents.map(student => `
                     <label class="student-assignment-item" data-student-name="${student.name.toLowerCase()}" style="display: block; padding: 8px; cursor: pointer;">
                         <input type="checkbox" value="${student.id}" ${assignedStudentIds.includes(student.id) ? 'checked' : ''} style="margin-right: 8px;">
@@ -10697,21 +10697,21 @@ function loadAdminStats(users) {
     const totalCount = users.length;
     
     statsContainer.innerHTML = `
-        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #d32f2f;">
-            <div style="font-size: 24px; font-weight: bold; color: #d32f2f;">${adminCount}</div>
-            <div style="color: #666; font-size: 12px;">Admin Users</div>
+        <div style="background: var(--bg-surface); padding: 15px; border-radius: var(--radius-sm); border-left: 3px solid var(--danger);">
+            <div style="font-size: 24px; font-weight: bold; color: var(--danger);">${adminCount}</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Admin Users</div>
         </div>
-        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #1976d2;">
-            <div style="font-size: 24px; font-weight: bold; color: #1976d2;">${staffCount}</div>
-            <div style="color: #666; font-size: 12px;">Staff Users</div>
+        <div style="background: var(--bg-surface); padding: 15px; border-radius: var(--radius-sm); border-left: 3px solid var(--accent);">
+            <div style="font-size: 24px; font-weight: bold; color: var(--accent);">${staffCount}</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Staff Users</div>
         </div>
-        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #388e3c;">
-            <div style="font-size: 24px; font-weight: bold; color: #388e3c;">${studentCount}</div>
-            <div style="color: #666; font-size: 12px;">Student Users</div>
+        <div style="background: var(--bg-surface); padding: 15px; border-radius: var(--radius-sm); border-left: 3px solid var(--success);">
+            <div style="font-size: 24px; font-weight: bold; color: var(--success);">${studentCount}</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Student Users</div>
         </div>
-        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #667eea;">
-            <div style="font-size: 24px; font-weight: bold; color: #667eea;">${totalCount}</div>
-            <div style="color: #666; font-size: 12px;">Total Users</div>
+        <div style="background: var(--bg-surface); padding: 15px; border-radius: 6px; border-left: 3px solid var(--accent);">
+            <div style="font-size: 24px; font-weight: bold; color: var(--accent);">${totalCount}</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Total Users</div>
         </div>
     `;
     
@@ -10962,7 +10962,7 @@ function editStudent(studentId, buttonElement) {
     });
     
     buttonElement.textContent = 'Save';
-    buttonElement.style.background = '#28a745';
+    buttonElement.style.background = 'var(--success)';
 }
 
 async function saveStudentInfo(studentId, row, buttonElement) {
@@ -11070,15 +11070,15 @@ function displayInfractionsModal(infractions, title) {
         
         let html = `
             <div style="margin-bottom: 20px;">
-                <p style="font-size: 14px; color: #666;"><strong>Total Infractions:</strong> ${totalCount}</p>
-                <p style="font-size: 14px; color: #666;"><strong>Unique Types:</strong> ${sortedInfractions.length}</p>
+                <p style="font-size: 14px; color: var(--text-secondary);"><strong>Total Infractions:</strong> ${totalCount}</p>
+                <p style="font-size: 14px; color: var(--text-secondary);"><strong>Unique Types:</strong> ${sortedInfractions.length}</p>
             </div>
             <table style="width: 100%; border-collapse: collapse;">
                 <thead>
-                    <tr style="background: #f8f9fa;">
-                        <th style="padding: 12px; border: 1px solid #ddd; text-align: left;">Infraction Type</th>
-                        <th style="padding: 12px; border: 1px solid #ddd; text-align: center; width: 120px;">Count</th>
-                        <th style="padding: 12px; border: 1px solid #ddd; text-align: center; width: 150px;">Percentage</th>
+                    <tr style="background: var(--bg-elevated);">
+                        <th style="padding: 12px; border: 1px solid var(--border); text-align: left;">Infraction Type</th>
+                        <th style="padding: 12px; border: 1px solid var(--border); text-align: center; width: 120px;">Count</th>
+                        <th style="padding: 12px; border: 1px solid var(--border); text-align: center; width: 150px;">Percentage</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -11088,9 +11088,9 @@ function displayInfractionsModal(infractions, title) {
             const percentage = totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(1) : '0.0';
             html += `
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;">${escapeHtml(item.type)}</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: 600;">${item.count}</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${percentage}%</td>
+                    <td style="padding: 10px; border: 1px solid var(--border);">${escapeHtml(item.type)}</td>
+                    <td style="padding: 10px; border: 1px solid var(--border); text-align: center; font-weight: 600;">${item.count}</td>
+                    <td style="padding: 10px; border: 1px solid var(--border); text-align: center;">${percentage}%</td>
                 </tr>
             `;
         });
@@ -11168,7 +11168,7 @@ function showPdfTableSelectionModal(type) {
                 populateSummaryPdfModal();
             } catch (error) {
                 console.error('Error populating summary PDF modal:', error);
-                optionsDiv.innerHTML = '<p style="color: #dc3545;">Error loading table options. Please try again.</p>';
+                optionsDiv.innerHTML = '<p style="color: var(--danger);">Error loading table options. Please try again.</p>';
             }
         } else if (type === 'frenzy') {
             title.textContent = 'Select Tables for Frenzy Stats PDF';
@@ -11176,7 +11176,7 @@ function showPdfTableSelectionModal(type) {
                 populateFrenzyPdfModal();
             } catch (error) {
                 console.error('Error populating frenzy PDF modal:', error);
-                optionsDiv.innerHTML = '<p style="color: #dc3545;">Error loading table options. Please try again.</p>';
+                optionsDiv.innerHTML = '<p style="color: var(--danger);">Error loading table options. Please try again.</p>';
             }
         }
         
@@ -11203,14 +11203,14 @@ function populateSummaryPdfModal() {
     
     const data = window.currentSummaryData;
     if (!data) {
-        optionsDiv.innerHTML = '<p style="color: #dc3545;">Please load summary data first.</p>';
+        optionsDiv.innerHTML = '<p style="color: var(--danger);">Please load summary data first.</p>';
         return;
     }
     
     const isComparison = data.comparison_mode && data.periods;
     
     let html = `
-        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: var(--bg-elevated); border-radius: 4px;">
             <input type="checkbox" id="modal-pdf-summary-main" checked disabled>
             <span>Main Summary Statistics (always included)</span>
         </label>
@@ -11305,14 +11305,14 @@ function populateFrenzyPdfModal() {
     
     const data = window.currentFrenzyStatsData;
     if (!data) {
-        optionsDiv.innerHTML = '<p style="color: #dc3545; padding: 10px;">Please load frenzy statistics data first before generating PDF.</p>';
+        optionsDiv.innerHTML = '<p style="color: var(--danger); padding: 10px;">Please load frenzy statistics data first before generating PDF.</p>';
         return;
     }
     
     const isComparison = data.comparison_mode && data.periods;
     
     let html = `
-        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        <label style="display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; padding: 8px; background: var(--bg-elevated); border-radius: 4px;">
             <input type="checkbox" id="modal-pdf-frenzy-main" checked disabled>
             <span>Main Frenzy Statistics (always included)</span>
         </label>
@@ -12955,7 +12955,7 @@ function renderMarketplaceCart() {
         return '<div class="marketplace-cart-line" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; gap:8px;">' +
             '<span style="flex:1; min-width:0;">' + (line.name || 'Item') + ' × ' + (line.quantity || 1) + '</span>' +
             '<span>$' + subtotal.toFixed(2) + '</span>' +
-            '<button type="button" class="marketplace-cart-remove-btn" data-item-id="' + itemId + '" title="Remove from cart" style="flex-shrink:0; padding:2px 6px; font-size:12px; color:#64748b; background:#e2e8f0; border:none; border-radius:4px; cursor:pointer;">✕</button>' +
+            '<button type="button" class="marketplace-cart-remove-btn" data-item-id="' + itemId + '" title="Remove from cart" style="flex-shrink:0; padding:2px 6px; font-size:12px; color:#64748b; background:var(--bg-elevated); border:none; border-radius:var(--radius-sm); cursor:pointer;">✕</button>' +
             '</div>';
     }).join('');
     el.querySelectorAll('.marketplace-cart-remove-btn').forEach(function (btn) {
@@ -13115,7 +13115,7 @@ function renderMarketplaceCatalog(items) {
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
     grid.innerHTML = items.map(function (item) {
         var imgSrc = item.image_url ? getMarketplaceImageSrc(item.image_url).replace(/"/g, '&quot;') : '';
-        var noImgDiv = '<div class="marketplace-card-no-img" style="width:100%; height:140px; background:#e2e8f0; border-radius:8px; margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:#94a3b8;">No image</div>';
+        var noImgDiv = '<div class="marketplace-card-no-img" style="width:100%; height:140px; background:var(--bg-elevated); border-radius:var(--radius-md); margin-bottom:10px; display:flex; align-items:center; justify-content:center; color:var(--text-secondary);">No image</div>';
         var imgHtml = item.image_url
             ? '<img src="' + imgSrc + '" alt="" referrerpolicy="no-referrer" style="width:100%; height:140px; object-fit:cover; border-radius:8px; margin-bottom:10px;" onerror="this.outerHTML=\'<div class=&quot;marketplace-card-no-img&quot; style=&quot;width:100%;height:140px;background:#e2e8f0;border-radius:8px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#94a3b8;&quot;>No image</div>\';">'
             : noImgDiv;
@@ -13138,7 +13138,7 @@ function renderMarketplaceCatalog(items) {
                 '<button type="button" class="marketplace-btn-delete btn-secondary" style="padding:4px 10px; font-size:12px; color:#dc2626;" data-item-id="' + item.id + '">Delete</button>' +
                 '</div>';
         }
-        return '<div class="marketplace-item-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
+        return '<div class="marketplace-item-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
             imgHtml +
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
             '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
@@ -13280,14 +13280,14 @@ function loadMarketplacePOApprovals() {
                 return;
             }
             list.innerHTML = pending.map(function (o) {
-                return '<div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:10px; background:#fff;">' +
+                return '<div style="border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; margin-bottom:10px; background:var(--bg-surface);">' +
                     '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' — $' + Number(o.item_price).toFixed(2) + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">Student: ' + (o.student_name || '').replace(/</g, '&lt;') + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">' + (o.created_at ? new Date(o.created_at).toLocaleString() : '') + '</div>' +
                     '<div style="margin-top:10px; display:flex; gap:8px; align-items:center;">' +
                     '<button type="button" class="btn-primary" style="padding:6px 12px;" data-po-approve="' + o.id + '">Fulfill</button>' +
                     '<button type="button" class="btn-secondary" style="padding:6px 12px;" data-po-deny="' + o.id + '">Deny</button>' +
-                    '<input type="text" placeholder="Reason (optional)" data-po-deny-reason="' + o.id + '" style="flex:1; padding:6px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px;">' +
+                    '<input type="text" placeholder="Reason (optional)" data-po-deny-reason="' + o.id + '" style="flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:13px;">' +
                     '</div></div>';
             }).join('');
             list.querySelectorAll('[data-po-approve]').forEach(function (btn) {
@@ -14657,29 +14657,29 @@ function viewPaychecksModal(filterType) {
         html += '<p style="margin-bottom: 15px; color: #64748b;">Select a paycheck to complete its worksheet.</p>';
     }
     html += '<table style="width: 100%; border-collapse: collapse;"><thead><tr>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Period</th>';
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">STAR %</th>';
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">Period</th>';
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">STAR %</th>';
     if (!isUndeposited) {
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">Base Pay</th>';
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">Citations</th>';
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">Deduction</th>';
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">Final Pay</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Base Pay</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Citations</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Deduction</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Final Pay</th>';
     }
-    html += '<th style="padding: 10px; border: 1px solid #ddd;">Status</th>';
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">Status</th>';
     if (isUndeposited) {
-        html += '<th style="padding: 10px; border: 1px solid #ddd;">Action</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Action</th>';
     }
     html += '</tr></thead><tbody>';
     
     filteredPaychecks.forEach(p => {
         html += '<tr>';
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.pay_period_start} - ${p.pay_period_end}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">${Number(p.average_star_percent).toFixed(2)}%</td>`;
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.pay_period_start} - ${p.pay_period_end}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${Number(p.average_star_percent).toFixed(2)}%</td>`;
         if (!isUndeposited) {
-            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.base_pay.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid #ddd;">${p.citation_count}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.citation_deduction.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid #ddd;">$${p.final_pay.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.base_pay.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.citation_count}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.citation_deduction.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.final_pay.toFixed(2)}</td>`;
         }
         let status = 'Incomplete';
         if (p.is_verified) {
@@ -14687,9 +14687,9 @@ function viewPaychecksModal(filterType) {
         } else if (p.worksheet_completed) {
             status = 'Pending Verification';
         }
-        html += `<td style="padding: 10px; border: 1px solid #ddd;">${status}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${status}</td>`;
         if (isUndeposited) {
-            html += `<td style="padding: 10px; border: 1px solid #ddd;"><button type="button" class="btn-primary" style="background: #10b981; border-color: #10b981; padding: 6px 12px; font-size: 13px;" onclick="openWorksheetForPaycheck(${p.id})">Complete worksheet</button></td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);"><button type="button" class="btn-primary" style="background: #10b981; border-color: #10b981; padding: 6px 12px; font-size: 13px;" onclick="openWorksheetForPaycheck(${p.id})">Complete worksheet</button></td>`;
         }
         html += '</tr>';
     });
@@ -14736,11 +14736,11 @@ function renderMarketplaceItems() {
     }
     
     grid.innerHTML = items.map(item => `
-        <div class="marketplace-item-card" style="background: white; border: 1px solid #ddd; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <div class="marketplace-item-card" style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
             <h4 style="margin: 0 0 10px 0;">${item.name}</h4>
-            <p style="color: #666; margin: 0 0 15px 0;">${item.description || 'No description'}</p>
+            <p style="color: var(--text-secondary); margin: 0 0 15px 0;">${item.description || 'No description'}</p>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 1.5em; font-weight: bold; color: #667eea;">$${item.price.toFixed(2)}</span>
+                <span style="font-size: 1.5em; font-weight: bold; color: var(--accent);">$${item.price.toFixed(2)}</span>
                 ${window.currentUser.role === 'student' ? `<button onclick="openPurchaseModal(${item.id})" class="btn-primary" style="background: #10b981; border-color: #10b981;">Purchase</button>` : ''}
             </div>
         </div>
@@ -14775,7 +14775,7 @@ async function openPurchaseModal(itemId) {
         </div>
         <div class="form-group">
             <label>Enter calculated balance after purchase:</label>
-            <input type="number" id="purchase-calculated-balance" step="0.01" placeholder="Enter calculated balance" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <input type="number" id="purchase-calculated-balance" step="0.01" placeholder="Enter calculated balance" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
         </div>
         <div id="purchase-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
         <div style="margin-top: 20px; display: flex; gap: 10px;">
@@ -14857,7 +14857,7 @@ function renderPurchaseOrders(orders) {
     }
     
     list.innerHTML = pendingOrders.map(order => `
-        <div class="purchase-order-card" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #ddd;">
+        <div class="purchase-order-card" style="background: var(--bg-elevated); padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid var(--border);">
             <h4 style="margin: 0 0 10px 0;">${order.item_name}</h4>
             <p style="margin: 5px 0;"><strong>Student:</strong> ${order.student_name}</p>
             <p style="margin: 5px 0;"><strong>Price:</strong> $${order.item_price.toFixed(2)}</p>
