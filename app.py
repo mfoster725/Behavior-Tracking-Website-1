@@ -7008,6 +7008,26 @@ def mark_all_notifications_read():
     return jsonify({'message': 'All notifications marked as read'})
 
 
+# Case managers that the current user can assign marketplace items to (same team for staff, all for admin)
+@app.route('/api/marketplace/case-managers', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def get_marketplace_assignable_case_managers():
+    """Return case managers the current user can assign items to. Staff: only those on same student team; Admin: all."""
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify([])
+    case_managers = User.query.filter(
+        User.role == 'staff',
+        User.designation == 'Case Manager',
+        User.is_outside_staff.is_(False)
+    ).order_by(User.name, User.username).all()
+    if current_user.role == 'admin':
+        return jsonify([{'id': u.id, 'name': (u.name or u.username or '').strip() or u.username, 'username': u.username or ''} for u in case_managers])
+    # Staff: only case managers with at least one student in common
+    assignable = [u for u in case_managers if are_users_on_same_student_team(current_user, u)]
+    return jsonify([{'id': u.id, 'name': (u.name or u.username or '').strip() or u.username, 'username': u.username or ''} for u in assignable])
+
+
 # Marketplace admin: item types and categories
 @app.route('/api/marketplace/types', methods=['GET'])
 @limiter.limit("60 per minute")

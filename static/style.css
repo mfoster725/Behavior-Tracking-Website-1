@@ -1893,9 +1893,8 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-header-cell[data-category="r"] {
-    /* Relationships column: move away from strong yellow into a soft neutral */
-    background: #F3F4F6;
-    color: #4B5563;
+    background: #FEF3C7;
+    color: #B45309;
 }
 .pc-header-cell[data-category="i"] {
     background: #E5E7EB;
@@ -1940,8 +1939,8 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(243, 244, 246, 0.9);
-    color: #4B5563;
+    background: rgba(254, 243, 199, 0.5);
+    color: #B45309;
 }
 
 .pc-cell.pc-info-cell {
@@ -1989,7 +1988,7 @@ table tbody tr:hover {
     background: rgba(209, 250, 229, 0.35);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(243, 244, 246, 0.9);
+    background: rgba(254, 243, 199, 0.35);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-info-cell {
     background: rgba(241, 239, 233, 0.5);
@@ -2029,7 +2028,7 @@ table tbody tr:hover {
 }
 .pc-edit-input[data-category="r"],
 .pc-edit-input[data-category="relationships"] {
-    background: rgba(243, 244, 246, 0.9);
+    background: rgba(254, 243, 199, 0.5);
 }
 
 .pc-edit-input:focus {

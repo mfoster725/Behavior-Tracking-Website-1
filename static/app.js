@@ -1903,8 +1903,7 @@ function renderStudentsGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            // Softer, more neutral palette to match overall UI
-            'yellow': '#F3F4F6',  // Neutral light for Relationships (R)
+            'yellow': '#FEF3C7',  // Light yellow, Relationships (R)
             'green': '#D1FAE5',   // Light green, Accountability (A)
             'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
@@ -2603,14 +2602,13 @@ function renderDailyGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            // Softer, more neutral palette to match overall UI
-            'yellow': '#F3F4F6',  // Neutral light for Relationships (R)
+            'yellow': '#FEF3C7',  // Light yellow, Relationships (R)
             'green': '#D1FAE5',   // Light green, Accountability (A)
             'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
         return colors[cardColor.toLowerCase()] || null;
     };
-    
+
     // Student headers (each spans 5 columns for S, T, A, R, I, plus spacer spans)
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
@@ -4024,10 +4022,10 @@ async function loadSummary() {
             html += `</tr>`;
             
             // Relationships
-            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: #F3F4F6; position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
+            html += `<tr><td style="padding: 12px; border: 1px solid var(--border); background: rgb(254, 243, 199); position: sticky; left: 0; z-index: 10; opacity: 1;">Relationships (R)</td>`;
             periods.forEach(periodKey => {
                 const periodData = data.periods[periodKey];
-                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(243, 244, 246, 0.8);">${periodData.percentages.relationships}%</td>`;
+                html += `<td style="padding: 12px; border: 1px solid var(--border); text-align: center; font-weight: 600; background: rgba(254, 243, 199, 0.2);">${periodData.percentages.relationships}%</td>`;
             });
             html += `</tr>`;
             
@@ -4383,7 +4381,7 @@ async function loadSummary() {
                                 <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border); text-align: center;">Safety (S)</th>
                                 <th style="padding: 12px; background: #E0E7FF; color: #1E3A8A; border: 1px solid var(--border); text-align: center;">Teamwork (T)</th>
                                 <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid var(--border); text-align: center;">Accountability (A)</th>
-                                <th style="padding: 12px; background: #F3F4F6; color: #4B5563; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
+                                <th style="padding: 12px; background: #FEF3C7; color: #B45309; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
                                 <th style="padding: 12px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); text-align: center; font-weight: 700;">Overall Average</th>
                             </tr>
                         </thead>
@@ -13497,7 +13495,9 @@ function openMarketplaceAddItemModal() {
     var nameIn = document.getElementById('marketplace-add-item-name');
     var descIn = document.getElementById('marketplace-add-item-description');
     var priceIn = document.getElementById('marketplace-add-item-price');
-    var gradeSel = document.getElementById('marketplace-add-item-grade-range');
+    var caseManagerSel = document.getElementById('marketplace-add-item-case-managers');
+    var schoolWideWrap = document.getElementById('marketplace-add-item-school-wide-wrap');
+    var schoolWideCb = document.getElementById('marketplace-add-item-school-wide');
     var typeInput = document.getElementById('marketplace-add-item-type-input');
     var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
     var typeDropdown = document.getElementById('marketplace-add-item-type-dropdown');
@@ -13510,17 +13510,34 @@ function openMarketplaceAddItemModal() {
     nameIn.value = '';
     if (descIn) descIn.value = '';
     priceIn.value = '';
-    if (gradeSel) gradeSel.value = '9_12';
+    if (caseManagerSel) { caseManagerSel.innerHTML = ''; for (var i = caseManagerSel.options.length - 1; i >= 0; i--) caseManagerSel.options.remove(i); }
+    if (schoolWideCb) schoolWideCb.checked = false;
     if (typeInput) typeInput.value = '';
     if (typeIdHidden) typeIdHidden.value = '';
     if (catInput) catInput.value = '';
     if (catIdHidden) catIdHidden.value = '';
     if (imgIn) imgIn.value = '';
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
-    if (gradeSel) {
-        var opt = gradeSel.querySelector('option[value="school_wide"]');
-        if (opt) opt.disabled = !isAdmin;
-    }
+    if (schoolWideWrap) schoolWideWrap.style.display = isAdmin ? 'block' : 'none';
+    // Load case managers and pre-select current user if they are a case manager
+    fetch('/api/marketplace/case-managers').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+        if (!caseManagerSel) return;
+        list.forEach(function (cm) {
+            var opt = document.createElement('option');
+            opt.value = String(cm.id);
+            opt.textContent = cm.name || cm.username || 'User #' + cm.id;
+            caseManagerSel.appendChild(opt);
+        });
+        var me = window.currentUser && window.currentUser.id;
+        if (me && list.some(function (cm) { return cm.id === me; })) {
+            for (var j = 0; j < caseManagerSel.options.length; j++) {
+                if (Number(caseManagerSel.options[j].value) === me) {
+                    caseManagerSel.options[j].selected = true;
+                    break;
+                }
+            }
+        }
+    }).catch(function () {});
     var typesList = [];
     var catsList = [];
     function renderTypeDropdown() {
@@ -13685,7 +13702,8 @@ function submitMarketplaceAddItem() {
     var nameIn = document.getElementById('marketplace-add-item-name');
     var descIn = document.getElementById('marketplace-add-item-description');
     var priceIn = document.getElementById('marketplace-add-item-price');
-    var gradeSel = document.getElementById('marketplace-add-item-grade-range');
+    var caseManagerSel = document.getElementById('marketplace-add-item-case-managers');
+    var schoolWideCb = document.getElementById('marketplace-add-item-school-wide');
     var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
     var catIdHidden = document.getElementById('marketplace-add-item-category-id');
     var imgIn = document.getElementById('marketplace-add-item-image-url');
@@ -13700,6 +13718,19 @@ function submitMarketplaceAddItem() {
         if (errEl) { errEl.textContent = 'Please enter a valid price.'; errEl.style.display = 'block'; }
         return;
     }
+    var isSchoolWide = schoolWideCb && schoolWideCb.checked;
+    var caseManagerIds = [];
+    if (caseManagerSel && !isSchoolWide) {
+        for (var i = 0; i < caseManagerSel.options.length; i++) {
+            if (caseManagerSel.options[i].selected) {
+                caseManagerIds.push(parseInt(caseManagerSel.options[i].value, 10));
+            }
+        }
+    }
+    if (!isSchoolWide && caseManagerIds.length === 0) {
+        if (errEl) { errEl.textContent = 'Select at least one Case Manager, or check School-wide (admins only).'; errEl.style.display = 'block'; }
+        return;
+    }
     var rawType = typeIdHidden && typeIdHidden.value ? typeIdHidden.value.trim() : '';
     var rawCat = catIdHidden && catIdHidden.value ? catIdHidden.value.trim() : '';
     var typeId = rawType ? parseInt(rawType, 10) : null;
@@ -13708,7 +13739,8 @@ function submitMarketplaceAddItem() {
         name: name,
         description: (descIn && descIn.value) ? descIn.value.trim() : '',
         price: price,
-        grade_range: (gradeSel && gradeSel.value) ? gradeSel.value : '9_12',
+        case_manager_ids: caseManagerIds,
+        is_school_wide: isSchoolWide,
         item_type_id: typeId,
         category_id: catId,
         image_url: (imgIn && imgIn.value) ? imgIn.value.trim() : null
