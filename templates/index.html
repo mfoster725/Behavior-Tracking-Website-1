@@ -115,7 +115,7 @@
                 </div>
 
                 <div id="students-grid-container" style="display: none;">
-                    {% if user.role == 'staff' %}
+                    {% if user.role in ['staff', 'admin'] %}
                     <div class="grid-header">
                         <div class="grid-controls">
                             <button id="save-period-btn" class="btn-primary">Save Period Data</button>
@@ -173,7 +173,7 @@
                         <p class="daily-grid-loading-text">Loading point cards...</p>
                     </div>
                     <div id="daily-staff-filter-title" class="daily-staff-filter-title" style="display: none;"></div>
-                    {% if user.role == 'staff' %}
+                    {% if user.role in ['staff', 'admin'] %}
                     <div class="grid-controls">
                         <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
                         <button id="clear-daily-all-btn" class="btn-secondary">Clear All</button>
