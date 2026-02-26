@@ -4845,7 +4845,7 @@ function showSectionGraph(sectionType, source) {
 }
 
 function buildSectionChartConfig(sectionType, data, source, groupBy) {
-    const palette = ['#0EA5E9', '#0284C7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#84cc16', '#6366f1'];
+    const palette = ['#2563EB', '#1D4ED8', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899', '#84cc16', '#6366f1'];
     const hex = (i) => palette[i % palette.length];
     groupBy = groupBy || 'month';
 
@@ -5505,58 +5505,61 @@ function filterPointCardData(searchQuery, records) {
 }
 
 function highlightMatchingRows(dayElement, query, record) {
-    const table = dayElement.querySelector('.point-card-table');
-    if (!table) return;
-    
-    const rows = table.querySelectorAll('tbody tr');
-    
-    rows.forEach((row, index) => {
-        if (index >= record.periods.length) return;
-        
-        const period = record.periods[index];
-        
-        // Check if this row matches the query
+    const grid = dayElement.querySelector('.pc-grid');
+    if (!grid) return;
+
+    const cells = grid.querySelectorAll('.pc-cell');
+    const colsPerRow = 7;
+    const headerOffset = 0;
+
+    record.periods.forEach((period, index) => {
+        const startIdx = index * colsPerRow;
+        const rowCells = Array.from(cells).slice(startIdx, startIdx + colsPerRow);
+        if (rowCells.length === 0) return;
+
         const timeMatches = period.time_range && period.time_range.toLowerCase().includes(query);
         const locationMatches = period.location && period.location.toLowerCase().includes(query);
         const safetyMatches = period.safety_points !== null && period.safety_points !== undefined && period.safety_points.toString().includes(query);
         const teamworkMatches = period.teamwork_points !== null && period.teamwork_points !== undefined && period.teamwork_points.toString().includes(query);
         const accountabilityMatches = period.accountability_points !== null && period.accountability_points !== undefined && period.accountability_points.toString().includes(query);
         const relationshipsMatches = period.relationships_points !== null && period.relationships_points !== undefined && period.relationships_points.toString().includes(query);
-        
+
         let infoMatches = false;
         if (period.info && period.info.trim() !== '') {
             try {
                 const infoData = JSON.parse(period.info);
-                const infoString = JSON.stringify(infoData).toLowerCase();
-                infoMatches = infoString.includes(query);
+                infoMatches = JSON.stringify(infoData).toLowerCase().includes(query);
             } catch (e) {
                 infoMatches = period.info.toLowerCase().includes(query);
             }
         }
-        
-        const rowMatches = timeMatches || locationMatches || safetyMatches || teamworkMatches || 
+
+        const rowMatches = timeMatches || locationMatches || safetyMatches || teamworkMatches ||
                           accountabilityMatches || relationshipsMatches || infoMatches;
-        
-        if (rowMatches) {
-            row.style.backgroundColor = '#fffbea'; // Light yellow highlight
-            row.style.border = '2px solid #fbbf24';
-        } else {
-            row.style.backgroundColor = '';
-            row.style.border = '';
-            row.style.opacity = '0.5';
-        }
+
+        rowCells.forEach(cell => {
+            if (rowMatches) {
+                cell.style.backgroundColor = '#fffbea';
+                cell.style.boxShadow = 'inset 0 -2px 0 #fbbf24, inset 0 2px 0 #fbbf24';
+                cell.style.opacity = '';
+            } else {
+                cell.style.backgroundColor = '';
+                cell.style.boxShadow = '';
+                cell.style.opacity = '0.5';
+            }
+        });
     });
 }
 
 function clearHighlights(dayElement) {
-    const table = dayElement.querySelector('.point-card-table');
-    if (!table) return;
-    
-    const rows = table.querySelectorAll('tbody tr');
-    rows.forEach(row => {
-        row.style.backgroundColor = '';
-        row.style.border = '';
-        row.style.opacity = '';
+    const grid = dayElement.querySelector('.pc-grid');
+    if (!grid) return;
+
+    const cells = grid.querySelectorAll('.pc-cell');
+    cells.forEach(cell => {
+        cell.style.backgroundColor = '';
+        cell.style.boxShadow = '';
+        cell.style.opacity = '';
     });
 }
 
@@ -5564,93 +5567,72 @@ function renderPointCardGrid(record) {
     if (!record.periods || record.periods.length === 0) {
         return '<p>No period data available for this day.</p>';
     }
-    
-    // Calculate totals for percentages
+
     let totals = { s: 0, t: 0, a: 0, r: 0 };
     let counts = { s: 0, t: 0, a: 0, r: 0 };
-    
+
     record.periods.forEach(period => {
         if (period.safety_points !== null && period.safety_points !== undefined) {
-            totals.s += period.safety_points;
-            counts.s++;
+            totals.s += period.safety_points; counts.s++;
         }
         if (period.teamwork_points !== null && period.teamwork_points !== undefined) {
-            totals.t += period.teamwork_points;
-            counts.t++;
+            totals.t += period.teamwork_points; counts.t++;
         }
         if (period.accountability_points !== null && period.accountability_points !== undefined) {
-            totals.a += period.accountability_points;
-            counts.a++;
+            totals.a += period.accountability_points; counts.a++;
         }
         if (period.relationships_points !== null && period.relationships_points !== undefined) {
-            totals.r += period.relationships_points;
-            counts.r++;
+            totals.r += period.relationships_points; counts.r++;
         }
     });
-    
-    // Calculate percentages
+
     const sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
     const tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
     const aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
     const rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
-    
     const totalPoints = totals.s + totals.t + totals.a + totals.r;
     const totalCounts = counts.s + counts.t + counts.a + counts.r;
     const overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
-    
+
     let html = `
-        <table class="point-card-table">
-            <thead>
-                <tr>
-                    <th>Time</th>
-                    <th>Location</th>
-                    <th style="background: #FEE2E2; color: #B91C1C;">S</th>
-                    <th style="background: #DBEAFE; color: #1E40AF;">T</th>
-                    <th style="background: #D1FAE5; color: #047857;">A</th>
-                    <th style="background: #FEF3C7; color: #B45309;">R</th>
-                    <th style="background: #E5E7EB; color: #374151;">Info</th>
-                </tr>
-            </thead>
-            <tbody>
+        <div class="pc-grid" style="grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 44px 44px 44px 44px 56px;">
+            <div class="pc-header-cell pc-header-time">Time</div>
+            <div class="pc-header-cell pc-header-location">Location</div>
+            <div class="pc-header-cell" data-category="s">S</div>
+            <div class="pc-header-cell" data-category="t">T</div>
+            <div class="pc-header-cell" data-category="a">A</div>
+            <div class="pc-header-cell" data-category="r">R</div>
+            <div class="pc-header-cell" data-category="i">Info</div>
     `;
-    
+
     record.periods.forEach((period, periodIndex) => {
         const hasInfo = period.info && period.info.trim() !== '';
-        let infoButtonHtml = '-';
-        if (hasInfo) {
-            // Store data in a way that's safe for HTML attributes
-            const recordId = record.id;
-            const periodIndexStr = periodIndex.toString();
-            infoButtonHtml = `<button class="info-view-btn" data-record-id="${recordId}" data-period-index="${periodIndexStr}" style="background: #9333EA; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">View Info</button>`;
-        }
-        
+        const recordId = record.id;
+        const infoHtml = hasInfo
+            ? `<button class="pc-info-view-btn info-view-btn" data-record-id="${recordId}" data-period-index="${periodIndex}">View</button>`
+            : '<span style="color: var(--text-secondary);">-</span>';
+
         html += `
-            <tr>
-                <td>${period.time_range}</td>
-                <td>${period.location}</td>
-                <td style="background: rgba(254, 226, 226, 0.3); text-align: center;">${period.safety_points !== null && period.safety_points !== undefined ? period.safety_points : '-'}</td>
-                <td style="background: rgba(219, 234, 254, 0.3); text-align: center;">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</td>
-                <td style="background: rgba(209, 250, 229, 0.3); text-align: center;">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</td>
-                <td style="background: rgba(254, 243, 199, 0.3); text-align: center;">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</td>
-                <td style="background: rgba(229, 231, 235, 0.3); text-align: center;">${infoButtonHtml}</td>
-            </tr>
+            <div class="pc-cell pc-time-cell">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell">${period.location}</div>
+            <div class="pc-cell pc-data-cell" data-category="s">${period.safety_points !== null && period.safety_points !== undefined ? period.safety_points : '-'}</div>
+            <div class="pc-cell pc-data-cell" data-category="t">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</div>
+            <div class="pc-cell pc-data-cell" data-category="a">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</div>
+            <div class="pc-cell pc-data-cell" data-category="r">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</div>
+            <div class="pc-cell pc-info-cell">${infoHtml}</div>
         `;
     });
-    
-    // Add percentage row
+
     html += `
-            <tr style="border-top: 2px solid #000; font-weight: 700;">
-                <td colspan="2" style="text-align: right; padding-right: 10px; background: var(--bg-elevated);">Percent:</td>
-                <td style="background: rgba(254, 226, 226, 0.5); text-align: center; color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</td>
-                <td style="background: rgba(219, 234, 254, 0.5); text-align: center; color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</td>
-                <td style="background: rgba(209, 250, 229, 0.5); text-align: center; color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</td>
-                <td style="background: rgba(254, 243, 199, 0.5); text-align: center; color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</td>
-                <td style="background: var(--bg-elevated); text-align: center; color: var(--accent); font-size: 13px;">${overallPercent !== '-' ? overallPercent + '%' : '-'}</td>
-            </tr>
-            </tbody>
-        </table>
+            <div class="pc-cell pc-percent-label" style="grid-column: span 2;">Percent:</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-overall">${overallPercent !== '-' ? overallPercent + '%' : '-'}</div>
+        </div>
     `;
-    
+
     return html;
 }
 
@@ -5683,123 +5665,97 @@ async function editPointCardDay(e) {
 }
 
 function showEditPointCardModal(record, studentId, studentName, date) {
-    // Create a modal for editing
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'edit-point-card-modal';
     modal.style.display = 'block';
-    
-    // Format date as "Day of Week, Month Day, Year" (parse without timezone issues)
+
     const [year, month, day] = date.split('-').map(Number);
-    const dateObj = new Date(year, month - 1, day); // month is 0-indexed
+    const dateObj = new Date(year, month - 1, day);
     const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     const formattedDate = dateObj.toLocaleDateString('en-US', options);
-    
+
+    const buildSelectHtml = (index, category, currentValue) => {
+        const opts = ['', '2', '1', '0'].map(v => {
+            const label = v === '' ? '-' : v;
+            const sel = (v !== '' && parseInt(v) === currentValue) ? 'selected' : (v === '' && (currentValue === null || currentValue === undefined) ? 'selected' : '');
+            return `<option value="${v}" ${sel}>${label}</option>`;
+        }).join('');
+        return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}">${opts}</select>`;
+    };
+
+    let gridRows = '';
+    record.periods.forEach((period, index) => {
+        const hasInfo = period.info && period.info.trim() !== '';
+        gridRows += `
+            <div class="pc-cell pc-time-cell">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell">${period.location}</div>
+            <div class="pc-cell pc-data-cell" data-category="s" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'safety', period.safety_points)}
+            </div>
+            <div class="pc-cell pc-data-cell" data-category="t" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'teamwork', period.teamwork_points)}
+            </div>
+            <div class="pc-cell pc-data-cell" data-category="a" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'accountability', period.accountability_points)}
+            </div>
+            <div class="pc-cell pc-data-cell" data-category="r" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'relationships', period.relationships_points)}
+            </div>
+            <div class="pc-cell pc-info-cell" style="padding: 2px; justify-content: center;">
+                <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${hasInfo ? 'Edit' : 'Add'}</button>
+            </div>
+        `;
+    });
+
     let modalContent = `
         <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
             <span class="close" onclick="document.getElementById('edit-point-card-modal').remove()">&times;</span>
             <h2>Edit Point Card Data - ${studentName}</h2>
             <h3>${formattedDate}</h3>
-            
+
             <div class="edit-point-card-grid" style="margin-top: 20px;">
-                <table class="point-card-edit-table" style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr>
-                            <th style="padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border);">Time</th>
-                            <th style="padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border);">Location</th>
-                            <th style="padding: 10px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border);">S</th>
-                            <th style="padding: 10px; background: #DBEAFE; color: #1E40AF; border: 1px solid var(--border);">T</th>
-                            <th style="padding: 10px; background: #D1FAE5; color: #047857; border: 1px solid var(--border);">A</th>
-                            <th style="padding: 10px; background: #FEF3C7; color: #B45309; border: 1px solid var(--border);">R</th>
-                            <th style="padding: 10px; background: #E5E7EB; color: #374151; border: 1px solid var(--border);">Info</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-    `;
-    
-    record.periods.forEach((period, index) => {
-        const hasInfo = period.info && period.info.trim() !== '';
-        
-        modalContent += `
-            <tr>
-                <td style="padding: 8px; border: 1px solid var(--border);">${period.time_range}</td>
-                <td style="padding: 8px; border: 1px solid var(--border);">${period.location}</td>
-                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 226, 226, 0.3);">
-                    <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
-                        <option value="">-</option>
-                        <option value="2" ${period.safety_points === 2 ? 'selected' : ''}>2</option>
-                        <option value="1" ${period.safety_points === 1 ? 'selected' : ''}>1</option>
-                        <option value="0" ${period.safety_points === 0 ? 'selected' : ''}>0</option>
-                    </select>
-                </td>
-                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(219, 234, 254, 0.3);">
-                    <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
-                        <option value="">-</option>
-                        <option value="2" ${period.teamwork_points === 2 ? 'selected' : ''}>2</option>
-                        <option value="1" ${period.teamwork_points === 1 ? 'selected' : ''}>1</option>
-                        <option value="0" ${period.teamwork_points === 0 ? 'selected' : ''}>0</option>
-                    </select>
-                </td>
-                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(209, 250, 229, 0.3);">
-                    <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
-                        <option value="">-</option>
-                        <option value="2" ${period.accountability_points === 2 ? 'selected' : ''}>2</option>
-                        <option value="1" ${period.accountability_points === 1 ? 'selected' : ''}>1</option>
-                        <option value="0" ${period.accountability_points === 0 ? 'selected' : ''}>0</option>
-                    </select>
-                </td>
-                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 243, 199, 0.3);">
-                    <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
-                        <option value="">-</option>
-                        <option value="2" ${period.relationships_points === 2 ? 'selected' : ''}>2</option>
-                        <option value="1" ${period.relationships_points === 1 ? 'selected' : ''}>1</option>
-                        <option value="0" ${period.relationships_points === 0 ? 'selected' : ''}>0</option>
-                    </select>
-                </td>
-                <td style="padding: 8px; border: 1px solid var(--border); background: rgba(229, 231, 235, 0.3); text-align: center;">
-                    <button class="info-btn-small" data-period-index="${index}" style="padding: 4px 8px; font-size: 11px;">${hasInfo ? 'Edit' : 'Add'}</button>
-                </td>
-            </tr>
-        `;
-    });
-    
-    modalContent += `
-                    </tbody>
-                </table>
+                <div class="pc-grid point-card-edit-grid" style="grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 48px 48px 48px 48px 56px;">
+                    <div class="pc-header-cell pc-header-time">Time</div>
+                    <div class="pc-header-cell pc-header-location">Location</div>
+                    <div class="pc-header-cell" data-category="s">S</div>
+                    <div class="pc-header-cell" data-category="t">T</div>
+                    <div class="pc-header-cell" data-category="a">A</div>
+                    <div class="pc-header-cell" data-category="r">R</div>
+                    <div class="pc-header-cell" data-category="i">Info</div>
+                    ${gridRows}
+                </div>
             </div>
-            
+
             <div style="margin-top: 12px;">
                 <button type="button" class="btn-secondary" id="add-point-card-row-btn" style="padding: 6px 12px; font-size: 13px;">+ Add row</button>
             </div>
-            
+
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
                 <button class="btn-primary" onclick="saveEditedPointCard(${record.id}, ${studentId}, '${date}')">Save Changes</button>
                 <button class="btn-secondary" onclick="document.getElementById('edit-point-card-modal').remove()">Cancel</button>
             </div>
         </div>
     `;
-    
+
     modal.innerHTML = modalContent;
     document.body.appendChild(modal);
-    
-    // Store the record data for saving (and student context for add row)
+
     window.editingPointCardRecord = record;
     window.editingPointCardStudentId = studentId;
     window.editingPointCardStudentName = studentName;
-    
-    // Add event listeners to info buttons
+
     const infoButtons = modal.querySelectorAll('.info-btn-small');
     infoButtons.forEach(button => {
         button.addEventListener('click', (e) => {
             const periodIndex = parseInt(button.dataset.periodIndex);
             const period = record.periods[periodIndex];
-            
+
             if (!period) {
                 console.error('Period not found at index:', periodIndex);
                 return;
             }
-            
-            // Create a synthetic event object that showInfoModal expects
+
             const syntheticEvent = {
                 target: {
                     dataset: {
@@ -5807,17 +5763,16 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         period: period.time_range,
                         studentName: studentName,
                         info: period.info || '',
-                        periodIndex: periodIndex, // Store period index for edit context
-                        isEditPointCard: 'true' // Flag to indicate we're in edit point card context
+                        periodIndex: periodIndex,
+                        isEditPointCard: 'true'
                     }
                 }
             };
-            
-            // Call showInfoModal with the synthetic event
+
             showInfoModal(syntheticEvent);
         });
     });
-    
+
     const addRowBtn = document.getElementById('add-point-card-row-btn');
     if (addRowBtn) {
         addRowBtn.addEventListener('click', addPointCardRow);
@@ -5830,7 +5785,7 @@ function addPointCardRow() {
     const studentName = window.editingPointCardStudentName;
     const modal = document.getElementById('edit-point-card-modal');
     if (!record || !modal) return;
-    
+
     const index = record.periods.length;
     const newPeriod = {
         time_range: '',
@@ -5848,75 +5803,92 @@ function addPointCardRow() {
         infractions: []
     };
     record.periods.push(newPeriod);
-    
-    const tbody = modal.querySelector('.point-card-edit-table tbody');
-    if (!tbody) return;
-    
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-        <td style="padding: 8px; border: 1px solid var(--border);">
-            <input type="text" class="edit-input" data-period-index="${index}" data-category="time_range" placeholder="Time" style="width: 100%; padding: 4px; box-sizing: border-box;">
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border);">
-            <input type="text" class="edit-input" data-period-index="${index}" data-category="location" placeholder="Location" autocomplete="off" style="width: 100%; padding: 4px; box-sizing: border-box;">
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 226, 226, 0.3);">
-            <select class="edit-input" data-period-index="${index}" data-category="safety" style="width: 60px; padding: 4px;">
-                <option value="">-</option>
-                <option value="2">2</option>
-                <option value="1">1</option>
-                <option value="0">0</option>
-            </select>
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(219, 234, 254, 0.3);">
-            <select class="edit-input" data-period-index="${index}" data-category="teamwork" style="width: 60px; padding: 4px;">
-                <option value="">-</option>
-                <option value="2">2</option>
-                <option value="1">1</option>
-                <option value="0">0</option>
-            </select>
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(209, 250, 229, 0.3);">
-            <select class="edit-input" data-period-index="${index}" data-category="accountability" style="width: 60px; padding: 4px;">
-                <option value="">-</option>
-                <option value="2">2</option>
-                <option value="1">1</option>
-                <option value="0">0</option>
-            </select>
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(254, 243, 199, 0.3);">
-            <select class="edit-input" data-period-index="${index}" data-category="relationships" style="width: 60px; padding: 4px;">
-                <option value="">-</option>
-                <option value="2">2</option>
-                <option value="1">1</option>
-                <option value="0">0</option>
-            </select>
-        </td>
-        <td style="padding: 8px; border: 1px solid var(--border); background: rgba(229, 231, 235, 0.3); text-align: center;">
-            <button class="info-btn-small" data-period-index="${index}" type="button" style="padding: 4px 8px; font-size: 11px;">Add</button>
-        </td>
-    `;
-    tbody.appendChild(tr);
-    
-    const infoBtn = tr.querySelector('.info-btn-small');
-    if (infoBtn) {
-        infoBtn.addEventListener('click', () => {
-            const period = record.periods[index];
-            const syntheticEvent = {
-                target: {
-                    dataset: {
-                        studentId: studentId,
-                        period: period.time_range,
-                        studentName: studentName,
-                        info: period.info || '',
-                        periodIndex: index,
-                        isEditPointCard: 'true'
-                    }
-                }
-            };
-            showInfoModal(syntheticEvent);
+
+    const grid = modal.querySelector('.point-card-edit-grid');
+    if (!grid) return;
+
+    const buildSelect = (cat) => {
+        const sel = document.createElement('select');
+        sel.className = 'pc-edit-input edit-input';
+        sel.dataset.periodIndex = index;
+        sel.dataset.category = cat;
+        ['', '2', '1', '0'].forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v === '' ? '-' : v;
+            sel.appendChild(opt);
         });
-    }
+        return sel;
+    };
+
+    const catMap = { safety: 's', teamwork: 't', accountability: 'a', relationships: 'r' };
+
+    // Time cell with input
+    const timeCell = document.createElement('div');
+    timeCell.className = 'pc-cell pc-time-cell';
+    const timeInput = document.createElement('input');
+    timeInput.type = 'text';
+    timeInput.className = 'pc-text-input edit-input';
+    timeInput.dataset.periodIndex = index;
+    timeInput.dataset.category = 'time_range';
+    timeInput.placeholder = 'Time';
+    timeCell.appendChild(timeInput);
+    grid.appendChild(timeCell);
+
+    // Location cell with input
+    const locCell = document.createElement('div');
+    locCell.className = 'pc-cell pc-location-cell';
+    const locInput = document.createElement('input');
+    locInput.type = 'text';
+    locInput.className = 'pc-text-input edit-input';
+    locInput.dataset.periodIndex = index;
+    locInput.dataset.category = 'location';
+    locInput.placeholder = 'Location';
+    locInput.autocomplete = 'off';
+    locCell.appendChild(locInput);
+    grid.appendChild(locCell);
+
+    // STAR select cells
+    ['safety', 'teamwork', 'accountability', 'relationships'].forEach(cat => {
+        const cell = document.createElement('div');
+        cell.className = 'pc-cell pc-data-cell';
+        cell.dataset.category = catMap[cat];
+        cell.style.padding = '2px';
+        cell.style.justifyContent = 'center';
+        cell.appendChild(buildSelect(cat));
+        grid.appendChild(cell);
+    });
+
+    // Info cell
+    const infoCell = document.createElement('div');
+    infoCell.className = 'pc-cell pc-info-cell';
+    infoCell.style.padding = '2px';
+    infoCell.style.justifyContent = 'center';
+    const infoBtn = document.createElement('button');
+    infoBtn.className = 'info-btn-small';
+    infoBtn.dataset.periodIndex = index;
+    infoBtn.type = 'button';
+    infoBtn.style.padding = '3px 8px';
+    infoBtn.style.fontSize = '10px';
+    infoBtn.textContent = 'Add';
+    infoBtn.addEventListener('click', () => {
+        const period = record.periods[index];
+        const syntheticEvent = {
+            target: {
+                dataset: {
+                    studentId: studentId,
+                    period: period.time_range,
+                    studentName: studentName,
+                    info: period.info || '',
+                    periodIndex: index,
+                    isEditPointCard: 'true'
+                }
+            }
+        };
+        showInfoModal(syntheticEvent);
+    });
+    infoCell.appendChild(infoBtn);
+    grid.appendChild(infoCell);
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
@@ -13143,7 +13115,7 @@ function renderMarketplaceCatalog(items) {
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
             '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
             '<div style="display:flex; justify-content:space-between; align-items:center;">' +
-            '<span style="font-weight:700; color:#0ea5e9;">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
+            '<span style="font-weight:700; color:var(--accent);">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
             '</div>' + staffBtns + adminBtns + '</div>';
     }).join('');
     grid.querySelectorAll('.marketplace-item-card').forEach(function (card) {
@@ -13348,7 +13320,7 @@ function destroyMarketplaceAnalyticsCharts() {
 function renderMarketplaceAnalyticsCharts(data) {
     if (typeof Chart === 'undefined') return;
     destroyMarketplaceAnalyticsCharts();
-    var palette = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
+    var palette = ['#2563EB', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
     var hex = function (i) { return palette[i % palette.length]; };
 
     var mostEl = document.getElementById('marketplace-analytics-most-chart');
@@ -13422,7 +13394,7 @@ function renderMarketplaceAnalyticsDemographics(itemId) {
     var colorLabels = Object.keys(byColor).sort();
     var gradeDisplay = function (k) { return k === '(none)' ? 'No grade' : k; };
     var colorDisplay = function (k) { return k === 'none' ? 'No color' : (k.charAt(0).toUpperCase() + k.slice(1)); };
-    var palette = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
+    var palette = ['#2563EB', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#14b8a6', '#f97316', '#ec4899', '#84cc16'];
     var hex = function (i) { return palette[i % palette.length]; };
     placeholder.style.display = 'none';
     chartsWrap.style.display = 'grid';

@@ -11,9 +11,9 @@
     --text-secondary: #78716C;
     --text-inverse: #FAFAF9;
 
-    --accent: #0EA5E9;
-    --accent-hover: #0284C7;
-    --accent-subtle: #E0F2FE;
+    --accent: #2563EB;
+    --accent-hover: #1D4ED8;
+    --accent-subtle: #EFF6FF;
 
     --border: #E7E5E0;
     --border-strong: #D6D3CD;
@@ -352,7 +352,7 @@ nav {
 .form-group textarea:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
 /* ============================================================
@@ -382,7 +382,7 @@ nav {
 
 .btn-primary:hover {
     background: var(--accent-hover);
-    box-shadow: 0 1px 3px rgba(14, 165, 233, 0.3);
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
 }
 
 .btn-secondary {
@@ -726,7 +726,7 @@ table tbody tr:hover {
 .grid-controls .btn-primary:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
-    box-shadow: 0 1px 3px rgba(14, 165, 233, 0.3);
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
 }
 
 .grid-controls .btn-secondary {
@@ -959,7 +959,7 @@ table tbody tr:hover {
 .star-btn.selected {
     background: var(--accent);
     color: #fff;
-    box-shadow: 0 1px 3px rgba(14, 165, 233, 0.3);
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
 }
 
 /* Daily inputs */
@@ -998,7 +998,7 @@ table tbody tr:hover {
 .daily-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
 .daily-input:hover {
@@ -1056,7 +1056,7 @@ table tbody tr:hover {
 .daily-input:focus {
     background: #fff !important;
     border-color: var(--accent) !important;
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15) !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18) !important;
 }
 
 /* ============================================================
@@ -1268,7 +1268,7 @@ table tbody tr:hover {
 .schedule-table input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
 .schedule-table .time-cell {
@@ -1749,7 +1749,7 @@ table tbody tr:hover {
 
 .student-submit-btn:hover {
     background: var(--accent-hover);
-    box-shadow: 0 1px 3px rgba(14, 165, 233, 0.3);
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
 }
 
 .student-submit-btn:active {
@@ -1808,32 +1808,6 @@ table tbody tr:hover {
     font-family: var(--font-heading);
 }
 
-.point-card-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 0.625rem;
-}
-
-.point-card-table th,
-.point-card-table td {
-    padding: 0.625rem;
-    border: 1px solid var(--border);
-    text-align: left;
-}
-
-.point-card-table th {
-    font-weight: 600;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-}
-
-.point-card-table td {
-    font-size: 0.8125rem;
-}
-
 .edit-day-btn {
     padding: 0.5rem 1rem;
     font-size: 0.8125rem;
@@ -1862,7 +1836,265 @@ table tbody tr:hover {
 .point-card-search input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+/* Point Card Grid Layout — matches Daily Grid style */
+.pc-grid {
+    display: grid;
+    margin-top: 0.5rem;
+    overflow-x: auto;
+}
+
+.pc-grid-header {
+    display: contents;
+}
+
+.pc-grid-body {
+    display: contents;
+}
+
+.pc-header-cell {
+    padding: 6px 6px;
+    font-weight: 700;
+    text-align: center;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--text-primary);
+}
+
+.pc-header-cell.pc-header-time,
+.pc-header-cell.pc-header-location {
+    text-align: left;
+    padding-left: 8px;
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 10px;
+}
+
+.pc-header-cell[data-category="s"] {
+    background: #FEE2E2;
+    color: #B91C1C;
+}
+.pc-header-cell[data-category="t"] {
+    background: #DBEAFE;
+    color: #1E40AF;
+}
+.pc-header-cell[data-category="a"] {
+    background: #D1FAE5;
+    color: #047857;
+}
+.pc-header-cell[data-category="r"] {
+    background: #FEF3C7;
+    color: #B45309;
+}
+.pc-header-cell[data-category="i"] {
+    background: #E5E7EB;
+    color: #374151;
+}
+
+.pc-cell {
+    padding: 5px 8px;
+    font-size: 11px;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+}
+
+.pc-cell.pc-time-cell {
+    font-weight: 500;
+    justify-content: flex-start;
+}
+
+.pc-cell.pc-location-cell {
+    justify-content: flex-start;
+}
+
+.pc-cell.pc-data-cell {
+    justify-content: center;
+    font-weight: 600;
+    font-size: 12px;
+    text-align: center;
+}
+
+.pc-cell.pc-data-cell[data-category="s"] {
+    background: rgba(254, 226, 226, 0.5);
+    color: #B91C1C;
+}
+.pc-cell.pc-data-cell[data-category="t"] {
+    background: rgba(219, 234, 254, 0.5);
+    color: #1E40AF;
+}
+.pc-cell.pc-data-cell[data-category="a"] {
+    background: rgba(209, 250, 229, 0.5);
+    color: #047857;
+}
+.pc-cell.pc-data-cell[data-category="r"] {
+    background: rgba(254, 243, 199, 0.5);
+    color: #B45309;
+}
+
+.pc-cell.pc-info-cell {
+    justify-content: center;
+    background: rgba(241, 239, 233, 0.75);
+}
+
+.pc-cell.pc-percent-cell {
+    border-top: 2px solid #000;
+    font-weight: 700;
+    font-size: 11px;
+    background: #f8f9fa;
+    justify-content: center;
+}
+
+.pc-cell.pc-percent-label {
+    border-top: 2px solid #000;
+    font-weight: 600;
+    font-size: 11px;
+    background: #f8f9fa;
+    justify-content: flex-end;
+    padding-right: 10px;
+}
+
+.pc-cell.pc-percent-overall {
+    border-top: 2px solid #000;
+    font-weight: 700;
+    font-size: 11px;
+    background: var(--bg-elevated);
+    color: var(--accent);
+    justify-content: center;
+}
+
+.pc-grid-row:nth-child(odd) .pc-cell {
+    background: var(--bg-page);
+}
+
+.pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="s"] {
+    background: rgba(254, 226, 226, 0.35);
+}
+.pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="t"] {
+    background: rgba(219, 234, 254, 0.35);
+}
+.pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="a"] {
+    background: rgba(209, 250, 229, 0.35);
+}
+.pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="r"] {
+    background: rgba(254, 243, 199, 0.35);
+}
+.pc-grid-row:nth-child(odd) .pc-cell.pc-info-cell {
+    background: rgba(241, 239, 233, 0.5);
+}
+
+/* Point Card Edit Grid — matches Daily Grid input style */
+.pc-edit-input {
+    width: 40px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+    cursor: pointer;
+    background: #fff;
+    color: var(--text-primary);
+    transition: all 0.15s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    font-family: var(--font-body);
+}
+
+.pc-edit-input[data-category="s"],
+.pc-edit-input[data-category="safety"] {
+    background: rgba(254, 226, 226, 0.5);
+}
+.pc-edit-input[data-category="t"],
+.pc-edit-input[data-category="teamwork"] {
+    background: rgba(219, 234, 254, 0.5);
+}
+.pc-edit-input[data-category="a"],
+.pc-edit-input[data-category="accountability"] {
+    background: rgba(209, 250, 229, 0.5);
+}
+.pc-edit-input[data-category="r"],
+.pc-edit-input[data-category="relationships"] {
+    background: rgba(254, 243, 199, 0.5);
+}
+
+.pc-edit-input:focus {
+    outline: none;
+    background: #fff !important;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.pc-edit-input:hover {
+    filter: brightness(0.97);
+}
+
+.pc-text-input {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+}
+
+.pc-text-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+/* Info view button in point card */
+.pc-info-view-btn {
+    background: #9333EA;
+    color: white;
+    border: none;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.pc-info-view-btn:hover {
+    background: #7E22CE;
+    transform: scale(1.05);
+}
+
+/* Legacy table support — keep for backward compat */
+.point-card-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.625rem;
+}
+
+.point-card-table th,
+.point-card-table td {
+    padding: 0.625rem;
+    border: 1px solid var(--border);
+    text-align: left;
+}
+
+.point-card-table th {
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+}
+
+.point-card-table td {
+    font-size: 0.8125rem;
 }
 
 .point-card-table tbody tr {
@@ -2077,7 +2309,7 @@ table tbody tr:hover {
 .worksheet-row input:focus {
     outline: none;
     border-color: var(--accent) !important;
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
 /* ============================================================

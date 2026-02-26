@@ -38,7 +38,9 @@
                 </div>
                 <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
                     <div id="notifications-bell-wrap" style="position: relative;">
-                        <button type="button" id="notifications-bell-btn" title="Notifications" style="background: none; border: none; cursor: pointer; padding: 6px; font-size: 1.2rem;">🔔</button>
+                        <button type="button" id="notifications-bell-btn" title="Notifications" style="background: none; border: none; cursor: pointer; padding: 6px; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-sm); transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='none'">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-inverse)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        </button>
                         <span id="notifications-badge" style="display: none; position: absolute; top: -2px; right: -2px; background: #dc2626; color: white; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; align-items: center; justify-content: center; padding: 0 4px;">0</span>
                         <div id="notifications-dropdown" style="display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; width: 360px; max-height: 400px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 25px rgba(0,0,0,0.1); z-index: 1000;">
                             <div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
@@ -686,7 +688,7 @@
                 >
                     <div
                         class="accounts-total-balance"
-                        style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(14,165,233,0.25);"
+                        style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(37,99,235,0.25);"
                     >
                         <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
                             <div>
@@ -911,7 +913,7 @@
 
                 <!-- Balance card (student or selected student) -->
                 <div id="marketplace-balance-section" style="margin-bottom: 28px;">
-                    <div class="accounts-total-balance" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 24px 28px; border-radius: 16px; box-shadow: 0 4px 14px rgba(14,165,233,0.25);">
+                    <div class="accounts-total-balance" style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); color: white; padding: 24px 28px; border-radius: 16px; box-shadow: 0 4px 14px rgba(37,99,235,0.25);">
                         <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
                             <div>
                                 <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Current balance</p>
