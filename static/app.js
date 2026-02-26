@@ -1903,9 +1903,10 @@ function renderStudentsGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            'yellow': '#FEF3C7',  // Light yellow, similar to Relationships (R) color
-            'green': '#D1FAE5',   // Light green, similar to Accountability (A) color
-            'blue': '#DBEAFE'     // Light blue, similar to Teamwork (T) color
+            // Softer palette to match overall UI
+            'yellow': '#F5E6B3',  // Soft yellow, Relationships (R)
+            'green': '#D1FAE5',   // Light green, Accountability (A)
+            'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
         return colors[cardColor.toLowerCase()] || null;
     };
@@ -2602,9 +2603,10 @@ function renderDailyGrid() {
     const getCardColor = (cardColor) => {
         if (!cardColor) return null;
         const colors = {
-            'yellow': '#FEF3C7',  // Light yellow, similar to Relationships (R) color
-            'green': '#D1FAE5',   // Light green, similar to Accountability (A) color
-            'blue': '#DBEAFE'     // Light blue, similar to Teamwork (T) color
+            // Softer palette to match overall UI
+            'yellow': '#F5E6B3',  // Soft yellow, Relationships (R)
+            'green': '#D1FAE5',   // Light green, Accountability (A)
+            'blue': '#E0E7FF'     // Muted blue for Teamwork (T)
         };
         return colors[cardColor.toLowerCase()] || null;
     };
@@ -4379,9 +4381,9 @@ async function loadSummary() {
                         <thead>
                             <tr>
                                 <th style="padding: 12px; background: #FEE2E2; color: #B91C1C; border: 1px solid var(--border); text-align: center;">Safety (S)</th>
-                                <th style="padding: 12px; background: #DBEAFE; color: #1E40AF; border: 1px solid var(--border); text-align: center;">Teamwork (T)</th>
+                                <th style="padding: 12px; background: #E0E7FF; color: #1E3A8A; border: 1px solid var(--border); text-align: center;">Teamwork (T)</th>
                                 <th style="padding: 12px; background: #D1FAE5; color: #047857; border: 1px solid var(--border); text-align: center;">Accountability (A)</th>
-                                <th style="padding: 12px; background: #FEF3C7; color: #B45309; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
+                                <th style="padding: 12px; background: #F5E6B3; color: #92400E; border: 1px solid var(--border); text-align: center;">Relationships (R)</th>
                                 <th style="padding: 12px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); text-align: center; font-weight: 700;">Overall Average</th>
                             </tr>
                         </thead>

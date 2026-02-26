@@ -207,7 +207,68 @@ def get_support_team_user_ids(student_id):
             team_member_user_ids.add(u.id)
     outside_staff_ids = [oss.user_id for oss in OutsideStaffStudent.query.filter_by(student_id=student_id).all()]
     admin_ids = [u.id for u in User.query.filter_by(role='admin').all()]
-    return team_member_user_ids | set(outside_staff_ids) | set(admin_ids)
+    support_ids = team_member_user_ids | set(outside_staff_ids) | set(admin_ids)
+    return support_ids
+
+
+def get_case_manager_user_ids_for_student(student_id):
+    """
+    Return set of user_ids for case managers associated with a student, based on the
+    student's support team.
+
+    Case managers are staff with designation 'Case Manager' who appear on the student's
+    support team (derived from TeamMember + OutsideStaffStudent + admins).
+    """
+    support_ids = get_support_team_user_ids(student_id)
+    if not support_ids:
+        return set()
+    case_managers = User.query.filter(
+        User.id.in_(support_ids),
+        User.role == 'staff',
+        User.designation == 'Case Manager'
+    ).all()
+    return {cm.id for cm in case_managers}
+
+
+def get_student_ids_for_staff_user(user):
+    """
+    Return set of student_ids for which the given staff user appears in the student's
+    team_members (by name or username). Used to determine when two staff are on the
+    same student team.
+    """
+    if not user or user.role != 'staff':
+        return set()
+    user_name = (user.name or user.username) or ''
+    user_username = (user.username or '').strip()
+    if not user_name and not user_username:
+        return set()
+    team_members = TeamMember.query.filter(
+        (TeamMember.name == user_name) | (TeamMember.name == user_username)
+    ).all()
+    return {tm.student_id for tm in team_members if tm.student_id}
+
+
+def are_users_on_same_student_team(user_a, user_b):
+    """
+    Return True if two staff users share at least one student in common in the
+    student users table (i.e., both appear as team members for the same student).
+    Admins are considered on a team with any case manager.
+    """
+    if not user_a or not user_b:
+        return False
+    if user_a.id == user_b.id:
+        return True
+    if user_a.role == 'admin' or user_b.role == 'admin':
+        return True
+    if user_a.role != 'staff' or user_b.role != 'staff':
+        return False
+    students_a = get_student_ids_for_staff_user(user_a)
+    if not students_a:
+        return False
+    students_b = get_student_ids_for_staff_user(user_b)
+    if not students_b:
+        return False
+    return bool(students_a & students_b)
 
 
 def student_grade_matches_item_grade_range(student_grade, item_grade_range):
@@ -701,6 +762,33 @@ class MarketplaceItem(db.Model):
     item_type = db.relationship('MarketplaceItemType', backref='items')
     category = db.relationship('MarketplaceCategory', backref='items')
     purchase_orders = db.relationship('PurchaseOrder', backref='item', lazy=True)
+
+
+class MarketplaceItemCaseManager(db.Model):
+    """Per-item assignments to case managers, including approval status and visibility to students.
+
+    This drives case-manager based visibility for marketplace items.
+    """
+    __tablename__ = 'marketplace_item_case_managers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
+    case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # pending: awaiting case manager decision
+    # accepted: case manager has accepted item for their students
+    # denied: case manager has explicitly denied item
+    status = db.Column(db.String(20), default='pending', nullable=False)
+    # For accepted items, controls whether the item is currently visible to the case manager's students.
+    # For school-wide items, rows with visible_to_students = False act as overrides to hide the item.
+    visible_to_students = db.Column(db.Boolean, default=True, nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    item = db.relationship('MarketplaceItem', backref='case_manager_assignments')
+    case_manager = db.relationship('User', foreign_keys=[case_manager_id])
+    creator = db.relationship('User', foreign_keys=[created_by_user_id])
+
 
 class MarketplaceItemRequest(db.Model):
     __tablename__ = 'marketplace_item_requests'
@@ -5864,7 +5952,12 @@ def verify_paycheck(paycheck_id):
 @limiter.limit("60 per minute")
 @login_required
 def get_marketplace_catalog():
-    """Get marketplace items. Staff/admin with staff=1 get all items + hidden_rules. With student_id, return items visible to that student (grade + not hidden)."""
+    """Get marketplace items.
+
+    - Staff/admin with staff=1 get all items + hidden_rules (for management views).
+    - With student_id (or current student), return items visible to that student based on
+      case-manager assignments and school-wide items, excluding any per-student hidden rules.
+    """
     staff_catalog = request.args.get('staff', type=lambda x: x == '1' or x == 'true')
     student_id = request.args.get('student_id', type=int)
     if current_user.role == 'student':
@@ -5922,39 +6015,94 @@ def get_marketplace_catalog():
     if not student:
         return jsonify([])
 
-    items_query = MarketplaceItem.query.filter_by(is_active=True)
-    grade_ranges_visible = ['school_wide']
-    if student_grade_matches_item_grade_range(student.grade, 'k_3'):
-        grade_ranges_visible.append('k_3')
-    if student_grade_matches_item_grade_range(student.grade, '4_8'):
-        grade_ranges_visible.append('4_8')
-    if student_grade_matches_item_grade_range(student.grade, '9_12'):
-        grade_ranges_visible.append('9_12')
-    items_query = items_query.filter(MarketplaceItem.grade_range.in_(grade_ranges_visible))
+    # Purely case-manager based visibility:
+    # - Non–school-wide items: visible if at least one of the student's case managers has
+    #   accepted the item and kept it visible_to_students.
+    # - School-wide items: visible by default for all students who have at least one
+    #   case manager, unless all of their case managers have explicitly hidden the item.
+    case_manager_ids = get_case_manager_user_ids_for_student(student.id)
+    if not case_manager_ids:
+        # No case manager => no marketplace items visible under the new rules.
+        return jsonify([])
 
-    q = request.args.get('q', '').strip()
-    if q:
-        items_query = items_query.filter(
-            db.or_(
-                MarketplaceItem.name.ilike(f'%{q}%'),
-                MarketplaceItem.description.ilike(f'%{q}%')
+    def apply_item_filters(query):
+        q = request.args.get('q', '').strip()
+        if q:
+            query = query.filter(
+                db.or_(
+                    MarketplaceItem.name.ilike(f'%{q}%'),
+                    MarketplaceItem.description.ilike(f'%{q}%')
+                )
             )
-        )
-    type_id = request.args.get('type_id', type=int)
-    if type_id:
-        items_query = items_query.filter(MarketplaceItem.item_type_id == type_id)
-    category_id = request.args.get('category_id', type=int)
-    if category_id:
-        items_query = items_query.filter(MarketplaceItem.category_id == category_id)
-    min_price = request.args.get('min_price', type=lambda x: Decimal(x) if x is not None else None)
-    if min_price is not None:
-        items_query = items_query.filter(MarketplaceItem.price >= min_price)
-    max_price = request.args.get('max_price', type=lambda x: Decimal(x) if x is not None else None)
-    if max_price is not None:
-        items_query = items_query.filter(MarketplaceItem.price <= max_price)
+        type_id = request.args.get('type_id', type=int)
+        if type_id:
+            query = query.filter(MarketplaceItem.item_type_id == type_id)
+        category_id = request.args.get('category_id', type=int)
+        if category_id:
+            query = query.filter(MarketplaceItem.category_id == category_id)
+        min_price = request.args.get('min_price', type=lambda x: Decimal(x) if x is not None else None)
+        if min_price is not None:
+            query = query.filter(MarketplaceItem.price >= min_price)
+        max_price = request.args.get('max_price', type=lambda x: Decimal(x) if x is not None else None)
+        if max_price is not None:
+            query = query.filter(MarketplaceItem.price <= max_price)
+        return query
 
-    items = items_query.all()
-    # Exclude items hidden for this student
+    # Non–school-wide items with accepted, visible assignments for any of the student's case managers
+    assigned_query = db.session.query(MarketplaceItem).join(
+        MarketplaceItemCaseManager,
+        MarketplaceItemCaseManager.item_id == MarketplaceItem.id
+    ).filter(
+        MarketplaceItem.is_active.is_(True),
+        MarketplaceItem.grade_range != 'school_wide',
+        MarketplaceItemCaseManager.case_manager_id.in_(case_manager_ids),
+        MarketplaceItemCaseManager.status == 'accepted',
+        MarketplaceItemCaseManager.visible_to_students.is_(True),
+    )
+    assigned_query = apply_item_filters(assigned_query)
+    assigned_items = assigned_query.all()
+
+    # School-wide items: active items with grade_range == 'school_wide'
+    school_wide_query = MarketplaceItem.query.filter(
+        MarketplaceItem.is_active.is_(True),
+        MarketplaceItem.grade_range == 'school_wide'
+    )
+    school_wide_query = apply_item_filters(school_wide_query)
+    school_wide_items = school_wide_query.all()
+
+    # For school-wide items, each case manager can explicitly hide the item for their students
+    # by creating a MarketplaceItemCaseManager row with visible_to_students = False.
+    # The item remains visible to a student as long as at least one of their case managers
+    # has not hidden it.
+    if school_wide_items:
+        item_ids = [item.id for item in school_wide_items]
+        overrides = MarketplaceItemCaseManager.query.filter(
+            MarketplaceItemCaseManager.item_id.in_(item_ids),
+            MarketplaceItemCaseManager.case_manager_id.in_(case_manager_ids),
+            MarketplaceItemCaseManager.visible_to_students.is_(False)
+        ).all()
+        hidden_by_item = {}
+        for ov in overrides:
+            hidden_by_item.setdefault(ov.item_id, set()).add(ov.case_manager_id)
+        visible_school_wide_items = []
+        for item in school_wide_items:
+            hidden_for = hidden_by_item.get(item.id, set())
+            # If there exists at least one case manager for this student who has not hidden the item,
+            # the item is visible.
+            if case_manager_ids - hidden_for:
+                visible_school_wide_items.append(item)
+    else:
+        visible_school_wide_items = []
+
+    # Combine and de-duplicate items
+    items_by_id = {}
+    for it in assigned_items + visible_school_wide_items:
+        items_by_id[it.id] = it
+    items = list(items_by_id.values())
+
+    # Exclude items hidden for this specific student (student, grade section, or card color rules)
+    q = request.args.get('q', '').strip()
+    # (search is already applied above in apply_item_filters; no need to re-apply here)
     items = [item for item in items if not is_item_hidden_for_student(item.id, student)]
     return jsonify([{
         'id': item.id,
@@ -6211,11 +6359,46 @@ def create_marketplace_item():
         name = data.get('name')
         description = data.get('description', '')
         price = Decimal(str(data.get('price', 0)))
-        grade_range = data.get('grade_range', '9_12')
-        if grade_range not in ('k_3', '4_8', '9_12', 'school_wide'):
-            grade_range = '9_12'
-        if grade_range == 'school_wide' and current_user.role != 'admin':
-            return jsonify({'error': 'Only admins can create school-wide items'}), 403
+        # Case-manager based visibility: collect target case managers and optional school-wide flag.
+        raw_case_manager_ids = data.get('case_manager_ids') or []
+        if not isinstance(raw_case_manager_ids, list):
+            raw_case_manager_ids = []
+        case_manager_ids = []
+        for cm_id in raw_case_manager_ids:
+            try:
+                cid = int(cm_id)
+            except (TypeError, ValueError):
+                continue
+            if cid not in case_manager_ids:
+                case_manager_ids.append(cid)
+
+        is_school_wide = bool(data.get('is_school_wide', False))
+        if is_school_wide and current_user.role != 'admin':
+            return jsonify({'error': 'Only admins can create school-wide items'}, 403)
+
+        # For non–school-wide items, at least one case manager must be selected.
+        if not is_school_wide and not case_manager_ids:
+            return jsonify({'error': 'Select at least one Case Manager or mark the item as school-wide'}, 400)
+
+        # Validate case managers: must be staff Case Managers, and for staff creators,
+        # only case managers they are "on a team with" (share at least one student).
+        valid_case_manager_ids = []
+        for cid in case_manager_ids:
+            cm = User.query.get(cid)
+            if not cm or cm.role != 'staff' or getattr(cm, 'designation', None) != 'Case Manager':
+                continue
+            if current_user.role == 'staff' and current_user.role != 'admin':
+                if not are_users_on_same_student_team(current_user, cm):
+                    continue
+            valid_case_manager_ids.append(cid)
+
+        case_manager_ids = list(dict.fromkeys(valid_case_manager_ids))  # de-duplicate while preserving order
+        if not is_school_wide and not case_manager_ids:
+            return jsonify({'error': 'You can only assign items to Case Managers you share students with'}, 400)
+
+        # Preserve grade_range column for compatibility, but it no longer drives visibility.
+        # Use 'school_wide' to flag true global items; otherwise a default value.
+        grade_range = 'school_wide' if is_school_wide else '9_12'
         item_type_id = data.get('item_type_id')
         category_id = data.get('category_id')
         image_url = (data.get('image_url') or '').strip() or None
@@ -6235,6 +6418,41 @@ def create_marketplace_item():
             image_url=image_url
         )
         db.session.add(item)
+        db.session.flush()
+
+        # Create per-case-manager assignments for non–school-wide items.
+        # - If the creator is a Case Manager and includes themselves, auto-accept that assignment.
+        # - Other case managers start in 'pending' state and receive notifications.
+        if not is_school_wide and case_manager_ids:
+            for cid in case_manager_ids:
+                cm = User.query.get(cid)
+                if not cm:
+                    continue
+                if cm.id == current_user.id and getattr(current_user, 'designation', None) == 'Case Manager':
+                    status = 'accepted'
+                    visible_to_students = True
+                else:
+                    status = 'pending'
+                    visible_to_students = False
+                assignment = MarketplaceItemCaseManager(
+                    item_id=item.id,
+                    case_manager_id=cid,
+                    status=status,
+                    visible_to_students=visible_to_students,
+                    created_by_user_id=current_user.id
+                )
+                db.session.add(assignment)
+
+                # Notify case managers other than the creator about new assignments.
+                if status == 'pending':
+                    notif = Notification(
+                        user_id=cid,
+                        type='marketplace_item_assigned',
+                        title='New marketplace item assigned to you',
+                        body=f'A new marketplace item "{name}" was assigned to you for review.'
+                    )
+                    db.session.add(notif)
+
         db.session.commit()
         
         return jsonify({

@@ -11,9 +11,10 @@
     --text-secondary: #78716C;
     --text-inverse: #FAFAF9;
 
-    --accent: #2563EB;
-    --accent-hover: #1D4ED8;
-    --accent-subtle: #EFF6FF;
+    /* Softer, more neutral accent to fit the black/white/grey scheme */
+    --accent: #4B5563;
+    --accent-hover: #374151;
+    --accent-subtle: #E5E7EB;
 
     --border: #E7E5E0;
     --border-strong: #D6D3CD;
@@ -1887,8 +1888,9 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-header-cell[data-category="r"] {
-    background: #FEF3C7;
-    color: #B45309;
+    /* Softer yellow for Relationships column */
+    background: #F5E6B3;
+    color: #92400E;
 }
 .pc-header-cell[data-category="i"] {
     background: #E5E7EB;
@@ -1933,8 +1935,8 @@ table tbody tr:hover {
     color: #047857;
 }
 .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(254, 243, 199, 0.5);
-    color: #B45309;
+    background: rgba(245, 230, 179, 0.65);
+    color: #92400E;
 }
 
 .pc-cell.pc-info-cell {
@@ -1982,7 +1984,7 @@ table tbody tr:hover {
     background: rgba(209, 250, 229, 0.35);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-data-cell[data-category="r"] {
-    background: rgba(254, 243, 199, 0.35);
+    background: rgba(245, 230, 179, 0.5);
 }
 .pc-grid-row:nth-child(odd) .pc-cell.pc-info-cell {
     background: rgba(241, 239, 233, 0.5);
@@ -2022,7 +2024,7 @@ table tbody tr:hover {
 }
 .pc-edit-input[data-category="r"],
 .pc-edit-input[data-category="relationships"] {
-    background: rgba(254, 243, 199, 0.5);
+    background: rgba(245, 230, 179, 0.65);
 }
 
 .pc-edit-input:focus {
