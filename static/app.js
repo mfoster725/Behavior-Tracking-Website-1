@@ -2259,8 +2259,8 @@ async function loadDailyData() {
     }
 
     // Show loading immediately so it appears without delay while we fetch
-    const loadingEl = document.getElementById('daily-grid-loading');
-    const dailyGridEl = document.getElementById('daily-grid');
+    let loadingEl = document.getElementById('daily-grid-loading');
+    let dailyGridEl = document.getElementById('daily-grid');
     if (loadingEl) loadingEl.style.display = 'flex';
     if (dailyGridEl) dailyGridEl.style.visibility = 'hidden';
 
@@ -2338,8 +2338,8 @@ async function loadDailyData() {
     }
 
     // Hide loading animation and show grid
-    const loadingEl = document.getElementById('daily-grid-loading');
-    const dailyGridEl = document.getElementById('daily-grid');
+    loadingEl = document.getElementById('daily-grid-loading');
+    dailyGridEl = document.getElementById('daily-grid');
     if (loadingEl) loadingEl.style.display = 'none';
     if (dailyGridEl) dailyGridEl.style.visibility = '';
 
