@@ -7927,13 +7927,19 @@ function populateTeacherScheduleStaffSearch() {
     });
     if (list.length) {
         const hasCurrent = list.some(u => u.id === window.currentUser.id);
+        const isAdmin = role === 'admin';
+
         if (currentVal && list.some(u => String(u.id) === currentVal)) {
+            // Preserve an existing valid selection
             select.value = currentVal;
         } else if (hasCurrent) {
+            // Staff users default to their own schedule
             select.value = String(window.currentUser.id);
-        } else {
+        } else if (!isAdmin) {
+            // For non-admins (e.g. staff), fall back to the first staff member
             select.value = String(list[0].id);
         }
+        // For admins with no prior selection, leave the dropdown unselected by default
     }
 }
 
