@@ -7183,7 +7183,7 @@ async function showInfoModal(event) {
         const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
         
         try {
-            const response = await fetch('/api/schedules/all-locations');
+            const response = await fetch('/api/schedules/locations');
             if (response.ok) {
                 const apiLocations = await response.json();
                 // Combine default locations with API locations, removing duplicates
@@ -7806,7 +7806,7 @@ let allTeacherClassNames = []; // Store all class names from all teacher schedul
 // Function to fetch all class names from all teacher schedules
 async function fetchAllTeacherClassNames() {
     try {
-        const response = await fetch('/api/schedules/all-locations');
+        const response = await fetch('/api/schedules/locations');
         if (response.ok) {
             const classNames = await response.json();
             allTeacherClassNames = Array.isArray(classNames) ? classNames : [];
