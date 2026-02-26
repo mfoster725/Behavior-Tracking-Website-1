@@ -65,6 +65,7 @@ let dailyLoadAbortController = null;
 let dailyLoadRequestToken = 0;
 let dailyGridDelegationBound = false;
 const DAILY_LOAD_CACHE_TTL_MS = 60000;
+const DAILY_LOAD_TIMEOUT_MS = 20000;
 const dailyLoadCache = new Map();
 
 // Load submitted students from localStorage or initialize empty
@@ -2333,7 +2334,13 @@ async function loadDailyData() {
     if (dailyLoadAbortController) {
         dailyLoadAbortController.abort();
     }
-    dailyLoadAbortController = new AbortController();
+    const activeAbortController = new AbortController();
+    dailyLoadAbortController = activeAbortController;
+    let requestTimedOut = false;
+    const timeoutId = setTimeout(() => {
+        requestTimedOut = true;
+        activeAbortController.abort();
+    }, DAILY_LOAD_TIMEOUT_MS);
 
     // Ensure staff members are loaded for search functionality
     if (allStaffMembers.length === 0) {
@@ -2411,7 +2418,7 @@ async function loadDailyData() {
                 include_details: 'false'
             });
             const response = await fetch(`/api/daily-records?${params.toString()}`, {
-                signal: dailyLoadAbortController.signal
+                signal: activeAbortController.signal
             });
             if (!response.ok) {
                 throw new Error(`Failed to load daily records (${response.status})`);
@@ -2469,18 +2476,27 @@ async function loadDailyData() {
         });
     } catch (error) {
         if (error && error.name === 'AbortError') {
+            if (requestTimedOut && requestToken === dailyLoadRequestToken) {
+                showMessage('Daily overview timed out while loading. Please try again.', 'error');
+            }
             return;
         }
         console.error('Error loading daily data:', error);
+    } finally {
+        clearTimeout(timeoutId);
+
+        if (requestToken !== dailyLoadRequestToken) {
+            return;
+        }
+
+        // Hide loading animation and show grid
+        loadingEl = document.getElementById('daily-grid-loading');
+        dailyGridEl = document.getElementById('daily-grid');
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (dailyGridEl) dailyGridEl.style.visibility = '';
+
+        renderDailyGrid();
     }
-
-    // Hide loading animation and show grid
-    loadingEl = document.getElementById('daily-grid-loading');
-    dailyGridEl = document.getElementById('daily-grid');
-    if (loadingEl) loadingEl.style.display = 'none';
-    if (dailyGridEl) dailyGridEl.style.visibility = '';
-
-    renderDailyGrid();
 }
 
 function calculateStudentPercentages(studentId) {
