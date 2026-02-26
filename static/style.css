@@ -880,6 +880,7 @@ table tbody tr:hover {
     border-bottom: 1px solid var(--border);
     padding: 6px 6px;
     gap: 4px;
+    border-radius: var(--radius-md);
 }
 
 .daily-body {
@@ -2544,6 +2545,52 @@ table tbody tr:hover {
 
 .marketplace-combobox-option.add-new {
     color: var(--accent);
+    font-weight: 500;
+}
+
+.marketplace-case-manager-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+    padding: 6px 0;
+    margin-bottom: 4px;
+}
+
+.marketplace-case-manager-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.marketplace-case-manager-chip:hover {
+    background: var(--bg-elevated);
+    border-color: var(--accent);
+}
+
+.marketplace-case-manager-chip .marketplace-case-manager-chip-remove {
+    padding: 0 2px;
+    font-size: 14px;
+    line-height: 1;
+    color: #64748b;
+}
+
+.marketplace-case-manager-chip:hover .marketplace-case-manager-chip-remove {
+    color: var(--danger);
+}
+
+.marketplace-case-manager-select-wrap .marketplace-combobox-dropdown {
+    max-height: 220px;
+}
+
+.marketplace-combobox-option.is-selected {
+    background: var(--bg-elevated);
     font-weight: 500;
 }
 

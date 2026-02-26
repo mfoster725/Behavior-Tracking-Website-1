@@ -13489,15 +13489,63 @@ function loadMarketplaceAnalytics() {
         });
 }
 
+// Selected case managers (and optionally School-wide) for the Add marketplace item modal.
+// Each item: { id: number|'school_wide', name: string }
+var marketplaceAddItemCaseManagerOptions = [];
+var marketplaceAddItemSelected = [];
+var marketplaceAddItemCaseManagerBound = false;
+
+function renderMarketplaceAddItemCaseManagerChips() {
+    var container = document.getElementById('marketplace-add-item-case-manager-chips');
+    if (!container) return;
+    container.innerHTML = '';
+    marketplaceAddItemSelected.forEach(function (item) {
+        var chip = document.createElement('span');
+        chip.className = 'marketplace-case-manager-chip';
+        chip.setAttribute('data-id', item.id === 'school_wide' ? 'school_wide' : String(item.id));
+        chip.innerHTML = '<span class="marketplace-case-manager-chip-label">' + (item.name || '').replace(/</g, '&lt;') + '</span><span class="marketplace-case-manager-chip-remove" aria-label="Remove">×</span>';
+        chip.addEventListener('click', function () {
+            marketplaceAddItemSelected = marketplaceAddItemSelected.filter(function (s) { return s.id !== item.id; });
+            renderMarketplaceAddItemCaseManagerChips();
+            renderMarketplaceAddItemCaseManagerDropdown();
+        });
+        container.appendChild(chip);
+    });
+}
+
+function renderMarketplaceAddItemCaseManagerDropdown() {
+    var input = document.getElementById('marketplace-add-item-case-manager-input');
+    var dropdown = document.getElementById('marketplace-add-item-case-manager-dropdown');
+    if (!input || !dropdown) return;
+    var q = (input.value || '').trim().toLowerCase();
+    var frag = document.createDocumentFragment();
+    marketplaceAddItemCaseManagerOptions.forEach(function (opt) {
+        var label = (opt.name || '').trim();
+        if (q && label.toLowerCase().indexOf(q) === -1) return;
+        var isSelected = marketplaceAddItemSelected.some(function (s) {
+            return s.id === opt.id || (opt.id === 'school_wide' && s.id === 'school_wide');
+        });
+        var div = document.createElement('div');
+        div.className = 'marketplace-combobox-option' + (isSelected ? ' is-selected' : '');
+        div.setAttribute('role', 'option');
+        div.setAttribute('data-id', opt.id === 'school_wide' ? 'school_wide' : String(opt.id));
+        div.setAttribute('data-name', label);
+        div.textContent = label;
+        frag.appendChild(div);
+    });
+    dropdown.innerHTML = '';
+    dropdown.appendChild(frag);
+    dropdown.classList.toggle('is-open', frag.childNodes.length > 0 && input === document.activeElement);
+}
+
 function openMarketplaceAddItemModal() {
     var modal = document.getElementById('marketplace-add-item-modal');
     var errEl = document.getElementById('marketplace-add-item-error');
     var nameIn = document.getElementById('marketplace-add-item-name');
     var descIn = document.getElementById('marketplace-add-item-description');
     var priceIn = document.getElementById('marketplace-add-item-price');
-    var caseManagerSel = document.getElementById('marketplace-add-item-case-managers');
-    var schoolWideWrap = document.getElementById('marketplace-add-item-school-wide-wrap');
-    var schoolWideCb = document.getElementById('marketplace-add-item-school-wide');
+    var caseManagerInput = document.getElementById('marketplace-add-item-case-manager-input');
+    var caseManagerDropdown = document.getElementById('marketplace-add-item-case-manager-dropdown');
     var typeInput = document.getElementById('marketplace-add-item-type-input');
     var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
     var typeDropdown = document.getElementById('marketplace-add-item-type-dropdown');
@@ -13510,34 +13558,76 @@ function openMarketplaceAddItemModal() {
     nameIn.value = '';
     if (descIn) descIn.value = '';
     priceIn.value = '';
-    if (caseManagerSel) { caseManagerSel.innerHTML = ''; for (var i = caseManagerSel.options.length - 1; i >= 0; i--) caseManagerSel.options.remove(i); }
-    if (schoolWideCb) schoolWideCb.checked = false;
+    marketplaceAddItemSelected = [];
+    if (caseManagerInput) caseManagerInput.value = '';
     if (typeInput) typeInput.value = '';
     if (typeIdHidden) typeIdHidden.value = '';
     if (catInput) catInput.value = '';
     if (catIdHidden) catIdHidden.value = '';
     if (imgIn) imgIn.value = '';
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
-    if (schoolWideWrap) schoolWideWrap.style.display = isAdmin ? 'block' : 'none';
-    // Load case managers and pre-select current user if they are a case manager
+    // Build options: School-wide (admin only) then case managers
     fetch('/api/marketplace/case-managers').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
-        if (!caseManagerSel) return;
-        list.forEach(function (cm) {
-            var opt = document.createElement('option');
-            opt.value = String(cm.id);
-            opt.textContent = cm.name || cm.username || 'User #' + cm.id;
-            caseManagerSel.appendChild(opt);
+        marketplaceAddItemCaseManagerOptions = [];
+        if (isAdmin) {
+            marketplaceAddItemCaseManagerOptions.push({ id: 'school_wide', name: 'School-wide' });
+        }
+        (list || []).forEach(function (cm) {
+            marketplaceAddItemCaseManagerOptions.push({
+                id: cm.id,
+                name: (cm.name || cm.username || 'User #' + cm.id).trim()
+            });
         });
+        renderMarketplaceAddItemCaseManagerChips();
+        renderMarketplaceAddItemCaseManagerDropdown();
         var me = window.currentUser && window.currentUser.id;
         if (me && list.some(function (cm) { return cm.id === me; })) {
-            for (var j = 0; j < caseManagerSel.options.length; j++) {
-                if (Number(caseManagerSel.options[j].value) === me) {
-                    caseManagerSel.options[j].selected = true;
-                    break;
-                }
+            var meOpt = marketplaceAddItemCaseManagerOptions.find(function (o) { return o.id === me; });
+            if (meOpt) {
+                marketplaceAddItemSelected.push(meOpt);
+                renderMarketplaceAddItemCaseManagerChips();
+                renderMarketplaceAddItemCaseManagerDropdown();
             }
         }
     }).catch(function () {});
+    if (!marketplaceAddItemCaseManagerBound && caseManagerInput && caseManagerDropdown) {
+        marketplaceAddItemCaseManagerBound = true;
+        var caseManagerCloseTimer = null;
+        caseManagerInput.addEventListener('focus', function () { renderMarketplaceAddItemCaseManagerDropdown(); });
+        caseManagerInput.addEventListener('input', function () { renderMarketplaceAddItemCaseManagerDropdown(); });
+        caseManagerInput.addEventListener('blur', function () {
+            caseManagerCloseTimer = setTimeout(function () { caseManagerDropdown.classList.remove('is-open'); }, 150);
+        });
+        caseManagerInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') caseManagerDropdown.classList.remove('is-open');
+        });
+        caseManagerDropdown.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        caseManagerDropdown.addEventListener('click', function (e) {
+            var opt = e.target && e.target.closest && e.target.closest('.marketplace-combobox-option');
+            if (!opt) return;
+            if (caseManagerCloseTimer) { clearTimeout(caseManagerCloseTimer); caseManagerCloseTimer = null; }
+            var id = opt.getAttribute('data-id');
+            var name = opt.getAttribute('data-name') || opt.textContent;
+            if (id === 'school_wide') {
+                var idx = marketplaceAddItemSelected.findIndex(function (s) { return s.id === 'school_wide'; });
+                if (idx >= 0) {
+                    marketplaceAddItemSelected.splice(idx, 1);
+                } else {
+                    marketplaceAddItemSelected.push({ id: 'school_wide', name: name });
+                }
+            } else {
+                var numId = parseInt(id, 10);
+                var idx = marketplaceAddItemSelected.findIndex(function (s) { return s.id === numId; });
+                if (idx >= 0) {
+                    marketplaceAddItemSelected.splice(idx, 1);
+                } else {
+                    marketplaceAddItemSelected.push({ id: numId, name: name });
+                }
+            }
+            renderMarketplaceAddItemCaseManagerChips();
+            renderMarketplaceAddItemCaseManagerDropdown();
+        });
+    }
     var typesList = [];
     var catsList = [];
     function renderTypeDropdown() {
@@ -13702,8 +13792,6 @@ function submitMarketplaceAddItem() {
     var nameIn = document.getElementById('marketplace-add-item-name');
     var descIn = document.getElementById('marketplace-add-item-description');
     var priceIn = document.getElementById('marketplace-add-item-price');
-    var caseManagerSel = document.getElementById('marketplace-add-item-case-managers');
-    var schoolWideCb = document.getElementById('marketplace-add-item-school-wide');
     var typeIdHidden = document.getElementById('marketplace-add-item-type-id');
     var catIdHidden = document.getElementById('marketplace-add-item-category-id');
     var imgIn = document.getElementById('marketplace-add-item-image-url');
@@ -13718,17 +13806,10 @@ function submitMarketplaceAddItem() {
         if (errEl) { errEl.textContent = 'Please enter a valid price.'; errEl.style.display = 'block'; }
         return;
     }
-    var isSchoolWide = schoolWideCb && schoolWideCb.checked;
-    var caseManagerIds = [];
-    if (caseManagerSel && !isSchoolWide) {
-        for (var i = 0; i < caseManagerSel.options.length; i++) {
-            if (caseManagerSel.options[i].selected) {
-                caseManagerIds.push(parseInt(caseManagerSel.options[i].value, 10));
-            }
-        }
-    }
-    if (!isSchoolWide && caseManagerIds.length === 0) {
-        if (errEl) { errEl.textContent = 'Select at least one Case Manager, or check School-wide (admins only).'; errEl.style.display = 'block'; }
+    var hasSchoolWide = marketplaceAddItemSelected.some(function (s) { return s.id === 'school_wide'; });
+    var caseManagerIds = marketplaceAddItemSelected.filter(function (s) { return s.id !== 'school_wide'; }).map(function (s) { return s.id; });
+    if (!hasSchoolWide && caseManagerIds.length === 0) {
+        if (errEl) { errEl.textContent = 'Select at least one Case Manager or School-wide (admins only).'; errEl.style.display = 'block'; }
         return;
     }
     var rawType = typeIdHidden && typeIdHidden.value ? typeIdHidden.value.trim() : '';
