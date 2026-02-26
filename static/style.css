@@ -1125,12 +1125,12 @@ table th {
     max-width: 120px;
 }
 
-/* Narrow class and staff columns */
-.schedule-table td:nth-child(2) {
+/* Narrow class and staff columns (student schedule only) */
+.student-schedule-table td:nth-child(2) {
     width: 150px;
 }
 
-.schedule-table td:nth-child(3) {
+.student-schedule-table td:nth-child(3) {
     width: 150px;
 }
 
