@@ -1,5 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
+from sqlalchemy.orm import selectinload
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -370,8 +372,6 @@ def ensure_ui_preferences_column():
         return
 
     try:
-        # Import here to avoid circular imports / early use
-        from sqlalchemy import text
         with app.app_context():
             with db.engine.connect() as conn:
                 conn.execute(text(
@@ -400,6 +400,29 @@ def ensure_ui_preferences_column():
 
 # Run the migration once when the app starts up in a Postgres environment
 ensure_ui_preferences_column()
+
+
+def ensure_daily_query_indexes():
+    """Create missing indexes used by daily overview queries."""
+    try:
+        with app.app_context():
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_daily_records_date ON daily_records (date)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_period_records_daily_record_id ON period_records (daily_record_id)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_frenzy_events_daily_record_id ON frenzy_events (daily_record_id)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_infractions_period_record_id ON infractions (period_record_id)"
+                ))
+                conn.commit()
+    except Exception as e:
+        app.logger.warning(f"Failed to ensure daily query indexes: {e}")
+
 
 class Student(db.Model):
     __tablename__ = 'students'
@@ -442,7 +465,7 @@ class DailyRecord(db.Model):
     __tablename__ = 'daily_records'
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
-    date = db.Column(db.Date, nullable=False)
+    date = db.Column(db.Date, nullable=False, index=True)
     day_of_week = db.Column(db.String(20))
     
     # Attendance: 'present', 'excused', or 'unexcused'
@@ -459,7 +482,7 @@ class DailyRecord(db.Model):
 class PeriodRecord(db.Model):
     __tablename__ = 'period_records'
     id = db.Column(db.Integer, primary_key=True)
-    daily_record_id = db.Column(db.Integer, db.ForeignKey('daily_records.id'), nullable=False)
+    daily_record_id = db.Column(db.Integer, db.ForeignKey('daily_records.id'), nullable=False, index=True)
     
     # Period info
     time_range = db.Column(db.String(20))  # e.g., "7:45-8:30"
@@ -489,7 +512,7 @@ class PeriodRecord(db.Model):
 class Infraction(db.Model):
     __tablename__ = 'infractions'
     id = db.Column(db.Integer, primary_key=True)
-    period_record_id = db.Column(db.Integer, db.ForeignKey('period_records.id'), nullable=False)
+    period_record_id = db.Column(db.Integer, db.ForeignKey('period_records.id'), nullable=False, index=True)
     
     # Infraction types
     infraction_type = db.Column(db.String(50), nullable=False)  # e.g., "Lang", "NFD", "Off Task", etc.
@@ -502,7 +525,7 @@ class Infraction(db.Model):
 class FrenzyEvent(db.Model):
     __tablename__ = 'frenzy_events'
     id = db.Column(db.Integer, primary_key=True)
-    daily_record_id = db.Column(db.Integer, db.ForeignKey('daily_records.id'), nullable=False)
+    daily_record_id = db.Column(db.Integer, db.ForeignKey('daily_records.id'), nullable=False, index=True)
     
     # Event details
     time_range = db.Column(db.String(20))
@@ -782,6 +805,7 @@ def init_db():
             
             # Create all tables
             db.create_all()
+            ensure_daily_query_indexes()
             print("Database tables created/verified")
             
             # Ensure OutsideStaffStudent table exists and run migrations
@@ -1939,6 +1963,21 @@ def daily_records():
     
     else:
         student_id = request.args.get('student_id', type=int)
+        student_ids_param = (request.args.get('student_ids') or '').strip()
+        include_details = (request.args.get('include_details', 'true') or 'true').lower() not in ('0', 'false', 'no')
+
+        requested_student_ids = []
+        if student_ids_param:
+            for raw_id in student_ids_param.split(','):
+                raw_id = raw_id.strip()
+                if not raw_id:
+                    continue
+                try:
+                    requested_student_ids.append(int(raw_id))
+                except ValueError:
+                    continue
+        if student_id:
+            requested_student_ids = [student_id]
         
         # Audit: Log daily record access
         log_phi_access(
@@ -1953,7 +1992,7 @@ def daily_records():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         
-        # Get daily records (filtered by student if student role or Outside Staff)
+        # Get daily records (filtered by role and optional student_id/student_ids)
         query = DailyRecord.query
         if current_user.role == 'student' and current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
@@ -1963,67 +2002,85 @@ def daily_records():
                                   OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
             if not assigned_student_ids:
                 return jsonify([])
-            if student_id:
-                # Verify access to requested student
-                if student_id not in assigned_student_ids:
-                    return jsonify({'error': 'Access denied to this student'}), 403
-                query = query.filter_by(student_id=student_id)
+            if requested_student_ids:
+                allowed_ids = [sid for sid in requested_student_ids if sid in assigned_student_ids]
+                if not allowed_ids:
+                    return jsonify({'error': 'Access denied to requested students'}), 403
+                query = query.filter(DailyRecord.student_id.in_(allowed_ids))
             else:
                 query = query.filter(DailyRecord.student_id.in_(assigned_student_ids))
-        elif student_id:
-            query = query.filter_by(student_id=student_id)
+        elif requested_student_ids:
+            query = query.filter(DailyRecord.student_id.in_(requested_student_ids))
         if start_date:
             query = query.filter(DailyRecord.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
         if end_date:
             query = query.filter(DailyRecord.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
         
-        records = query.all()
+        # Eager-load relationships with lightweight mode for daily grid speed.
+        if include_details:
+            query = query.options(
+                selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
+                selectinload(DailyRecord.frenzies),
+            )
+        else:
+            query = query.options(selectinload(DailyRecord.periods))
+
+        records = query.order_by(DailyRecord.student_id, DailyRecord.date).all()
         result = []
         for record in records:
             periods = []
             for period in record.periods:
-                infractions = [{
-                    'type': i.infraction_type,
-                    'count': i.count,
-                    'is_general': i.is_general,
-                    'is_harmful': i.is_harmful
-                } for i in period.infractions]
-                
-                periods.append({
-                    'id': period.id,
-                    'time_range': period.time_range,
-                    'location': period.location,
-                    'safety_points': period.safety_points,
-                    'teamwork_points': period.teamwork_points,
-                    'accountability_points': period.accountability_points,
-                    'relationships_points': period.relationships_points,
-                    'points_possible': period.points_possible,
-                    'reset': period.reset,
-                    'frenzy': period.frenzy,
-                    'notes': period.notes,
-                    'reminders': period.reminders,
-                    'info': period.info or '',
-                    'infractions': infractions
-                })
+                if include_details:
+                    infractions = [{
+                        'type': i.infraction_type,
+                        'count': i.count,
+                        'is_general': i.is_general,
+                        'is_harmful': i.is_harmful
+                    } for i in period.infractions]
+
+                    periods.append({
+                        'id': period.id,
+                        'time_range': period.time_range,
+                        'location': period.location,
+                        'safety_points': period.safety_points,
+                        'teamwork_points': period.teamwork_points,
+                        'accountability_points': period.accountability_points,
+                        'relationships_points': period.relationships_points,
+                        'points_possible': period.points_possible,
+                        'reset': period.reset,
+                        'frenzy': period.frenzy,
+                        'notes': period.notes,
+                        'reminders': period.reminders,
+                        'info': period.info or '',
+                        'infractions': infractions
+                    })
+                else:
+                    periods.append({
+                        'id': period.id,
+                        'time_range': period.time_range,
+                        'safety_points': period.safety_points,
+                        'teamwork_points': period.teamwork_points,
+                        'accountability_points': period.accountability_points,
+                        'relationships_points': period.relationships_points,
+                        'info': period.info or '',
+                    })
+
+            frenzies = []
+            if include_details:
+                frenzies = [{
+                    'id': f.id,
+                    'time_range': f.time_range,
+                    'location': f.location,
+                    'purpose': f.purpose,
+                    'purpose2': f.purpose2,
+                    'duration_minutes': f.duration_minutes,
+                    'result': f.result
+                } for f in record.frenzies]
             
-            frenzies = [{
-                'id': f.id,
-                'time_range': f.time_range,
-                'location': f.location,
-                'purpose': f.purpose,
-                'purpose2': f.purpose2,
-                'duration_minutes': f.duration_minutes,
-                'result': f.result
-            } for f in record.frenzies]
-            
-            # Get attendance_status, migrate from present boolean if needed
+            # Get attendance_status, with fallback from present boolean for backward compatibility
             attendance_status = record.attendance_status
             if not attendance_status:
-                # Migration: convert old present boolean to new attendance_status
                 attendance_status = 'present' if record.present else 'unexcused'
-                # Update the record for future queries
-                record.attendance_status = attendance_status
-                db.session.commit()
             
             result.append({
                 'id': record.id,
@@ -7091,6 +7148,7 @@ def check_users():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        ensure_daily_query_indexes()
         # Ensure OutsideStaffStudent table exists
         try:
             from sqlalchemy import inspect, text

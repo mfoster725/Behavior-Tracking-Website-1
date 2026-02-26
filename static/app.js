@@ -60,6 +60,12 @@ let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
 let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
+let dailyLoadDebounceTimer = null;
+let dailyLoadAbortController = null;
+let dailyLoadRequestToken = 0;
+let dailyGridDelegationBound = false;
+const DAILY_LOAD_CACHE_TTL_MS = 60000;
+const dailyLoadCache = new Map();
 
 // Load submitted students from localStorage or initialize empty
 function loadSubmittedStudents() {
@@ -94,6 +100,99 @@ function saveSubmittedStudents(submittedStudents) {
 }
 
 let submittedStudents = loadSubmittedStudents(); // Track submitted students by date: submittedStudents[date] = Set of student IDs
+
+function scheduleDailyDataLoad(delayMs) {
+    if (dailyLoadDebounceTimer) {
+        clearTimeout(dailyLoadDebounceTimer);
+    }
+    dailyLoadDebounceTimer = setTimeout(() => {
+        loadDailyData();
+    }, Math.max(0, delayMs || 0));
+}
+
+function invalidateDailyLoadCache(dateKey) {
+    if (!dateKey) {
+        dailyLoadCache.clear();
+        return;
+    }
+    const prefix = `${dateKey}|`;
+    for (const key of dailyLoadCache.keys()) {
+        if (key.startsWith(prefix)) {
+            dailyLoadCache.delete(key);
+        }
+    }
+}
+
+function handleDailyAttendanceChange(e) {
+    const select = e.target;
+    if (!select || !select.classList.contains('attendance-select')) {
+        return;
+    }
+    if (!attendanceData[currentDate]) {
+        attendanceData[currentDate] = {};
+    }
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const newStatus = select.value;
+    if (!studentId) return;
+
+    attendanceData[currentDate][studentId] = newStatus;
+
+    if (newStatus === 'unexcused') {
+        if (!dailyData[studentId]) {
+            dailyData[studentId] = {};
+        }
+
+        STANDARD_PERIODS.forEach(period => {
+            if (!dailyData[studentId][period.time]) {
+                dailyData[studentId][period.time] = { s: null, t: null, a: null, r: null, info: '' };
+            }
+            dailyData[studentId][period.time].s = 0;
+            dailyData[studentId][period.time].t = 0;
+            dailyData[studentId][period.time].a = 0;
+            dailyData[studentId][period.time].r = 0;
+        });
+
+        document.querySelectorAll(`.daily-input[data-student-id="${studentId}"]`).forEach(inputEl => {
+            const category = inputEl.dataset.category;
+            if (category && ['s', 't', 'a', 'r'].includes(category)) {
+                inputEl.value = '0';
+            }
+        });
+    }
+
+    updateDailyPercentageRow();
+}
+
+function ensureDailyGridDelegatedListeners() {
+    if (dailyGridDelegationBound) return;
+    const gridContainer = document.getElementById('daily-grid-container');
+    if (!gridContainer) return;
+
+    gridContainer.addEventListener('change', (e) => {
+        if (e.target && e.target.classList.contains('daily-input')) {
+            handleDailyInputChange(e);
+            return;
+        }
+        if (e.target && e.target.classList.contains('attendance-select')) {
+            handleDailyAttendanceChange(e);
+        }
+    });
+
+    gridContainer.addEventListener('keydown', (e) => {
+        if (e.target && e.target.classList.contains('daily-input')) {
+            handleDailyInputKeydown(e);
+        }
+    });
+
+    gridContainer.addEventListener('click', (e) => {
+        const infoBtn = e.target && e.target.closest('.info-btn');
+        if (infoBtn) {
+            showInfoModal({ target: infoBtn });
+        }
+    });
+
+    dailyGridDelegationBound = true;
+}
 
 // Load quarter dates from localStorage or use defaults
 function loadQuarterDates() {
@@ -654,7 +753,7 @@ function setupEventListeners() {
                 updateQuarterDisplay();
                 
                 if (allStudents.length > 0) {
-                    loadDailyData();
+                    scheduleDailyDataLoad(0);
                 }
             });
         }
@@ -663,22 +762,24 @@ function setupEventListeners() {
         const dailySearchInput = document.getElementById('daily-search-input');
         if (dailySearchInput) {
             setupDailySearchAutocomplete(dailySearchInput);
-            dailySearchInput.addEventListener('input', async (e) => {
+            dailySearchInput.addEventListener('input', (e) => {
                 dailyEntrySearchQuery = e.target.value;
                 console.log('Daily search query changed:', dailyEntrySearchQuery);
-                await loadDailyData();
+                scheduleDailyDataLoad(300);
             });
         }
 
         // Daily entry "managed by me" checkbox
         const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
         if (dailyManagedByMeCheckbox) {
-            dailyManagedByMeCheckbox.addEventListener('change', async (e) => {
+            dailyManagedByMeCheckbox.addEventListener('change', (e) => {
                 dailyEntryManagedByMe = e.target.checked;
                 console.log('Daily managed by me checkbox changed:', dailyEntryManagedByMe);
-                await loadDailyData();
+                scheduleDailyDataLoad(0);
             });
         }
+
+        ensureDailyGridDelegatedListeners();
 
         const saveDailyAllBtn = document.getElementById('save-daily-all-btn');
         if (saveDailyAllBtn) {
@@ -1230,7 +1331,7 @@ async function switchView(viewName) {
         if (!filteredDailyStudents || filteredDailyStudents.length === 0) {
             filteredDailyStudents = [...allStudents];
         }
-        loadDailyData();
+        scheduleDailyDataLoad(0);
     }
     
     // If switching to summary view, reload summary data
@@ -1643,7 +1744,7 @@ async function loadStudents(filterManagedByMe = false, updateSummaryOnly = false
                 if (!filteredDailyStudents || filteredDailyStudents.length === 0) {
                     filteredDailyStudents = [...allStudents];
                 }
-                loadDailyData();
+                scheduleDailyDataLoad(0);
             }
         }
     } catch (error) {
@@ -2227,6 +2328,13 @@ async function filterDailyStudents() {
 }
 
 async function loadDailyData() {
+    const requestToken = ++dailyLoadRequestToken;
+
+    if (dailyLoadAbortController) {
+        dailyLoadAbortController.abort();
+    }
+    dailyLoadAbortController = new AbortController();
+
     // Ensure staff members are loaded for search functionality
     if (allStaffMembers.length === 0) {
         await loadUsers();
@@ -2286,9 +2394,35 @@ async function loadDailyData() {
             return;
         }
 
-        // Load data for all accessible students for the current date in a single request
-        const response = await fetch(`/api/daily-records?start_date=${currentDate}&end_date=${currentDate}`);
-        const allRecords = await response.json();
+        const studentIdsCsv = Array.from(nonSubmittedVisibleIds).join(',');
+        const cacheKey = `${currentDate}|${studentIdsCsv}`;
+        const now = Date.now();
+        let allRecords;
+
+        const cached = dailyLoadCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < DAILY_LOAD_CACHE_TTL_MS) {
+            allRecords = cached.records;
+        } else {
+            // Request only visible students and lightweight period fields for faster daily-grid loads.
+            const params = new URLSearchParams({
+                start_date: currentDate,
+                end_date: currentDate,
+                student_ids: studentIdsCsv,
+                include_details: 'false'
+            });
+            const response = await fetch(`/api/daily-records?${params.toString()}`, {
+                signal: dailyLoadAbortController.signal
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to load daily records (${response.status})`);
+            }
+            allRecords = await response.json();
+            dailyLoadCache.set(cacheKey, { timestamp: now, records: allRecords });
+        }
+
+        if (requestToken !== dailyLoadRequestToken) {
+            return;
+        }
         
         // Initialize attendance data for current date if not exists
         if (!attendanceData[currentDate]) {
@@ -2334,6 +2468,9 @@ async function loadDailyData() {
             });
         });
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            return;
+        }
         console.error('Error loading daily data:', error);
     }
 
@@ -2522,45 +2659,7 @@ function renderDailyGrid() {
                 }
                 attendanceSelect.appendChild(option);
             });
-            
-            attendanceSelect.addEventListener('change', (e) => {
-                if (!attendanceData[currentDate]) {
-                    attendanceData[currentDate] = {};
-                }
-                const newStatus = e.target.value;
-                attendanceData[currentDate][student.id] = newStatus;
-                
-                // If "unexcused" is selected, set all STAR points to 0 for all periods
-                if (newStatus === 'unexcused') {
-                    // Initialize dailyData for this student if needed
-                    if (!dailyData[student.id]) {
-                        dailyData[student.id] = {};
-                    }
-                    
-                    // Set all STAR points to 0 for all periods
-                    STANDARD_PERIODS.forEach(period => {
-                        if (!dailyData[student.id][period.time]) {
-                            dailyData[student.id][period.time] = { s: null, t: null, a: null, r: null, info: '' };
-                        }
-                        dailyData[student.id][period.time].s = 0;
-                        dailyData[student.id][period.time].t = 0;
-                        dailyData[student.id][period.time].a = 0;
-                        dailyData[student.id][period.time].r = 0;
-                    });
-                    
-                    // Update all input selects to show 0
-                    document.querySelectorAll(`.daily-input[data-student-id="${student.id}"]`).forEach(select => {
-                        const category = select.dataset.category;
-                        if (category && ['s', 't', 'a', 'r'].includes(category)) {
-                            select.value = '0';
-                        }
-                    });
-                    
-                    // Update percentage row
-                    updateDailyPercentageRow();
-                }
-            });
-            
+
             attendanceContainer.appendChild(attendanceSelect);
             studentHeader.appendChild(attendanceContainer);
         }
@@ -2670,9 +2769,6 @@ function renderDailyGrid() {
                     select.appendChild(option);
                 });
                 
-                select.addEventListener('change', handleDailyInputChange);
-                select.addEventListener('keydown', handleDailyInputKeydown);
-                
                 cell.appendChild(select);
                 body.appendChild(cell);
             });
@@ -2714,8 +2810,6 @@ function renderDailyGrid() {
                     }
                 }
             }
-            
-            infoButton.addEventListener('click', showInfoModal);
             
             infoCell.appendChild(infoButton);
             body.appendChild(infoCell);
@@ -3101,7 +3195,8 @@ async function saveDailyAllData() {
     try {
         await Promise.all(savePromises);
         showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
-        loadDailyData(); // Reload to confirm
+        invalidateDailyLoadCache(currentDate);
+        scheduleDailyDataLoad(0); // Reload to confirm
         // Refresh summary if it's currently displayed
         refreshSummaryIfActive();
     } catch (error) {
@@ -3201,6 +3296,7 @@ async function submitStudentData(e) {
             
             // Show success message
             showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            invalidateDailyLoadCache(currentDate);
             
             // Reload the grid to show cleared data
             renderDailyGrid();
