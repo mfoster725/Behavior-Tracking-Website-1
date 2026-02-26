@@ -7919,6 +7919,17 @@ function populateTeacherScheduleStaffSearch() {
 
     const currentVal = select.value;
     select.innerHTML = '';
+
+    const isAdmin = role === 'admin';
+
+    // For admins, add a "Select staff…" placeholder so nothing is auto-selected
+    if (isAdmin) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select staff…';
+        select.appendChild(placeholder);
+    }
+
     list.forEach(u => {
         const opt = document.createElement('option');
         opt.value = u.id;
@@ -7927,10 +7938,9 @@ function populateTeacherScheduleStaffSearch() {
     });
     if (list.length) {
         const hasCurrent = list.some(u => u.id === window.currentUser.id);
-        const isAdmin = role === 'admin';
 
-        if (currentVal && list.some(u => String(u.id) === currentVal)) {
-            // Preserve an existing valid selection
+        if (currentVal && Array.from(select.options).some(o => o.value === currentVal)) {
+            // Preserve an existing valid selection (including placeholder)
             select.value = currentVal;
         } else if (hasCurrent) {
             // Staff users default to their own schedule
@@ -7938,8 +7948,10 @@ function populateTeacherScheduleStaffSearch() {
         } else if (!isAdmin) {
             // For non-admins (e.g. staff), fall back to the first staff member
             select.value = String(list[0].id);
+        } else {
+            // Admins: explicitly select the placeholder (no staff selected)
+            select.value = '';
         }
-        // For admins with no prior selection, leave the dropdown unselected by default
     }
 }
 
