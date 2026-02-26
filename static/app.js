@@ -326,6 +326,17 @@ window.toggleNavMenu = toggleNavMenu;
 function attachNavAndHamburger() {
     if (window._navHamburgerAttached) return;
     window._navHamburgerAttached = true;
+
+    // Direct handler on hamburger so it always runs (capture phase, before anything can stop propagation)
+    var hamburgerBtn = document.getElementById('nav-hamburger');
+    if (hamburgerBtn) {
+        hamburgerBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleNavMenu();
+        }, true);
+    }
+
     document.addEventListener('click', function navAndHamburgerClick(e) {
             var navBtn = e.target && e.target.closest && e.target.closest('.nav-btn');
             if (navBtn && navBtn.dataset && navBtn.dataset.view) {
