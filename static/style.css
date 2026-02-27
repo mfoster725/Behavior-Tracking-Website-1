@@ -840,6 +840,8 @@ table tbody tr:hover {
     margin-bottom: 0;
     background: transparent;
     border-bottom: 2px solid var(--text-primary);
+    /* Add space between STARI labels and the black line */
+    padding-bottom: 4px;
 }
 
 .daily-header-cell {
@@ -880,7 +882,11 @@ table tbody tr:hover {
     border-bottom: 1px solid var(--border);
     padding: 6px 6px;
     gap: 4px;
-    border-radius: var(--radius-md);
+    /* Only round the top corners so it visually merges with STARI row below */
+    border-top-left-radius: var(--radius-md);
+    border-top-right-radius: var(--radius-md);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 .daily-body {
@@ -1017,6 +1023,14 @@ table tbody tr:hover {
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* Visually merge STARI headers with the student name container above */
+.star-category-header[data-category="s"] {
+    border-bottom-left-radius: var(--radius-md);
+}
+.star-category-header[data-category="i"] {
+    border-bottom-right-radius: var(--radius-md);
 }
 
 /* ⚠️ PROTECTED: STAR category header colors — DO NOT CHANGE */
@@ -1734,7 +1748,7 @@ table tbody tr:hover {
    STUDENT SUBMIT BUTTON
    ============================================================ */
 .student-submit-btn {
-    width: 100%;
+    width: auto;
     padding: 6px 10px;
     background: var(--accent);
     color: #fff;
@@ -1767,6 +1781,7 @@ table tbody tr:hover {
 .daily-submit-cell {
     background: var(--bg-page);
     padding: 4px 6px;
+    justify-content: center;
 }
 
 /* ============================================================
