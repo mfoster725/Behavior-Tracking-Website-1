@@ -1083,14 +1083,8 @@ table tbody tr:hover {
     border-left: 1px solid var(--border);
 }
 
-.daily-period-cell[data-period-index]:nth-child(odd),
-.daily-data-cell[data-period-index]:nth-child(odd) {
-    background: var(--bg-page);
-}
-
-.daily-data-cell[data-student-index]:nth-child(4n+2) {
-    border-left: 1px solid var(--border);
-}
+/* Row striping for the daily grid is now handled in JS per periodIndex
+   to avoid odd visual artifacts from nth-child across the grid. */
 
 .daily-input:focus {
     background: #fff !important;

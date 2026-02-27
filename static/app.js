@@ -2741,11 +2741,15 @@ function renderDailyGrid() {
 
     // Create rows for each period
     STANDARD_PERIODS.forEach((period, periodIndex) => {
+        const isOddRow = periodIndex % 2 === 1;
         // Period cell
         const periodCell = document.createElement('div');
         periodCell.className = 'daily-period-cell';
         periodCell.textContent = period.time;
         periodCell.dataset.periodIndex = periodIndex;
+        if (isOddRow) {
+            periodCell.style.background = 'var(--bg-page)';
+        }
         body.appendChild(periodCell);
 
         // Add spacer after period column (gutter, but visually transparent)
@@ -2767,6 +2771,9 @@ function renderDailyGrid() {
                 cell.style.alignItems = 'center';
                 cell.dataset.studentIndex = studentIndex;
                 cell.dataset.periodIndex = periodIndex;
+                if (isOddRow) {
+                    cell.style.background = 'var(--bg-page)';
+                }
                 
                 const select = document.createElement('select');
                 select.className = 'daily-input';
@@ -2809,6 +2816,9 @@ function renderDailyGrid() {
             infoCell.style.alignItems = 'center';
             infoCell.dataset.studentIndex = studentIndex;
             infoCell.dataset.periodIndex = periodIndex;
+            if (isOddRow) {
+                infoCell.style.background = 'var(--bg-page)';
+            }
             
             const infoButton = document.createElement('button');
             infoButton.className = 'info-btn';
@@ -2945,11 +2955,11 @@ function renderDailyGrid() {
         submitSpacer.style.borderTop = '2px solid #e0e0e0';
         body.appendChild(submitSpacer);
         
-        // For each student, add submit button spanning STAR columns (4 columns)
+        // For each student, add submit button spanning STAR columns (S, T, A, R, I => 5 columns)
         studentsToDisplay.forEach((student, studentIndex) => {
             const submitCell = document.createElement('div');
             submitCell.className = 'daily-data-cell daily-submit-cell';
-            submitCell.style.gridColumn = 'span 4'; // Span S, T, A, R columns
+            submitCell.style.gridColumn = 'span 5'; // Span S, T, A, R, I columns
             submitCell.style.padding = '4px 6px';
             submitCell.style.display = 'flex';
             submitCell.style.justifyContent = 'center';
@@ -2971,12 +2981,6 @@ function renderDailyGrid() {
             
             submitCell.appendChild(submitButton);
             body.appendChild(submitCell);
-            
-            // Empty cell for Info column
-            const emptyInfoCell = document.createElement('div');
-            emptyInfoCell.className = 'daily-data-cell';
-            emptyInfoCell.style.borderTop = '2px solid #e0e0e0';
-            body.appendChild(emptyInfoCell);
             
             // Add spacer cell after each student (except the last)
             if (studentIndex < studentsToDisplay.length - 1) {
