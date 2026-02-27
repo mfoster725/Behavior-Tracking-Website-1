@@ -84,6 +84,24 @@ header {
     margin-bottom: 0;
 }
 
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.site-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.header-text {
+    display: flex;
+    flex-direction: column;
+}
+
 .header-actions {
     position: relative;
 }
@@ -264,6 +282,11 @@ nav {
     .header-content {
         gap: 10px;
         align-items: center;
+    }
+
+    .site-logo {
+        width: 28px;
+        height: 28px;
     }
 
     header h1 {

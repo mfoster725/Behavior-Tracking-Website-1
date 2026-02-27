@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -32,9 +33,12 @@
         {% endif %}
         <header>
             <div class="header-content">
-                <div>
-                    <h1>Behavior Tracking System</h1>
-                    <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
+                <div class="header-brand">
+                    <img src="{{ url_for('static', filename='logo.png') }}" alt="Behavior Tracking System logo" class="site-logo">
+                    <div class="header-text">
+                        <h1>Behavior Tracking System</h1>
+                        <p class="user-info">Welcome, <span id="username-display">{{ user.name|default(user.username) }}</span></p>
+                    </div>
                 </div>
                 <div class="header-actions" style="display: flex; align-items: center; gap: 12px;">
                     <div id="notifications-bell-wrap" style="position: relative;">
