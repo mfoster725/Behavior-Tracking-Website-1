@@ -2242,16 +2242,56 @@ def summary():
     school_year_start = school_year_dates.get('start', '08-01')
     school_year_end = school_year_dates.get('end', '07-31')
     
+    # Staff-based filtering: when staff_id is provided, show aggregated data for that staff member's students
+    staff_id = request.args.get('staff_id', type=int)
+    staff_context_name = None
+    
     # Debug logging
-    print(f"Summary API called - student_id: {student_id}, timeframe: {timeframe}")
+    print(f"Summary API called - student_id: {student_id}, staff_id: {staff_id}, timeframe: {timeframe}")
     
     query = DailyRecord.query
     
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
+    # If staff_id is provided and the current user has permission, filter to that staff member's students
+    if staff_id and current_user.role in ['staff', 'admin']:
+        staff_user = User.query.get(staff_id)
+        if staff_user:
+            staff_context_name = staff_user.name or staff_user.username
+            staff_name = staff_user.name or ''
+            staff_username = staff_user.username or ''
+            team_members = TeamMember.query.filter(
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+            ).all()
+            staff_student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+            if staff_student_ids:
+                if student_id:
+                    if student_id in staff_student_ids:
+                        query = query.filter_by(student_id=student_id)
+                    else:
+                        return jsonify({
+                            'timeframe': timeframe, 'total_days': 0,
+                            'averages': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'overall': 0},
+                            'totals': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'possible': 0},
+                            'infractions': {}, 'total_frenzies': 0,
+                            'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
+                            'staff_context': staff_context_name
+                        })
+                else:
+                    query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
+            else:
+                return jsonify({
+                    'timeframe': timeframe, 'total_days': 0,
+                    'averages': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'overall': 0},
+                    'totals': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'possible': 0},
+                    'infractions': {}, 'total_frenzies': 0,
+                    'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
+                    'staff_context': staff_context_name
+                })
     # Students can only see their own summary
-    if current_user.role == 'student':
+    elif current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
         else:
@@ -2843,8 +2883,15 @@ def summary():
         if period == '30day' and available_data_points is not None:
             result['available_data_points'] = available_data_points
             result['has_full_30_days'] = available_data_points >= 30
+        if staff_context_name:
+            result['staff_context'] = staff_context_name
         return jsonify(result)
     
+    def _summary_response(resp_dict):
+        if staff_context_name:
+            resp_dict['staff_context'] = staff_context_name
+        return jsonify(resp_dict)
+
     # Filter by timeframe and handle comparison modes
     if timeframe == 'weekly':
         # Get the most recent complete week (Monday-Sunday)
@@ -2859,7 +2906,7 @@ def summary():
         print(f"After weekly filtering: {len(records)} records from {most_recent_monday} to {most_recent_sunday}")
         # Calculate single summary
         stats = calculate_summary_stats(records)
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -2892,7 +2939,7 @@ def summary():
         print(f"After 30 day filtering: {len(records)} records from {len(selected_dates)} unique dates")
         # Calculate single summary
         stats = calculate_summary_stats(records)
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -2945,7 +2992,7 @@ def summary():
             'Previous 30 Days': previous_stats
         }
         
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
@@ -2990,7 +3037,7 @@ def summary():
         # Get available school years for dropdown
         available_school_years = get_available_school_years(all_records)
         
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data,
@@ -3023,7 +3070,7 @@ def summary():
             quarter_stats = calculate_summary_stats(quarter_groups[quarter_key])
             comparison_data[quarter_key] = quarter_stats
         
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
@@ -3051,7 +3098,7 @@ def summary():
             year_stats = calculate_summary_stats(year_groups[year_key])
             comparison_data[year_key] = year_stats
         
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
@@ -3060,7 +3107,7 @@ def summary():
         # "alltime" or "all" - use all records, single summary
         records = all_records
         stats = calculate_summary_stats(records)
-        return jsonify({
+        return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -3891,6 +3938,8 @@ def frenzy_stats():
     student_id = request.args.get('student_id', type=int)
     period = request.args.get('period', None)
     timeframe = request.args.get('timeframe', None)  # "30day", "month", "quarter", "year", "alltime"
+    staff_id = request.args.get('staff_id', type=int)
+    staff_context_name = None
     
     # Audit: Log frenzy stats access
     log_phi_access(
@@ -3948,22 +3997,44 @@ def frenzy_stats():
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     
+    _empty_frenzy = {
+        'by_day': {}, 'by_time': {}, 'by_location': {}, 'by_purpose': {},
+        'total_count': 0, 'total_duration': 0, 'avg_duration': 0,
+        'all_purposes': [], 'all_results': []
+    }
+    
+    # If staff_id is provided and the current user has permission, filter to that staff member's students
+    if staff_id and current_user.role in ['staff', 'admin']:
+        staff_user = User.query.get(staff_id)
+        if staff_user:
+            staff_context_name = staff_user.name or staff_user.username
+            staff_name = staff_user.name or ''
+            staff_username = staff_user.username or ''
+            team_members = TeamMember.query.filter(
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+            ).all()
+            staff_student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+            if staff_student_ids:
+                if student_id:
+                    if student_id in staff_student_ids:
+                        query = query.filter_by(student_id=student_id)
+                    else:
+                        resp = dict(_empty_frenzy)
+                        resp['staff_context'] = staff_context_name
+                        return jsonify(resp)
+                else:
+                    query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
+            else:
+                resp = dict(_empty_frenzy)
+                resp['staff_context'] = staff_context_name
+                return jsonify(resp)
     # Students can only see their own frenzy stats
-    if current_user.role == 'student':
+    elif current_user.role == 'student':
         if current_user.student_id:
             query = query.filter_by(student_id=current_user.student_id)
         else:
-            return jsonify({
-                'by_day': {},
-                'by_time': {},
-                'by_location': {},
-                'by_purpose': {},
-                'total_count': 0,
-                'total_duration': 0,
-                'avg_duration': 0,
-                'all_purposes': [],
-                'all_results': []
-            })
+            return jsonify(_empty_frenzy)
     elif current_user.role == 'staff' and current_user.is_outside_staff:
         # Outside Staff can only see assigned students
         assigned_student_ids = [assoc.student_id for assoc in 
@@ -4320,7 +4391,14 @@ def frenzy_stats():
         if period == '30day' and available_data_points is not None:
             stats['available_data_points'] = available_data_points
             stats['has_full_30_days'] = available_data_points >= 30
+        if staff_context_name:
+            stats['staff_context'] = staff_context_name
         return jsonify(stats)
+
+    def _frenzy_response(resp_dict):
+        if staff_context_name:
+            resp_dict['staff_context'] = staff_context_name
+        return jsonify(resp_dict)
     
     # Filter by timeframe and handle comparison modes
     if timeframe == '30day':
@@ -4338,87 +4416,58 @@ def frenzy_stats():
         stats['comparison_mode'] = False
         stats['available_data_points'] = available_data_points
         stats['has_full_30_days'] = available_data_points >= 30
-        return jsonify(stats)
+        return _frenzy_response(stats)
     elif timeframe == '30day_to_30day':
-        # Get unique dates that have data, sorted descending
         unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
         total_available_dates = len(unique_dates)
-        
-        # Take first 30 dates for "Most Recent 30 Days"
         most_recent_dates = unique_dates[:30]
-        # Take next 30 dates for "Previous 30 Days"
         previous_dates = unique_dates[30:60] if len(unique_dates) > 30 else []
-        
-        # Track data points for each period
         most_recent_data_points = len(most_recent_dates)
         previous_data_points = len(previous_dates)
-        
-        # Filter records for each period
         most_recent_records = [r for r in all_records if r.date in most_recent_dates]
         previous_records = [r for r in all_records if r.date in previous_dates]
-        
-        # Calculate stats for each period
         most_recent_stats = calculate_frenzy_stats(most_recent_records)
         previous_stats = calculate_frenzy_stats(previous_records)
-        
-        # Add data points info to each period's stats
         most_recent_stats['available_data_points'] = most_recent_data_points
         most_recent_stats['has_full_30_days'] = most_recent_data_points >= 30
         previous_stats['available_data_points'] = previous_data_points
         previous_stats['has_full_30_days'] = previous_data_points >= 30
-        
-        # Build comparison data
         comparison_data = {
             'Most Recent 30 Days': most_recent_stats,
             'Previous 30 Days': previous_stats
         }
-        
-        return jsonify({
+        return _frenzy_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
         })
     elif timeframe == 'month':
-        # Group by month-year for comparison, filtered by school year
         from collections import defaultdict
         from datetime import date
         school_year_param = request.args.get('school_year', None)
-        
-        # If no school year specified, default to current school year
         if not school_year_param:
             today = date.today()
             school_year_param = get_school_year_for_date(today)
-        
-        # Filter records by school year
         filtered_records = []
         for record in all_records:
             record_school_year = get_school_year_for_date(record.date)
             if record_school_year == school_year_param:
                 filtered_records.append(record)
-        
-        # Group by month
         month_groups = defaultdict(list)
         for record in filtered_records:
             month_key = format_month_name(record.date.year, record.date.month)
             month_groups[month_key].append(record)
-        
-        # Sort months chronologically (by date, not alphabetically)
         sorted_months = sorted(month_groups.keys(), key=lambda x: (
-            # Extract year and month from "MonthName YY" format
-            int('20' + x.split()[-1]),  # Convert YY to YYYY
+            int('20' + x.split()[-1]),
             ['January', 'February', 'March', 'April', 'May', 'June',
              'July', 'August', 'September', 'October', 'November', 'December'].index(x.split()[0])
         ))
-        
         comparison_data = {}
         for month_key in sorted_months:
             month_stats = calculate_frenzy_stats(month_groups[month_key])
             comparison_data[month_key] = month_stats
-        
-        # Get available school years for dropdown
         available_school_years = get_available_school_years(all_records)
-        
-        return jsonify({
+        return _frenzy_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data,
@@ -4426,70 +4475,54 @@ def frenzy_stats():
             'selected_school_year': school_year_param
         })
     elif timeframe == 'quarter':
-        # Group by quarter for comparison
         from collections import defaultdict
         quarter_groups = defaultdict(list)
         for record in all_records:
             q_num = get_quarter_for_date(record.date)
             if q_num:
-                # Include year to handle multiple years
                 year = record.date.year
-                # Adjust year for quarters that span years (Q2: Nov-Jan)
                 q_info = quarter_ranges.get(q_num, {})
                 q_start = q_info.get('start', '08-01')
                 start_month = int(q_start.split('-')[0])
                 if record.date.month < start_month and q_num == '2':
-                    # This is likely the end of Q2 from previous year
                     year = record.date.year - 1
                 quarter_key = f"Q{q_num} {year}"
                 quarter_groups[quarter_key].append(record)
-        
-        # Sort quarters chronologically
         sorted_quarters = sorted(quarter_groups.keys(), key=lambda x: (int(x.split()[1]), int(x[1])))
         comparison_data = {}
         for quarter_key in sorted_quarters:
             quarter_stats = calculate_frenzy_stats(quarter_groups[quarter_key])
             comparison_data[quarter_key] = quarter_stats
-        
-        return jsonify({
+        return _frenzy_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
         })
     elif timeframe == 'year':
-        # Group by school year for comparison
         from collections import defaultdict
         year_groups = defaultdict(list)
         for record in all_records:
-            # Determine which school year this record belongs to
-            # School year typically starts in August
-            if record.date.month >= 8:  # August or later
+            if record.date.month >= 8:
                 school_year = f"{record.date.year}-{record.date.year + 1}"
-            else:  # January through July
+            else:
                 school_year = f"{record.date.year - 1}-{record.date.year}"
-            
-            # Only include if date is within configured school year range
             if date_in_range(record.date, school_year_start, school_year_end):
                 year_groups[school_year].append(record)
-        
-        # Sort years chronologically
         sorted_years = sorted(year_groups.keys())
         comparison_data = {}
         for year_key in sorted_years:
             year_stats = calculate_frenzy_stats(year_groups[year_key])
             comparison_data[year_key] = year_stats
-        
-        return jsonify({
+        return _frenzy_response({
             'timeframe': timeframe,
             'comparison_mode': True,
             'periods': comparison_data
         })
     else:
-        # "alltime" or "all" - use all records, single summary
         records = all_records
         stats = calculate_frenzy_stats(records)
         stats['comparison_mode'] = False
-        return jsonify(stats)
+        return _frenzy_response(stats)
 
 @app.route('/api/schedules', methods=['GET', 'POST'])
 @limiter.limit("60 per minute")

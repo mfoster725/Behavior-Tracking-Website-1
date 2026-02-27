@@ -200,52 +200,77 @@
         <div id="summary-view" class="view">
             <div class="form-section">
                 <h2>Summary & Reports</h2>
-                <div class="form-group">
-                    <label for="summary-student-select" style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;">
-                        <span>Student:</span>
+
+                <div class="dashboard-controls">
+                    <!-- Search row -->
+                    <div class="dashboard-search-row">
+                        <div class="dashboard-search-wrap" id="summary-student-search-wrap">
+                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" id="summary-student-search" placeholder="Search student..." autocomplete="off">
+                            <div class="dashboard-search-dropdown" id="summary-student-dropdown"></div>
+                        </div>
                         {% if user.role in ['staff', 'admin'] %}
-                        <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; margin-left: 40px;">
-                            <input type="checkbox" id="summary-managed-by-me-checkbox" style="cursor: pointer;">
-                            <span>Show students managed by me</span>
+                        <div class="dashboard-search-wrap" id="summary-staff-search-wrap">
+                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            <input type="text" id="summary-staff-search" placeholder="Search staff..." autocomplete="off">
+                            <div class="dashboard-search-dropdown" id="summary-staff-dropdown"></div>
+                        </div>
+                        <label class="dashboard-managed-check">
+                            <input type="checkbox" id="summary-managed-by-me-checkbox">
+                            <span>Managed by me</span>
                         </label>
                         {% endif %}
-                    </label>
-                    <select id="summary-student-select">
-                        <option value="">All Students</option>
-                    </select>
+                        <div class="dashboard-toolbar">
+                            <button type="button" id="print-summary-btn" disabled title="Print">Print</button>
+                            <button type="button" id="compare-case-managers-btn" title="Compare Case Managers">Compare</button>
+                        </div>
+                    </div>
+
+                    <!-- Context banner -->
+                    <div class="dashboard-context-banner" id="summary-context-banner">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <span>Viewing: <span class="context-label" id="summary-context-label"></span></span>
+                        <button class="context-clear" id="summary-context-clear">Clear</button>
+                    </div>
+
+                    <!-- Filter pills -->
+                    <div class="dashboard-filter-row">
+                        <div class="dashboard-filter-pills" id="summary-filter-pills">
+                            <button type="button" class="dashboard-pill active" data-period="30day">30 School Days</button>
+                            <button type="button" class="dashboard-pill" data-period="weekly">Past Week</button>
+                            <button type="button" class="dashboard-pill" data-period="current_year">Current Year</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter1">Q1</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter2">Q2</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter3">Q3</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter4">Q4</button>
+                            <button type="button" class="dashboard-pill" data-period="all_time">All Time</button>
+                        </div>
+                        <button type="button" class="dashboard-compare-toggle" id="summary-compare-toggle">Compare</button>
+                    </div>
+
+                    <!-- Comparison controls (hidden by default) -->
+                    <div class="dashboard-compare-controls" id="summary-compare-controls">
+                        <select id="quarter-select">
+                            <option value="">Select Comparison</option>
+                            <option value="30day_to_30day">30 Day to 30 Day</option>
+                            <option value="month">Month to Month</option>
+                            <option value="quarter">Quarter to Quarter</option>
+                            <option value="year">Year to Year</option>
+                            <option value="alltime">All Time</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="summary-period-select">Timeframe:</label>
-                    <select id="summary-period-select">
-                        <option value="">Select Timeframe</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="30day">30 Day</option>
-                        <option value="current_year">Current Year</option>
-                        <option value="quarter1">Quarter 1</option>
-                        <option value="quarter2">Quarter 2</option>
-                        <option value="quarter3">Quarter 3</option>
-                        <option value="quarter4">Quarter 4</option>
-                        <option value="all_time">All Time</option>
-                        <option value="previous_years">Previous Years</option>
-                    </select>
+
+                <!-- Hidden select for backwards compatibility with existing JS -->
+                <select id="summary-student-select" style="display:none"><option value="">All Students</option></select>
+                <select id="summary-period-select" style="display:none"><option value="">Select Timeframe</option></select>
+
+                <div id="summary-results">
+                    <div class="dashboard-empty">
+                        <div class="dashboard-empty-icon">&#128202;</div>
+                        <p>Select a timeframe to view summary data</p>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="quarter-select">Timeframe Comparison:</label>
-                    <select id="quarter-select">
-                        <option value="">Select Timeframe Comparison</option>
-                        <option value="30day_to_30day">30 Day to 30 Day</option>
-                        <option value="month">Month to Month</option>
-                        <option value="quarter">Quarter to Quarter</option>
-                        <option value="year">Year to Year</option>
-                        <option value="alltime">All Time</option>
-                    </select>
-                </div>
-                <button id="load-summary-btn" class="btn-primary">Load Summary</button>
-                <button type="button" id="print-summary-btn" class="btn-secondary" style="margin-left: 10px;" disabled>Print</button>
-                <button id="compare-case-managers-btn" class="btn-secondary" style="margin-left: 10px;">Compare Case Managers</button>
-                <button id="show-point-card-btn" class="btn-secondary" style="display: none; margin-left: 10px;">Show Point Card Data</button>
-                
-                <div id="summary-results"></div>
                 <div id="point-card-data-container" style="display: none; margin-top: 30px;"></div>
             </div>
         </div>
@@ -254,49 +279,71 @@
         <div id="frenzy-view" class="view">
             <div class="form-section">
                 <h2>Frenzy Statistics</h2>
-                <div class="form-group">
-                    <label for="frenzy-student-select" style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;">
-                        <span>Student:</span>
+
+                <div class="dashboard-controls">
+                    <div class="dashboard-search-row">
+                        <div class="dashboard-search-wrap" id="frenzy-student-search-wrap">
+                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" id="frenzy-student-search" placeholder="Search student..." autocomplete="off">
+                            <div class="dashboard-search-dropdown" id="frenzy-student-dropdown"></div>
+                        </div>
                         {% if user.role in ['staff', 'admin'] %}
-                        <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; margin-left: 40px;">
-                            <input type="checkbox" id="frenzy-managed-by-me-checkbox" style="cursor: pointer;">
-                            <span>Show students managed by me</span>
+                        <div class="dashboard-search-wrap" id="frenzy-staff-search-wrap">
+                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            <input type="text" id="frenzy-staff-search" placeholder="Search staff..." autocomplete="off">
+                            <div class="dashboard-search-dropdown" id="frenzy-staff-dropdown"></div>
+                        </div>
+                        <label class="dashboard-managed-check">
+                            <input type="checkbox" id="frenzy-managed-by-me-checkbox">
+                            <span>Managed by me</span>
                         </label>
                         {% endif %}
-                    </label>
-                    <select id="frenzy-student-select">
-                        <option value="">All Students</option>
-                    </select>
+                        <div class="dashboard-toolbar">
+                            <button type="button" id="print-frenzy-btn" disabled title="Print">Print</button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-context-banner" id="frenzy-context-banner">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <span>Viewing: <span class="context-label" id="frenzy-context-label"></span></span>
+                        <button class="context-clear" id="frenzy-context-clear">Clear</button>
+                    </div>
+
+                    <div class="dashboard-filter-row">
+                        <div class="dashboard-filter-pills" id="frenzy-filter-pills">
+                            <button type="button" class="dashboard-pill active" data-period="30day">30 School Days</button>
+                            <button type="button" class="dashboard-pill" data-period="current_year">Current Year</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter1">Q1</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter2">Q2</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter3">Q3</button>
+                            <button type="button" class="dashboard-pill" data-period="quarter4">Q4</button>
+                            <button type="button" class="dashboard-pill" data-period="all_time">All Time</button>
+                        </div>
+                        <button type="button" class="dashboard-compare-toggle" id="frenzy-compare-toggle">Compare</button>
+                    </div>
+
+                    <div class="dashboard-compare-controls" id="frenzy-compare-controls">
+                        <select id="frenzy-timeframe-select">
+                            <option value="">Select Comparison</option>
+                            <option value="30day_to_30day">30 Day to 30 Day</option>
+                            <option value="month">Month to Month</option>
+                            <option value="quarter">Quarter to Quarter</option>
+                            <option value="year">Year to Year</option>
+                            <option value="alltime">All Time</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="frenzy-period-select">Timeframe:</label>
-                    <select id="frenzy-period-select">
-                        <option value="">Select Timeframe</option>
-                        <option value="30day">30 Day</option>
-                        <option value="current_year">Current Year</option>
-                        <option value="quarter1">Quarter 1</option>
-                        <option value="quarter2">Quarter 2</option>
-                        <option value="quarter3">Quarter 3</option>
-                        <option value="quarter4">Quarter 4</option>
-                        <option value="all_time">All Time</option>
-                        <option value="previous_years">Previous Years</option>
-                    </select>
+
+                <!-- Hidden selects for backwards compatibility -->
+                <select id="frenzy-student-select" style="display:none"><option value="">All Students</option></select>
+                <select id="frenzy-period-select" style="display:none"><option value="">Select Timeframe</option></select>
+
+                <div id="frenzy-results">
+                    <div class="dashboard-empty">
+                        <div class="dashboard-empty-icon">&#9889;</div>
+                        <p>Select a timeframe to view frenzy statistics</p>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="frenzy-timeframe-select">Timeframe Comparison:</label>
-                    <select id="frenzy-timeframe-select">
-                        <option value="">Select Timeframe Comparison</option>
-                        <option value="30day_to_30day">30 Day to 30 Day</option>
-                        <option value="month">Month to Month</option>
-                        <option value="quarter">Quarter to Quarter</option>
-                        <option value="year">Year to Year</option>
-                        <option value="alltime">All Time</option>
-                    </select>
-                </div>
-                <button id="load-frenzy-stats-btn" class="btn-primary">Load Statistics</button>
-                <button type="button" id="print-frenzy-btn" class="btn-secondary" style="margin-left: 10px;" disabled>Print</button>
-                
-                <div id="frenzy-results"></div>
             </div>
         </div>
 

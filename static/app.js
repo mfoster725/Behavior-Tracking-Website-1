@@ -15659,12 +15659,14 @@ function viewChildRecords(studentId) {
     if (document.getElementById('summary-student-select')) {
         document.getElementById('summary-student-select').value = studentId;
     }
-    switchView('summary');
-    // Trigger summary load if possible
-    const loadBtn = document.getElementById('load-summary-btn');
-    if (loadBtn) {
-        setTimeout(() => loadBtn.click(), 100);
+    const student = (allStudents || []).find(s => s.id === studentId);
+    if (student && dashboardState) {
+        dashboardState.summary.studentId = studentId;
+        dashboardState.summary.studentName = student.name;
+        updateContextBanner('summary');
     }
+    switchView('summary');
+    setTimeout(() => triggerDashboardLoad('summary'), 100);
 }
 
 // Open amendment request modal
@@ -15820,6 +15822,752 @@ async function exportChildData(studentId) {
         console.error('Error exporting data:', error);
         showMessage('Error exporting data. Please try again.', 'error');
     }
+}
+
+// ============================================================
+//  DASHBOARD — Search, Filters, Card Rendering
+// ============================================================
+
+const DASHBOARD_COLORS = {
+    safety: '#60A5FA',
+    teamwork: '#34D399',
+    accountability: '#FBBF24',
+    relationships: '#F97316',
+    palette: ['#60A5FA', '#34D399', '#FBBF24', '#F97316', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
+};
+
+// ---- State ----
+let dashboardState = {
+    summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false },
+    frenzy:  { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false }
+};
+
+let summaryChartInstance = null;
+let frenzyChartInstance = null;
+
+// ---- Autocomplete Search ----
+function setupDashboardSearch(prefix, type) {
+    const input = document.getElementById(`${prefix}-${type}-search`);
+    const dropdown = document.getElementById(`${prefix}-${type}-dropdown`);
+    if (!input || !dropdown) return;
+
+    let debounceTimer = null;
+
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            const q = input.value.trim().toLowerCase();
+            if (q.length < 1) { dropdown.classList.remove('active'); return; }
+            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            const matches = list.filter(item => {
+                const name = (item.name || '').toLowerCase();
+                const uname = (item.username || '').toLowerCase();
+                return name.includes(q) || uname.includes(q);
+            }).slice(0, 12);
+            if (matches.length === 0) { dropdown.classList.remove('active'); return; }
+            dropdown.innerHTML = matches.map(item => {
+                const label = item.name || item.username;
+                const meta = type === 'staff' ? (item.designation || item.role || '') : '';
+                return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
+                    <span class="search-label">${escapeHtml(label)}</span>
+                    ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
+                </div>`;
+            }).join('');
+            dropdown.classList.add('active');
+        }, 150);
+    });
+
+    dropdown.addEventListener('click', (e) => {
+        const opt = e.target.closest('.dashboard-search-option');
+        if (!opt) return;
+        const id = parseInt(opt.dataset.id);
+        const name = opt.dataset.name;
+        input.value = name;
+        dropdown.classList.remove('active');
+        const page = prefix.replace('-student', '').replace('-staff', '');
+        const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+        if (type === 'student') {
+            dashboardState[pageKey].studentId = id;
+            dashboardState[pageKey].studentName = name;
+            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+            if (hiddenSelect) hiddenSelect.value = id;
+        } else {
+            dashboardState[pageKey].staffId = id;
+            dashboardState[pageKey].staffName = name;
+        }
+        updateContextBanner(pageKey);
+        triggerDashboardLoad(pageKey);
+    });
+
+    input.addEventListener('focus', () => {
+        if (dropdown.children.length > 0 && input.value.trim().length > 0) {
+            dropdown.classList.add('active');
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest(`#${prefix}-${type}-search-wrap`)) {
+            dropdown.classList.remove('active');
+        }
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') dropdown.classList.remove('active');
+        if (e.key === 'Backspace' && input.value.length <= 1) {
+            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+            if (type === 'student') {
+                dashboardState[pageKey].studentId = null;
+                dashboardState[pageKey].studentName = null;
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = '';
+            } else {
+                dashboardState[pageKey].staffId = null;
+                dashboardState[pageKey].staffName = null;
+            }
+            updateContextBanner(pageKey);
+        }
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function updateContextBanner(pageKey) {
+    const banner = document.getElementById(`${pageKey}-context-banner`);
+    const label = document.getElementById(`${pageKey}-context-label`);
+    if (!banner || !label) return;
+    const st = dashboardState[pageKey];
+    if (st.studentName || st.staffName) {
+        let text = '';
+        if (st.staffName) text = `${st.staffName}'s Students`;
+        if (st.studentName) text = st.studentName;
+        if (st.staffName && st.studentName) text = `${st.studentName} (via ${st.staffName})`;
+        label.textContent = text;
+        banner.classList.add('active');
+    } else {
+        banner.classList.remove('active');
+    }
+}
+
+// ---- Filter Pills ----
+function setupFilterPills(pageKey) {
+    const container = document.getElementById(`${pageKey}-filter-pills`);
+    if (!container) return;
+    container.addEventListener('click', (e) => {
+        const pill = e.target.closest('.dashboard-pill');
+        if (!pill) return;
+        container.querySelectorAll('.dashboard-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        dashboardState[pageKey].period = pill.dataset.period;
+        dashboardState[pageKey].compareMode = false;
+        const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
+        if (compareToggle) compareToggle.classList.remove('active');
+        const compareControls = document.getElementById(`${pageKey}-compare-controls`);
+        if (compareControls) compareControls.classList.remove('active');
+        triggerDashboardLoad(pageKey);
+    });
+}
+
+function setupCompareToggle(pageKey) {
+    const toggle = document.getElementById(`${pageKey}-compare-toggle`);
+    const controls = document.getElementById(`${pageKey}-compare-controls`);
+    if (!toggle || !controls) return;
+    toggle.addEventListener('click', () => {
+        const isActive = toggle.classList.toggle('active');
+        controls.classList.toggle('active', isActive);
+        dashboardState[pageKey].compareMode = isActive;
+        if (!isActive) {
+            triggerDashboardLoad(pageKey);
+        }
+    });
+    const select = controls.querySelector('select');
+    if (select) {
+        select.addEventListener('change', () => {
+            if (select.value) triggerDashboardLoad(pageKey);
+        });
+    }
+}
+
+function setupContextClear(pageKey) {
+    const clearBtn = document.getElementById(`${pageKey}-context-clear`);
+    if (!clearBtn) return;
+    clearBtn.addEventListener('click', () => {
+        dashboardState[pageKey].studentId = null;
+        dashboardState[pageKey].studentName = null;
+        dashboardState[pageKey].staffId = null;
+        dashboardState[pageKey].staffName = null;
+        const studentSearch = document.getElementById(`${pageKey}-student-search`);
+        const staffSearch = document.getElementById(`${pageKey}-staff-search`);
+        if (studentSearch) studentSearch.value = '';
+        if (staffSearch) staffSearch.value = '';
+        const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+        if (hiddenSelect) hiddenSelect.value = '';
+        updateContextBanner(pageKey);
+        triggerDashboardLoad(pageKey);
+    });
+}
+
+// ---- Load Trigger ----
+function triggerDashboardLoad(pageKey) {
+    if (pageKey === 'summary') loadSummaryDashboard();
+    else loadFrenzyDashboard();
+}
+
+// ---- Summary Dashboard ----
+async function loadSummaryDashboard() {
+    const st = dashboardState.summary;
+    const container = document.getElementById('summary-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading summary...</p></div>';
+
+    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
+    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
+    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
+    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
+
+    const params = [];
+    if (st.compareMode) {
+        const selectEl = document.getElementById('quarter-select');
+        const tf = selectEl ? selectEl.value : '';
+        if (tf) params.push(`timeframe=${tf}`);
+        if (tf === 'month') {
+            const sySelect = document.getElementById('summary-school-year-select');
+            const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+            if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+        }
+    } else {
+        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
+    }
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+
+    const url = '/api/summary?' + params.join('&');
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        window.currentSummaryData = data;
+
+        const printBtn = document.getElementById('print-summary-btn');
+        if (printBtn) printBtn.disabled = false;
+
+        if (data.comparison_mode && data.periods) {
+            renderSummaryComparison(container, data);
+        } else {
+            renderSummarySingle(container, data);
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
+    }
+}
+
+function renderSummarySingle(container, data) {
+    const avgs = data.averages || {};
+    const totalDays = data.total_days || 0;
+    const infractions = data.infractions || data.additional_info?.infractions || {};
+    const totalInfractions = Object.values(infractions).reduce((s, c) => s + c, 0);
+    const reminders = data.additional_info?.total_reminders || 0;
+    const resets = data.additional_info?.total_resets || 0;
+    const frenzies = data.total_frenzies || 0;
+    const byClass = data.by_class || {};
+    const byDay = data.by_day_of_week || {};
+
+    let html = `<div class="dashboard-card-grid">`;
+
+    // STAR Performance Chart Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">STAR Performance</h3>
+                <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap"><canvas id="summary-star-chart"></canvas></div>
+    </div>`;
+
+    // Overview Stats Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Overview</h3></div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDays}</div><div class="dashboard-stat-label">Days</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${Math.round(avgs.overall || 0)}%</div><div class="dashboard-stat-label">Overall</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${frenzies}</div><div class="dashboard-stat-label">Frenzies</div></div>
+        </div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div><div class="dashboard-stat-label">Infractions</div></div>
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#D97706">${reminders}</div><div class="dashboard-stat-label">Reminders</div></div>
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#6366F1">${resets}</div><div class="dashboard-stat-label">Resets</div></div>
+        </div>
+    </div>`;
+
+    // Class Breakdown Card
+    const classNames = Object.keys(byClass);
+    if (classNames.length > 0) {
+        html += `<div class="dashboard-card">
+            <div class="dashboard-card-header"><h3 class="dashboard-card-title">Class Breakdown</h3></div>
+            <ul class="dashboard-breakdown-list">`;
+        classNames.forEach((cls, i) => {
+            const cd = byClass[cls];
+            const pctOverall = cd.percentages?.overall ?? '';
+            const dotColor = DASHBOARD_COLORS.palette[i % DASHBOARD_COLORS.palette.length];
+            html += `<li class="dashboard-breakdown-item">
+                <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${dotColor}"></span>${escapeHtml(cls)}</span>
+                <span><span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span><span class="dashboard-breakdown-meta">${cd.total_days || 0} days</span></span>
+            </li>`;
+        });
+        html += `</ul></div>`;
+    }
+
+    // Infractions / Reminders Log Card
+    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Recent Log</h3></div>`;
+    if (infractionKeys.length > 0 || reminders > 0 || resets > 0) {
+        html += `<div class="dashboard-log-list">`;
+        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
+            html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-red">${escapeHtml(k)}</span></span><span class="log-count">${infractions[k]}</span></div>`;
+        });
+        if (reminders > 0) html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-amber">Reminders</span></span><span class="log-count">${reminders}</span></div>`;
+        if (resets > 0) html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-blue">Resets</span></span><span class="log-count">${resets}</span></div>`;
+        html += `</div>`;
+    } else {
+        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions or reminders for this period.</p>`;
+    }
+    html += `</div>`;
+
+    // Day of Week Chart Card
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const hasDayData = dayOrder.some(d => byDay[d]);
+    if (hasDayData) {
+        html += `<div class="dashboard-card full-width">
+            <div class="dashboard-card-header"><h3 class="dashboard-card-title">Day of Week Breakdown</h3></div>
+            <div class="dashboard-chart-wrap" style="height:200px"><canvas id="summary-day-chart"></canvas></div>
+        </div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render STAR Chart
+    const starCanvas = document.getElementById('summary-star-chart');
+    if (starCanvas && typeof Chart !== 'undefined') {
+        if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
+        summaryChartInstance = new Chart(starCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: ['Safety', 'Teamwork', 'Accountability', 'Relationships'],
+                datasets: [{
+                    label: 'Average %',
+                    data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
+                    backgroundColor: [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships],
+                    borderRadius: 8,
+                    borderSkipped: false,
+                    maxBarThickness: 48
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // Render Day of Week Chart
+    const dayCanvas = document.getElementById('summary-day-chart');
+    if (dayCanvas && typeof Chart !== 'undefined' && hasDayData) {
+        const dayLabels = dayOrder.filter(d => byDay[d]);
+        const dayData = dayLabels.map(d => byDay[d]?.percentages?.overall || 0);
+        new Chart(dayCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: dayLabels.map(d => d.substring(0, 3)),
+                datasets: [{
+                    label: 'Overall %',
+                    data: dayData,
+                    backgroundColor: '#60A5FA',
+                    borderRadius: 6,
+                    maxBarThickness: 40
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+function renderSummaryComparison(container, data) {
+    const periods = Object.keys(data.periods || {});
+    if (periods.length === 0) {
+        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
+        return;
+    }
+    let html = `<div class="dashboard-card-grid">`;
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Comparison</h3></div>
+        <div class="dashboard-chart-wrap" style="height:280px"><canvas id="summary-compare-chart"></canvas></div>
+    </div>`;
+
+    // Comparison table
+    html += `<div class="dashboard-card full-width">
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+        <thead><tr style="background:var(--bg-elevated);">
+            <th style="padding:10px 12px;border:1px solid var(--border);text-align:left;">Metric</th>`;
+    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
+    html += `</tr></thead><tbody>`;
+    const rows = [
+        { label: 'Total Days', get: p => p.total_days || 0 },
+        { label: 'Safety %', get: p => Math.round(p.percentages?.safety || p.averages?.safety || 0) + '%' },
+        { label: 'Teamwork %', get: p => Math.round(p.percentages?.teamwork || p.averages?.teamwork || 0) + '%' },
+        { label: 'Accountability %', get: p => Math.round(p.percentages?.accountability || p.averages?.accountability || 0) + '%' },
+        { label: 'Relationships %', get: p => Math.round(p.percentages?.relationships || p.averages?.relationships || 0) + '%' },
+        { label: 'Overall %', get: p => Math.round(p.percentages?.overall || p.averages?.overall || 0) + '%' },
+        { label: 'Infractions', get: p => Object.values(p.infractions || {}).reduce((s, c) => s + c, 0) },
+        { label: 'Reminders', get: p => p.additional_info?.total_reminders || 0 },
+        { label: 'Resets', get: p => p.additional_info?.total_resets || 0 }
+    ];
+    rows.forEach(r => {
+        html += `<tr><td style="padding:8px 12px;border:1px solid var(--border);font-weight:500;">${r.label}</td>`;
+        periods.forEach(p => {
+            html += `<td style="padding:8px 12px;border:1px solid var(--border);text-align:center;">${r.get(data.periods[p])}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render comparison chart
+    const canvas = document.getElementById('summary-compare-chart');
+    if (canvas && typeof Chart !== 'undefined') {
+        if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
+        const cats = ['safety', 'teamwork', 'accountability', 'relationships'];
+        const colors = [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships];
+        summaryChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: periods,
+                datasets: cats.map((c, i) => ({
+                    label: c.charAt(0).toUpperCase() + c.slice(1),
+                    data: periods.map(p => {
+                        const pd = data.periods[p];
+                        return pd.percentages?.[c] || pd.averages?.[c] || 0;
+                    }),
+                    backgroundColor: colors[i],
+                    borderRadius: 6,
+                    maxBarThickness: 32
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+// ---- Frenzy Dashboard ----
+async function loadFrenzyDashboard() {
+    const st = dashboardState.frenzy;
+    const container = document.getElementById('frenzy-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading frenzy stats...</p></div>';
+
+    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
+    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
+    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
+    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
+
+    const params = [];
+    if (st.compareMode) {
+        const selectEl = document.getElementById('frenzy-timeframe-select');
+        const tf = selectEl ? selectEl.value : '';
+        if (tf) params.push(`timeframe=${tf}`);
+        if (tf === 'month') {
+            const sySelect = document.getElementById('frenzy-school-year-select');
+            const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+            if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+        }
+    } else {
+        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
+    }
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+
+    const url = '/api/frenzy-stats?' + params.join('&');
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        window.currentFrenzyStatsData = data;
+
+        const printBtn = document.getElementById('print-frenzy-btn');
+        if (printBtn) printBtn.disabled = false;
+
+        if (data.comparison_mode && data.periods) {
+            renderFrenzyComparison(container, data);
+        } else {
+            renderFrenzySingle(container, data);
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading frenzy stats: ${err.message}</p></div>`;
+    }
+}
+
+function renderFrenzySingle(container, data) {
+    const totalCount = data.total_count || 0;
+    const totalDuration = data.total_duration || 0;
+    const avgDuration = data.avg_duration || 0;
+    const byDay = data.by_day || {};
+    const byLocation = data.by_location || {};
+    const byPurpose = data.by_purpose || {};
+    const allPurposes = data.all_purposes || [];
+    const allResults = data.all_results || [];
+
+    let html = `<div class="dashboard-card-grid">`;
+
+    // Frenzy Frequency Chart
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const hasDayData = dayOrder.some(d => byDay[d]);
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Frenzy Frequency</h3>
+                <div class="dashboard-card-subtitle">${totalCount} total frenzy event${totalCount !== 1 ? 's' : ''}</div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap"><canvas id="frenzy-freq-chart"></canvas></div>
+    </div>`;
+
+    // Duration Stats Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Duration Breakdown</h3></div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalCount}</div><div class="dashboard-stat-label">Total</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDuration}</div><div class="dashboard-stat-label">Minutes</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0'}</div><div class="dashboard-stat-label">Avg Min</div></div>
+        </div>`;
+
+    // By-location breakdown
+    const locKeys = Object.keys(byLocation);
+    if (locKeys.length > 0) {
+        html += `<ul class="dashboard-breakdown-list" style="margin-top:12px;">`;
+        locKeys.sort((a, b) => (byLocation[b].count || 0) - (byLocation[a].count || 0)).forEach((loc, i) => {
+            const ld = byLocation[loc];
+            const dotColor = DASHBOARD_COLORS.palette[i % DASHBOARD_COLORS.palette.length];
+            html += `<li class="dashboard-breakdown-item">
+                <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${dotColor}"></span>${escapeHtml(loc)}</span>
+                <span><span class="dashboard-breakdown-value">${ld.count || 0}</span><span class="dashboard-breakdown-meta">${ld.duration || 0} min</span></span>
+            </li>`;
+        });
+        html += `</ul>`;
+    }
+    html += `</div>`;
+
+    // Purpose & Results Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Purpose</h3></div>`;
+    const purposeKeys = Object.keys(byPurpose);
+    if (purposeKeys.length > 0) {
+        html += `<div class="dashboard-log-list">`;
+        purposeKeys.sort((a, b) => (byPurpose[b].count || 0) - (byPurpose[a].count || 0)).forEach(p => {
+            html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-blue">${escapeHtml(p)}</span></span><span class="log-count">${byPurpose[p].count || 0}</span></div>`;
+        });
+        html += `</div>`;
+    } else {
+        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No purpose data recorded.</p>`;
+    }
+    if (allResults.length > 0) {
+        html += `<div style="margin-top:16px;"><div class="dashboard-card-subtitle" style="margin-bottom:8px;">Results</div>`;
+        html += `<div class="dashboard-tag-cloud">`;
+        const resultCounts = {};
+        allResults.forEach(r => { resultCounts[r] = (resultCounts[r] || 0) + 1; });
+        Object.keys(resultCounts).sort((a, b) => resultCounts[b] - resultCounts[a]).forEach(r => {
+            html += `<span class="dashboard-tag">${escapeHtml(r)}<span class="tag-count">${resultCounts[r]}</span></span>`;
+        });
+        html += `</div></div>`;
+    }
+    html += `</div>`;
+
+    // Day-of-week detail card
+    if (hasDayData) {
+        html += `<div class="dashboard-card">
+            <div class="dashboard-card-header"><h3 class="dashboard-card-title">By Day of Week</h3></div>
+            <ul class="dashboard-breakdown-list">`;
+        dayOrder.forEach((d, i) => {
+            const dd = byDay[d];
+            if (dd) {
+                html += `<li class="dashboard-breakdown-item">
+                    <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${DASHBOARD_COLORS.palette[i]}"></span>${d.substring(0, 3)}</span>
+                    <span><span class="dashboard-breakdown-value">${dd.count || 0}</span><span class="dashboard-breakdown-meta">${dd.duration || 0} min</span></span>
+                </li>`;
+            }
+        });
+        html += `</ul></div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render Frenzy Frequency Chart
+    const freqCanvas = document.getElementById('frenzy-freq-chart');
+    if (freqCanvas && typeof Chart !== 'undefined') {
+        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
+        const labels = dayOrder;
+        const counts = labels.map(d => byDay[d]?.count || 0);
+        frenzyChartInstance = new Chart(freqCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: labels.map(d => d.substring(0, 3)),
+                datasets: [{
+                    label: 'Frenzies',
+                    data: counts,
+                    backgroundColor: '#F97316',
+                    borderRadius: 8,
+                    maxBarThickness: 48
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+function renderFrenzyComparison(container, data) {
+    const periods = Object.keys(data.periods || {});
+    if (periods.length === 0) {
+        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
+        return;
+    }
+    let html = `<div class="dashboard-card-grid">`;
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Frenzy Comparison</h3></div>
+        <div class="dashboard-chart-wrap" style="height:260px"><canvas id="frenzy-compare-chart"></canvas></div>
+    </div>`;
+    html += `<div class="dashboard-card full-width">
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+        <thead><tr style="background:var(--bg-elevated);">
+            <th style="padding:10px 12px;border:1px solid var(--border);text-align:left;">Metric</th>`;
+    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
+    html += `</tr></thead><tbody>`;
+    const rows = [
+        { label: 'Total Frenzies', get: p => p.total_count || 0 },
+        { label: 'Total Duration (min)', get: p => p.total_duration || 0 },
+        { label: 'Avg Duration (min)', get: p => typeof p.avg_duration === 'number' ? p.avg_duration.toFixed(1) : '0' }
+    ];
+    rows.forEach(r => {
+        html += `<tr><td style="padding:8px 12px;border:1px solid var(--border);font-weight:500;">${r.label}</td>`;
+        periods.forEach(p => {
+            html += `<td style="padding:8px 12px;border:1px solid var(--border);text-align:center;">${r.get(data.periods[p])}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table></div></div></div>`;
+    container.innerHTML = html;
+
+    const canvas = document.getElementById('frenzy-compare-chart');
+    if (canvas && typeof Chart !== 'undefined') {
+        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
+        frenzyChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: periods,
+                datasets: [
+                    { label: 'Total Frenzies', data: periods.map(p => data.periods[p].total_count || 0), backgroundColor: '#F97316', borderRadius: 6, maxBarThickness: 32 },
+                    { label: 'Avg Duration (min)', data: periods.map(p => data.periods[p].avg_duration || 0), backgroundColor: '#60A5FA', borderRadius: 6, maxBarThickness: 32 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+// ---- Initialize Dashboard ----
+function initDashboard() {
+    ['summary', 'frenzy'].forEach(pageKey => {
+        setupDashboardSearch(`${pageKey}`, 'student');
+        setupDashboardSearch(`${pageKey}`, 'staff');
+        setupFilterPills(pageKey);
+        setupCompareToggle(pageKey);
+        setupContextClear(pageKey);
+    });
+
+    // Wire managed-by-me checkboxes
+    const summaryManagedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (summaryManagedCheckbox) {
+        summaryManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('summary'));
+    }
+    const frenzyManagedCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+    if (frenzyManagedCheckbox) {
+        frenzyManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('frenzy'));
+    }
+}
+
+// Auto-load when switching to summary or frenzy tab
+const origNavHandler = document.querySelectorAll('.nav-btn');
+origNavHandler.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const view = btn.dataset.view;
+        if (view === 'summary') {
+            setTimeout(() => triggerDashboardLoad('summary'), 100);
+        } else if (view === 'frenzy') {
+            setTimeout(() => triggerDashboardLoad('frenzy'), 100);
+        }
+    });
+});
+
+// Init when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    setTimeout(initDashboard, 0);
 }
 
 // Expose functions to window
