@@ -1803,6 +1803,9 @@ table tbody tr:hover {
 .daily-submit-cell {
     background: var(--bg-page);
     padding: 4px 6px;
+    /* Round the bottom of the submit row background cards */
+    border-bottom-left-radius: var(--radius-md);
+    border-bottom-right-radius: var(--radius-md);
     justify-content: center;
 }
 
