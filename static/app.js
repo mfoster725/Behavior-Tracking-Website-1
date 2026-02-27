@@ -2660,7 +2660,6 @@ function renderDailyGrid() {
             attendanceSelect.style.padding = '4px 8px';
             attendanceSelect.style.fontSize = '11px';
             attendanceSelect.style.border = '1px solid #ddd';
-            attendanceSelect.style.borderRadius = '4px';
             attendanceSelect.style.background = 'white';
             attendanceSelect.style.cursor = 'pointer';
             

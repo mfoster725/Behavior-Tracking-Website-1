@@ -831,6 +831,11 @@ table tbody tr:hover {
     cursor: pointer;
 }
 
+/* Attendance dropdown styling (match global corner radius) */
+.attendance-select {
+    border-radius: var(--radius-sm);
+}
+
 .quarter-display {
     padding: 0.5rem 0.75rem;
     background: var(--bg-elevated);
