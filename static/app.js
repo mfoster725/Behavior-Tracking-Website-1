@@ -1876,28 +1876,16 @@ function renderStudentsGrid() {
         return;
     }
 
-    // Reuse the same grid structure as daily grid
-    const spacerWidth = '7px';
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            return 'repeat(4, 40px) 40px';
-        } else {
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
-    
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    grid.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    // Grid columns: Period + (5 columns per student: S, T, A, R, I) — no gutters between students
+    const studentColumns = studentsToDisplay.map(() => 'repeat(4, 40px) 40px').join(' ');
+    header.style.gridTemplateColumns = `120px ${studentColumns}`;
+    grid.style.gridTemplateColumns = `120px ${studentColumns}`;
 
     // 1. Period/Location Header
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period';
     periodHeader.textContent = currentPeriod || 'Period';
     header.appendChild(periodHeader);
-
-    const periodSpacer = document.createElement('div');
-    periodSpacer.style.background = 'var(--bg-elevated)';
-    header.appendChild(periodSpacer);
 
     // Helper function to get background color from card_color (opaque, similar to STAR colors)
     const getCardColor = (cardColor) => {
@@ -1924,12 +1912,6 @@ function renderStudentsGrid() {
         }
         
         header.appendChild(studentHeader);
-        
-        if (index < studentsToDisplay.length - 1) {
-            const spacerHeader = document.createElement('div');
-            spacerHeader.style.background = 'var(--bg-elevated)';
-            header.appendChild(spacerHeader);
-        }
     });
 
     // 3. Category Labels (S, T, A, R, I)
@@ -1939,11 +1921,7 @@ function renderStudentsGrid() {
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
     
-    const emptySpacerCell = document.createElement('div');
-    emptySpacerCell.style.background = 'var(--bg-elevated)';
-    header.appendChild(emptySpacerCell);
-    
-    studentsToDisplay.forEach((student, index) => {
+    studentsToDisplay.forEach((student) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
@@ -1952,12 +1930,6 @@ function renderStudentsGrid() {
             catHeader.dataset.category = categoryKeys[labelIndex];
             header.appendChild(catHeader);
         });
-        
-        if (index < studentsToDisplay.length - 1) {
-            const spacerSubHeader = document.createElement('div');
-            spacerSubHeader.style.background = 'var(--bg-elevated)';
-            header.appendChild(spacerSubHeader);
-        }
     });
 
     // 4. Data Row
@@ -1966,10 +1938,6 @@ function renderStudentsGrid() {
     periodCell.className = 'daily-period-cell';
     periodCell.textContent = currentPeriod || '';
     grid.appendChild(periodCell);
-
-    const rowSpacer = document.createElement('div');
-    rowSpacer.style.background = 'var(--bg-elevated)';
-    grid.appendChild(rowSpacer);
 
     // Data cells for each student
     studentsToDisplay.forEach((student, studentIndex) => {
@@ -2064,12 +2032,6 @@ function renderStudentsGrid() {
         infoButton.addEventListener('click', showInfoModal);
         infoCell.appendChild(infoButton);
         grid.appendChild(infoCell);
-        
-        if (studentIndex < studentsToDisplay.length - 1) {
-            const spacerCell = document.createElement('div');
-            spacerCell.style.background = 'var(--bg-elevated)';
-            grid.appendChild(spacerCell);
-        }
     });
     
     // Add percentage row
@@ -2080,11 +2042,6 @@ function renderStudentsGrid() {
     percentLabel.style.borderTop = '2px solid #000';
     percentLabel.style.background = '#f8f9fa';
     grid.appendChild(percentLabel);
-    
-    const percentSpacer = document.createElement('div');
-    percentSpacer.style.background = 'var(--bg-elevated)';
-    percentSpacer.style.borderTop = '2px solid #000';
-    grid.appendChild(percentSpacer);
     
     // Calculate and display percentage for each student
     studentsToDisplay.forEach((student, studentIndex) => {
@@ -2154,13 +2111,6 @@ function renderStudentsGrid() {
         }
         
         grid.appendChild(overallCell);
-        
-        if (studentIndex < studentsToDisplay.length - 1) {
-            const spacerCell = document.createElement('div');
-            spacerCell.style.background = 'var(--bg-elevated)';
-            spacerCell.style.borderTop = '2px solid #000';
-            grid.appendChild(spacerCell);
-        }
     });
     
     // Update "I" box highlights for all students on initial load
@@ -2572,31 +2522,16 @@ function renderDailyGrid() {
         return;
     }
 
-    // Calculate grid columns: Period + spacer + (5 columns per student: S, T, A, R, I + 1 spacer between)
-    const spacerWidth = '7px'; // 1/4 of original 27px
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            // Last student - no spacer after (4 STAR columns + 1 Info column)
-            return 'repeat(4, 40px) 40px';
-        } else {
-            // Add spacer after student (4 STAR columns + 1 Info column + spacer)
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
-    
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    body.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    // Grid columns: Period + (5 columns per student: S, T, A, R, I) — no gutters between students
+    const studentColumns = studentsToDisplay.map(() => 'repeat(4, 40px) 40px').join(' ');
+    header.style.gridTemplateColumns = `120px ${studentColumns}`;
+    body.style.gridTemplateColumns = `120px ${studentColumns}`;
 
     // Create header row
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period';
     periodHeader.textContent = 'Period';
     header.appendChild(periodHeader);
-
-    // Add spacer after period column
-    const periodSpacer = document.createElement('div');
-    periodSpacer.style.background = 'var(--bg-elevated)';
-    header.appendChild(periodSpacer);
 
     // Helper function to get background color from card_color (opaque, similar to STAR colors)
     const getCardColor = (cardColor) => {
@@ -2681,14 +2616,6 @@ function renderDailyGrid() {
         }
         
         header.appendChild(studentHeader);
-        
-        // Add spacer cell after each student (except the last)
-        if (index < studentsToDisplay.length - 1) {
-            const spacerHeader = document.createElement('div');
-            spacerHeader.style.background = 'var(--bg-elevated)';
-            spacerHeader.style.gridColumn = 'span 1';
-            header.appendChild(spacerHeader);
-        }
     });
 
     // Sub-headers for S, T, A, R, I under each student
@@ -2702,11 +2629,6 @@ function renderDailyGrid() {
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
     
-    // Empty spacer cell after period column
-    const emptySpacerCell = document.createElement('div');
-    emptySpacerCell.style.background = 'var(--bg-elevated)';
-    header.appendChild(emptySpacerCell);
-    
     // S, T, A, R, I headers for each student
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
@@ -2718,14 +2640,6 @@ function renderDailyGrid() {
             catHeader.dataset.category = categoryKeys[labelIndex];
             header.appendChild(catHeader);
         });
-        
-        // Add spacer cell after each student (except the last)
-        if (index < studentsToDisplay.length - 1) {
-            const spacerSubHeader = document.createElement('div');
-            spacerSubHeader.style.background = 'var(--bg-elevated)';
-            spacerSubHeader.style.gridColumn = 'span 1';
-            header.appendChild(spacerSubHeader);
-        }
     });
 
     // Create rows for each period
@@ -2736,12 +2650,6 @@ function renderDailyGrid() {
         periodCell.textContent = period.time;
         periodCell.dataset.periodIndex = periodIndex;
         body.appendChild(periodCell);
-
-        // Add spacer after period column
-        const periodRowSpacer = document.createElement('div');
-        periodRowSpacer.style.background = 'var(--bg-elevated)';
-        periodRowSpacer.dataset.periodIndex = periodIndex;
-        body.appendChild(periodRowSpacer);
 
         // For each student, create 5 cells (S, T, A, R, I)
         studentsToDisplay.forEach((student, studentIndex) => {
@@ -2829,14 +2737,6 @@ function renderDailyGrid() {
             
             infoCell.appendChild(infoButton);
             body.appendChild(infoCell);
-            
-            // Add spacer cell after each student (except the last)
-            if (studentIndex < studentsToDisplay.length - 1) {
-                const spacerCell = document.createElement('div');
-                spacerCell.style.background = 'var(--bg-elevated)';
-                spacerCell.dataset.periodIndex = periodIndex;
-                body.appendChild(spacerCell);
-            }
         });
     });
     
@@ -2849,12 +2749,6 @@ function renderDailyGrid() {
     percentPeriodCell.style.borderTop = '2px solid #000';
     percentPeriodCell.style.background = '#f8f9fa';
     body.appendChild(percentPeriodCell);
-    
-    // Add spacer after period column
-    const percentSpacer = document.createElement('div');
-    percentSpacer.style.background = 'var(--bg-elevated)';
-    percentSpacer.style.borderTop = '2px solid #000';
-    body.appendChild(percentSpacer);
     
     // For each student, add percentage cells
     studentsToDisplay.forEach((student, studentIndex) => {
@@ -2908,14 +2802,6 @@ function renderDailyGrid() {
         overallPercentCell.textContent = overallText;
         
         body.appendChild(overallPercentCell);
-        
-        // Add spacer cell after each student (except the last)
-        if (studentIndex < studentsToDisplay.length - 1) {
-            const spacerCell = document.createElement('div');
-            spacerCell.style.background = 'var(--bg-elevated)';
-            spacerCell.style.borderTop = '2px solid #000';
-            body.appendChild(spacerCell);
-        }
     });
     
     // Add submit button row for each student (staff only)
@@ -2925,12 +2811,6 @@ function renderDailyGrid() {
         submitPeriodCell.className = 'daily-period-cell';
         submitPeriodCell.style.borderTop = '2px solid #e0e0e0';
         body.appendChild(submitPeriodCell);
-        
-        // Add spacer after period column
-        const submitSpacer = document.createElement('div');
-        submitSpacer.style.background = 'var(--bg-elevated)';
-        submitSpacer.style.borderTop = '2px solid #e0e0e0';
-        body.appendChild(submitSpacer);
         
         // For each student, add submit button spanning STAR columns (4 columns)
         studentsToDisplay.forEach((student, studentIndex) => {
@@ -2964,14 +2844,6 @@ function renderDailyGrid() {
             emptyInfoCell.className = 'daily-data-cell';
             emptyInfoCell.style.borderTop = '2px solid #e0e0e0';
             body.appendChild(emptyInfoCell);
-            
-            // Add spacer cell after each student (except the last)
-            if (studentIndex < studentsToDisplay.length - 1) {
-                const spacerCell = document.createElement('div');
-                spacerCell.style.background = 'var(--bg-elevated)';
-                spacerCell.style.borderTop = '2px solid #e0e0e0';
-                body.appendChild(spacerCell);
-            }
         });
     }
     
@@ -13821,7 +13693,7 @@ function submitMarketplaceAddItem() {
         description: (descIn && descIn.value) ? descIn.value.trim() : '',
         price: price,
         case_manager_ids: caseManagerIds,
-        is_school_wide: isSchoolWide,
+        is_school_wide: hasSchoolWide,
         item_type_id: typeId,
         category_id: catId,
         image_url: (imgIn && imgIn.value) ? imgIn.value.trim() : null
