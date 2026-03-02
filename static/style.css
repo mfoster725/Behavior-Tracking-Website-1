@@ -1839,6 +1839,19 @@ table tbody tr:hover {
     font-family: var(--font-heading);
 }
 
+#point-card-data-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    align-items: flex-start;
+}
+
+#point-card-data-container .point-card-day {
+    margin-bottom: 0;
+    width: max-content;
+    max-width: 100%;
+}
+
 .point-card-day {
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -3090,16 +3103,53 @@ table tbody tr:hover {
     cursor: not-allowed;
 }
 
+/* Reports sub-toggle (Point Card / Frenzy) */
+.reports-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 12px 0 16px;
+    padding: 2px;
+    background: var(--bg-elevated);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+}
+
+.reports-toggle-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.reports-toggle-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
 /* Card grid */
 .dashboard-card-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    grid-template-areas:
+        "overview star day"
+        "trigger infractions .";
     gap: 20px;
+    align-items: stretch;
 }
 
 @media (max-width: 768px) {
     .dashboard-card-grid {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "overview"
+            "star"
+            "day"
+            "trigger"
+            "infractions";
     }
 }
 
@@ -3109,6 +3159,7 @@ table tbody tr:hover {
     border-radius: 16px;
     padding: 20px;
     transition: box-shadow 0.2s;
+    height: 100%;
 }
 
 .dashboard-card:hover {
@@ -3119,12 +3170,33 @@ table tbody tr:hover {
     grid-column: 1 / -1;
 }
 
+/* Explicit dashboard card placement */
+.overview-card {
+    grid-area: overview;
+}
+
+.star-performance-card {
+    grid-area: star;
+}
+
+.day-of-week-card {
+    grid-area: day;
+}
+
+.trigger-times-card {
+    grid-area: trigger;
+}
+
+.infractions-card {
+    grid-area: infractions;
+}
+
 /* Cards that only contain a breakdown or log list: shrink to fit the table */
 .dashboard-card:has(> .dashboard-breakdown-list),
 .dashboard-card:has(> .dashboard-log-list) {
-    width: fit-content;
+    width: 100%;
     max-width: 100%;
-    align-self: start;
+    align-self: stretch;
 }
 
 .dashboard-card-header {
@@ -3153,6 +3225,39 @@ table tbody tr:hover {
     position: relative;
     width: 100%;
     height: 220px;
+}
+
+/* Summary charts that should only be as wide as their content,
+   instead of stretching across the entire card width */
+.summary-day-chart-wrap,
+.summary-star-chart-wrap {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Give the STAR Performance chart a bit more horizontal room
+   so all four labels can render without being dropped */
+.summary-star-chart-wrap {
+    min-width: 0;
+}
+
+/* Let summary cards that are pure chart visualizations shrink to the width
+   of their content instead of stretching across the full grid column. */
+.dashboard-card.day-of-week-card,
+.dashboard-card.star-performance-card {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-card.star-performance-card .dashboard-chart-wrap,
+.dashboard-card.day-of-week-card .dashboard-chart-wrap {
+    flex: 1;
+    min-height: 0;
 }
 
 /* Stat grid inside cards */
@@ -3225,6 +3330,11 @@ table tbody tr:hover {
     color: var(--text-primary);
 }
 
+/* Tighter spacing between label and number for Infractions breakdown list */
+.infractions-breakdown-list .dashboard-breakdown-item {
+    column-gap: 1rem;
+}
+
 .dashboard-breakdown-dot {
     width: 8px;
     height: 8px;
@@ -3241,6 +3351,49 @@ table tbody tr:hover {
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin-left: 8px;
+}
+
+/* Starbucks count input: plain numeric box, compact */
+.starbucks-count-input {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+/* Starbucks table: columns only as wide as data */
+#starbucks-table-container {
+    display: inline-block;
+    max-width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    padding: 12px;
+    overflow-x: auto;
+}
+
+#starbucks-table {
+    /* Do NOT stretch to full-width; shrink-wrap to content */
+    display: inline-table;
+    width: auto !important;
+    max-width: none;
+    min-width: 0;
+    table-layout: auto;
+    border-collapse: collapse;
+}
+
+#starbucks-table th,
+#starbucks-table td {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+}
+
+#starbucks-table th:nth-child(1),
+#starbucks-table td:nth-child(1) {
+    white-space: nowrap;
+}
+
+#starbucks-table th:nth-child(2),
+#starbucks-table td:nth-child(2) {
+    white-space: nowrap;
 }
 
 /* Badges for infractions/reminders */

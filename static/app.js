@@ -55,10 +55,14 @@ let allStaffMembers = []; // Store staff users for team member dropdowns
 let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
+let dailyAutosaveTimer = null; // Debounce timer for daily-entry autosave
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
+// Starbucks management state (Bank Account tab)
+let starbucksRows = []; // [{ student_id, student_name, starbucks_count }]
+let starbucksAutosaveTimer = null; // Debounce timer for Starbucks table autosave
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
 let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
 let dailyLoadDebounceTimer = null;
@@ -163,6 +167,9 @@ function handleDailyAttendanceChange(e) {
     }
 
     updateDailyPercentageRow();
+
+    // Schedule an autosave of the current daily grid state
+    scheduleDailyAutosave();
 }
 
 function ensureDailyGridDelegatedListeners() {
@@ -786,6 +793,12 @@ function setupEventListeners() {
                         e.preventDefault();
                         dailyEntrySearchQuery = dailySearchInput.value;
                         dailyEntrySearchCommitted = true;
+                        // When a daily search is committed, clear "managed by me" so it does not persist across searches.
+                        const managedCheckbox = document.getElementById('daily-managed-by-me-checkbox');
+                        if (managedCheckbox && managedCheckbox.checked) {
+                            managedCheckbox.checked = false;
+                            dailyEntryManagedByMe = false;
+                        }
                         scheduleDailyDataLoad(0);
                     }
                 }
@@ -803,12 +816,7 @@ function setupEventListeners() {
         }
 
         ensureDailyGridDelegatedListeners();
-
-        const saveDailyAllBtn = document.getElementById('save-daily-all-btn');
-        if (saveDailyAllBtn) {
-            saveDailyAllBtn.addEventListener('click', saveDailyAllData);
-        }
-
+        
         const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
         if (clearDailyAllBtn) {
             clearDailyAllBtn.addEventListener('click', clearDailyAllData);
@@ -965,16 +973,6 @@ function setupEventListeners() {
             console.warn('print-summary-btn not found');
         }
         
-        const compareCaseManagersBtn = document.getElementById('compare-case-managers-btn');
-        if (compareCaseManagersBtn) {
-            compareCaseManagersBtn.addEventListener('click', () => {
-                console.log('Compare case managers button clicked');
-                loadCaseManagerComparison();
-            });
-        } else {
-            console.warn('compare-case-managers-btn not found');
-        }
-        
         // Make period and timeframe dropdowns mutually exclusive for summary
         const summaryPeriodSelect = document.getElementById('summary-period-select');
         const summaryTimeframeSelect = document.getElementById('quarter-select');
@@ -1016,8 +1014,21 @@ function setupEventListeners() {
         const showPointCardBtn = document.getElementById('show-point-card-btn');
         if (showPointCardBtn) {
             showPointCardBtn.addEventListener('click', () => {
-                console.log('Show point card data button clicked');
-                loadPointCardData();
+                const container = document.getElementById('point-card-data-container');
+                if (!container) {
+                    console.warn('point-card-data-container not found');
+                    return;
+                }
+
+                // Toggle visibility: if currently visible, hide it; otherwise load data and show it
+                const isVisible = container.style.display !== 'none' && container.style.display !== '';
+                if (isVisible) {
+                    container.style.display = 'none';
+                    showPointCardBtn.textContent = 'View Point Cards';
+                } else {
+                    console.log('Show point card data button clicked');
+                    loadPointCardData();
+                }
             });
         } else {
             console.warn('show-point-card-btn not found');
@@ -1199,21 +1210,6 @@ function setupEventListeners() {
             });
         }
 
-        const modalDeleteUserBtn = document.getElementById('delete-user-btn');
-        if (modalDeleteUserBtn) {
-            modalDeleteUserBtn.addEventListener('click', async () => {
-                const idInput = document.getElementById('edit-user-id');
-                const usernameInput = document.getElementById('edit-user-username');
-                const originalRoleInput = document.getElementById('edit-user-original-role');
-                const userId = idInput ? parseInt(idInput.value, 10) : null;
-                const username = usernameInput ? usernameInput.value : '';
-                const role = originalRoleInput ? originalRoleInput.value : '';
-                if (!userId) return;
-                await deleteUser(userId, username, role);
-                document.getElementById('edit-user-modal').style.display = 'none';
-            });
-        }
-
         // Handle add parent student button
         const addParentStudentBtn = document.getElementById('edit-parent-add-student-btn');
         if (addParentStudentBtn) {
@@ -1328,9 +1324,24 @@ async function switchView(viewName) {
         viewElement.classList.add('active');
     }
     
-    const navButton = document.querySelector(`[data-view="${viewName}"]`);
+    let navButton = document.querySelector(`[data-view="${viewName}"]`);
+    // When viewing Frenzy via the combined Reports tab, keep the Reports nav button active
+    if (!navButton && viewName === 'frenzy') {
+        navButton = document.querySelector('[data-view="summary"]');
+    }
     if (navButton) {
         navButton.classList.add('active');
+    }
+
+    // Sync Reports sub-toggle buttons (Point Card vs Frenzy)
+    const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
+    if (reportsToggleButtons.length) {
+        reportsToggleButtons.forEach(btn => {
+            const target = btn.dataset.reportsView;
+            if (!target) return;
+            const shouldBeActive = target === viewName;
+            btn.classList.toggle('active', shouldBeActive);
+        });
     }
 
     // Persist last selected tab so we reopen to it on next load
@@ -1384,14 +1395,20 @@ async function switchView(viewName) {
             }
         }
         
-        // If switching to summary view, ensure dashboard refreshes using new layout
-        const summaryView = document.getElementById('summary-view');
-        if (summaryView && summaryView.classList.contains('active')) {
-            if (typeof triggerDashboardLoad === 'function') {
-                triggerDashboardLoad('summary');
-            } else if (typeof loadSummary === 'function') {
+        // Check if summary has been loaded before (has student/quarter selected)
+        const summaryStudentSelect = document.getElementById('summary-student-select');
+        const quarterSelect = document.getElementById('quarter-select');
+        if (summaryStudentSelect && quarterSelect) {
+            // Reload summary if there's a quarter selected
+            if (quarterSelect.value) {
                 loadSummary();
             }
+        }
+
+        // Always load the new dashboard-style summary when entering the tab,
+        // so the default 30-day + "managed by me" state shows data immediately.
+        if (typeof triggerDashboardLoad === 'function') {
+            triggerDashboardLoad('summary');
         }
     }
     
@@ -1409,11 +1426,7 @@ async function switchView(viewName) {
         
         const timeframeSelect = document.getElementById('frenzy-timeframe-select');
         if (timeframeSelect && timeframeSelect.value) {
-            if (typeof triggerDashboardLoad === 'function') {
-                triggerDashboardLoad('frenzy');
-            } else if (typeof loadFrenzyStats === 'function') {
-                loadFrenzyStats();
-            }
+            loadFrenzyStats();
         }
     }
     
@@ -1477,15 +1490,25 @@ async function switchView(viewName) {
     
     // If switching to bank account view
     if (viewName === 'bank-account') {
-        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
+        // Sync "Show students managed by me" to role (staff/admin = checked by default)
         const bankManagedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
         if (bankManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
-            const shouldCheck = window.currentUser.role === 'staff';
+            const shouldCheck = true;
             if (bankManagedByMeCheckbox.checked !== shouldCheck) {
                 bankManagedByMeCheckbox.checked = shouldCheck;
                 bankManagedByMeCheckbox.dispatchEvent(new Event('change'));
             }
         }
+
+        // Ensure Starbucks "managed by me" starts checked as well
+        const starbucksManagedByMeCheckbox = document.getElementById('starbucks-managed-by-me-checkbox');
+        if (starbucksManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            if (!starbucksManagedByMeCheckbox.checked) {
+                starbucksManagedByMeCheckbox.checked = true;
+                starbucksManagedByMeCheckbox.dispatchEvent(new Event('change'));
+            }
+        }
+
         handleBankAccountView();
     }
     if (viewName === 'marketplace') {
@@ -3133,6 +3156,9 @@ function handleDailyInputChange(e) {
     if (period) {
         updateInfoButtonHighlight(studentId, period);
     }
+
+    // Schedule an autosave of the current daily grid state
+    scheduleDailyAutosave();
     
     // Auto-advance to next input, unless this was triggered by backspace
     if (!e.isBackspaceClear) {
@@ -3206,14 +3232,51 @@ function moveToPreviousInput(currentInput) {
     }
 }
 
-async function saveDailyAllData() {
+function updateDailyAutosaveStatus(text) {
+    const statusEl = document.getElementById('save-daily-status');
+    if (statusEl) {
+        statusEl.textContent = text || '';
+    }
+}
+
+function scheduleDailyAutosave() {
     if (!currentDate) {
-        alert('Please select a date');
+        return;
+    }
+
+    // Show a lightweight "Saving..." indicator
+    updateDailyAutosaveStatus('Saving...');
+
+    if (dailyAutosaveTimer) {
+        clearTimeout(dailyAutosaveTimer);
+    }
+
+    dailyAutosaveTimer = setTimeout(async () => {
+        dailyAutosaveTimer = null;
+        try {
+            await saveDailyAllData({ silent: true, fromAutosave: true });
+            updateDailyAutosaveStatus('All changes saved');
+        } catch (error) {
+            console.error('Auto-save error for daily data:', error);
+            updateDailyAutosaveStatus('Auto-save failed');
+        }
+    }, 1500);
+}
+
+async function saveDailyAllData(options = {}) {
+    const { silent = false, fromAutosave = false } = options;
+
+    if (!currentDate) {
+        if (!silent) {
+            alert('Please select a date');
+        }
         return;
     }
 
     if (Object.keys(dailyData).length === 0) {
-        alert('No data to save');
+        if (!silent) {
+            alert('No data to save');
+        }
         return;
     }
 
@@ -3266,16 +3329,31 @@ async function saveDailyAllData() {
         }
     });
 
+    if (savePromises.length === 0) {
+        if (!silent) {
+            showMessage('No data to save', 'info');
+        }
+        return;
+    }
+
     try {
         await Promise.all(savePromises);
-        showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
+        if (!silent) {
+            showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
+        }
         invalidateDailyLoadCache(currentDate);
-        scheduleDailyDataLoad(0); // Reload to confirm
+        // For manual saves, reload the grid to confirm. For autosaves, avoid disrupting focus.
+        if (!fromAutosave) {
+            scheduleDailyDataLoad(0);
+        }
         // Refresh summary if it's currently displayed
         refreshSummaryIfActive();
     } catch (error) {
         console.error('Error saving daily data:', error);
-        showMessage('Error saving data. Please try again.', 'error');
+        if (!silent) {
+            showMessage('Error saving data. Please try again.', 'error');
+        }
+        throw error;
     }
 }
 
@@ -3812,13 +3890,9 @@ async function saveStudent() {
 function refreshSummaryIfActive() {
     const summaryView = document.getElementById('summary-view');
     if (summaryView && summaryView.classList.contains('active')) {
-        if (typeof triggerDashboardLoad === 'function') {
-            triggerDashboardLoad('summary');
-        } else if (typeof loadSummary === 'function') {
-            const quarterSelect = document.getElementById('quarter-select');
-            if (quarterSelect && quarterSelect.value) {
-                loadSummary();
-            }
+        const quarterSelect = document.getElementById('quarter-select');
+        if (quarterSelect && quarterSelect.value) {
+            loadSummary();
         }
     }
 }
@@ -4430,10 +4504,25 @@ async function loadSummary() {
                 </p>`;
             }
 
+            const starbucksTotal = typeof data.starbucks_total === 'number'
+                ? data.starbucks_total
+                : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
+
             container.innerHTML = `
                 <div class="summary-card">
                     <h3>Summary - ${timeframeLabel}</h3>
-                    <p style="margin-bottom: 15px;"><strong>Total Days:</strong> ${data.total_days}</p>
+
+                    <div style="display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0 18px 0;">
+                        <div style="flex: 0 0 auto; min-width: 140px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated);">
+                            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 4px;">Total Days</div>
+                            <div style="font-size: 20px; font-weight: 600;">${data.total_days}</div>
+                        </div>
+                        <div style="flex: 0 0 auto; min-width: 160px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: #fef3c7;">
+                            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #92400e; margin-bottom: 4px;">Starbucks Received</div>
+                            <div style="font-size: 20px; font-weight: 600; color: #92400e;">${starbucksTotal}</div>
+                        </div>
+                    </div>
+
                     ${dataPointsInfo}
                     
                     <h4 style="margin-bottom: 15px;">STAR Averages <button type="button" class="btn-secondary btn-graph" style="margin-left: 10px; padding: 4px 10px; font-size: 12px; vertical-align: middle;" onclick="showSectionGraph('summary_single_star', 'summary')">Graph</button></h4>
@@ -4937,31 +5026,16 @@ function buildSectionChartConfig(sectionType, data, source, groupBy) {
             if (sectionType === 'summary_comparison_star') {
                 const starKeys = ['safety', 'teamwork', 'accountability', 'relationships', 'overall'];
                 const starLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships', 'Overall'];
-                const starColors = {
-                    safety: DASHBOARD_COLORS.safety,
-                    teamwork: DASHBOARD_COLORS.teamwork,
-                    accountability: DASHBOARD_COLORS.accountability,
-                    relationships: DASHBOARD_COLORS.relationships,
-                    overall: hex(4)
-                };
                 const datasets = starKeys.map((k, i) => ({
                     label: starLabels[i],
                     data: labels.map(pk => (periodsData[pk].percentages?.[k] || 0)),
-                    backgroundColor: starColors[k] ?? hex(i)
+                    backgroundColor: hex(i)
                 }));
                 return {
                     title: 'Summary - STAR Percentages',
                     type: 'bar',
                     data: { labels, datasets },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'top' },
-                            datalabels: { anchor: 'end', align: 'top', formatter: (v) => (v != null ? v + '%' : ''), color: '#1C1917', font: { size: 11, weight: '600' } }
-                        },
-                        scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } }
-                    }
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } } }
                 };
             }
             if (sectionType === 'summary_comparison_day') {
@@ -5005,26 +5079,11 @@ function buildSectionChartConfig(sectionType, data, source, groupBy) {
                 let values = keys.map(k => maxPerCategory > 0 ? ((data.totals[k] || 0) / maxPerCategory * 100).toFixed(0) : 0);
                 const overall = values.length ? (values.reduce((a, b) => a + parseFloat(b), 0) / values.length).toFixed(0) : 0;
                 values.push(overall);
-                const barColors = [
-                    DASHBOARD_COLORS.safety,
-                    DASHBOARD_COLORS.teamwork,
-                    DASHBOARD_COLORS.accountability,
-                    DASHBOARD_COLORS.relationships,
-                    hex(4)
-                ];
                 return {
                     title: 'Summary - STAR Averages',
                     type: 'bar',
-                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: barColors }] },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false },
-                            datalabels: { anchor: 'end', align: 'top', formatter: (v) => (v != null ? v + '%' : ''), color: '#1C1917', font: { size: 12, weight: '600' } }
-                        },
-                        scales: { y: { beginAtZero: true, max: 100 } }
-                    }
+                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: labels.map((_, i) => hex(i)) }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
                 };
             }
             if (sectionType === 'summary_single_day') {
@@ -5351,8 +5410,35 @@ function renderCaseManagerComparison(data, timeframeLabel) {
 
 async function loadPointCardData() {
     const showPointCardBtn = document.getElementById('show-point-card-btn');
-    const studentId = showPointCardBtn.dataset.studentId;
-    const timeframe = showPointCardBtn.dataset.timeframe;
+
+    // Prefer the dashboard state (new summary UI) for student/timeframe,
+    // and fall back to the button's data attributes for backwards compatibility.
+    let studentId = null;
+    let timeframe = 'alltime';
+
+    if (typeof dashboardState !== 'undefined' && dashboardState.summary) {
+        const st = dashboardState.summary;
+        if (st.studentId) {
+            studentId = st.studentId;
+        }
+
+        if (st.compareMode) {
+            const quarterSelect = document.getElementById('quarter-select');
+            if (quarterSelect && quarterSelect.value) {
+                timeframe = quarterSelect.value;
+            }
+        } else if (st.period) {
+            timeframe = st.period === 'all_time' ? 'alltime' : st.period;
+        }
+    }
+
+    // If state didn't give us a student, fall back to any data attributes on the button
+    if (!studentId && showPointCardBtn && showPointCardBtn.dataset.studentId) {
+        studentId = showPointCardBtn.dataset.studentId;
+        if (showPointCardBtn.dataset.timeframe) {
+            timeframe = showPointCardBtn.dataset.timeframe;
+        }
+    }
     
     if (!studentId) {
         showMessage('Please select a student first', 'error');
@@ -5436,6 +5522,8 @@ async function loadPointCardData() {
         
         if (!records || records.length === 0) {
             container.innerHTML = '<div class="info-message">No point card data found for this period.</div>';
+            const btn = document.getElementById('show-point-card-btn');
+            if (btn) btn.textContent = 'Hide Point Cards';
             return;
         }
         
@@ -5480,6 +5568,8 @@ async function loadPointCardData() {
         });
         
         container.innerHTML = html;
+        const btn = document.getElementById('show-point-card-btn');
+        if (btn) btn.textContent = 'Hide Point Cards';
         
         // Add event listeners to edit buttons
         container.querySelectorAll('.edit-day-btn').forEach(btn => {
@@ -5687,7 +5777,7 @@ function renderPointCardGrid(record) {
     const overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
 
     let html = `
-        <div class="pc-grid" style="grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 44px 44px 44px 44px 56px;">
+        <div class="pc-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 44px 44px 44px 44px 56px;">
             <div class="pc-header-cell pc-header-time">Time</div>
             <div class="pc-header-cell pc-header-location">Location</div>
             <div class="pc-header-cell" data-category="s">S</div>
@@ -5807,7 +5897,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             <h3>${formattedDate}</h3>
 
             <div class="edit-point-card-grid" style="margin-top: 20px;">
-                <div class="pc-grid point-card-edit-grid" style="grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 48px 48px 48px 48px 56px;">
+                <div class="pc-grid point-card-edit-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 48px 48px 48px 48px 56px;">
                     <div class="pc-header-cell pc-header-time">Time</div>
                     <div class="pc-header-cell pc-header-location">Location</div>
                     <div class="pc-header-cell" data-category="s">S</div>
@@ -7966,6 +8056,334 @@ function showInfoViewPopup(infoDataString, time, location) {
     });
 }
 
+// Starbucks management (Bank Account tab, staff/admin)
+function initStarbucksManagement() {
+    const studentSearchInput = document.getElementById('starbucks-student-search');
+    const staffSearchInput = document.getElementById('starbucks-staff-search');
+    const managedByMeCheckbox = document.getElementById('starbucks-managed-by-me-checkbox');
+    const submitBtn = document.getElementById('starbucks-submit-btn');
+    const studentDropdown = document.getElementById('starbucks-student-dropdown');
+    const staffDropdown = document.getElementById('starbucks-staff-dropdown');
+
+    if (!studentSearchInput && !staffSearchInput && !managedByMeCheckbox && !submitBtn) {
+        return;
+    }
+
+    if (studentSearchInput && studentSearchInput._starbucksBound) return;
+    if (studentSearchInput) studentSearchInput._starbucksBound = true;
+
+    async function loadStarbucksData() {
+        const studentQuery = studentSearchInput ? studentSearchInput.value.trim() : '';
+        const staffQuery = staffSearchInput ? staffSearchInput.value.trim() : '';
+        const managed = !!(managedByMeCheckbox && managedByMeCheckbox.checked);
+
+        const params = new URLSearchParams();
+        const q = studentQuery || staffQuery;
+        if (q) params.append('q', q);
+        if (managed) params.append('managed_by_me', 'true');
+
+        const container = document.getElementById('starbucks-table-body');
+        if (container) {
+            container.innerHTML = `
+                <tr>
+                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                        Loading Starbucks data...
+                    </td>
+                </tr>
+            `;
+        }
+
+        try {
+            const response = await fetch('/api/starbucks?' + params.toString());
+            if (!response.ok) {
+                throw new Error('Failed to load Starbucks data');
+            }
+            const data = await response.json();
+            starbucksRows = Array.isArray(data) ? data : [];
+            renderStarbucksTable();
+        } catch (err) {
+            console.error('Error loading Starbucks data:', err);
+            if (container) {
+                container.innerHTML = `
+                    <tr>
+                        <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #dc2626;">
+                            Error loading Starbucks data. Please try again.
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+    function setupStarbucksAutocomplete(input, dropdown, type) {
+        if (!input || !dropdown) return;
+
+        let debounceTimer = null;
+        let attemptedLoadData = false;
+
+        input.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(async () => {
+                const q = input.value.trim().toLowerCase();
+                if (!q) {
+                    dropdown.classList.remove('active');
+                    dropdown.innerHTML = '';
+                    return;
+                }
+
+                let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+
+                if (list.length === 0 && !attemptedLoadData) {
+                    attemptedLoadData = true;
+                    try {
+                        if (type === 'student' && typeof loadStudents === 'function') {
+                            await loadStudents();
+                            list = allStudents || [];
+                        } else if (type === 'staff' && typeof loadUsers === 'function') {
+                            await loadUsers();
+                            list = allStaffMembers || [];
+                        }
+                    } catch (e) {
+                        console.error('Error loading data for Starbucks search:', e);
+                    }
+                }
+
+                const matches = list.filter(item => {
+                    const name = (item.name || '').toLowerCase();
+                    const uname = (item.username || '').toLowerCase();
+                    return name.includes(q) || uname.includes(q);
+                }).slice(0, 12);
+
+                if (!matches.length) {
+                    dropdown.classList.remove('active');
+                    dropdown.innerHTML = '';
+                    return;
+                }
+
+                dropdown.innerHTML = matches.map(item => {
+                    const label = item.name || item.username || '';
+                    const meta = type === 'staff' ? (item.designation || item.role || '') : '';
+                    return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
+                        <span class="search-label">${escapeHtml(label)}</span>
+                        ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
+                    </div>`;
+                }).join('');
+                dropdown.classList.add('active');
+            }, 150);
+        });
+
+        dropdown.addEventListener('click', (e) => {
+            const opt = e.target.closest('.dashboard-search-option');
+            if (!opt) return;
+            const name = opt.dataset.name || '';
+            input.value = name;
+            dropdown.classList.remove('active');
+
+            if (type === 'student' && staffSearchInput) {
+                staffSearchInput.value = '';
+            } else if (type === 'staff' && studentSearchInput) {
+                studentSearchInput.value = '';
+            }
+
+            // When a Starbucks search is committed, clear "managed by me" so it does not persist across searches.
+            if (managedByMeCheckbox && managedByMeCheckbox.checked) {
+                managedByMeCheckbox.checked = false;
+            }
+
+            loadStarbucksData();
+        });
+
+        input.addEventListener('focus', () => {
+            if (dropdown.children.length > 0 && input.value.trim().length > 0) {
+                dropdown.classList.add('active');
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#starbucks-section')) {
+                dropdown.classList.remove('active');
+            }
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                dropdown.classList.remove('active');
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                dropdown.classList.remove('active');
+                if (type === 'student' && staffSearchInput) {
+                    staffSearchInput.value = '';
+                } else if (type === 'staff' && studentSearchInput) {
+                    studentSearchInput.value = '';
+                }
+                // When a Starbucks search is committed via Enter, clear "managed by me" so it does not persist across searches.
+                if (managedByMeCheckbox && managedByMeCheckbox.checked) {
+                    managedByMeCheckbox.checked = false;
+                }
+                loadStarbucksData();
+            }
+        });
+    }
+
+    function renderStarbucksTable() {
+        const tbody = document.getElementById('starbucks-table-body');
+        if (!tbody) return;
+
+        if (!starbucksRows || starbucksRows.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                        No students found for the current filters.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = '';
+        starbucksRows.forEach((row) => {
+            const tr = document.createElement('tr');
+
+            const nameTd = document.createElement('td');
+            nameTd.style.padding = '10px 12px';
+            nameTd.style.border = '1px solid var(--border)';
+            nameTd.style.whiteSpace = 'nowrap';
+            nameTd.textContent = row.student_name || '';
+
+            const countTd = document.createElement('td');
+            countTd.style.padding = '10px 12px';
+            countTd.style.border = '1px solid var(--border)';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.inputMode = 'numeric';
+            input.value = typeof row.starbucks_count === 'number'
+                ? row.starbucks_count
+                : (row.starbucks_count ? Number(row.starbucks_count) || 0 : 0);
+            input.dataset.studentId = row.student_id;
+            input.className = 'starbucks-count-input';
+            input.style.width = '7ch';
+            input.style.padding = '6px 8px';
+
+            input.addEventListener('input', () => {
+                const val = parseInt(input.value, 10);
+                const safeVal = isNaN(val) || val < 0 ? 0 : val;
+                input.value = safeVal;
+                const idx = starbucksRows.findIndex(r => r.student_id === row.student_id);
+                if (idx !== -1) {
+                    starbucksRows[idx].starbucks_count = safeVal;
+                }
+                scheduleStarbucksAutosave();
+            });
+
+            countTd.appendChild(input);
+            tr.appendChild(nameTd);
+            tr.appendChild(countTd);
+            tbody.appendChild(tr);
+        });
+    }
+
+    function updateStarbucksSaveStatus(text) {
+        const statusEl = document.getElementById('starbucks-save-status');
+        if (statusEl) {
+            statusEl.textContent = text || '';
+        }
+    }
+
+    function scheduleStarbucksAutosave() {
+        updateStarbucksSaveStatus('Saving...');
+        if (starbucksAutosaveTimer) {
+            clearTimeout(starbucksAutosaveTimer);
+        }
+        starbucksAutosaveTimer = setTimeout(() => {
+            starbucksAutosaveTimer = null;
+            saveStarbucksData({ silent: true });
+        }, 1500);
+    }
+
+    async function saveStarbucksData(options = {}) {
+        const { silent = false } = options;
+        const rowsPayload = (starbucksRows || []).map((row) => ({
+            student_id: row.student_id,
+            count: typeof row.starbucks_count === 'number'
+                ? row.starbucks_count
+                : (row.starbucks_count ? Number(row.starbucks_count) || 0 : 0),
+        }));
+
+        if (!rowsPayload.length) {
+            if (!silent) {
+                updateStarbucksSaveStatus('No Starbucks data to save');
+            } else {
+                updateStarbucksSaveStatus('');
+            }
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/starbucks/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rows: rowsPayload }),
+            });
+            if (!response.ok) {
+                throw new Error('Failed to save Starbucks data');
+            }
+            if (!silent) {
+                showMessage('Starbucks table saved successfully!', 'success');
+                if (studentSearchInput) {
+                    studentSearchInput.value = '';
+                }
+                if (staffSearchInput) {
+                    staffSearchInput.value = '';
+                }
+                loadStarbucksData();
+            }
+            updateStarbucksSaveStatus('All changes saved');
+        } catch (err) {
+            console.error('Error saving Starbucks data:', err);
+            if (!silent) {
+                showMessage('Error saving Starbucks data. Please try again.', 'error');
+            }
+            updateStarbucksSaveStatus('Save failed');
+        }
+    }
+
+    setupStarbucksAutocomplete(studentSearchInput, studentDropdown, 'student');
+    setupStarbucksAutocomplete(staffSearchInput, staffDropdown, 'staff');
+
+    if (studentSearchInput) {
+        studentSearchInput.addEventListener('input', () => {
+            if (staffSearchInput) staffSearchInput.value = '';
+            loadStarbucksData();
+        });
+    }
+
+    if (staffSearchInput) {
+        staffSearchInput.addEventListener('input', () => {
+            if (studentSearchInput) studentSearchInput.value = '';
+            loadStarbucksData();
+        });
+    }
+
+    if (managedByMeCheckbox && !managedByMeCheckbox._starbucksManagedBound) {
+        managedByMeCheckbox._starbucksManagedBound = true;
+        managedByMeCheckbox.addEventListener('change', () => {
+            loadStarbucksData();
+        });
+    }
+
+    if (submitBtn && !submitBtn._starbucksSubmitBound) {
+        submitBtn._starbucksSubmitBound = true;
+        submitBtn.addEventListener('click', () => {
+            saveStarbucksData({ silent: false });
+        });
+    }
+
+    loadStarbucksData();
+}
+
 // Make functions globally accessible
 window.showInfoModal = showInfoModal;
 window.closeInfoModal = closeInfoModal;
@@ -8571,11 +8989,17 @@ function setupDailySearchAutocomplete(input) {
             item.appendChild(nameSpan);
             item.dataset.value = option.name;
             item.dataset.type = option.type;
-            
+
             item.addEventListener('click', () => {
                 input.value = option.name;
                 dailyEntrySearchQuery = option.name;
                 dailyEntrySearchCommitted = true;
+                // When a daily search is committed via autocomplete, clear "managed by me" so it does not persist across searches.
+                const managedCheckbox = document.getElementById('daily-managed-by-me-checkbox');
+                if (managedCheckbox && managedCheckbox.checked) {
+                    managedCheckbox.checked = false;
+                    dailyEntryManagedByMe = false;
+                }
                 hideDropdown();
                 input.blur();
                 scheduleDailyDataLoad(0);
@@ -9367,6 +9791,7 @@ function createAdminStaffRow(user, displayRole) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9415,6 +9840,7 @@ function createStudentRow(user) {
         paraprofessional = formatTeamMembers(user.team_members.paraprofessional);
     }
     
+    const canDelete = isAdmin();
     const canEdit = isAdmin() || isStaff();
     
     // Password visibility: Admin and staff can see/edit all student passwords, students see their own
@@ -9444,6 +9870,7 @@ function createStudentRow(user) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9479,7 +9906,7 @@ async function restoreArchivedStudent(studentId, studentName) {
         
         if (response.ok) {
             showMessage('Student user restored successfully.', 'success');
-            // Reload users so both Current Students and Archived Students tables refresh
+            // Reload users so both Student Users and Archived Students tables refresh
             await loadUsers();
         } else {
             const data = await response.json().catch(() => ({}));
@@ -9509,6 +9936,7 @@ function createOutsideStaffRow(user) {
         }
     }
     
+    const canDelete = isAdmin() && user.id !== window.currentUser.id;
     const canEdit = isAdmin();
     const canSeePassword = isAdmin();
     
@@ -9529,6 +9957,7 @@ function createOutsideStaffRow(user) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editOutsideStaffUser(${user.id}, ${userName}, '${user.username}', ${userDistrict})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9732,24 +10161,6 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     const districtGroup = districtInput ? districtInput.closest('.form-group') : null;
     if (role === 'parent' && districtGroup) {
         districtGroup.style.display = 'none';
-    }
-    
-    // Configure archive/delete button visibility and label
-    const deleteUserBtn = document.getElementById('delete-user-btn');
-    if (deleteUserBtn) {
-        // Only admins can delete/archive from this modal
-        if (!isAdmin()) {
-            deleteUserBtn.style.display = 'none';
-        } else {
-            deleteUserBtn.style.display = 'inline-flex';
-            if (role === 'student') {
-                deleteUserBtn.textContent = 'Archive Student';
-                deleteUserBtn.title = 'Remove this student\'s user account while keeping their historical data.';
-            } else {
-                deleteUserBtn.textContent = 'Delete User';
-                deleteUserBtn.title = 'Permanently delete this user account.';
-            }
-        }
     }
     
     // Show/hide team member section based on role
@@ -10296,15 +10707,10 @@ async function saveEditUser() {
 }
 
 async function deleteUser(userId, username, role) {
-    const isStudent = role === 'student';
     const roleText = role === 'admin' ? 'ADMIN USER' : 
                      role === 'staff' ? 'STAFF USER' : 'STUDENT USER';
-    const warningTitle = isStudent ? 'Archive STUDENT USER' : `Delete ${roleText}`;
-    const message = isStudent
-        ? `⚠️ WARNING: Archive STUDENT USER\n\nArchiving will remove the login account for "${username}" but keep their historical data.\n\nThey will move to the Archived Students list and can be restored later.\n\nContinue?`
-        : `⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`;
     
-    if (!confirm(message)) {
+    if (!confirm(`⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`)) {
         return;
     }
     
@@ -10806,7 +11212,7 @@ function loadAdminStats(users) {
         </div>
         <div style="background: var(--bg-surface); padding: 15px; border-radius: var(--radius-sm); border-left: 3px solid var(--success);">
             <div style="font-size: 24px; font-weight: bold; color: var(--success);">${studentCount}</div>
-            <div style="color: var(--text-secondary); font-size: 12px;">Current Students</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Student Users</div>
         </div>
         <div style="background: var(--bg-surface); padding: 15px; border-radius: 6px; border-left: 3px solid var(--accent);">
             <div style="font-size: 24px; font-weight: bold; color: var(--accent);">${totalCount}</div>
@@ -14243,7 +14649,16 @@ function setupMarketplaceStudentSearch() {
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
             div.textContent = s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
-            div.addEventListener('mousedown', function (e) { e.preventDefault(); selectMarketplaceStudent(s.student_id); searchInput.value = div.textContent; dropdown.style.display = 'none'; });
+            div.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                selectMarketplaceStudent(s.student_id);
+                searchInput.value = div.textContent;
+                dropdown.style.display = 'none';
+                // When a marketplace student search is committed, clear "managed by me" so it does not persist across searches.
+                if (managedByMe && managedByMe.checked) {
+                    managedByMe.checked = false;
+                }
+            });
             dropdown.appendChild(div);
         });
     }
@@ -14260,6 +14675,88 @@ function setupMarketplaceStudentSearch() {
     searchInput.addEventListener('input', loadList);
     searchInput.addEventListener('focus', function () { if (list.length) showDropdown(list); else loadList(); });
     document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) dropdown.style.display = 'none'; });
+    if (managedByMe) managedByMe.addEventListener('change', loadList);
+}
+
+// Bank Account student search (mirror marketplace behavior)
+function setupBankStudentSearch() {
+    var searchInput = document.getElementById('bank-student-search-input');
+    var wrapper = searchInput && searchInput.closest('.bank-search-autocomplete-wrapper');
+    var dropdown = wrapper && wrapper.querySelector('.bank-search-autocomplete-dropdown');
+    var managedByMe = document.getElementById('bank-managed-by-me-checkbox');
+    var noMsg = document.getElementById('bank-no-student-msg');
+    if (!searchInput || !dropdown || searchInput._bankSimpleAutocompleteBound) return;
+    searchInput._bankSimpleAutocompleteBound = true;
+
+    var list = [];
+
+    function setSectionsVisible(visible) {
+        var display = visible ? 'block' : 'none';
+        var balanceSection = document.getElementById('bank-balance-section');
+        var paycheckSection = document.getElementById('bank-paycheck-section');
+        var transactionsSection = document.getElementById('bank-transactions-section');
+        if (balanceSection) balanceSection.style.display = display;
+        if (paycheckSection) paycheckSection.style.display = display;
+        if (transactionsSection) transactionsSection.style.display = display;
+    }
+
+    function showDropdown(items) {
+        dropdown.innerHTML = '';
+        if (!items || !items.length) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        dropdown.style.display = 'block';
+        items.slice(0, 15).forEach(function (s) {
+            var div = document.createElement('div');
+            div.className = 'bank-search-autocomplete-item';
+            div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
+            var label = (s.student_name || '') + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
+            div.textContent = label;
+            div.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                currentBankStudentId = s.student_id;
+                searchInput.value = label;
+                dropdown.style.display = 'none';
+                if (noMsg) noMsg.style.display = 'none';
+                setSectionsVisible(true);
+                // When a bank-account student search is committed, clear "managed by me" so it does not persist across searches.
+                if (managedByMe && managedByMe.checked) {
+                    managedByMe.checked = false;
+                }
+                loadBankAccount(s.student_id);
+            });
+            dropdown.appendChild(div);
+        });
+    }
+
+    function loadList() {
+        var params = new URLSearchParams();
+        if (managedByMe && managedByMe.checked) params.set('managed_by_me', 'true');
+        var q = (searchInput.value || '').trim();
+        if (q) params.set('q', q);
+        fetch('/api/bank-account/search?' + params.toString())
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (data) {
+                list = Array.isArray(data) ? data : [];
+                showDropdown(list);
+            })
+            .catch(function () {
+                list = [];
+                dropdown.style.display = 'none';
+            });
+    }
+
+    searchInput.addEventListener('input', loadList);
+    searchInput.addEventListener('focus', function () {
+        if (list.length) showDropdown(list);
+        else loadList();
+    });
+    document.addEventListener('click', function (e) {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+    });
     if (managedByMe) managedByMe.addEventListener('change', loadList);
 }
 
@@ -14619,8 +15116,31 @@ async function loadBankAccount(studentId) {
         const balanceSection = document.getElementById('bank-balance-section');
         if (balanceSection) balanceSection.style.display = 'block';
         
-        // Load transactions
-        renderTransactions(data.transactions || []);
+        // Load transactions (include Starbucks as a synthetic deposit line item if present)
+        const starbucksTotal = typeof data.starbucks_total === 'number'
+            ? data.starbucks_total
+            : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
+        const baseTransactions = data.transactions || [];
+        let transactionsWithStarbucks = baseTransactions.slice();
+
+        if (starbucksTotal > 0) {
+            const starbucksDollarValue = starbucksTotal * 0.10;
+            const nowIso = new Date().toISOString();
+            const lastBalanceAfter = baseTransactions.length
+                ? Number(baseTransactions[0].balance_after || baseTransactions[baseTransactions.length - 1].balance_after || 0)
+                : Number(data.balance || 0);
+
+            transactionsWithStarbucks.push({
+                id: 'starbucks',
+                type: 'deposit',
+                amount: starbucksDollarValue,
+                balance_after: lastBalanceAfter + starbucksDollarValue,
+                description: `Starbucks (${starbucksTotal} × $0.10)`,
+                created_at: nowIso,
+            });
+        }
+
+        renderTransactions(transactionsWithStarbucks);
         
         // Load paychecks
         await loadPaychecks(studentId);
@@ -15313,223 +15833,16 @@ function handleBankAccountView() {
             if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
         }
     } else {
-        // Staff/Admin view - searchable dropdown + "Show students managed by me"
+        // Staff/Admin view - simple selector; autocomplete handled by setupBankStudentSearch
         const wrap = document.getElementById('bank-student-select-wrap');
-        const searchInput = document.getElementById('bank-student-search-input');
-        const wrapperEl = searchInput ? searchInput.closest('.bank-search-autocomplete-wrapper') : null;
-        const dropdown = wrapperEl ? wrapperEl.querySelector('.bank-search-autocomplete-dropdown') : null;
-        const managedByMeCheckbox = document.getElementById('bank-managed-by-me-checkbox');
         const noMsg = document.getElementById('bank-no-student-msg');
         const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
         if (wrap) wrap.style.display = 'block';
-        if (noMsg) noMsg.style.display = 'none';
+        if (noMsg) noMsg.style.display = 'block';
         if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
 
-        let bankStudentList = [];
-        let isDropdownVisible = false;
-        let selectedIndex = -1;
-
-        function setSectionsVisible(visible) {
-            const balanceSection = document.getElementById('bank-balance-section');
-            const paycheckSection = document.getElementById('bank-paycheck-section');
-            const transactionsSection = document.getElementById('bank-transactions-section');
-            const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
-            const display = visible ? 'block' : 'none';
-            if (balanceSection) balanceSection.style.display = display;
-            if (paycheckSection) paycheckSection.style.display = display;
-            if (transactionsSection) transactionsSection.style.display = display;
-            if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
-        }
-
-        function displayLabel(s) {
-            return s.student_name + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
-        }
-
-        function filterStudents(query) {
-            if (!query || !String(query).trim()) return bankStudentList.slice();
-            const q = String(query).trim().toLowerCase();
-            return bankStudentList.filter(function (s) {
-                return (s.student_name || '').toLowerCase().includes(q);
-            });
-        }
-
-        function hideDropdown() {
-            if (!dropdown) return;
-            dropdown.style.display = 'none';
-            dropdown.innerHTML = '';
-            isDropdownVisible = false;
-            selectedIndex = -1;
-        }
-
-        function updateHighlight() {
-            if (!dropdown) return;
-            const items = dropdown.querySelectorAll('.bank-search-autocomplete-item');
-            items.forEach(function (item, i) {
-                item.classList.toggle('highlighted', i === selectedIndex);
-            });
-        }
-
-        function showFilteredDropdown(filtered) {
-            if (!dropdown) return;
-            dropdown.innerHTML = '';
-            const hasSelection = currentBankStudentId != null;
-            let idx = 0;
-            if (hasSelection) {
-                const clearItem = document.createElement('div');
-                clearItem.className = 'bank-search-autocomplete-item';
-                clearItem.textContent = '— Clear selection —';
-                clearItem.dataset.clear = 'true';
-                clearItem.addEventListener('mousedown', function (e) {
-                    e.preventDefault();
-                    currentBankStudentId = null;
-                    if (searchInput) searchInput.value = '';
-                    hideDropdown();
-                    if (noMsg) noMsg.style.display = 'block';
-                    setSectionsVisible(false);
-                });
-                clearItem.addEventListener('mouseenter', function () { selectedIndex = 0; updateHighlight(); });
-                dropdown.appendChild(clearItem);
-                idx = 1;
-            }
-            filtered.forEach(function (s) {
-                const item = document.createElement('div');
-                item.className = 'bank-search-autocomplete-item';
-                item.textContent = displayLabel(s);
-                item.dataset.studentId = s.student_id;
-                const i = idx++;
-                item.addEventListener('mousedown', function (e) {
-                    e.preventDefault();
-                    currentBankStudentId = s.student_id;
-                    if (searchInput) searchInput.value = displayLabel(s);
-                    hideDropdown();
-                    if (noMsg) noMsg.style.display = 'none';
-                    setSectionsVisible(true);
-                    loadBankAccount(s.student_id);
-                });
-                item.addEventListener('mouseenter', function () { selectedIndex = i; updateHighlight(); });
-                dropdown.appendChild(item);
-            });
-            if (filtered.length === 0 && !hasSelection) {
-                hideDropdown();
-                return;
-            }
-            dropdown.style.display = 'block';
-            isDropdownVisible = true;
-            selectedIndex = hasSelection ? 0 : -1;
-            updateHighlight();
-        }
-
-        function fetchAndRefresh() {
-            const params = new URLSearchParams();
-            if (managedByMeCheckbox && managedByMeCheckbox.checked) params.append('managed_by_me', 'true');
-            return fetch('/api/bank-account/search?' + params)
-                .then(function (res) {
-                    if (!res.ok) return res.text().then(function (t) { throw new Error('API ' + res.status); });
-                    return res.json();
-                })
-                .then(function (data) {
-                    bankStudentList = Array.isArray(data) ? data : [];
-                    const stillInList = currentBankStudentId && bankStudentList.some(function (s) { return s.student_id === currentBankStudentId; });
-                    if (!stillInList && currentBankStudentId) {
-                        currentBankStudentId = null;
-                        if (searchInput) searchInput.value = '';
-                        if (noMsg) noMsg.style.display = 'block';
-                        setSectionsVisible(false);
-                    }
-                    // Only show dropdown when the input is focused (handled by onInputOrFocus)
-                    if (searchInput && document.activeElement === searchInput) {
-                        const filtered = filterStudents(searchInput.value || '');
-                        showFilteredDropdown(filtered);
-                    } else {
-                        hideDropdown();
-                    }
-                })
-                .catch(function (err) {
-                    console.error('Bank Account student list error:', err);
-                    bankStudentList = [];
-                    hideDropdown();
-                });
-        }
-
-        function onInputOrFocus() {
-            // If the input contains a display label (format: "Name ($X.XX)"), clear it when user starts typing
-            if (searchInput && currentBankStudentId) {
-                const currentValue = searchInput.value;
-                // Check if the value matches the display label format
-                const sel = bankStudentList.find(function (s) { return s.student_id === currentBankStudentId; });
-                if (sel && currentValue === displayLabel(sel)) {
-                    // User is clicking/focusing on a selected student's display label
-                    // Clear it so they can search for another student
-                    searchInput.value = '';
-                    currentBankStudentId = null;
-                    if (noMsg) noMsg.style.display = 'block';
-                    setSectionsVisible(false);
-                }
-            }
-            const query = searchInput ? searchInput.value : '';
-            const filtered = filterStudents(query);
-            showFilteredDropdown(filtered);
-        }
-
-        if (managedByMeCheckbox && !managedByMeCheckbox._bankManagedBound) {
-            managedByMeCheckbox._bankManagedBound = true;
-            managedByMeCheckbox.addEventListener('change', function () {
-                fetchAndRefresh();
-            });
-        }
-
-        if (searchInput && dropdown && !searchInput._bankSearchBound) {
-            searchInput._bankSearchBound = true;
-            searchInput.addEventListener('focus', onInputOrFocus);
-            searchInput.addEventListener('input', onInputOrFocus);
-            searchInput.addEventListener('blur', function () {
-                setTimeout(function () {
-                    if (!dropdown.contains(document.activeElement) && document.activeElement !== searchInput) {
-                        hideDropdown();
-                    }
-                }, 200);
-            });
-            searchInput.addEventListener('keydown', function (e) {
-                if (!isDropdownVisible) return;
-                const items = dropdown.querySelectorAll('.bank-search-autocomplete-item');
-                if (items.length === 0) return;
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-                    updateHighlight();
-                    items[selectedIndex].scrollIntoView({ block: 'nearest' });
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    selectedIndex = Math.max(selectedIndex - 1, 0);
-                    updateHighlight();
-                    items[selectedIndex].scrollIntoView({ block: 'nearest' });
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    var i = selectedIndex >= 0 ? selectedIndex : 0;
-                    var el = items[i];
-                    if (el) {
-                        var ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-                        el.dispatchEvent(ev);
-                    }
-                }
-            });
-        }
-
-        fetchAndRefresh().then(function () {
-            if (currentBankStudentId && searchInput) {
-                var sel = bankStudentList.find(function (s) { return s.student_id === currentBankStudentId; });
-                if (sel) {
-                    searchInput.value = displayLabel(sel);
-                    if (noMsg) noMsg.style.display = 'none';
-                    setSectionsVisible(true);
-                    loadBankAccount(currentBankStudentId);
-                } else {
-                    if (noMsg) noMsg.style.display = 'block';
-                }
-            } else {
-                if (noMsg) noMsg.style.display = 'block';
-            }
-        });
+        setupBankStudentSearch();
+        initStarbucksManagement();
     }
     
     // Setup event listeners
@@ -15943,12 +16256,13 @@ async function exportChildData(studentId) {
 // ============================================================
 
 const DASHBOARD_COLORS = {
-    // Match STAR point card table colors
-    safety: '#FEE2E2',         // Safety - light red
-    teamwork: '#DBEAFE',       // Teamwork - light blue
-    accountability: '#D1FAE5', // Accountability - light green
-    relationships: '#FEF3C7',  // Relationships - light yellow
-    palette: ['#60A5FA', '#34D399', '#FBBF24', '#F97316', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
+    // STAR Performance bar colors
+    // Safety = red, Teamwork = blue, Accountability = green, Relationships = yellow
+    safety: '#DC2626',         // red
+    teamwork: '#2563EB',       // blue
+    accountability: '#16A34A', // green
+    relationships: '#FACC15',  // yellow
+    palette: ['#DC2626', '#2563EB', '#16A34A', '#FACC15', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
 
 // ---- State ----
@@ -15960,11 +16274,53 @@ let dashboardState = {
 let summaryChartInstance = null;
 let frenzyChartInstance = null;
 
+// ---- Input hardening to resist password managers on search fields ----
+function hardenSearchInput(input) {
+    if (!input) return;
+    try {
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('spellcheck', 'false');
+
+        if (!input.hasAttribute('readonly')) {
+            input.setAttribute('readonly', '');
+        }
+
+        input.addEventListener('focus', () => {
+            if (input.hasAttribute('readonly')) {
+                input.removeAttribute('readonly');
+            }
+        });
+
+        let userInteracted = false;
+        ['keydown', 'mousedown', 'touchstart'].forEach(evt => {
+            input.addEventListener(evt, () => {
+                userInteracted = true;
+            }, { once: true });
+        });
+
+        const clearIfInjected = () => {
+            if (!userInteracted && input.value && !input.dataset.allowPrefill) {
+                input.value = '';
+            }
+        };
+
+        setTimeout(clearIfInjected, 600);
+        input.addEventListener('blur', clearIfInjected);
+    } catch (e) {
+        console.error('Error hardening search input:', e);
+    }
+}
+
 // ---- Autocomplete Search ----
 function setupDashboardSearch(prefix, type) {
     const input = document.getElementById(`${prefix}-${type}-search`);
     const dropdown = document.getElementById(`${prefix}-${type}-dropdown`);
     if (!input || !dropdown) return;
+
+    // Extra protection against browser/password‑manager autofill on dashboard searches
+    hardenSearchInput(input);
 
     let debounceTimer = null;
     let attemptedLoadData = false;
@@ -16024,11 +16380,30 @@ function setupDashboardSearch(prefix, type) {
             dashboardState[pageKey].studentName = name;
             const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
             if (hiddenSelect) hiddenSelect.value = id;
+            // When selecting a student, clear any existing staff filter so the context
+            // represents the latest selection (student-only).
+            dashboardState[pageKey].staffId = null;
+            dashboardState[pageKey].staffName = null;
+            const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
+            if (staffSearchInput) staffSearchInput.value = '';
         } else {
             dashboardState[pageKey].staffId = id;
             dashboardState[pageKey].staffName = name;
+            // When selecting a staff member, clear any existing student filter so the context
+            // represents the latest selection (staff's students).
+            dashboardState[pageKey].studentId = null;
+            dashboardState[pageKey].studentName = null;
+            const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
+            if (studentSearchInput) studentSearchInput.value = '';
+            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+            if (hiddenSelect) hiddenSelect.value = '';
         }
         updateContextBanner(pageKey);
+        // When a dashboard (summary/frenzy) search is committed, clear "managed by me" so it does not persist across searches.
+        const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
+        if (managedCheckbox && managedCheckbox.checked) {
+            managedCheckbox.checked = false;
+        }
         triggerDashboardLoad(pageKey);
     });
 
@@ -16075,11 +16450,28 @@ function setupDashboardSearch(prefix, type) {
                 dashboardState[pageKey].studentName = name;
                 const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
                 if (hiddenSelect) hiddenSelect.value = id;
+                // Enter-based student search should also clear any existing staff context.
+                dashboardState[pageKey].staffId = null;
+                dashboardState[pageKey].staffName = null;
+                const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
+                if (staffSearchInput) staffSearchInput.value = '';
             } else {
                 dashboardState[pageKey].staffId = id;
                 dashboardState[pageKey].staffName = name;
+                // Enter-based staff search should clear any existing student context.
+                dashboardState[pageKey].studentId = null;
+                dashboardState[pageKey].studentName = null;
+                const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
+                if (studentSearchInput) studentSearchInput.value = '';
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = '';
             }
             updateContextBanner(pageKey);
+            // When a dashboard (summary/frenzy) search is committed via Enter, clear "managed by me" so it does not persist across searches.
+            const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
+            if (managedCheckbox && managedCheckbox.checked) {
+                managedCheckbox.checked = false;
+            }
             triggerDashboardLoad(pageKey);
             return;
         }
@@ -16182,33 +16574,9 @@ function setupContextClear(pageKey) {
 }
 
 // ---- Load Trigger ----
-function applyDefaultStaffFilterForDashboard(pageKey) {
-    // Only for logged-in staff (not students/admins)
-    if (!window.currentUser || window.currentUser.role !== 'staff' || !window.currentUser.id) return;
-    if (!dashboardState || !dashboardState[pageKey]) return;
-
-    // Don't override an existing staff filter
-    if (dashboardState[pageKey].staffId) return;
-
-    const staffName = window.currentUser.name || window.currentUser.username || '';
-    dashboardState[pageKey].staffId = window.currentUser.id;
-    dashboardState[pageKey].staffName = staffName;
-
-    const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
-    if (staffSearchInput && staffName) {
-        staffSearchInput.value = staffName;
-    }
-
-    updateContextBanner(pageKey);
-}
-
 function triggerDashboardLoad(pageKey) {
-    applyDefaultStaffFilterForDashboard(pageKey);
-    if (pageKey === 'summary') {
-        loadSummaryDashboard();
-    } else {
-        loadFrenzyDashboard();
-    }
+    if (pageKey === 'summary') loadSummaryDashboard();
+    else loadFrenzyDashboard();
 }
 
 // ---- Summary Dashboard ----
@@ -16272,81 +16640,182 @@ function renderSummarySingle(container, data) {
     const reminders = data.additional_info?.total_reminders || 0;
     const resets = data.additional_info?.total_resets || 0;
     const frenzies = data.total_frenzies || 0;
+    const starbucksTotal = typeof data.starbucks_total === 'number'
+        ? data.starbucks_total
+        : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
+    const attendance = data.attendance_summary || {};
+    const presentPct = typeof attendance.present_pct === 'number'
+        ? attendance.present_pct
+        : 0;
     const byClass = data.by_class || {};
     const byDay = data.by_day_of_week || {};
+    const byTime = data.by_time || {};
+
+    // Trigger Time helpers (top/hardest time or class)
+    const timeKeys = Object.keys(byTime);
+    const classNames = Object.keys(byClass);
+    const useByTime = timeKeys.length > 0;
+    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+    let sortedTriggerKeys = [];
+    let hardestTriggerLabel = '';
+    let hardestTriggerSubtitle = '';
+
+    if (triggerEntries.length > 0) {
+        // Hardest times:
+        // 1) Lowest overall % first (harder = lower score)
+        // 2) Then most infractions (harder = more infractions)
+        sortedTriggerKeys = triggerEntries.sort((a, b) => {
+            const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+            const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+
+            const aPct = typeof aData.percentages?.overall === 'number'
+                ? Math.round(aData.percentages.overall)
+                : Number.POSITIVE_INFINITY;
+            const bPct = typeof bData.percentages?.overall === 'number'
+                ? Math.round(bData.percentages.overall)
+                : Number.POSITIVE_INFINITY;
+            if (aPct !== bPct) {
+                return aPct - bPct;
+            }
+
+            const aInfra = typeof aData.total_infractions === 'number'
+                ? aData.total_infractions
+                : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+            const bInfra = typeof bData.total_infractions === 'number'
+                ? bData.total_infractions
+                : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+
+            return bInfra - aInfra;
+        });
+
+        const hardestKey = sortedTriggerKeys[0];
+        const hardestData = useByTime ? (byTime[hardestKey] || {}) : (byClass[hardestKey] || {});
+        const hardestPctOverall = hardestData.percentages?.overall;
+        const hardestInfractionsCount = typeof hardestData.total_infractions === 'number'
+            ? hardestData.total_infractions
+            : (typeof hardestData.infractions === 'number' ? hardestData.infractions : 0);
+
+        hardestTriggerSubtitle = typeof hardestPctOverall === 'number'
+            ? `${Math.round(hardestPctOverall)}% average • ${hardestInfractionsCount} infractions`
+            : `${hardestInfractionsCount} infractions`;
+        hardestTriggerLabel = hardestKey;
+    }
+
+    // Rounded attendance helper for Overview card
+    const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
+    const overallPct = Math.round(avgs.overall || 0);
 
     let html = `<div class="dashboard-card-grid">`;
 
-    // STAR Performance Chart Card
-    html += `<div class="dashboard-card">
+    // Row 1: Overview Stats Card (full width)
+    html += `<div class="dashboard-card overview-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Overview</h3></div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box">
+                <div class="dashboard-stat-value">${roundedPresentPct}%</div>
+                <div class="dashboard-stat-label">DAYS PRESENT</div>
+            </div>
+            <div class="dashboard-stat-box">
+                <div class="dashboard-stat-value">${overallPct}%</div>
+                <div class="dashboard-stat-label">Average STAR Percent</div>
+            </div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${frenzies}</div><div class="dashboard-stat-label">Frenzies</div></div>
+        </div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#92400e">${starbucksTotal}</div><div class="dashboard-stat-label">Starbucks</div></div>
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div><div class="dashboard-stat-label">Infractions</div></div>
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#D97706">${reminders}</div><div class="dashboard-stat-label">Reminders</div></div>
+            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#6366F1">${resets}</div><div class="dashboard-stat-label">Resets</div></div>
+        </div>
+        ${hardestTriggerLabel ? `
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box" style="flex:1">
+                <div class="dashboard-stat-value">${escapeHtml(hardestTriggerLabel)}</div>
+                <div class="dashboard-stat-label">Trigger Time${hardestTriggerSubtitle ? ' \u2022 ' + hardestTriggerSubtitle : ''}</div>
+            </div>
+        </div>` : ''}
+    </div>`;
+
+    // Row 2: STAR Performance Chart Card
+    html += `<div class="dashboard-card star-performance-card">
         <div class="dashboard-card-header">
             <div>
                 <h3 class="dashboard-card-title">STAR Performance</h3>
                 <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
             </div>
         </div>
-        <div class="dashboard-chart-wrap"><canvas id="summary-star-chart"></canvas></div>
+        <div class="dashboard-chart-wrap summary-star-chart-wrap"><canvas id="summary-star-chart"></canvas></div>
     </div>`;
 
-    // Overview Stats Card
-    html += `<div class="dashboard-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Overview</h3></div>
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDays}</div><div class="dashboard-stat-label">Days</div></div>
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${Math.round(avgs.overall || 0)}%</div><div class="dashboard-stat-label">Overall</div></div>
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${frenzies}</div><div class="dashboard-stat-label">Frenzies</div></div>
-        </div>
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div><div class="dashboard-stat-label">Infractions</div></div>
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#D97706">${reminders}</div><div class="dashboard-stat-label">Reminders</div></div>
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#6366F1">${resets}</div><div class="dashboard-stat-label">Resets</div></div>
-        </div>
-    </div>`;
+    // Row 3: Trigger Times Card — group by time period, with most common class subheader
+    // Always render this card so its position within the grid is stable
+    html += `<div class="dashboard-card trigger-times-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>`;
+    if (sortedTriggerKeys.length > 0) {
+        // Full Trigger Times list
+        html += `<ul class="dashboard-breakdown-list">`;
+        sortedTriggerKeys.forEach((key, i) => {
+            const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
+            const pctOverall = rowData.percentages?.overall ?? '';
 
-    // Class Breakdown Card
-    const classNames = Object.keys(byClass);
-    if (classNames.length > 0) {
-        html += `<div class="dashboard-card">
-            <div class="dashboard-card-header"><h3 class="dashboard-card-title">Class Breakdown</h3></div>
-            <ul class="dashboard-breakdown-list">`;
-        classNames.forEach((cls, i) => {
-            const cd = byClass[cls];
-            const pctOverall = cd.percentages?.overall ?? '';
-            const dotColor = DASHBOARD_COLORS.palette[i % DASHBOARD_COLORS.palette.length];
+            const infractionsCount = typeof rowData.total_infractions === 'number'
+                ? rowData.total_infractions
+                : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
+
+            const displayLabel = key;
+            const topClass = useByTime ? (rowData.top_class || null) : null;
+
             html += `<li class="dashboard-breakdown-item">
-                <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${dotColor}"></span>${escapeHtml(cls)}</span>
-                <span><span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span><span class="dashboard-breakdown-meta">${cd.total_days || 0} days</span></span>
+                <span class="dashboard-breakdown-name">
+                    <span>
+                        <div>${escapeHtml(displayLabel)}</div>
+                        ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
+                    </span>
+                </span>
+                <span>
+                    <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
+                </span>
             </li>`;
         });
-        html += `</ul></div>`;
-    }
-
-    // Infractions / Reminders Log Card
-    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
-    html += `<div class="dashboard-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Infractions</h3></div>`;
-    if (infractionKeys.length > 0 || reminders > 0 || resets > 0) {
-        html += `<div class="dashboard-log-list">`;
-        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
-            html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-red">${escapeHtml(k)}</span></span><span class="log-count">${infractions[k]}</span></div>`;
-        });
-        if (reminders > 0) html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-amber">Reminders</span></span><span class="log-count">${reminders}</span></div>`;
-        if (resets > 0) html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-blue">Resets</span></span><span class="log-count">${resets}</span></div>`;
-        html += `</div>`;
+        html += `</ul>`;
     } else {
-        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions or reminders for this period.</p>`;
+        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
     }
     html += `</div>`;
 
-    // Day of Week Chart Card
+    // Row 3: Infractions Log Card (reminders/resets stay only in the Overview card)
+    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
+    html += `<div class="dashboard-card infractions-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Infractions</h3></div>`;
+    if (infractionKeys.length > 0) {
+        // Use the same breakdown table style as the Trigger Times card, with tighter spacing for this list
+        html += `<ul class="dashboard-breakdown-list infractions-breakdown-list">`;
+        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
+            html += `<li class="dashboard-breakdown-item">
+                <span class="dashboard-breakdown-name">${escapeHtml(k)}</span>
+                <span>
+                    <span class="dashboard-breakdown-value">${infractions[k]}</span>
+                </span>
+            </li>`;
+        });
+        html += `</ul>`;
+    } else {
+        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+    }
+    html += `</div>`;
+
+    // Row 2: Day of Week Chart Card (always render; show message if no data)
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     const hasDayData = dayOrder.some(d => byDay[d]);
-    if (hasDayData) {
-        html += `<div class="dashboard-card full-width">
-            <div class="dashboard-card-header"><h3 class="dashboard-card-title">Day of Week Breakdown</h3></div>
-            <div class="dashboard-chart-wrap" style="height:200px"><canvas id="summary-day-chart"></canvas></div>
-        </div>`;
-    }
+    html += `<div class="dashboard-card day-of-week-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Day of Week Breakdown</h3></div>
+        ${
+            hasDayData
+                ? `<div class="dashboard-chart-wrap summary-day-chart-wrap" style="height:200px"><canvas id="summary-day-chart"></canvas></div>`
+                : `<p style="color:var(--text-secondary);font-size:0.875rem;">No day-of-week data for this period.</p>`
+        }
+    </div>`;
 
     html += `</div>`;
     container.innerHTML = html;
@@ -16362,15 +16831,10 @@ function renderSummarySingle(container, data) {
                 datasets: [{
                     label: 'Average %',
                     data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
-                    backgroundColor: [
-                        DASHBOARD_COLORS.safety,
-                        DASHBOARD_COLORS.teamwork,
-                        DASHBOARD_COLORS.accountability,
-                        DASHBOARD_COLORS.relationships
-                    ],
+                    backgroundColor: [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships],
                     borderRadius: 8,
                     borderSkipped: false,
-                    maxBarThickness: 48
+                    maxBarThickness: 32
                 }]
             },
             options: {
@@ -16381,15 +16845,34 @@ function renderSummarySingle(container, data) {
                     legend: { display: false },
                     datalabels: {
                         anchor: 'end',
-                        align: 'top',
-                        formatter: (value) => (value != null ? value + '%' : ''),
-                        color: '#1C1917',
-                        font: { size: 12, weight: '600' }
+                        align: 'end',
+                        offset: -4,
+                        color: '#111827',
+                        font: {
+                            weight: '600',
+                            size: 11
+                        },
+                        formatter: (value) => `${Math.round(value)}%`
                     }
                 },
+                layout: {
+                    padding: { top: 10, right: 8, bottom: 0, left: 8 }
+                },
                 scales: {
-                    x: { grid: { display: false } },
-                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } }
+                    x: {
+                        grid: { display: false },
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: false
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: 'rgba(0,0,0,0.04)' },
+                        ticks: { callback: v => v + '%' }
+                    }
                 }
             }
         });
@@ -16400,6 +16883,10 @@ function renderSummarySingle(container, data) {
     if (dayCanvas && typeof Chart !== 'undefined' && hasDayData) {
         const dayLabels = dayOrder.filter(d => byDay[d]);
         const dayData = dayLabels.map(d => byDay[d]?.percentages?.overall || 0);
+        // Use distinct colors per day that do not reuse the STAR Performance red/blue/green/yellow palette.
+        // Chosen set: violet, orange, teal, pink, deep teal.
+        const dayColorPalette = ['#7C3AED', '#F97316', '#14B8A6', '#EC4899', '#0F766E'];
+        const dayBackgroundColors = dayLabels.map((_, idx) => dayColorPalette[idx % dayColorPalette.length]);
         new Chart(dayCanvas.getContext('2d'), {
             type: 'bar',
             data: {
@@ -16407,15 +16894,29 @@ function renderSummarySingle(container, data) {
                 datasets: [{
                     label: 'Overall %',
                     data: dayData,
-                    backgroundColor: '#60A5FA',
+                    backgroundColor: dayBackgroundColors,
                     borderRadius: 6,
-                    maxBarThickness: 40
+                    borderSkipped: false,
+                    maxBarThickness: 32
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'end',
+                        offset: -4,
+                        color: '#111827',
+                        font: {
+                            weight: '600',
+                            size: 11
+                        },
+                        formatter: (value) => `${Math.round(value)}%`
+                    }
+                },
                 scales: {
                     y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } },
                     x: { grid: { display: false } }
@@ -16491,16 +16992,7 @@ function renderSummaryComparison(container, data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'top' },
-                    datalabels: {
-                        anchor: 'end',
-                        align: 'top',
-                        formatter: (value) => (value != null ? value + '%' : ''),
-                        color: '#1C1917',
-                        font: { size: 11, weight: '600' }
-                    }
-                },
+                plugins: { legend: { position: 'top' } },
                 scales: {
                     y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
                     x: { grid: { display: false } }
@@ -16767,11 +17259,23 @@ function initDashboard() {
         frenzyManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('frenzy'));
     }
 
-    // Apply default staff filter once on load so that when
-    // Summary / Frenzy are first opened, they are already
-    // scoped to the current staff user.
-    applyDefaultStaffFilterForDashboard('summary');
-    applyDefaultStaffFilterForDashboard('frenzy');
+    // Wire Reports sub-toggle buttons (Point Card vs Frenzy) to switch views
+    const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
+    reportsToggleButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetView = btn.dataset.reportsView;
+            if (!targetView) return;
+            // Use normal view switching so all existing logic (managed by me, dashboard load, etc.) still runs
+            switchView(targetView);
+            if (typeof triggerDashboardLoad === 'function') {
+                if (targetView === 'summary') {
+                    setTimeout(() => triggerDashboardLoad('summary'), 100);
+                } else if (targetView === 'frenzy') {
+                    setTimeout(() => triggerDashboardLoad('frenzy'), 100);
+                }
+            }
+        });
+    });
 }
 
 // Auto-load when switching to summary or frenzy tab

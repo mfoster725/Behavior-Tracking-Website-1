@@ -112,7 +112,7 @@ def main():
         db_path = os.path.join(instance_path, "behavior_tracking_test.db")
         print("Using TEST database:", db_path)
 
-    from app import app, db, User, Student, DailyRecord, PeriodRecord, Infraction, FrenzyEvent, TeamMember
+    from app import app, db, User, Student, DailyRecord, PeriodRecord, Infraction, FrenzyEvent, TeamMember, Schedule
 
     # Use the chosen DB path (must set before any db. operation so the engine uses it)
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path.replace(os.sep, '/')}"
@@ -220,6 +220,47 @@ def main():
                 name=gl_user.name,
                 email=f"{gl_user.username}@test.example",
             ))
+
+        db.session.flush()
+
+        # ----- Schedules for staff and students -----
+        print("Creating teacher and student schedules...")
+
+        # Teacher schedules: each staff user gets a full-day schedule matching STANDARD_PERIODS
+        for u in staff_users:
+            for idx, (time_range, location) in enumerate(STANDARD_PERIODS):
+                sched = Schedule(
+                    schedule_type="teacher",
+                    user_id=u.id,
+                    student_id=None,
+                    time_period=time_range,
+                    class_name=location,
+                    staff_name=u.name,
+                    sort_order=idx,
+                )
+                db.session.add(sched)
+
+        # Map each student to a case manager name for student schedules
+        cm_by_student = {}
+        from app import TeamMember as TM  # alias to avoid confusion
+        for tm in TM.query.filter_by(role="Case Manager").all():
+            if tm.student_id and tm.name:
+                cm_by_student[tm.student_id] = tm.name
+
+        # Student schedules: each student gets the same STANDARD_PERIODS with their case manager as staff_name
+        for s in students:
+            staff_name = cm_by_student.get(s.id, None)
+            for idx, (time_range, location) in enumerate(STANDARD_PERIODS):
+                sched = Schedule(
+                    schedule_type="student",
+                    user_id=None,
+                    student_id=s.id,
+                    time_period=time_range,
+                    class_name=location,
+                    staff_name=staff_name,
+                    sort_order=idx,
+                )
+                db.session.add(sched)
 
         db.session.flush()
 

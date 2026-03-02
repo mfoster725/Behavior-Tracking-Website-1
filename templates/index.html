@@ -69,8 +69,7 @@
                 <!-- Template version: acc5 (no Accounts tab) -->
                 <button type="button" class="nav-btn active" data-view="period-entry">Period Entry</button>
                 <button type="button" class="nav-btn" data-view="entry">Daily Entry</button>
-                <button type="button" class="nav-btn" data-view="summary">Summary</button>
-                <button type="button" class="nav-btn" data-view="frenzy">Frenzy Stats</button>
+                <button type="button" class="nav-btn" data-view="summary">Reports</button>
                 {% if user.role in ['staff', 'admin'] %}
                 <button type="button" class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
@@ -202,10 +201,19 @@
             </div>
         </div>
 
-        <!-- Summary View -->
+        <!-- Reports View (Summary & Frenzy) -->
         <div id="summary-view" class="view">
             <div class="form-section">
                 <h2>Summary & Reports</h2>
+
+                <div class="reports-toggle">
+                    <button type="button" class="reports-toggle-btn active" data-reports-view="summary">
+                        Point Card
+                    </button>
+                    <button type="button" class="reports-toggle-btn" data-reports-view="frenzy">
+                        Frenzy
+                    </button>
+                </div>
 
                 <div class="dashboard-controls">
                     <!-- Search row -->
@@ -281,10 +289,19 @@
             </div>
         </div>
 
-        <!-- Frenzy Stats View -->
+        <!-- Frenzy Stats View (accessed via Reports toggle) -->
         <div id="frenzy-view" class="view">
             <div class="form-section">
                 <h2>Frenzy Statistics</h2>
+
+                <div class="reports-toggle">
+                    <button type="button" class="reports-toggle-btn" data-reports-view="summary">
+                        Point Card
+                    </button>
+                    <button type="button" class="reports-toggle-btn active" data-reports-view="frenzy">
+                        Frenzy
+                    </button>
+                </div>
 
                 <div class="dashboard-controls">
                     <div class="dashboard-search-row">
@@ -703,7 +720,60 @@
         <!-- Bank Account View (restyled to match Accounts UI) -->
         <div id="bank-account-view" class="view">
             <div class="form-section accounts-ui">
-                <h2 style="margin-bottom: 24px;">Bank Account</h2>
+                {% if user.role in ['staff', 'admin'] %}
+                <!-- Starbucks Management (staff/admin only) -->
+                <div id="starbucks-section" style="margin-top: 0; margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Starbucks</h3>
+                    <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">
+                        Track the number of Starbucks each student has earned. Use the search options below to find students, then edit counts directly in the table.
+                    </p>
+
+                    <div class="dashboard-controls" style="margin-bottom: 12px;">
+                        <div class="dashboard-search-row">
+                            <div class="dashboard-search-wrap" id="starbucks-student-search-wrap">
+                                <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" id="starbucks-student-search" placeholder="Search student..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                                <div class="dashboard-search-dropdown" id="starbucks-student-dropdown"></div>
+                            </div>
+                            <div class="dashboard-search-wrap" id="starbucks-staff-search-wrap">
+                                <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                <input type="text" id="starbucks-staff-search" placeholder="Search staff..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                                <div class="dashboard-search-dropdown" id="starbucks-staff-dropdown"></div>
+                            </div>
+                            <label class="dashboard-managed-check">
+                                <input type="checkbox" id="starbucks-managed-by-me-checkbox">
+                                <span>Managed by me</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="starbucks-table-container">
+                        <table id="starbucks-table">
+                            <thead>
+                                <tr style="background: var(--bg-elevated);">
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600; white-space: nowrap; width: 1%;">Student Name</th>
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600; white-space: nowrap; width: 1%;">Starbucks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="starbucks-table-body">
+                                <tr>
+                                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                                        Use the search controls above to load students.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div style="margin-top: 10px; text-align: right;">
+                            <button type="button" id="starbucks-submit-btn" class="btn-primary" title="Save all Starbucks changes">
+                                Submit Starbucks Table
+                            </button>
+                        </div>
+                    </div>
+                    <p id="starbucks-save-status" style="margin-top: 8px; font-size: 12px; color: #64748b;"></p>
+                </div>
+                {% endif %}
+
+                <h2 style="margin-bottom: 24px;">Student Bank Accounts</h2>
 
                 <!-- Staff/Admin Student Select (searchable dropdown + managed by me) -->
                 {% if user.role in ['staff', 'admin'] %}
@@ -715,6 +785,9 @@
                             id="bank-student-search-input"
                             placeholder="Search or select student"
                             autocomplete="off"
+                            autocapitalize="none"
+                            spellcheck="false"
+                            data-1p-ignore="true"
                             style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
                         >
                         <div class="bank-search-autocomplete-dropdown"></div>
@@ -766,6 +839,7 @@
                     </div>
                 </div>
 
+                <!-- Starbucks Balance Display -->
                 <!-- Paycheck Section -->
                 <div
                     id="bank-paycheck-section"

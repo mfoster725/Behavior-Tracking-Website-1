@@ -709,6 +709,17 @@ class BankAccount(db.Model):
     student = db.relationship('Student', backref='bank_account')
     transactions = db.relationship('Transaction', backref='bank_account', lazy=True, cascade='all, delete-orphan')
 
+
+class StarbucksBalance(db.Model):
+    __tablename__ = 'starbucks_balances'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    count = db.Column(db.Integer, default=0, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    student = db.relationship('Student', backref='starbucks_balance')
+
 class Paycheck(db.Model):
     __tablename__ = 'paychecks'
     id = db.Column(db.Integer, primary_key=True)
@@ -1433,24 +1444,38 @@ def students():
             if managed_by_me:
                 # Paraprofessional with a linked Case Manager: show that case manager's students
                 linked_cm_id = getattr(current_user, 'linked_case_manager_id', None)
-                if (current_user.role == 'staff' and getattr(current_user, 'designation', None) == 'Paraprofessional'
-                        and linked_cm_id):
+                if (
+                    current_user.role == 'staff'
+                    and getattr(current_user, 'designation', None) == 'Paraprofessional'
+                    and linked_cm_id
+                ):
                     linked_cm = User.query.get(linked_cm_id)
                     if linked_cm and linked_cm.designation == 'Case Manager':
-                        cm_name = linked_cm.name or linked_cm.username
-                        cm_username = linked_cm.username
+                        cm_name = linked_cm.name or linked_cm.username or ''
+                        cm_username = linked_cm.username or ''
                         team_members = TeamMember.query.filter(
                             TeamMember.role == 'Case Manager',
-                            (TeamMember.name == cm_name) | (TeamMember.name == cm_username)
+                            db.or_(
+                                db.func.lower(TeamMember.name) == db.func.lower(cm_name),
+                                db.func.lower(TeamMember.name) == db.func.lower(cm_username),
+                            ),
                         ).all()
-                        student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+                        student_ids = list({tm.student_id for tm in team_members if tm.student_id})
                         if student_ids:
                             if current_user.role == 'staff' and current_user.is_outside_staff:
-                                assigned_student_ids = [assoc.student_id for assoc in
-                                                      OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+                                assigned_student_ids = [
+                                    assoc.student_id
+                                    for assoc in OutsideStaffStudent.query.filter_by(
+                                        user_id=current_user.id
+                                    ).all()
+                                ]
                                 student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
                             if student_ids:
-                                students = query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                                students = (
+                                    query.filter(Student.id.in_(student_ids))
+                                    .order_by(Student.name)
+                                    .all()
+                                )
                             else:
                                 students = []
                         else:
@@ -1459,25 +1484,35 @@ def students():
                         students = []
                 else:
                     # Get current user's name and username - team members might be stored with either
-                    user_name = current_user.name or current_user.username
-                    user_username = current_user.username
-                    
-                    # Find all students where this user is a team member
-                    # Check both name and username since team members might be stored with either
+                    user_name = (current_user.name or current_user.username or '').strip()
+                    user_username = (current_user.username or '').strip()
+
+                    # Find all students where this user is a team member (case-insensitive match)
                     team_members = TeamMember.query.filter(
-                        (TeamMember.name == user_name) | (TeamMember.name == user_username)
+                        db.or_(
+                            db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                            db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                        )
                     ).all()
-                    student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
-                    
+                    student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+
                     if student_ids:
                         # Intersect with Outside Staff assignments if applicable
                         if current_user.role == 'staff' and current_user.is_outside_staff:
-                            assigned_student_ids = [assoc.student_id for assoc in 
-                                                  OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+                            assigned_student_ids = [
+                                assoc.student_id
+                                for assoc in OutsideStaffStudent.query.filter_by(
+                                    user_id=current_user.id
+                                ).all()
+                            ]
                             student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
-                        
+
                         if student_ids:
-                            students = query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                            students = (
+                                query.filter(Student.id.in_(student_ids))
+                                .order_by(Student.name)
+                                .all()
+                            )
                         else:
                             students = []
                     else:
@@ -2300,7 +2335,8 @@ def summary():
                             'totals': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'possible': 0},
                             'infractions': {}, 'total_frenzies': 0,
                             'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
-                            'staff_context': staff_context_name
+                            'staff_context': staff_context_name,
+                            'starbucks_total': 0,
                         })
                 else:
                     query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
@@ -2311,7 +2347,8 @@ def summary():
                     'totals': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'possible': 0},
                     'infractions': {}, 'total_frenzies': 0,
                     'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
-                    'staff_context': staff_context_name
+                    'staff_context': staff_context_name,
+                    'starbucks_total': 0,
                 })
     # Students can only see their own summary
     elif current_user.role == 'student':
@@ -2331,7 +2368,8 @@ def summary():
                 'totals': {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0, 'possible': 0},
                 'infractions': {},
                 'total_frenzies': 0,
-                'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0}
+                'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
+                'starbucks_total': 0,
             })
         if student_id:
             # Verify access to requested student
@@ -2345,11 +2383,14 @@ def summary():
         # If managed_by_me is checked, verify the student is managed by current user
         if managed_by_me:
             # Check both name and username since team members might be stored with either
-            user_name = current_user.name or current_user.username
-            user_username = current_user.username
+            user_name = (current_user.name or current_user.username or '').strip()
+            user_username = (current_user.username or '').strip()
             team_member = TeamMember.query.filter(
                 TeamMember.student_id == student_id,
-                ((TeamMember.name == user_name) | (TeamMember.name == user_username))
+                db.or_(
+                    db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                    db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                ),
             ).first()
             if not team_member:
                 # Student is not managed by this user, return empty summary
@@ -2376,17 +2417,20 @@ def summary():
                         'infractions': {},
                         'total_reminders': 0,
                         'total_resets': 0
-                    }
+                    },
+                    'starbucks_total': 0,
                 })
     elif managed_by_me:
-        # Filter to only students managed by current user
-        # Check both name and username since team members might be stored with either
-        user_name = current_user.name or current_user.username
-        user_username = current_user.username
+        # Filter to only students managed by current user (case-insensitive match on support team name)
+        user_name = (current_user.name or current_user.username or '').strip()
+        user_username = (current_user.username or '').strip()
         team_members = TeamMember.query.filter(
-            (TeamMember.name == user_name) | (TeamMember.name == user_username)
+            db.or_(
+                db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                db.func.lower(TeamMember.name) == db.func.lower(user_username),
+            )
         ).all()
-        student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+        student_ids = list({tm.student_id for tm in team_members if tm.student_id})
         if student_ids:
             query = query.filter(DailyRecord.student_id.in_(student_ids))
         else:
@@ -2414,7 +2458,8 @@ def summary():
                     'infractions': {},
                     'total_reminders': 0,
                     'total_resets': 0
-                }
+                },
+                'starbucks_total': 0,
             })
     
     # For staff/admin views, restrict to active students only (students with a User account role='student')
@@ -2446,7 +2491,8 @@ def summary():
                     'infractions': {},
                     'total_reminders': 0,
                     'total_resets': 0
-                }
+                },
+                'starbucks_total': 0,
             })
         query = query.filter(DailyRecord.student_id.in_(active_student_ids))
 
@@ -2456,23 +2502,33 @@ def summary():
         selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
         selectinload(DailyRecord.frenzies),
     )
-    all_records = query.all()
-    print(f"Found {len(all_records)} total records before filtering")
+    all_records_raw = query.all()
+    print(f"Found {len(all_records_raw)} total records before filtering")
     
-    # Filter out excused records (they should be saved but excluded from calculations)
+    # Filter out excused records for STAR/frenzy calculations, but keep attendance info on all_records_raw.
     # Also migrate attendance_status for records that don't have it yet (in-memory only; no per-record commit here)
     filtered_records = []
-    for record in all_records:
+    for record in all_records_raw:
         # Migrate attendance_status if needed
         if not record.attendance_status:
             record.attendance_status = 'present' if record.present else 'unexcused'
         
-        # Exclude excused records from calculations
+        # Exclude excused records from STAR/frenzy calculations
         if record.attendance_status != 'excused':
             filtered_records.append(record)
     
     all_records = filtered_records
     print(f"After filtering out excused records: {len(all_records)} records")
+
+    # Compute Starbucks total for this summary (per-student only; aggregated views use 0)
+    starbucks_total = 0
+    if student_id:
+        starbucks_balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
+        if starbucks_balance:
+            try:
+                starbucks_total = int(starbucks_balance.count or 0)
+            except (TypeError, ValueError):
+                starbucks_total = 0
     
     # Helper function to check if a date is in a month-day range (handles year boundaries)
     def date_in_range(record_date, start_md, end_md):
@@ -2538,6 +2594,25 @@ def summary():
             school_years.add(school_year)
         return sorted(school_years)
     
+    def compute_attendance_summary(records):
+        """Compute attendance breakdown and percent of days present for a set of records."""
+        summary = {
+            'present': 0,
+            'excused': 0,
+            'unexcused': 0,
+            'present_pct': 0.0,
+        }
+        total = 0
+        for r in records:
+            status = r.attendance_status or ('present' if r.present else 'unexcused')
+            if status not in ('present', 'excused', 'unexcused'):
+                continue
+            summary[status] += 1
+            total += 1
+        if total > 0:
+            summary['present_pct'] = round((summary['present'] / total) * 100, 1)
+        return summary
+    
     # Helper function to calculate summary stats for a set of records
     def calculate_summary_stats(record_list):
         total_safety = 0
@@ -2571,6 +2646,10 @@ def summary():
         
         # Initialize class statistics
         by_class = {}
+
+        # Initialize time-of-day statistics (time periods as written in point cards)
+        # Keyed by PeriodRecord.time_range (e.g., "7:45-8:30")
+        by_time = {}
         
         for record in record_list:
             # Track day of week statistics (weekdays only)
@@ -2585,6 +2664,38 @@ def summary():
                 total_accountability += period.accountability_points
                 total_relationships += period.relationships_points
                 total_possible += period.points_possible
+
+                # Normalize time period label (matches point card data tables)
+                raw_time_period = (period.time_range or '').strip()
+                time_label = raw_time_period or 'Unknown'
+
+                # Initialize time bucket if needed
+                if time_label not in by_time:
+                    by_time[time_label] = {
+                        'total_days': 0,
+                        'safety_points': 0,
+                        'teamwork_points': 0,
+                        'accountability_points': 0,
+                        'relationships_points': 0,
+                        'possible_points': 0,
+                        'infractions': {},
+                        'total_reminders': 0,
+                        'total_resets': 0,
+                        '_unique_dates': set(),
+                        'class_counts': {},
+                    }
+                time_data = by_time[time_label]
+
+                time_data['safety_points'] += period.safety_points
+                time_data['teamwork_points'] += period.teamwork_points
+                time_data['accountability_points'] += period.accountability_points
+                time_data['relationships_points'] += period.relationships_points
+                time_data['possible_points'] += period.points_possible
+
+                # Track unique days per time period
+                if record.date not in time_data['_unique_dates']:
+                    time_data['_unique_dates'].add(record.date)
+                    time_data['total_days'] += 1
                 
                 # Track day of week statistics for this period
                 if is_weekday:
@@ -2619,6 +2730,9 @@ def summary():
                 if record.date not in by_class[class_name]['_unique_dates']:
                     by_class[class_name]['_unique_dates'].add(record.date)
                     by_class[class_name]['total_days'] += 1
+
+                # Track which classes most often occur in each time period
+                time_data['class_counts'][class_name] = time_data['class_counts'].get(class_name, 0) + 1
                 
                 if period.frenzy:
                     total_frenzies += 1
@@ -2644,6 +2758,28 @@ def summary():
                     if infraction.infraction_type not in by_class[class_name]['infractions']:
                         by_class[class_name]['infractions'][infraction.infraction_type] = 0
                     by_class[class_name]['infractions'][infraction.infraction_type] += infraction.count
+
+                    # Track infractions by time period
+                    raw_time_period = (period.time_range or '').strip()
+                    time_label = raw_time_period or 'Unknown'
+                    if time_label not in by_time:
+                        by_time[time_label] = {
+                            'total_days': 0,
+                            'safety_points': 0,
+                            'teamwork_points': 0,
+                            'accountability_points': 0,
+                            'relationships_points': 0,
+                            'possible_points': 0,
+                            'infractions': {},
+                            'total_reminders': 0,
+                            'total_resets': 0,
+                            '_unique_dates': set(),
+                            'class_counts': {},
+                        }
+                    time_data = by_time[time_label]
+                    if infraction.infraction_type not in time_data['infractions']:
+                        time_data['infractions'][infraction.infraction_type] = 0
+                    time_data['infractions'][infraction.infraction_type] += infraction.count
                 
                 # Extract all data from Info column JSON data
                 if period.info:
@@ -2678,6 +2814,28 @@ def summary():
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
+
+                            # Track infractions by time period
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            time_data = by_time[time_label]
+                            if infraction_type not in time_data['infractions']:
+                                time_data['infractions'][infraction_type] = 0
+                            time_data['infractions'][infraction_type] += count
                         
                         # Extract infraction2
                         infraction2 = info_data.get('infraction2')
@@ -2707,6 +2865,28 @@ def summary():
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
+
+                            # Track infractions by time period
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            time_data = by_time[time_label]
+                            if infraction_type not in time_data['infractions']:
+                                time_data['infractions'][infraction_type] = 0
+                            time_data['infractions'][infraction_type] += count
                         
                         # Extract infractions array (Info column dynamic infractions)
                         for inf_item in info_data.get('infractions') or []:
@@ -2733,6 +2913,27 @@ def summary():
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
+                            # Track infractions by time period
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            time_data = by_time[time_label]
+                            if infraction_type not in time_data['infractions']:
+                                time_data['infractions'][infraction_type] = 0
+                            time_data['infractions'][infraction_type] += count
                         
                         # Count reminders
                         reminder1 = info_data.get('reminder1', False)
@@ -2744,18 +2945,69 @@ def summary():
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
                             by_class[class_name]['total_reminders'] += 1
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            by_time[time_label]['total_reminders'] += 1
                         if reminder2 and reminder2 not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_reminders'] += 1
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
                             by_class[class_name]['total_reminders'] += 1
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            by_time[time_label]['total_reminders'] += 1
                         if reminder3 and reminder3 not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_reminders'] += 1
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
                             by_class[class_name]['total_reminders'] += 1
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            by_time[time_label]['total_reminders'] += 1
                         
                         # Count resets
                         reset = info_data.get('reset', False)
@@ -2765,6 +3017,23 @@ def summary():
                                 by_day_of_week[day_of_week]['total_resets'] += 1
                             class_name = period.location or 'Unknown'
                             by_class[class_name]['total_resets'] += 1
+                            raw_time_period = (period.time_range or '').strip()
+                            time_label = raw_time_period or 'Unknown'
+                            if time_label not in by_time:
+                                by_time[time_label] = {
+                                    'total_days': 0,
+                                    'safety_points': 0,
+                                    'teamwork_points': 0,
+                                    'accountability_points': 0,
+                                    'relationships_points': 0,
+                                    'possible_points': 0,
+                                    'infractions': {},
+                                    'total_reminders': 0,
+                                    'total_resets': 0,
+                                    '_unique_dates': set(),
+                                    'class_counts': {},
+                                }
+                            by_time[time_label]['total_resets'] += 1
                             
                     except (json.JSONDecodeError, ValueError, TypeError):
                         pass
@@ -2840,6 +3109,45 @@ def summary():
                 'total_reminders': class_data['total_reminders'],
                 'total_resets': class_data['total_resets']
             }
+
+        # Calculate percentages for each time period and determine most common class
+        by_time_formatted = {}
+        for time_label, time_data in by_time.items():
+            # Remove internal-only fields before formatting
+            unique_dates = time_data.pop('_unique_dates', None)
+            class_counts = time_data.pop('class_counts', {})
+
+            num_periods_time = time_data['possible_points'] / 4 if time_data['possible_points'] > 0 else 0
+            max_per_category_time = num_periods_time * 2 if num_periods_time > 0 else 0
+
+            safety_percent_time = (time_data['safety_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+            teamwork_percent_time = (time_data['teamwork_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+            accountability_percent_time = (time_data['accountability_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+            relationships_percent_time = (time_data['relationships_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+            overall_percent_time = (safety_percent_time + teamwork_percent_time + accountability_percent_time + relationships_percent_time) / 4 if max_per_category_time > 0 else 0
+
+            total_infractions_time = sum(time_data['infractions'].values())
+
+            top_class_name = None
+            top_class_count = 0
+            if class_counts:
+                top_class_name, top_class_count = max(class_counts.items(), key=lambda kv: kv[1])
+
+            by_time_formatted[time_label] = {
+                'total_days': time_data['total_days'],
+                'percentages': {
+                    'safety': round(safety_percent_time, 1),
+                    'teamwork': round(teamwork_percent_time, 1),
+                    'accountability': round(accountability_percent_time, 1),
+                    'relationships': round(relationships_percent_time, 1),
+                    'overall': round(overall_percent_time, 1),
+                },
+                'total_infractions': total_infractions_time,
+                'total_reminders': time_data['total_reminders'],
+                'total_resets': time_data['total_resets'],
+                'top_class': top_class_name,
+                'top_class_count': top_class_count,
+            }
         
         return {
             'total_days': len(record_list),
@@ -2861,7 +3169,8 @@ def summary():
             'total_frenzies': total_frenzies,
             'additional_info': additional_info,
             'by_day_of_week': by_day_of_week_formatted,
-            'by_class': by_class_formatted
+            'by_class': by_class_formatted,
+            'by_time': by_time_formatted,
         }
     
     # Filter by period if specified (takes precedence over timeframe)
@@ -2870,7 +3179,8 @@ def summary():
         today = date.today()
         current_school_year = get_school_year_for_date(today)
         
-        filtered_records = []
+        metric_records = []
+        attendance_records = []
         available_data_points = None
         week_start = None
         week_end = None
@@ -2880,55 +3190,63 @@ def summary():
             days_since_monday = today.weekday()  # Monday is 0
             week_start = today - timedelta(days=days_since_monday)
             week_end = week_start + timedelta(days=6)
-            filtered_records = [r for r in all_records if week_start <= r.date <= week_end]
+            for record in all_records_raw:
+                if week_start <= record.date <= week_end:
+                    attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        metric_records.append(record)
         elif period == '30day':
             # Get unique dates that have data, sorted descending
-            unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
+            unique_dates = sorted(set([r.date for r in all_records_raw]), reverse=True)
             # Take the first 30 dates
             selected_dates = unique_dates[:30]
             # Track actual number of data points used
             available_data_points = len(selected_dates)
             # Filter records to only those dates
-            filtered_records = [r for r in all_records if r.date in selected_dates]
+            for record in all_records_raw:
+                if record.date in selected_dates:
+                    attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        metric_records.append(record)
         else:
-            for record in all_records:
+            for record in all_records_raw:
                 record_school_year = get_school_year_for_date(record.date)
+                matches = False
                 
                 if period == 'current_year':
                     # Current school year only
-                    if record_school_year == current_school_year:
-                        filtered_records.append(record)
+                    matches = (record_school_year == current_school_year)
                 elif period == 'quarter1':
                     # Quarter 1
                     q_num = get_quarter_for_date(record.date)
-                    if q_num == '1' and record_school_year == current_school_year:
-                        filtered_records.append(record)
+                    matches = (q_num == '1' and record_school_year == current_school_year)
                 elif period == 'quarter2':
                     # Quarter 2
                     q_num = get_quarter_for_date(record.date)
-                    if q_num == '2' and record_school_year == current_school_year:
-                        filtered_records.append(record)
+                    matches = (q_num == '2' and record_school_year == current_school_year)
                 elif period == 'quarter3':
                     # Quarter 3
                     q_num = get_quarter_for_date(record.date)
-                    if q_num == '3' and record_school_year == current_school_year:
-                        filtered_records.append(record)
+                    matches = (q_num == '3' and record_school_year == current_school_year)
                 elif period == 'quarter4':
                     # Quarter 4
                     q_num = get_quarter_for_date(record.date)
-                    if q_num == '4' and record_school_year == current_school_year:
-                        filtered_records.append(record)
+                    matches = (q_num == '4' and record_school_year == current_school_year)
                 elif period == 'all_time':
                     # All records (no filtering)
-                    filtered_records.append(record)
+                    matches = True
                 elif period == 'previous_years':
                     # All school years except current
-                    if record_school_year != current_school_year:
-                        filtered_records.append(record)
+                    matches = (record_school_year != current_school_year)
+
+                if matches:
+                    attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        metric_records.append(record)
         
-        all_records = filtered_records
         # Calculate single summary for period
-        stats = calculate_summary_stats(all_records)
+        stats = calculate_summary_stats(metric_records)
+        attendance_summary = compute_attendance_summary(attendance_records)
         result = {
             'timeframe': period,
             'comparison_mode': False,
@@ -2945,7 +3263,10 @@ def summary():
             'total_frenzies': stats['total_frenzies'],
             'additional_info': stats['additional_info'],
             'by_day_of_week': stats['by_day_of_week'],
-            'by_class': stats['by_class']
+            'by_class': stats['by_class'],
+            'by_time': stats.get('by_time', {}),
+            'starbucks_total': starbucks_total,
+            'attendance_summary': attendance_summary,
         }
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
@@ -2993,8 +3314,11 @@ def summary():
             'total_frenzies': stats['total_frenzies'],
             'additional_info': stats['additional_info'],
             'by_day_of_week': stats['by_day_of_week'],
+            'by_class': stats.get('by_class', {}),
+            'by_time': stats.get('by_time', {}),
             'week_start': most_recent_monday.isoformat(),
-            'week_end': most_recent_sunday.isoformat()
+            'week_end': most_recent_sunday.isoformat(),
+            'starbucks_total': starbucks_total,
         })
     elif timeframe == '30day':
         # Get unique dates that have data, sorted descending
@@ -3026,8 +3350,11 @@ def summary():
             'total_frenzies': stats['total_frenzies'],
             'additional_info': stats['additional_info'],
             'by_day_of_week': stats['by_day_of_week'],
+            'by_class': stats.get('by_class', {}),
+            'by_time': stats.get('by_time', {}),
             'available_data_points': available_data_points,
-            'has_full_30_days': available_data_points >= 30
+            'has_full_30_days': available_data_points >= 30,
+            'starbucks_total': starbucks_total,
         })
     elif timeframe == '30day_to_30day':
         # Get unique dates that have data, sorted descending
@@ -3193,7 +3520,8 @@ def summary():
             'infractions': stats['infractions'],
             'total_frenzies': stats['total_frenzies'],
             'additional_info': stats['additional_info'],
-            'by_day_of_week': stats['by_day_of_week']
+            'by_day_of_week': stats['by_day_of_week'],
+            'starbucks_total': starbucks_total,
         })
 
 @app.route('/api/case-manager-comparison', methods=['GET'])
@@ -4134,11 +4462,14 @@ def frenzy_stats():
         # If managed_by_me is checked, verify the student is managed by current user
         if managed_by_me:
             # Check both name and username since team members might be stored with either
-            user_name = current_user.name or current_user.username
-            user_username = current_user.username
+            user_name = (current_user.name or current_user.username or '').strip()
+            user_username = (current_user.username or '').strip()
             team_member = TeamMember.query.filter(
                 TeamMember.student_id == student_id,
-                ((TeamMember.name == user_name) | (TeamMember.name == user_username))
+                db.or_(
+                    db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                    db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                ),
             ).first()
             if not team_member:
                 # Student is not managed by this user, return empty stats
@@ -4154,14 +4485,16 @@ def frenzy_stats():
                     'all_results': []
                 })
     elif managed_by_me:
-        # Filter to only students managed by current user
-        # Check both name and username since team members might be stored with either
-        user_name = current_user.name or current_user.username
-        user_username = current_user.username
+        # Filter to only students managed by current user (case-insensitive match on support team name)
+        user_name = (current_user.name or current_user.username or '').strip()
+        user_username = (current_user.username or '').strip()
         team_members = TeamMember.query.filter(
-            (TeamMember.name == user_name) | (TeamMember.name == user_username)
+            db.or_(
+                db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                db.func.lower(TeamMember.name) == db.func.lower(user_username),
+            )
         ).all()
-        student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+        student_ids = list({tm.student_id for tm in team_members if tm.student_id})
         if student_ids:
             query = query.filter(DailyRecord.student_id.in_(student_ids))
         else:
@@ -5670,6 +6003,16 @@ def list_weekly_citations(student_id, start_date, end_date):
             result.extend(_citations_from_period_info(period))
     return result
 
+
+def get_or_create_starbucks_balance(student_id):
+    """Get or create the Starbucks balance record for a student"""
+    balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
+    if not balance:
+        balance = StarbucksBalance(student_id=student_id, count=0)
+        db.session.add(balance)
+        db.session.commit()
+    return balance
+
 def get_or_create_bank_account(student_id):
     """Get or create a bank account for a student"""
     account = BankAccount.query.filter_by(student_id=student_id).first()
@@ -5689,10 +6032,12 @@ def get_bank_account(student_id):
         return jsonify({'error': 'Access denied'}), 403
     
     account = get_or_create_bank_account(student_id)
+    starbucks_balance = get_or_create_starbucks_balance(student_id)
     transactions = Transaction.query.filter_by(student_id=student_id).order_by(Transaction.created_at.desc()).limit(50).all()
     
     return jsonify({
         'balance': float(account.balance),
+        'starbucks_total': int(starbucks_balance.count or 0),
         'transactions': [{
             'id': t.id,
             'type': t.transaction_type,
@@ -7415,6 +7760,157 @@ def search_bank_accounts():
     resp = jsonify(result)
     resp.headers['X-Accounts-Search-Version'] = 'acc5'
     return resp
+
+
+@app.route('/api/starbucks', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def list_starbucks_balances():
+    """
+    List Starbucks balances for students, using similar access rules to /api/bank-account/search.
+    Supports:
+      - ?q=... (search by student name or staff/case manager name)
+      - ?managed_by_me=true (restrict to students managed by the current user)
+    """
+    query_text = request.args.get('q', '').strip()
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+
+    # Reuse the same student selection logic as /api/bank-account/search
+    if query_text:
+        students_by_name = Student.query.filter(Student.name.ilike(f'%{query_text}%')).all()
+
+        staff_members = User.query.filter(
+            db.or_(
+                User.name.ilike(f'%{query_text}%'),
+                User.username.ilike(f'%{query_text}%')
+            )
+        ).all()
+
+        staff_names = [s.name for s in staff_members if s.name]
+        team_members = TeamMember.query.filter(
+            TeamMember.name.in_(staff_names)
+        ).all() if staff_names else []
+
+        student_ids_from_staff = list({tm.student_id for tm in team_members if tm.student_id})
+
+        all_student_ids = {s.id for s in students_by_name}
+        all_student_ids.update(student_ids_from_staff)
+
+        students = Student.query.filter(Student.id.in_(list(all_student_ids))).all() if all_student_ids else []
+    else:
+        if current_user.role == 'staff' and current_user.is_outside_staff:
+            assigned_student_ids = [a.student_id for a in
+                                   OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+            if not assigned_student_ids:
+                students = []
+            else:
+                query_obj = Student.query.filter(Student.id.in_(assigned_student_ids))
+                if managed_by_me:
+                    user_name = (current_user.name or current_user.username) or ''
+                    user_username = (current_user.username or '').strip()
+                    if not user_name and not user_username:
+                        sid_list = []
+                    else:
+                        team_members = TeamMember.query.filter(
+                            (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
+                            (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+                        ).all()
+                        sid_list = list({tm.student_id for tm in team_members if tm.student_id})
+                    sid_list = [sid for sid in sid_list if sid in assigned_student_ids]
+                    students = query_obj.filter(Student.id.in_(sid_list)).order_by(Student.name).all() if sid_list else []
+                else:
+                    students = query_obj.order_by(Student.name).all()
+        else:
+            query_obj = Student.query
+            if managed_by_me:
+                user_name = (current_user.name or current_user.username) or ''
+                user_username = (current_user.username or '').strip()
+                if not user_name and not user_username:
+                    student_ids = []
+                else:
+                    team_members = TeamMember.query.filter(
+                        (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
+                        (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+                    ).all()
+                    student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+                if student_ids:
+                    students = query_obj.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+                else:
+                    students = []
+            else:
+                students = query_obj.order_by(Student.name).all()
+
+        students = filter_directory_info(students, include_opted_out=False)
+
+    # Restrict to active students only (those in Student Users / User Management)
+    student_users = User.query.filter_by(role='student').all()
+    student_user_ids = {u.student_id for u in student_users if u.student_id}
+    students = [s for s in students if s.id in student_user_ids]
+
+    # Attach Starbucks balances
+    result = []
+    for student in students:
+        balance = StarbucksBalance.query.filter_by(student_id=student.id).first()
+        count = int(balance.count) if balance and balance.count is not None else 0
+        result.append({
+            'student_id': student.id,
+            'student_name': student.name,
+            'starbucks_count': count,
+        })
+
+    return jsonify(result)
+
+
+@app.route('/api/starbucks/bulk', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def update_starbucks_balances_bulk():
+    """
+    Bulk update Starbucks balances.
+
+    Expects JSON body:
+    {
+      "rows": [
+        {"student_id": 1, "count": 5},
+        ...
+      ]
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    rows = data.get('rows') or []
+
+    if not isinstance(rows, list):
+        return jsonify({'error': 'rows must be a list'}), 400
+
+    try:
+        for row in rows:
+            try:
+                student_id = int(row.get('student_id'))
+            except (TypeError, ValueError):
+                continue
+            if student_id <= 0:
+                continue
+
+            count_value = row.get('count', 0)
+            try:
+                count_int = int(count_value)
+            except (TypeError, ValueError):
+                count_int = 0
+            if count_int < 0:
+                count_int = 0
+
+            balance = get_or_create_starbucks_balance(student_id)
+            balance.count = count_int
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("Error updating Starbucks balances")
+        return jsonify({'error': 'Failed to update Starbucks balances'}), 500
+
+    return jsonify({'status': 'ok'})
 
 @app.route('/test')
 def test():

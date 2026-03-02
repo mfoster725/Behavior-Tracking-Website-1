@@ -144,4 +144,5 @@ Leave the field blank if you do not have an image.
 | "Name and valid price required" | Ensure Name is not empty and Price is a positive number. |
 | Type or Category not saving | Use the "Add [name]" option in the dropdown to create it first. |
 
-
+$env:DATABASE_URL = "postgres://avnadmin:YOUR_AIVEN_PASSWORD@your-host.aivencloud.com:23771/defaultdb?sslmode=require"
+python migrate_linked_case_manager_id.py
