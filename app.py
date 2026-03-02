@@ -62,7 +62,16 @@ else:
     # Local development: Use instance folder for database (Flask convention)
     instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
     os.makedirs(instance_path, exist_ok=True)
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
+    # Optional: use test DB for seeding (run with USE_TEST_DB=1 to use behavior_tracking_test.db)
+    if os.environ.get('USE_TEST_DB') or os.environ.get('TEST_DATABASE_URI'):
+        test_uri = os.environ.get('TEST_DATABASE_URI')
+        if test_uri:
+            app.config['SQLALCHEMY_DATABASE_URI'] = test_uri
+        else:
+            test_db_path = os.path.join(instance_path, "behavior_tracking_test.db").replace("\\", "/")
+            app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{test_db_path}'
+    else:
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -1100,8 +1109,8 @@ def login():
         if not data:
             return jsonify({'success': False, 'error': 'Invalid request. Please provide username and password.'}), 400
         
-        username = data.get('username')
-        password = data.get('password')
+        username = (data.get('username') or '').strip()
+        password = (data.get('password') or '').strip()
         
         if not username or not password:
             return jsonify({'success': False, 'error': 'Username and password are required.'}), 400
@@ -1680,19 +1689,33 @@ def archived_students():
     dedicated archived mode.
     """
     students = get_archived_students()
-    
+    student_ids = [s.id for s in students]
+    team_by_student = {}
+    if student_ids:
+        for tm in TeamMember.query.filter(TeamMember.student_id.in_(student_ids)).all():
+            team_by_student.setdefault(tm.student_id, {
+                'case_manager': [], 'practitioner': [], 'professional': [],
+                'group_leader': [], 'paraprofessional': []
+            })
+            role_key = tm.role.lower().replace(' ', '_')
+            if role_key in team_by_student[tm.student_id] and tm.name:
+                team_by_student[tm.student_id][role_key].append(tm.name)
+
     # Internal administrative view of historical data.
-    # We include all students here, including those who opted out of directory
-    # information, because this is not a public directory but an internal log.
-    # Still, we minimize the fields we return.
-    result = [{
-        'id': s.id,
-        'name': s.name,
-        'grade': s.grade,
-        'card_color': s.card_color,
-        'created_at': s.created_at.isoformat() if s.created_at else None
-    } for s in students]
-    
+    result = []
+    for s in students:
+        entry = {
+            'id': s.id,
+            'name': s.name,
+            'grade': s.grade,
+            'card_color': s.card_color,
+            'team_members': team_by_student.get(s.id, {
+                'case_manager': [], 'practitioner': [], 'professional': [],
+                'group_leader': [], 'paraprofessional': []
+            })
+        }
+        result.append(entry)
+
     return jsonify(result)
 
 
@@ -2394,18 +2417,55 @@ def summary():
                 }
             })
     
-    # Get all records first, then filter in Python for more reliable date handling
+    # For staff/admin views, restrict to active students only (students with a User account role='student')
+    if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
+        student_users = User.query.filter_by(role='student').all()
+        active_student_ids = {u.student_id for u in student_users if u.student_id}
+        if not active_student_ids:
+            # No active students -> return empty summary
+            return jsonify({
+                'timeframe': timeframe,
+                'total_days': 0,
+                'averages': {
+                    'safety': 0,
+                    'teamwork': 0,
+                    'accountability': 0,
+                    'relationships': 0,
+                    'overall': 0
+                },
+                'totals': {
+                    'safety': 0,
+                    'teamwork': 0,
+                    'accountability': 0,
+                    'relationships': 0,
+                    'possible': 0
+                },
+                'infractions': {},
+                'total_frenzies': 0,
+                'additional_info': {
+                    'infractions': {},
+                    'total_reminders': 0,
+                    'total_resets': 0
+                }
+            })
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
+
+    # Get all records first, then filter in Python for more reliable date handling.
+    # Eager-load related data to avoid N+1 query patterns in summary calculations.
+    query = query.options(
+        selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
+        selectinload(DailyRecord.frenzies),
+    )
     all_records = query.all()
     print(f"Found {len(all_records)} total records before filtering")
     
     # Filter out excused records (they should be saved but excluded from calculations)
-    # Also migrate attendance_status for records that don't have it yet
+    # Also migrate attendance_status for records that don't have it yet (in-memory only; no per-record commit here)
     filtered_records = []
     for record in all_records:
         # Migrate attendance_status if needed
         if not record.attendance_status:
             record.attendance_status = 'present' if record.present else 'unexcused'
-            db.session.commit()
         
         # Exclude excused records from calculations
         if record.attendance_status != 'excused':
@@ -2806,14 +2866,22 @@ def summary():
     
     # Filter by period if specified (takes precedence over timeframe)
     if period:
-        from datetime import date
+        from datetime import date, timedelta
         today = date.today()
         current_school_year = get_school_year_for_date(today)
         
         filtered_records = []
         available_data_points = None
+        week_start = None
+        week_end = None
         
-        if period == '30day':
+        if period == 'weekly':
+            # Most recent complete week (Monday–Sunday)
+            days_since_monday = today.weekday()  # Monday is 0
+            week_start = today - timedelta(days=days_since_monday)
+            week_end = week_start + timedelta(days=6)
+            filtered_records = [r for r in all_records if week_start <= r.date <= week_end]
+        elif period == '30day':
             # Get unique dates that have data, sorted descending
             unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
             # Take the first 30 dates
@@ -2879,7 +2947,10 @@ def summary():
             'by_day_of_week': stats['by_day_of_week'],
             'by_class': stats['by_class']
         }
-        # Add data points info for 30day period
+        # Add metadata for weekly and 30-day periods
+        if period == 'weekly' and week_start and week_end:
+            result['week_start'] = week_start.isoformat()
+            result['week_end'] = week_end.isoformat()
         if period == '30day' and available_data_points is not None:
             result['available_data_points'] = available_data_points
             result['has_full_30_days'] = available_data_points >= 30
@@ -4106,6 +4177,24 @@ def frenzy_stats():
                 'all_purposes': [],
                 'all_results': []
             })
+
+    # For staff/admin views, restrict to active students only (students with a User account role='student')
+    if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
+        student_users = User.query.filter_by(role='student').all()
+        active_student_ids = {u.student_id for u in student_users if u.student_id}
+        if not active_student_ids:
+            return jsonify({
+                'by_day': {},
+                'by_time': {},
+                'by_location': {},
+                'by_purpose': {},
+                'total_count': 0,
+                'total_duration': 0,
+                'avg_duration': 0,
+                'all_purposes': [],
+                'all_results': []
+            })
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
     
     # Get all records first
     all_records = query.all()

@@ -91,8 +91,8 @@ header {
 }
 
 .site-logo {
-    width: 32px;
-    height: 32px;
+    height: 40px;
+    width: auto;
     border-radius: 6px;
     flex-shrink: 0;
 }
@@ -285,8 +285,8 @@ nav {
     }
 
     .site-logo {
-        width: 28px;
-        height: 28px;
+        height: 32px;
+        width: auto;
     }
 
     header h1 {
@@ -383,7 +383,8 @@ nav {
    BUTTONS
    ============================================================ */
 .btn-primary,
-.btn-secondary {
+.btn-secondary,
+.btn-danger {
     padding: 0.5rem 1.25rem;
     border: none;
     border-radius: var(--radius-sm);
@@ -419,6 +420,18 @@ nav {
 .btn-secondary:hover {
     background: var(--bg-elevated);
     border-color: var(--border-strong);
+}
+
+.btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.btn-danger:hover {
+    background: var(--danger);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
 .btn-large {
@@ -2592,9 +2605,9 @@ table tbody tr:hover {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    min-height: 28px;
-    padding: 6px 0;
-    margin-bottom: 4px;
+    min-height: 0;
+    padding: 0;
+    margin-bottom: 0;
 }
 
 .marketplace-case-manager-chip {
@@ -3106,6 +3119,14 @@ table tbody tr:hover {
     grid-column: 1 / -1;
 }
 
+/* Cards that only contain a breakdown or log list: shrink to fit the table */
+.dashboard-card:has(> .dashboard-breakdown-list),
+.dashboard-card:has(> .dashboard-log-list) {
+    width: fit-content;
+    max-width: 100%;
+    align-self: start;
+}
+
 .dashboard-card-header {
     display: flex;
     align-items: center;
@@ -3170,15 +3191,26 @@ table tbody tr:hover {
     list-style: none;
     padding: 0;
     margin: 0;
+    /* Shrink to data width so columns don't stretch across the card */
+    width: max-content;
+    max-width: 100%;
 }
 
 .dashboard-breakdown-item {
-    display: flex;
+    /* Two-column layout: labels left, numbers right-aligned in a fixed-width column */
+    display: grid;
+    grid-template-columns: auto minmax(5rem, auto);
+    column-gap: 2rem;
     align-items: center;
-    justify-content: space-between;
     padding: 10px 0;
     border-bottom: 1px solid var(--border);
     font-size: 0.875rem;
+}
+
+/* Numbers column: same alignment for every row, further from titles */
+.dashboard-breakdown-item > span:last-child {
+    justify-self: end;
+    text-align: right;
 }
 
 .dashboard-breakdown-item:last-child {
@@ -3252,16 +3284,26 @@ table tbody tr:hover {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* Shrink to just fit log rows so counts sit in a tight column */
+    width: max-content;
+    max-width: 100%;
 }
 
 .dashboard-log-item {
-    display: flex;
+    /* Two-column layout for type and count to line up */
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 2rem;
     align-items: center;
-    justify-content: space-between;
     padding: 8px 12px;
     background: var(--bg-elevated);
     border-radius: 10px;
     font-size: 0.8125rem;
+}
+
+.dashboard-log-item .log-count {
+    justify-self: end;
+    min-width: 2.5rem;
 }
 
 .dashboard-log-item .log-type {

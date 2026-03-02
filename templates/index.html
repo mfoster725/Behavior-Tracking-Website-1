@@ -14,6 +14,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <!-- Chart.js for marketplace analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script>
+        if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+            Chart.register(ChartDataLabels);
+        }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -426,10 +432,10 @@
                 <h2>User Management</h2>
                 <p>View and manage user accounts</p>
                 
-                <!-- Student Users Table -->
+                <!-- Current Students Table -->
                 <div class="user-role-section" id="user-section-students" style="margin-bottom: 30px;">
                     <h3 style="display: flex; align-items: center; justify-content: space-between;">
-                        <span>Student Users</span>
+                        <span>Current Students</span>
                         <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
                             <input type="checkbox" id="toggle-section-students" style="cursor: pointer;">
                             <span>Hide section</span>
@@ -482,7 +488,10 @@
                                     <th>Name</th>
                                     <th>Grade</th>
                                     <th>Card Color</th>
-                                    <th>Created At</th>
+                                    <th>Case Manager</th>
+                                    <th>Practitioner</th>
+                                    <th>Professional</th>
+                                    <th>Group Leader</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>

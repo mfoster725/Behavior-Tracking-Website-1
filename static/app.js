@@ -56,6 +56,7 @@ let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
+let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
@@ -766,7 +767,28 @@ function setupEventListeners() {
             dailySearchInput.addEventListener('input', (e) => {
                 dailyEntrySearchQuery = e.target.value;
                 console.log('Daily search query changed:', dailyEntrySearchQuery);
-                scheduleDailyDataLoad(300);
+                // While typing, just update the query and keep the current grid visible.
+                // If the query is cleared, immediately reset the grid.
+                if (!dailyEntrySearchQuery.trim()) {
+                    dailyEntrySearchCommitted = true;
+                    scheduleDailyDataLoad(0);
+                } else {
+                    dailyEntrySearchCommitted = false;
+                }
+            });
+            dailySearchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    // If the autocomplete dropdown is not open, treat Enter as submitting the search.
+                    const wrapper = dailySearchInput.closest('.daily-search-autocomplete-wrapper');
+                    const dropdown = wrapper ? wrapper.querySelector('.daily-search-autocomplete-dropdown') : null;
+                    const isDropdownVisible = dropdown && dropdown.style.display === 'block';
+                    if (!isDropdownVisible) {
+                        e.preventDefault();
+                        dailyEntrySearchQuery = dailySearchInput.value;
+                        dailyEntrySearchCommitted = true;
+                        scheduleDailyDataLoad(0);
+                    }
+                }
             });
         }
 
@@ -1177,6 +1199,21 @@ function setupEventListeners() {
             });
         }
 
+        const modalDeleteUserBtn = document.getElementById('delete-user-btn');
+        if (modalDeleteUserBtn) {
+            modalDeleteUserBtn.addEventListener('click', async () => {
+                const idInput = document.getElementById('edit-user-id');
+                const usernameInput = document.getElementById('edit-user-username');
+                const originalRoleInput = document.getElementById('edit-user-original-role');
+                const userId = idInput ? parseInt(idInput.value, 10) : null;
+                const username = usernameInput ? usernameInput.value : '';
+                const role = originalRoleInput ? originalRoleInput.value : '';
+                if (!userId) return;
+                await deleteUser(userId, username, role);
+                document.getElementById('edit-user-modal').style.display = 'none';
+            });
+        }
+
         // Handle add parent student button
         const addParentStudentBtn = document.getElementById('edit-parent-add-student-btn');
         if (addParentStudentBtn) {
@@ -1347,12 +1384,12 @@ async function switchView(viewName) {
             }
         }
         
-        // Check if summary has been loaded before (has student/quarter selected)
-        const summaryStudentSelect = document.getElementById('summary-student-select');
-        const quarterSelect = document.getElementById('quarter-select');
-        if (summaryStudentSelect && quarterSelect) {
-            // Reload summary if there's a quarter selected
-            if (quarterSelect.value) {
+        // If switching to summary view, ensure dashboard refreshes using new layout
+        const summaryView = document.getElementById('summary-view');
+        if (summaryView && summaryView.classList.contains('active')) {
+            if (typeof triggerDashboardLoad === 'function') {
+                triggerDashboardLoad('summary');
+            } else if (typeof loadSummary === 'function') {
                 loadSummary();
             }
         }
@@ -1372,7 +1409,11 @@ async function switchView(viewName) {
         
         const timeframeSelect = document.getElementById('frenzy-timeframe-select');
         if (timeframeSelect && timeframeSelect.value) {
-            loadFrenzyStats();
+            if (typeof triggerDashboardLoad === 'function') {
+                triggerDashboardLoad('frenzy');
+            } else if (typeof loadFrenzyStats === 'function') {
+                loadFrenzyStats();
+            }
         }
     }
     
@@ -3771,9 +3812,13 @@ async function saveStudent() {
 function refreshSummaryIfActive() {
     const summaryView = document.getElementById('summary-view');
     if (summaryView && summaryView.classList.contains('active')) {
-        const quarterSelect = document.getElementById('quarter-select');
-        if (quarterSelect && quarterSelect.value) {
-            loadSummary();
+        if (typeof triggerDashboardLoad === 'function') {
+            triggerDashboardLoad('summary');
+        } else if (typeof loadSummary === 'function') {
+            const quarterSelect = document.getElementById('quarter-select');
+            if (quarterSelect && quarterSelect.value) {
+                loadSummary();
+            }
         }
     }
 }
@@ -4892,16 +4937,31 @@ function buildSectionChartConfig(sectionType, data, source, groupBy) {
             if (sectionType === 'summary_comparison_star') {
                 const starKeys = ['safety', 'teamwork', 'accountability', 'relationships', 'overall'];
                 const starLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships', 'Overall'];
+                const starColors = {
+                    safety: DASHBOARD_COLORS.safety,
+                    teamwork: DASHBOARD_COLORS.teamwork,
+                    accountability: DASHBOARD_COLORS.accountability,
+                    relationships: DASHBOARD_COLORS.relationships,
+                    overall: hex(4)
+                };
                 const datasets = starKeys.map((k, i) => ({
                     label: starLabels[i],
                     data: labels.map(pk => (periodsData[pk].percentages?.[k] || 0)),
-                    backgroundColor: hex(i)
+                    backgroundColor: starColors[k] ?? hex(i)
                 }));
                 return {
                     title: 'Summary - STAR Percentages',
                     type: 'bar',
                     data: { labels, datasets },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } } }
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' },
+                            datalabels: { anchor: 'end', align: 'top', formatter: (v) => (v != null ? v + '%' : ''), color: '#1C1917', font: { size: 11, weight: '600' } }
+                        },
+                        scales: { x: { stacked: false }, y: { beginAtZero: true, max: 100 } }
+                    }
                 };
             }
             if (sectionType === 'summary_comparison_day') {
@@ -4945,11 +5005,26 @@ function buildSectionChartConfig(sectionType, data, source, groupBy) {
                 let values = keys.map(k => maxPerCategory > 0 ? ((data.totals[k] || 0) / maxPerCategory * 100).toFixed(0) : 0);
                 const overall = values.length ? (values.reduce((a, b) => a + parseFloat(b), 0) / values.length).toFixed(0) : 0;
                 values.push(overall);
+                const barColors = [
+                    DASHBOARD_COLORS.safety,
+                    DASHBOARD_COLORS.teamwork,
+                    DASHBOARD_COLORS.accountability,
+                    DASHBOARD_COLORS.relationships,
+                    hex(4)
+                ];
                 return {
                     title: 'Summary - STAR Averages',
                     type: 'bar',
-                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: labels.map((_, i) => hex(i)) }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: barColors }] },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            datalabels: { anchor: 'end', align: 'top', formatter: (v) => (v != null ? v + '%' : ''), color: '#1C1917', font: { size: 12, weight: '600' } }
+                        },
+                        scales: { y: { beginAtZero: true, max: 100 } }
+                    }
                 };
             }
             if (sectionType === 'summary_single_day') {
@@ -8457,9 +8532,19 @@ function setupDailySearchAutocomplete(input) {
     const filterOptions = (query) => {
         if (!query || !query.trim()) return []; // Only show when user starts typing
         const lowerQuery = query.trim().toLowerCase();
-        return getAllOptions().filter(option => 
+        const filtered = getAllOptions().filter(option => 
             option.name.toLowerCase().includes(lowerQuery)
         );
+        // Prefer staff matches over students when both match the same text
+        filtered.sort((a, b) => {
+            if (a.type === b.type) {
+                return a.name.localeCompare(b.name);
+            }
+            if (a.type === 'staff') return -1;
+            if (b.type === 'staff') return 1;
+            return 0;
+        });
+        return filtered;
     };
     
     // Show dropdown with filtered options
@@ -8490,9 +8575,10 @@ function setupDailySearchAutocomplete(input) {
             item.addEventListener('click', () => {
                 input.value = option.name;
                 dailyEntrySearchQuery = option.name;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+                dailyEntrySearchCommitted = true;
                 hideDropdown();
                 input.blur();
+                scheduleDailyDataLoad(0);
             });
             item.addEventListener('mouseenter', () => {
                 selectedIndex = index;
@@ -8574,8 +8660,9 @@ function setupDailySearchAutocomplete(input) {
             if (selectedItem) {
                 input.value = selectedItem.dataset.value;
                 dailyEntrySearchQuery = selectedItem.dataset.value;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+                dailyEntrySearchCommitted = true;
                 hideDropdown();
+                scheduleDailyDataLoad(0);
             }
         } else if (e.key === 'Escape') {
             hideDropdown();
@@ -9192,23 +9279,28 @@ async function loadUsers() {
                 if (archivedResponse.ok) {
                     const archivedStudents = await archivedResponse.json();
                     if (archivedStudents.length === 0) {
-                        archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                        archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
                         const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
                             const row = document.createElement('tr');
-                            const createdAt = student.created_at
-                                ? new Date(student.created_at).toLocaleDateString()
-                                : '-';
                             const cardColor = student.card_color || '-';
                             const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
-                            // Safely escape single quotes in name for inline handler
+                            const tm = student.team_members || {};
+                            const fmt = (arr) => (arr && arr.length) ? arr.join('<br>') : '-';
+                            const caseManager = fmt(tm.case_manager);
+                            const practitioner = fmt(tm.practitioner);
+                            const professional = fmt(tm.professional);
+                            const groupLeader = fmt(tm.group_leader);
                             const safeName = (student.name || 'Student').replace(/'/g, "\\'");
                             row.innerHTML = `
                                 <td><strong>${student.name || 'Unnamed Student'}</strong></td>
                                 <td>${student.grade || '-'}</td>
                                 <td>${cardColorDisplay}</td>
-                                <td>${createdAt}</td>
+                                <td style="font-size: 13px;">${caseManager}</td>
+                                <td style="font-size: 13px;">${practitioner}</td>
+                                <td style="font-size: 13px;">${professional}</td>
+                                <td style="font-size: 13px;">${groupLeader}</td>
                                 <td class="actions-cell">
                                     <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
                                         onclick="restoreArchivedStudent(${student.id}, '${safeName}')">
@@ -9221,11 +9313,11 @@ async function loadUsers() {
                         archivedStudentsTbody.appendChild(archivedFrag);
                     }
                 } else {
-                    archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                    archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
                 }
             } catch (e) {
                 console.error('Error loading archived students:', e);
-                archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
             }
         }
     } catch (error) {
@@ -9275,7 +9367,6 @@ function createAdminStaffRow(user, displayRole) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9324,7 +9415,6 @@ function createStudentRow(user) {
         paraprofessional = formatTeamMembers(user.team_members.paraprofessional);
     }
     
-    const canDelete = isAdmin();
     const canEdit = isAdmin() || isStaff();
     
     // Password visibility: Admin and staff can see/edit all student passwords, students see their own
@@ -9354,7 +9444,6 @@ function createStudentRow(user) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9390,7 +9479,7 @@ async function restoreArchivedStudent(studentId, studentName) {
         
         if (response.ok) {
             showMessage('Student user restored successfully.', 'success');
-            // Reload users so both Student Users and Archived Students tables refresh
+            // Reload users so both Current Students and Archived Students tables refresh
             await loadUsers();
         } else {
             const data = await response.json().catch(() => ({}));
@@ -9420,7 +9509,6 @@ function createOutsideStaffRow(user) {
         }
     }
     
-    const canDelete = isAdmin() && user.id !== window.currentUser.id;
     const canEdit = isAdmin();
     const canSeePassword = isAdmin();
     
@@ -9441,7 +9529,6 @@ function createOutsideStaffRow(user) {
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editOutsideStaffUser(${user.id}, ${userName}, '${user.username}', ${userDistrict})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
     
@@ -9645,6 +9732,24 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     const districtGroup = districtInput ? districtInput.closest('.form-group') : null;
     if (role === 'parent' && districtGroup) {
         districtGroup.style.display = 'none';
+    }
+    
+    // Configure archive/delete button visibility and label
+    const deleteUserBtn = document.getElementById('delete-user-btn');
+    if (deleteUserBtn) {
+        // Only admins can delete/archive from this modal
+        if (!isAdmin()) {
+            deleteUserBtn.style.display = 'none';
+        } else {
+            deleteUserBtn.style.display = 'inline-flex';
+            if (role === 'student') {
+                deleteUserBtn.textContent = 'Archive Student';
+                deleteUserBtn.title = 'Remove this student\'s user account while keeping their historical data.';
+            } else {
+                deleteUserBtn.textContent = 'Delete User';
+                deleteUserBtn.title = 'Permanently delete this user account.';
+            }
+        }
     }
     
     // Show/hide team member section based on role
@@ -10191,10 +10296,15 @@ async function saveEditUser() {
 }
 
 async function deleteUser(userId, username, role) {
+    const isStudent = role === 'student';
     const roleText = role === 'admin' ? 'ADMIN USER' : 
                      role === 'staff' ? 'STAFF USER' : 'STUDENT USER';
+    const warningTitle = isStudent ? 'Archive STUDENT USER' : `Delete ${roleText}`;
+    const message = isStudent
+        ? `⚠️ WARNING: Archive STUDENT USER\n\nArchiving will remove the login account for "${username}" but keep their historical data.\n\nThey will move to the Archived Students list and can be restored later.\n\nContinue?`
+        : `⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`;
     
-    if (!confirm(`⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`)) {
+    if (!confirm(message)) {
         return;
     }
     
@@ -10696,7 +10806,7 @@ function loadAdminStats(users) {
         </div>
         <div style="background: var(--bg-surface); padding: 15px; border-radius: var(--radius-sm); border-left: 3px solid var(--success);">
             <div style="font-size: 24px; font-weight: bold; color: var(--success);">${studentCount}</div>
-            <div style="color: var(--text-secondary); font-size: 12px;">Student Users</div>
+            <div style="color: var(--text-secondary); font-size: 12px;">Current Students</div>
         </div>
         <div style="background: var(--bg-surface); padding: 15px; border-radius: 6px; border-left: 3px solid var(--accent);">
             <div style="font-size: 24px; font-weight: bold; color: var(--accent);">${totalCount}</div>
@@ -13552,7 +13662,11 @@ function renderMarketplaceAddItemCaseManagerDropdown() {
     });
     dropdown.innerHTML = '';
     dropdown.appendChild(frag);
-    dropdown.classList.toggle('is-open', frag.childNodes.length > 0 && input === document.activeElement);
+    if (frag.childNodes.length > 0) {
+        dropdown.classList.add('is-open');
+    } else {
+        dropdown.classList.remove('is-open');
+    }
 }
 
 function openMarketplaceAddItemModal() {
@@ -15829,10 +15943,11 @@ async function exportChildData(studentId) {
 // ============================================================
 
 const DASHBOARD_COLORS = {
-    safety: '#60A5FA',
-    teamwork: '#34D399',
-    accountability: '#FBBF24',
-    relationships: '#F97316',
+    // Match STAR point card table colors
+    safety: '#FEE2E2',         // Safety - light red
+    teamwork: '#DBEAFE',       // Teamwork - light blue
+    accountability: '#D1FAE5', // Accountability - light green
+    relationships: '#FEF3C7',  // Relationships - light yellow
     palette: ['#60A5FA', '#34D399', '#FBBF24', '#F97316', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
 
@@ -15852,13 +15967,31 @@ function setupDashboardSearch(prefix, type) {
     if (!input || !dropdown) return;
 
     let debounceTimer = null;
+    let attemptedLoadData = false;
 
-    input.addEventListener('input', () => {
+    input.addEventListener('input', async () => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
+        debounceTimer = setTimeout(async () => {
             const q = input.value.trim().toLowerCase();
             if (q.length < 1) { dropdown.classList.remove('active'); return; }
-            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+
+            // Fallback: if we have no data yet, try to load it once
+            if (list.length === 0 && !attemptedLoadData) {
+                attemptedLoadData = true;
+                try {
+                    if (type === 'student' && typeof loadStudents === 'function') {
+                        await loadStudents();
+                        list = allStudents || [];
+                    } else if (type === 'staff' && typeof loadUsers === 'function') {
+                        await loadUsers();
+                        list = allStaffMembers || [];
+                    }
+                } catch (e) {
+                    console.error('Error loading data for dashboard search:', e);
+                }
+            }
+
             const matches = list.filter(item => {
                 const name = (item.name || '').toLowerCase();
                 const uname = (item.username || '').toLowerCase();
@@ -15912,7 +16045,45 @@ function setupDashboardSearch(prefix, type) {
     });
 
     input.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') dropdown.classList.remove('active');
+        if (e.key === 'Escape') {
+            dropdown.classList.remove('active');
+            return;
+        }
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const q = input.value.trim().toLowerCase();
+            if (!q) return;
+            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            const matches = list.filter(item => {
+                const name = (item.name || '').toLowerCase();
+                const uname = (item.username || '').toLowerCase();
+                return name.includes(q) || uname.includes(q);
+            }).slice(0, 12);
+            if (matches.length === 0) return;
+
+            const match = matches[0];
+            const id = parseInt(match.id);
+            const name = match.name || match.username;
+            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+
+            input.value = name;
+            dropdown.classList.remove('active');
+
+            if (type === 'student') {
+                dashboardState[pageKey].studentId = id;
+                dashboardState[pageKey].studentName = name;
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = id;
+            } else {
+                dashboardState[pageKey].staffId = id;
+                dashboardState[pageKey].staffName = name;
+            }
+            updateContextBanner(pageKey);
+            triggerDashboardLoad(pageKey);
+            return;
+        }
+
         if (e.key === 'Backspace' && input.value.length <= 1) {
             const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
             if (type === 'student') {
@@ -16011,9 +16182,33 @@ function setupContextClear(pageKey) {
 }
 
 // ---- Load Trigger ----
+function applyDefaultStaffFilterForDashboard(pageKey) {
+    // Only for logged-in staff (not students/admins)
+    if (!window.currentUser || window.currentUser.role !== 'staff' || !window.currentUser.id) return;
+    if (!dashboardState || !dashboardState[pageKey]) return;
+
+    // Don't override an existing staff filter
+    if (dashboardState[pageKey].staffId) return;
+
+    const staffName = window.currentUser.name || window.currentUser.username || '';
+    dashboardState[pageKey].staffId = window.currentUser.id;
+    dashboardState[pageKey].staffName = staffName;
+
+    const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
+    if (staffSearchInput && staffName) {
+        staffSearchInput.value = staffName;
+    }
+
+    updateContextBanner(pageKey);
+}
+
 function triggerDashboardLoad(pageKey) {
-    if (pageKey === 'summary') loadSummaryDashboard();
-    else loadFrenzyDashboard();
+    applyDefaultStaffFilterForDashboard(pageKey);
+    if (pageKey === 'summary') {
+        loadSummaryDashboard();
+    } else {
+        loadFrenzyDashboard();
+    }
 }
 
 // ---- Summary Dashboard ----
@@ -16129,7 +16324,7 @@ function renderSummarySingle(container, data) {
     // Infractions / Reminders Log Card
     const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
     html += `<div class="dashboard-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Recent Log</h3></div>`;
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Infractions</h3></div>`;
     if (infractionKeys.length > 0 || reminders > 0 || resets > 0) {
         html += `<div class="dashboard-log-list">`;
         infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
@@ -16167,20 +16362,34 @@ function renderSummarySingle(container, data) {
                 datasets: [{
                     label: 'Average %',
                     data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
-                    backgroundColor: [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships],
+                    backgroundColor: [
+                        DASHBOARD_COLORS.safety,
+                        DASHBOARD_COLORS.teamwork,
+                        DASHBOARD_COLORS.accountability,
+                        DASHBOARD_COLORS.relationships
+                    ],
                     borderRadius: 8,
                     borderSkipped: false,
                     maxBarThickness: 48
                 }]
             },
             options: {
-                indexAxis: 'y',
+                // Default indexAxis ('x') so STAR is on x-axis and % on y-axis
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        formatter: (value) => (value != null ? value + '%' : ''),
+                        color: '#1C1917',
+                        font: { size: 12, weight: '600' }
+                    }
+                },
                 scales: {
-                    x: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } },
-                    y: { grid: { display: false } }
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } }
                 }
             }
         });
@@ -16282,7 +16491,16 @@ function renderSummaryComparison(container, data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
+                plugins: {
+                    legend: { position: 'top' },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'top',
+                        formatter: (value) => (value != null ? value + '%' : ''),
+                        color: '#1C1917',
+                        font: { size: 11, weight: '600' }
+                    }
+                },
                 scales: {
                     y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
                     x: { grid: { display: false } }
@@ -16548,6 +16766,12 @@ function initDashboard() {
     if (frenzyManagedCheckbox) {
         frenzyManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('frenzy'));
     }
+
+    // Apply default staff filter once on load so that when
+    // Summary / Frenzy are first opened, they are already
+    // scoped to the current staff user.
+    applyDefaultStaffFilterForDashboard('summary');
+    applyDefaultStaffFilterForDashboard('frenzy');
 }
 
 // Auto-load when switching to summary or frenzy tab
