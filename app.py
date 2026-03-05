@@ -2612,6 +2612,25 @@ def summary():
         if total > 0:
             summary['present_pct'] = round((summary['present'] / total) * 100, 1)
         return summary
+
+    def compute_attendance_by_day_of_week(records):
+        """Compute attendance counts (present / excused / unexcused) per day of week."""
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        by_day = {day: {'present': 0, 'excused': 0, 'unexcused': 0} for day in days}
+        for r in records:
+            status = r.attendance_status or ('present' if r.present else 'unexcused')
+            if status not in ('present', 'excused', 'unexcused'):
+                continue
+            day = (r.day_of_week or r.date.strftime('%A')) if hasattr(r, 'day_of_week') else r.date.strftime('%A')
+            if day not in by_day:
+                continue
+            by_day[day][status] += 1
+        # Optionally drop days with zero totals to keep payload small
+        trimmed = {}
+        for day, counts in by_day.items():
+            if any(counts.values()):
+                trimmed[day] = counts
+        return trimmed
     
     # Helper function to calculate summary stats for a set of records
     def calculate_summary_stats(record_list):
@@ -2625,7 +2644,10 @@ def summary():
         additional_info = {
             'infractions': {},
             'total_reminders': 0,
-            'total_resets': 0
+            'total_resets': 0,
+            # New: which infractions most often co-occur with reminders / resets
+            'infractions_for_reminders': {},
+            'infractions_for_resets': {},
         }
         
         # Initialize day of week statistics (weekdays only)
@@ -2650,6 +2672,9 @@ def summary():
         # Initialize time-of-day statistics (time periods as written in point cards)
         # Keyed by PeriodRecord.time_range (e.g., "7:45-8:30")
         by_time = {}
+        # Nested time-of-day statistics by day of week:
+        # { 'Monday': { '7:45-8:30': bucket, ... }, ... }
+        by_time_by_day = {day: {} for day in weekdays}
         
         for record in record_list:
             # Track day of week statistics (weekdays only)
@@ -2697,13 +2722,38 @@ def summary():
                     time_data['_unique_dates'].add(record.date)
                     time_data['total_days'] += 1
                 
-                # Track day of week statistics for this period
+                # Track day-of-week and day+time statistics for this period
                 if is_weekday:
                     by_day_of_week[day_of_week]['safety_points'] += period.safety_points
                     by_day_of_week[day_of_week]['teamwork_points'] += period.teamwork_points
                     by_day_of_week[day_of_week]['accountability_points'] += period.accountability_points
                     by_day_of_week[day_of_week]['relationships_points'] += period.relationships_points
                     by_day_of_week[day_of_week]['possible_points'] += period.points_possible
+
+                    # Nested time-of-day stats for this day of week
+                    day_time_map = by_time_by_day[day_of_week]
+                    if time_label not in day_time_map:
+                        day_time_map[time_label] = {
+                            'total_days': 0,
+                            'safety_points': 0,
+                            'teamwork_points': 0,
+                            'accountability_points': 0,
+                            'relationships_points': 0,
+                            'possible_points': 0,
+                            'infractions': {},
+                            'total_reminders': 0,
+                            'total_resets': 0,
+                            '_unique_dates': set(),
+                        }
+                    dt_bucket = day_time_map[time_label]
+                    dt_bucket['safety_points'] += period.safety_points
+                    dt_bucket['teamwork_points'] += period.teamwork_points
+                    dt_bucket['accountability_points'] += period.accountability_points
+                    dt_bucket['relationships_points'] += period.relationships_points
+                    dt_bucket['possible_points'] += period.points_possible
+                    if record.date not in dt_bucket['_unique_dates']:
+                        dt_bucket['_unique_dates'].add(record.date)
+                        dt_bucket['total_days'] += 1
                 
                 # Track class statistics for this period
                 class_name = period.location or 'Unknown'
@@ -2738,6 +2788,10 @@ def summary():
                     total_frenzies += 1
                 
                 # Count infractions from period.infractions relationship
+                # Collect infractions for this period so we can later associate
+                # them with reminders / resets when present.
+                period_infraction_counts = {}
+
                 for infraction in period.infractions:
                     if infraction.infraction_type not in total_infractions:
                         total_infractions[infraction.infraction_type] = 0
@@ -2752,6 +2806,26 @@ def summary():
                         if infraction.infraction_type not in by_day_of_week[day_of_week]['infractions']:
                             by_day_of_week[day_of_week]['infractions'][infraction.infraction_type] = 0
                         by_day_of_week[day_of_week]['infractions'][infraction.infraction_type] += infraction.count
+
+                        # Track infractions by (day of week, time of day)
+                        day_time_map = by_time_by_day[day_of_week]
+                        if time_label not in day_time_map:
+                            day_time_map[time_label] = {
+                                'total_days': 0,
+                                'safety_points': 0,
+                                'teamwork_points': 0,
+                                'accountability_points': 0,
+                                'relationships_points': 0,
+                                'possible_points': 0,
+                                'infractions': {},
+                                'total_reminders': 0,
+                                'total_resets': 0,
+                                '_unique_dates': set(),
+                            }
+                        dt_bucket = day_time_map[time_label]
+                        if infraction.infraction_type not in dt_bucket['infractions']:
+                            dt_bucket['infractions'][infraction.infraction_type] = 0
+                        dt_bucket['infractions'][infraction.infraction_type] += infraction.count
                     
                     # Track infractions by class
                     class_name = period.location or 'Unknown'
@@ -2780,8 +2854,14 @@ def summary():
                     if infraction.infraction_type not in time_data['infractions']:
                         time_data['infractions'][infraction.infraction_type] = 0
                     time_data['infractions'][infraction.infraction_type] += infraction.count
+
+                    # Track on a per-period basis for reminder/reset association
+                    period_infraction_counts[infraction.infraction_type] = period_infraction_counts.get(infraction.infraction_type, 0) + infraction.count
                 
                 # Extract all data from Info column JSON data
+                has_reminder_for_period = False
+                has_reset_for_period = False
+
                 if period.info:
                     try:
                         info_data = json.loads(period.info)
@@ -2808,6 +2888,26 @@ def summary():
                                 if infraction_type not in by_day_of_week[day_of_week]['infractions']:
                                     by_day_of_week[day_of_week]['infractions'][infraction_type] = 0
                                 by_day_of_week[day_of_week]['infractions'][infraction_type] += count
+
+                                # Track infractions by (day of week, time of day)
+                                day_time_map = by_time_by_day[day_of_week]
+                                if time_label not in day_time_map:
+                                    day_time_map[time_label] = {
+                                        'total_days': 0,
+                                        'safety_points': 0,
+                                        'teamwork_points': 0,
+                                        'accountability_points': 0,
+                                        'relationships_points': 0,
+                                        'possible_points': 0,
+                                        'infractions': {},
+                                        'total_reminders': 0,
+                                        'total_resets': 0,
+                                        '_unique_dates': set(),
+                                    }
+                                dt_bucket = day_time_map[time_label]
+                                if infraction_type not in dt_bucket['infractions']:
+                                    dt_bucket['infractions'][infraction_type] = 0
+                                dt_bucket['infractions'][infraction_type] += count
                             
                             # Track infractions by class
                             class_name = period.location or 'Unknown'
@@ -2836,6 +2936,7 @@ def summary():
                             if infraction_type not in time_data['infractions']:
                                 time_data['infractions'][infraction_type] = 0
                             time_data['infractions'][infraction_type] += count
+                            period_infraction_counts[infraction_type] = period_infraction_counts.get(infraction_type, 0) + count
                         
                         # Extract infraction2
                         infraction2 = info_data.get('infraction2')
@@ -2859,6 +2960,26 @@ def summary():
                                 if infraction_type not in by_day_of_week[day_of_week]['infractions']:
                                     by_day_of_week[day_of_week]['infractions'][infraction_type] = 0
                                 by_day_of_week[day_of_week]['infractions'][infraction_type] += count
+
+                                # Track infractions by (day of week, time of day)
+                                day_time_map = by_time_by_day[day_of_week]
+                                if time_label not in day_time_map:
+                                    day_time_map[time_label] = {
+                                        'total_days': 0,
+                                        'safety_points': 0,
+                                        'teamwork_points': 0,
+                                        'accountability_points': 0,
+                                        'relationships_points': 0,
+                                        'possible_points': 0,
+                                        'infractions': {},
+                                        'total_reminders': 0,
+                                        'total_resets': 0,
+                                        '_unique_dates': set(),
+                                    }
+                                dt_bucket = day_time_map[time_label]
+                                if infraction_type not in dt_bucket['infractions']:
+                                    dt_bucket['infractions'][infraction_type] = 0
+                                dt_bucket['infractions'][infraction_type] += count
                             
                             # Track infractions by class
                             class_name = period.location or 'Unknown'
@@ -2887,6 +3008,7 @@ def summary():
                             if infraction_type not in time_data['infractions']:
                                 time_data['infractions'][infraction_type] = 0
                             time_data['infractions'][infraction_type] += count
+                            period_infraction_counts[infraction_type] = period_infraction_counts.get(infraction_type, 0) + count
                         
                         # Extract infractions array (Info column dynamic infractions)
                         for inf_item in info_data.get('infractions') or []:
@@ -2909,6 +3031,26 @@ def summary():
                                 if infraction_type not in by_day_of_week[day_of_week]['infractions']:
                                     by_day_of_week[day_of_week]['infractions'][infraction_type] = 0
                                 by_day_of_week[day_of_week]['infractions'][infraction_type] += count
+
+                                # Track infractions by (day of week, time of day)
+                                day_time_map = by_time_by_day[day_of_week]
+                                if time_label not in day_time_map:
+                                    day_time_map[time_label] = {
+                                        'total_days': 0,
+                                        'safety_points': 0,
+                                        'teamwork_points': 0,
+                                        'accountability_points': 0,
+                                        'relationships_points': 0,
+                                        'possible_points': 0,
+                                        'infractions': {},
+                                        'total_reminders': 0,
+                                        'total_resets': 0,
+                                        '_unique_dates': set(),
+                                    }
+                                dt_bucket = day_time_map[time_label]
+                                if infraction_type not in dt_bucket['infractions']:
+                                    dt_bucket['infractions'][infraction_type] = 0
+                                dt_bucket['infractions'][infraction_type] += count
                             class_name = period.location or 'Unknown'
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
@@ -2934,6 +3076,7 @@ def summary():
                             if infraction_type not in time_data['infractions']:
                                 time_data['infractions'][infraction_type] = 0
                             time_data['infractions'][infraction_type] += count
+                            period_infraction_counts[infraction_type] = period_infraction_counts.get(infraction_type, 0) + count
                         
                         # Count reminders
                         reminder1 = info_data.get('reminder1', False)
@@ -2941,6 +3084,7 @@ def summary():
                         reminder3 = info_data.get('reminder3', False)
                         if reminder1 and reminder1 not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_reminders'] += 1
+                            has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
@@ -2964,6 +3108,7 @@ def summary():
                             by_time[time_label]['total_reminders'] += 1
                         if reminder2 and reminder2 not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_reminders'] += 1
+                            has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
@@ -2987,6 +3132,7 @@ def summary():
                             by_time[time_label]['total_reminders'] += 1
                         if reminder3 and reminder3 not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_reminders'] += 1
+                            has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
                             class_name = period.location or 'Unknown'
@@ -3013,6 +3159,7 @@ def summary():
                         reset = info_data.get('reset', False)
                         if reset and reset not in [False, None, '', 'false', 'False', '0', 0]:
                             additional_info['total_resets'] += 1
+                            has_reset_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_resets'] += 1
                             class_name = period.location or 'Unknown'
@@ -3034,9 +3181,22 @@ def summary():
                                     'class_counts': {},
                                 }
                             by_time[time_label]['total_resets'] += 1
-                            
+
                     except (json.JSONDecodeError, ValueError, TypeError):
                         pass
+
+                # After processing this period's info, attribute its infractions
+                # to reminders / resets if they occurred.
+                if has_reminder_for_period and period_infraction_counts:
+                    for itype, cnt in period_infraction_counts.items():
+                        additional_info['infractions_for_reminders'][itype] = (
+                            additional_info['infractions_for_reminders'].get(itype, 0) + cnt
+                        )
+                if has_reset_for_period and period_infraction_counts:
+                    for itype, cnt in period_infraction_counts.items():
+                        additional_info['infractions_for_resets'][itype] = (
+                            additional_info['infractions_for_resets'].get(itype, 0) + cnt
+                        )
         
         num_periods = total_possible / 4 if total_possible > 0 else 0
         max_per_category = num_periods * 2 if num_periods > 0 else 0
@@ -3143,12 +3303,60 @@ def summary():
                     'overall': round(overall_percent_time, 1),
                 },
                 'total_infractions': total_infractions_time,
+                'infractions': dict(time_data.get('infractions', {})),
                 'total_reminders': time_data['total_reminders'],
                 'total_resets': time_data['total_resets'],
                 'top_class': top_class_name,
                 'top_class_count': top_class_count,
             }
-        
+
+        # Calculate percentages for each (day of week, time of day) bucket
+        by_time_by_day_formatted = {}
+        for day, times_map in by_time_by_day.items():
+            formatted_times = {}
+            for time_label, time_data in times_map.items():
+                unique_dates = time_data.pop('_unique_dates', None)
+
+                num_periods_time = time_data['possible_points'] / 4 if time_data['possible_points'] > 0 else 0
+                max_per_category_time = num_periods_time * 2 if num_periods_time > 0 else 0
+
+                safety_percent_time = (time_data['safety_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                teamwork_percent_time = (time_data['teamwork_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                accountability_percent_time = (time_data['accountability_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                relationships_percent_time = (time_data['relationships_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                overall_percent_time = (safety_percent_time + teamwork_percent_time + accountability_percent_time + relationships_percent_time) / 4 if max_per_category_time > 0 else 0
+
+                total_infractions_time = sum(time_data['infractions'].values())
+
+                formatted_times[time_label] = {
+                    'total_days': time_data['total_days'],
+                    'percentages': {
+                        'safety': round(safety_percent_time, 1),
+                        'teamwork': round(teamwork_percent_time, 1),
+                        'accountability': round(accountability_percent_time, 1),
+                        'relationships': round(relationships_percent_time, 1),
+                        'overall': round(overall_percent_time, 1),
+                    },
+                    'total_infractions': total_infractions_time,
+                    'infractions': dict(time_data.get('infractions', {})),
+                    'total_reminders': time_data['total_reminders'],
+                    'total_resets': time_data['total_resets'],
+                }
+            by_time_by_day_formatted[day] = formatted_times
+
+        # Build per-infraction breakdowns by time of day and day of week
+        infractions_by_type = {}
+        # From time-of-day buckets
+        for time_label, time_data in by_time.items():
+            for itype, cnt in (time_data.get('infractions') or {}).items():
+                entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
+                entry['by_time'][time_label] = entry['by_time'].get(time_label, 0) + cnt
+        # From day-of-week buckets
+        for day_label, day_data in by_day_of_week.items():
+            for itype, cnt in (day_data.get('infractions') or {}).items():
+                entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
+                entry['by_day_of_week'][day_label] = entry['by_day_of_week'].get(day_label, 0) + cnt
+
         return {
             'total_days': len(record_list),
             'totals': {
@@ -3171,6 +3379,8 @@ def summary():
             'by_day_of_week': by_day_of_week_formatted,
             'by_class': by_class_formatted,
             'by_time': by_time_formatted,
+            'by_time_by_day': by_time_by_day_formatted,
+            'infractions_by_type': infractions_by_type,
         }
     
     # Filter by period if specified (takes precedence over timeframe)
@@ -3247,6 +3457,7 @@ def summary():
         # Calculate single summary for period
         stats = calculate_summary_stats(metric_records)
         attendance_summary = compute_attendance_summary(attendance_records)
+        attendance_by_day = compute_attendance_by_day_of_week(attendance_records)
         result = {
             'timeframe': period,
             'comparison_mode': False,
@@ -3265,8 +3476,11 @@ def summary():
             'by_day_of_week': stats['by_day_of_week'],
             'by_class': stats['by_class'],
             'by_time': stats.get('by_time', {}),
+            'by_time_by_day': stats.get('by_time_by_day', {}),
+            'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
             'attendance_summary': attendance_summary,
+            'attendance_by_day_of_week': attendance_by_day,
         }
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
@@ -3316,6 +3530,8 @@ def summary():
             'by_day_of_week': stats['by_day_of_week'],
             'by_class': stats.get('by_class', {}),
             'by_time': stats.get('by_time', {}),
+            'by_time_by_day': stats.get('by_time_by_day', {}),
+            'infractions_by_type': stats.get('infractions_by_type', {}),
             'week_start': most_recent_monday.isoformat(),
             'week_end': most_recent_sunday.isoformat(),
             'starbucks_total': starbucks_total,
@@ -3352,6 +3568,8 @@ def summary():
             'by_day_of_week': stats['by_day_of_week'],
             'by_class': stats.get('by_class', {}),
             'by_time': stats.get('by_time', {}),
+            'by_time_by_day': stats.get('by_time_by_day', {}),
+            'infractions_by_type': stats.get('infractions_by_type', {}),
             'available_data_points': available_data_points,
             'has_full_30_days': available_data_points >= 30,
             'starbucks_total': starbucks_total,
@@ -3501,6 +3719,37 @@ def summary():
             'comparison_mode': True,
             'periods': comparison_data
         })
+    elif timeframe == 'custom_range':
+        # Custom explicit date range (from X date to Y date)
+        start_str = request.args.get('start_date')
+        end_str = request.args.get('end_date')
+        from datetime import datetime
+        try:
+            start = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else None
+            end = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else None
+        except Exception:
+            return _summary_response({
+                'timeframe': timeframe,
+                'comparison_mode': True,
+                'periods': {}
+            })
+        if not start or not end or start > end:
+            return _summary_response({
+                'timeframe': timeframe,
+                'comparison_mode': True,
+                'periods': {}
+            })
+
+        records = [r for r in all_records if start <= r.date <= end]
+        stats = calculate_summary_stats(records)
+        label = f"{start.isoformat()} to {end.isoformat()}"
+        comparison_data = {label: stats}
+
+        return _summary_response({
+            'timeframe': timeframe,
+            'comparison_mode': True,
+            'periods': comparison_data
+        })
     else:
         # "alltime" or "all" - use all records, single summary
         records = all_records
@@ -3521,6 +3770,10 @@ def summary():
             'total_frenzies': stats['total_frenzies'],
             'additional_info': stats['additional_info'],
             'by_day_of_week': stats['by_day_of_week'],
+            'by_class': stats.get('by_class', {}),
+            'by_time': stats.get('by_time', {}),
+            'by_time_by_day': stats.get('by_time_by_day', {}),
+            'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
         })
 
@@ -4935,6 +5188,37 @@ def frenzy_stats():
         for year_key in sorted_years:
             year_stats = calculate_frenzy_stats(year_groups[year_key])
             comparison_data[year_key] = year_stats
+        return _frenzy_response({
+            'timeframe': timeframe,
+            'comparison_mode': True,
+            'periods': comparison_data
+        })
+    elif timeframe == 'custom_range':
+        # Custom explicit date range (from X date to Y date)
+        start_str = request.args.get('start_date')
+        end_str = request.args.get('end_date')
+        from datetime import datetime
+        try:
+            start = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else None
+            end = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else None
+        except Exception:
+            return _frenzy_response({
+                'timeframe': timeframe,
+                'comparison_mode': True,
+                'periods': {}
+            })
+        if not start or not end or start > end:
+            return _frenzy_response({
+                'timeframe': timeframe,
+                'comparison_mode': True,
+                'periods': {}
+            })
+
+        records = [r for r in all_records if start <= r.date <= end]
+        stats = calculate_frenzy_stats(records)
+        label = f"{start.isoformat()} to {end.isoformat()}"
+        comparison_data = {label: stats}
+
         return _frenzy_response({
             'timeframe': timeframe,
             'comparison_mode': True,
@@ -7911,6 +8195,192 @@ def update_starbucks_balances_bulk():
         return jsonify({'error': 'Failed to update Starbucks balances'}), 500
 
     return jsonify({'status': 'ok'})
+
+@app.route('/api/incentive-tracking', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def incentive_tracking():
+    """
+    Compute incentive tracking tables for Yellow / Green / Blue card students
+    over an explicit date range, based on overall point card averages.
+    """
+    from collections import defaultdict
+    from sqlalchemy.orm import joinedload
+
+    # Parse dates (YYYY-MM-DD)
+    start_str = request.args.get('start_date')
+    end_str = request.args.get('end_date')
+    try:
+        start_date = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else None
+        end_date = datetime.strptime(end_str, '%Y-%m-%d').date() if end_str else None
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Expected YYYY-MM-DD.'}), 400
+
+    if start_date and end_date and start_date > end_date:
+        return jsonify({'error': 'Start date must be on or before end date.'}), 400
+
+    student_id = request.args.get('student_id', type=int)
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+
+    # Base query
+    query = DailyRecord.query.join(Student)
+
+    # Role-based access control (mirror summary rules at a high level)
+    if staff_id and current_user.role in ['staff', 'admin']:
+        staff_user = User.query.get(staff_id)
+        if staff_user:
+            staff_name = staff_user.name or ''
+            staff_username = staff_user.username or ''
+            team_members = TeamMember.query.filter(
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+            ).all()
+            staff_student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+            if not staff_student_ids:
+                return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+            if student_id and student_id in staff_student_ids:
+                query = query.filter(DailyRecord.student_id == student_id)
+            elif student_id and student_id not in staff_student_ids:
+                return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+            else:
+                query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
+    elif current_user.role == 'student':
+        if current_user.student_id:
+            query = query.filter(DailyRecord.student_id == current_user.student_id)
+        else:
+            return jsonify({'error': 'No student record linked'}), 404
+    elif current_user.role == 'staff' and current_user.is_outside_staff:
+        assigned_student_ids = [
+            assoc.student_id for assoc in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()
+        ]
+        if not assigned_student_ids:
+            return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+        if student_id:
+            if student_id not in assigned_student_ids:
+                return jsonify({'error': 'Access denied to this student'}), 403
+            query = query.filter(DailyRecord.student_id == student_id)
+        else:
+            query = query.filter(DailyRecord.student_id.in_(assigned_student_ids))
+    else:
+        if student_id:
+            query = query.filter(DailyRecord.student_id == student_id)
+            if managed_by_me:
+                user_name = (current_user.name or current_user.username or '').strip()
+                user_username = (current_user.username or '').strip()
+                team_member = TeamMember.query.filter(
+                    TeamMember.student_id == student_id,
+                    db.or_(
+                        db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                        db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                    ),
+                ).first()
+                if not team_member:
+                    return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+        elif managed_by_me:
+            user_name = (current_user.name or current_user.username or '').strip()
+            user_username = (current_user.username or '').strip()
+            team_members = TeamMember.query.filter(
+                db.or_(
+                    db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                    db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                )
+            ).all()
+            student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+            if not student_ids:
+                return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+            query = query.filter(DailyRecord.student_id.in_(student_ids))
+
+    # Apply date range
+    if start_date:
+        query = query.filter(DailyRecord.date >= start_date)
+    if end_date:
+        query = query.filter(DailyRecord.date <= end_date)
+
+    records = query.options(
+        joinedload(DailyRecord.periods),
+        joinedload(DailyRecord.student),
+    ).all()
+
+    if not records:
+        return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
+
+    # Aggregate STAR points per student
+    per_student = defaultdict(lambda: {
+        'student': None,
+        'total_safety': 0,
+        'total_teamwork': 0,
+        'total_accountability': 0,
+        'total_relationships': 0,
+        'total_possible': 0,
+    })
+
+    for record in records:
+        student = record.student
+        if not student:
+            continue
+        bucket = per_student[student.id]
+        bucket['student'] = student
+        for period in record.periods:
+            bucket['total_safety'] += period.safety_points or 0
+            bucket['total_teamwork'] += period.teamwork_points or 0
+            bucket['total_accountability'] += period.accountability_points or 0
+            bucket['total_relationships'] += period.relationships_points or 0
+            bucket['total_possible'] += period.points_possible or 0
+
+    yellow_list = []
+    green_list = []
+    blue_list = []
+
+    for sid, bucket in per_student.items():
+        student = bucket['student']
+        if not student:
+            continue
+        total_possible = bucket['total_possible']
+        if total_possible <= 0:
+            continue
+
+        num_periods = total_possible / 4.0
+        max_per_category = num_periods * 2.0 if num_periods > 0 else 0.0
+        if max_per_category <= 0:
+            continue
+
+        safety_percent = (bucket['total_safety'] / max_per_category * 100.0)
+        teamwork_percent = (bucket['total_teamwork'] / max_per_category * 100.0)
+        accountability_percent = (bucket['total_accountability'] / max_per_category * 100.0)
+        relationships_percent = (bucket['total_relationships'] / max_per_category * 100.0)
+        overall_percent = (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4.0
+        overall_percent = round(overall_percent, 1)
+
+        color = (student.card_color or '').strip().lower()
+        entry = {
+            'id': student.id,
+            'name': student.name,
+            'card_color': color,
+            'average_percent': overall_percent,
+        }
+
+        if color == 'yellow' and overall_percent >= 85.0:
+            yellow_list.append(entry)
+        elif color == 'green' and overall_percent >= 90.0:
+            green_list.append(entry)
+        elif color == 'blue' and overall_percent >= 90.0:
+            blue_list.append(entry)
+
+    # Sort each list by descending average, then name
+    def sort_key(item):
+        return (-item['average_percent'], item['name'] or '')
+
+    yellow_list.sort(key=sort_key)
+    green_list.sort(key=sort_key)
+    blue_list.sort(key=sort_key)
+
+    return jsonify({
+        'yellow_students': yellow_list,
+        'green_students': green_list,
+        'blue_students': blue_list,
+    })
+
 
 @app.route('/test')
 def test():

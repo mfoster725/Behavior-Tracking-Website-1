@@ -7,11 +7,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign3">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <!-- html2canvas for DOM snapshot → PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- Chart.js for marketplace analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -234,10 +236,6 @@
                             <span>Managed by me</span>
                         </label>
                         {% endif %}
-                        <div class="dashboard-toolbar">
-                            <button type="button" id="print-summary-btn" disabled title="Print">Print</button>
-                            <button type="button" id="compare-case-managers-btn" title="Compare Case Managers">Compare</button>
-                        </div>
                     </div>
 
                     <!-- Context banner -->
@@ -247,19 +245,30 @@
                         <button class="context-clear" id="summary-context-clear">Clear</button>
                     </div>
 
-                    <!-- Filter pills -->
+                    <!-- Timeframe selector (dropdown + optional custom range) -->
                     <div class="dashboard-filter-row">
                         <div class="dashboard-filter-pills" id="summary-filter-pills">
-                            <button type="button" class="dashboard-pill active" data-period="30day">30 School Days</button>
-                            <button type="button" class="dashboard-pill" data-period="weekly">Past Week</button>
-                            <button type="button" class="dashboard-pill" data-period="current_year">Current Year</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter1">Q1</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter2">Q2</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter3">Q3</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter4">Q4</button>
-                            <button type="button" class="dashboard-pill" data-period="all_time">All Time</button>
+                            <label for="summary-period-dropdown" class="dashboard-filter-label">Timeframe</label>
+                            <select id="summary-period-dropdown" class="dashboard-period-select">
+                                <option value="30day" selected>30 School Days</option>
+                                <option value="weekly">Past Week</option>
+                                <option value="current_year">Current Year</option>
+                                <option value="quarter1">Q1</option>
+                                <option value="quarter2">Q2</option>
+                                <option value="quarter3">Q3</option>
+                                <option value="quarter4">Q4</option>
+                                <option value="all_time">All Time</option>
+                                <option value="custom_range">Custom Date Range…</option>
+                            </select>
+                            <div class="dashboard-custom-range" id="summary-custom-range" style="display:none;">
+                                <input type="date" id="summary-custom-start">
+                                <span class="dashboard-custom-range-separator">to</span>
+                                <input type="date" id="summary-custom-end">
+                            </div>
+                            <button type="button" class="dashboard-compare-toggle" id="summary-compare-toggle">Compare</button>
+                            <button type="button" class="dashboard-compare-toggle" id="summary-incentive-toggle">Incentive Tracking</button>
+                            <button type="button" id="print-summary-btn" disabled title="Print">Print</button>
                         </div>
-                        <button type="button" class="dashboard-compare-toggle" id="summary-compare-toggle">Compare</button>
                     </div>
 
                     <!-- Comparison controls (hidden by default) -->
@@ -270,8 +279,26 @@
                             <option value="month">Month to Month</option>
                             <option value="quarter">Quarter to Quarter</option>
                             <option value="year">Year to Year</option>
-                            <option value="alltime">All Time</option>
+                            <option value="custom_range">Custom Date Range</option>
                         </select>
+                        <div id="summary-custom-range-controls" style="display: none; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px;">
+                            <label for="summary-custom-start">From</label>
+                            <input type="date" id="summary-custom-start" data-role="custom-start">
+                            <span>to</span>
+                            <input type="date" id="summary-custom-end" data-role="custom-end">
+                            <span class="dashboard-custom-error" style="color: #b91c1c; font-size: 0.8rem;"></span>
+                        </div>
+                    </div>
+                    <!-- Incentive Tracking controls (hidden by default) -->
+                    <div class="dashboard-compare-controls" id="summary-incentive-controls" style="margin-top: 8px;">
+                        <label for="incentive-start-date" class="dashboard-filter-label">Incentive Date Range</label>
+                        <div class="dashboard-custom-range">
+                            <input type="date" id="incentive-start-date">
+                            <span class="dashboard-custom-range-separator">to</span>
+                            <input type="date" id="incentive-end-date">
+                        </div>
+                        <button type="button" class="btn-primary" id="incentive-generate-btn">Generate Tables</button>
+                        <span id="incentive-error" class="dashboard-custom-error" style="color: #b91c1c; font-size: 0.8rem;"></span>
                     </div>
                 </div>
 
@@ -340,7 +367,6 @@
                             <button type="button" class="dashboard-pill" data-period="quarter2">Q2</button>
                             <button type="button" class="dashboard-pill" data-period="quarter3">Q3</button>
                             <button type="button" class="dashboard-pill" data-period="quarter4">Q4</button>
-                            <button type="button" class="dashboard-pill" data-period="all_time">All Time</button>
                         </div>
                         <button type="button" class="dashboard-compare-toggle" id="frenzy-compare-toggle">Compare</button>
                     </div>
@@ -352,8 +378,15 @@
                             <option value="month">Month to Month</option>
                             <option value="quarter">Quarter to Quarter</option>
                             <option value="year">Year to Year</option>
-                            <option value="alltime">All Time</option>
+                            <option value="custom_range">Custom Date Range</option>
                         </select>
+                        <div id="frenzy-custom-range-controls" style="display: none; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px;">
+                            <label for="frenzy-custom-start">From</label>
+                            <input type="date" id="frenzy-custom-start" data-role="custom-start">
+                            <span>to</span>
+                            <input type="date" id="frenzy-custom-end" data-role="custom-end">
+                            <span class="dashboard-custom-error" style="color: #b91c1c; font-size: 0.8rem;"></span>
+                        </div>
                     </div>
                 </div>
 
@@ -462,6 +495,7 @@
                         <div class="form-group" style="margin-bottom: 15px;">
                             <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
+                        <div class="user-table-scroll">
                         <table class="users-table">
                             <thead>
                                 <tr>
@@ -481,6 +515,7 @@
                                 <!-- Student user rows will be loaded dynamically -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
 
@@ -499,6 +534,7 @@
                             Students who no longer have a Student User account. These students are hidden from all normal views
                             (daily entry, period entry, linking, etc.) and are only visible here in archived mode.
                         </p>
+                        <div class="user-table-scroll">
                         <table class="users-table">
                             <thead>
                                 <tr>
@@ -516,6 +552,7 @@
                                 <!-- Archived student rows will be loaded dynamically -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
                 {% endif %}
@@ -533,6 +570,7 @@
                         <div class="form-group" style="margin-bottom: 15px;">
                             <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
+                        <div class="user-table-scroll">
                         <table class="users-table">
                             <thead>
                                 <tr>
@@ -547,6 +585,7 @@
                                 <!-- Staff user rows will be loaded dynamically -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
                 
@@ -563,6 +602,7 @@
                         <div class="form-group" style="margin-bottom: 15px;">
                             <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
+                        <div class="user-table-scroll">
                         <table class="users-table">
                             <thead>
                                 <tr>
@@ -578,11 +618,12 @@
                                 <!-- Outside Staff user rows will be loaded dynamically -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
                 
                 <!-- Admin Users Table -->
-                <div class="user-role-section" id="user-section-admin">
+                    <div class="user-role-section" id="user-section-admin">
                     <h3 style="display: flex; align-items: center; justify-content: space-between;">
                         <span>Admin Users</span>
                         <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
@@ -592,8 +633,9 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-admin-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;" readonly>
                         </div>
+                        <div class="user-table-scroll">
                         <table class="users-table">
                             <thead>
                                 <tr>
@@ -608,6 +650,7 @@
                                 <!-- Admin user rows will be loaded dynamically -->
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
                 
@@ -747,12 +790,12 @@
                         </div>
                     </div>
 
-                    <div id="starbucks-table-container">
-                        <table id="starbucks-table">
+                    <div id="starbucks-table-container" style="display: inline-block; width: fit-content; max-width: 100%;">
+                        <table id="starbucks-table" style="width: fit-content; display: inline-table; table-layout: auto;">
                             <thead>
                                 <tr style="background: var(--bg-elevated);">
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600; white-space: nowrap; width: 1%;">Student Name</th>
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600; white-space: nowrap; width: 1%;">Starbucks</th>
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Student Name</th>
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Starbucks</th>
                                 </tr>
                             </thead>
                             <tbody id="starbucks-table-body">
@@ -788,6 +831,8 @@
                             autocapitalize="none"
                             spellcheck="false"
                             data-1p-ignore="true"
+                            readonly
+                            onfocus="this.removeAttribute('readonly')"
                             style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
                         >
                         <div class="bank-search-autocomplete-dropdown"></div>
@@ -1465,11 +1510,6 @@
                         <div id="edit-group-leader-container" class="team-member-container"></div>
                         <button type="button" id="edit-add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
                     </div>
-                    <div class="form-group">
-                        <label>Paraprofessional:</label>
-                        <div id="edit-paraprofessional-container" class="team-member-container"></div>
-                        <button type="button" id="edit-add-paraprofessional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Paraprofessional</button>
-                    </div>
                 </div>
                 
                 <!-- Parent Students Section (only for parents) -->
@@ -1500,7 +1540,7 @@
             
             <div style="margin-top: 20px; display: flex; gap: 10px;">
                 <button id="save-edit-user-btn" class="btn-primary">Save Changes</button>
-                <button id="delete-user-btn" class="btn-danger">Delete User</button>
+                <button id="archive-student-btn" class="btn-danger" style="display: none;">Archive Student</button>
                 <button onclick="document.getElementById('edit-user-modal').style.display='none'" class="btn-secondary">Cancel</button>
             </div>
         </div>
@@ -1605,6 +1645,20 @@
             </div>
             <div style="margin-top: 20px; display: flex; gap: 10px;">
                 <button onclick="closeInfractionsSummaryModal()" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STAR Category Details Modal (from Reports STAR graph bar click) -->
+    <div id="star-category-details-modal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <span class="close" onclick="closeStarCategoryDetailsModal()">&times;</span>
+            <h2 id="star-category-details-title">STAR Category Details</h2>
+            <div id="star-category-details-content" style="margin-top: 20px;">
+                <!-- Content will be populated dynamically -->
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="closeStarCategoryDetailsModal()" class="btn-secondary">Close</button>
             </div>
         </div>
     </div>
@@ -1918,7 +1972,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc12"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc13"></script>
 </body>
 </html>
 

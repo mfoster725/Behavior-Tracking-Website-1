@@ -1561,6 +1561,14 @@ table tbody tr:hover {
     border-bottom: 1px solid var(--border);
 }
 
+/* Center the Password and Actions column headers in User Management tables */
+.users-table thead th:nth-child(4),
+.users-table thead th:nth-child(5),
+/* Outside Staff table has Username, Password, Actions as 4,5,6 */
+.users-table thead th:nth-child(6) {
+    text-align: center;
+}
+
 .users-table tbody tr:hover {
     background: var(--bg-elevated);
     transition: background 0.15s;
@@ -1687,6 +1695,45 @@ table tbody tr:hover {
     white-space: nowrap;
 }
 
+/* Scroll container for User Management tables so header/first column can stick */
+.user-table-scroll {
+    position: relative;
+    max-height: 400px;
+    overflow: auto;
+}
+
+/* Freeze header row and first (name) column in User Management tables */
+.users-table,
+.parent-children-table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.users-table thead th,
+.parent-children-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-elevated);
+}
+
+.users-table th:first-child,
+.users-table td:first-child,
+.parent-children-table th:first-child,
+.parent-children-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-surface);
+}
+
+/* Ensure the top-left header cell stays above both the header row and first column */
+.users-table thead th:first-child,
+.parent-children-table thead th:first-child {
+    z-index: 3;
+    background: var(--bg-elevated);
+}
+
 .verification-badge {
     display: inline-block;
     padding: 0.25rem 0.75rem;
@@ -1753,6 +1800,32 @@ table tbody tr:hover {
 .edit-student-btn:hover {
     background: var(--accent);
     color: #fff;
+}
+
+/* Team member rows in Add/Edit Student modal */
+.team-member-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.team-member-group .team-member-select {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Override generic delete button styles for team member rows */
+.team-member-group .delete-btn {
+    position: static;
+    top: auto;
+    right: auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
 }
 
 .inline-edit-input {
@@ -2985,7 +3058,7 @@ table tbody tr:hover {
     background: rgba(59, 130, 246, 0.1);
 }
 
-/* Filter pills */
+/* Filter row + pills / dropdown */
 .dashboard-filter-row {
     display: flex;
     align-items: center;
@@ -2997,6 +3070,7 @@ table tbody tr:hover {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 .dashboard-pill {
@@ -3024,6 +3098,83 @@ table tbody tr:hover {
     color: #3B82F6;
 }
 
+/* Reports timeframe dropdown + custom range */
+.dashboard-period-select {
+    min-width: 190px;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-surface);
+    font-size: 0.875rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.dashboard-period-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.dashboard-period-select:hover {
+    background: var(--bg-elevated);
+}
+
+.dashboard-filter-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.dashboard-custom-range {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dashboard-custom-range input[type="date"] {
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    font-size: 0.75rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    min-height: 32px;
+}
+
+.dashboard-custom-range-separator {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Print button in summary filter row - match toolbar button styling */
+#print-summary-btn {
+    padding: 7px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+#print-summary-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+#print-summary-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .dashboard-compare-toggle {
     padding: 7px 14px;
     border-radius: 20px;
@@ -3046,8 +3197,7 @@ table tbody tr:hover {
 
 .dashboard-compare-toggle.active {
     background: #FEF3C7;
-    border-color: #F59E0B;
-    border-style: solid;
+    border: 1px dashed #F59E0B;
     color: #92400E;
 }
 
@@ -3130,16 +3280,26 @@ table tbody tr:hover {
     color: #fff;
 }
 
+/* Summary results: allow content to expand page height (no clipping) */
+#summary-results {
+    overflow: visible;
+    min-height: 0;
+}
+
 /* Card grid */
 .dashboard-card-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(260px, 1fr));
-    grid-template-areas:
-        "overview star day"
-        "trigger infractions .";
+    display: flex;
+    flex-wrap: wrap;
     gap: 20px;
-    align-items: stretch;
+    align-items: flex-start;
+    /* When masonry sets height in JS, ensure it drives layout so page can scroll */
+    min-height: 0;
 }
+
+/* When a custom JS masonry layout is applied, cards are absolutely
+   positioned and the container height is controlled in script. The
+   base flex layout still serves as a graceful fallback when JS is
+   disabled or on small screens where we skip the custom layout. */
 
 @media (max-width: 768px) {
     .dashboard-card-grid {
@@ -3159,36 +3319,20 @@ table tbody tr:hover {
     border-radius: 16px;
     padding: 20px;
     transition: box-shadow 0.2s;
-    height: 100%;
+    /* Let each card use its natural height instead of stretching
+       to match the tallest card in the row. */
+    height: auto;
+    box-sizing: border-box;
 }
 
 .dashboard-card:hover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
+/* With flexbox layout, cards flow purely in DOM order.
+   The special grid-area based placement is no longer needed. */
 .dashboard-card.full-width {
-    grid-column: 1 / -1;
-}
-
-/* Explicit dashboard card placement */
-.overview-card {
-    grid-area: overview;
-}
-
-.star-performance-card {
-    grid-area: star;
-}
-
-.day-of-week-card {
-    grid-area: day;
-}
-
-.trigger-times-card {
-    grid-area: trigger;
-}
-
-.infractions-card {
-    grid-area: infractions;
+    width: 100%;
 }
 
 /* Cards that only contain a breakdown or log list: shrink to fit the table */
@@ -3204,6 +3348,147 @@ table tbody tr:hover {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 16px;
+}
+
+/* Shared inner wrapper for Trigger Times & Infractions cards so
+   the title and breakdown "table" are centered together, with
+   the title left-aligned relative to the table */
+.dashboard-breakdown-card-inner {
+    width: max-content;
+    max-width: 100%;
+    margin: 0 auto 16px;
+}
+
+/* Infractions card: (i) icon next to title */
+.infractions-card-header {
+    justify-content: flex-start;
+    gap: 8px;
+}
+.infractions-card-header .infractions-title-hint {
+    margin: 0;
+}
+
+/* Details panel (By Time / By Day): (i) next to section title */
+.infractions-details-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.infractions-details-section-header .infractions-title-hint {
+    margin: 0;
+}
+
+/* Tabs inside the Infractions card */
+.infractions-card .infractions-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.infractions-card .infractions-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.infractions-card .infractions-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.infractions-card .infractions-tab:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.infractions-card .infractions-tab-panels {
+    margin-top: 8px;
+}
+
+.infractions-card .infractions-tab-panel {
+    display: none;
+}
+
+.infractions-card .infractions-tab-panel.is-active {
+    display: block;
+}
+
+/* Second row of tabs for time/day drilldowns */
+.infractions-card .infractions-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.infractions-card .infractions-drill-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 999px;
+    border: 1px solid transparent;
+}
+
+.infractions-card .infractions-drill-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border-color: var(--border);
+}
+
+.infractions-card .infractions-drill-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.infractions-card .infractions-drill-tab-panel.is-active {
+    display: block;
+}
+
+/* Tab labels + close buttons */
+.infractions-card .infractions-tab-label,
+.infractions-card .infractions-drill-tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.infractions-card .infractions-tab-close,
+.infractions-card .infractions-drill-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.infractions-card .infractions-tab-close:hover,
+.infractions-card .infractions-drill-tab-close:hover {
+    background: rgba(0,0,0,0.06);
 }
 
 .dashboard-card-title {
@@ -3260,6 +3545,208 @@ table tbody tr:hover {
     min-height: 0;
 }
 
+/* STAR Performance card: (i) icon on same line as title */
+.star-performance-card-header {
+    display: flex;
+    justify-content: flex-start;
+    align-items: baseline;
+    gap: 8px;
+}
+.star-performance-card-header .infractions-title-hint {
+    margin: 0;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.star-performance-card-header .infractions-hint-icon {
+    vertical-align: middle;
+}
+
+/* Tabs inside the STAR Performance card (Level 1 — main tabs) */
+.star-performance-card .star-performance-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.star-performance-card .star-performance-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.star-performance-card .star-performance-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.star-performance-card .star-performance-tab:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.star-performance-card .star-performance-tab-panels {
+    margin-top: 8px;
+}
+
+.star-performance-card .star-performance-tab-panel {
+    display: none;
+}
+
+.star-performance-card .star-performance-tab-panel.is-active {
+    display: block;
+}
+
+.star-performance-card .star-performance-tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.star-performance-card .star-performance-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.star-performance-card .star-performance-tab-close:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+/* Level 2 drilldown tabs inside STAR category detail */
+.star-performance-card .star-performance-drilldown-tabs,
+#star-category-details-content .star-performance-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+    margin-bottom: 8px;
+}
+
+.star-performance-card .star-performance-drill-tab,
+#star-category-details-content .star-performance-drill-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 999px;
+    border: 1px solid transparent;
+}
+
+.star-performance-card .star-performance-drill-tab.active,
+#star-category-details-content .star-performance-drill-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border-color: var(--border);
+}
+
+.star-performance-card .star-performance-drill-tab-panel,
+#star-category-details-content .star-performance-drill-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.star-performance-card .star-performance-drill-tab-panel.is-active,
+#star-category-details-content .star-performance-drill-tab-panel.is-active {
+    display: block;
+}
+
+.star-performance-card .star-performance-drill-tab-label,
+#star-category-details-content .star-performance-drill-tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.star-performance-card .star-performance-drill-tab-close,
+#star-category-details-content .star-performance-drill-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.star-performance-card .star-performance-drill-tab-close:hover,
+#star-category-details-content .star-performance-drill-tab-close:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+/* Tables in STAR Performance tab panels — match Infractions card table style */
+.star-performance-card .star-performance-tab-panel table {
+    display: inline-table;
+    width: auto;
+    max-width: none;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 0.8125rem;
+}
+
+.star-performance-card .star-performance-tab-panel th,
+.star-performance-card .star-performance-tab-panel td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.star-performance-card .star-performance-tab-panel th {
+    background: var(--bg-elevated);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Same table style when STAR category details are shown in the modal */
+#star-category-details-content table {
+    display: inline-table;
+    width: auto;
+    max-width: none;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 0.8125rem;
+}
+
+#star-category-details-content th,
+#star-category-details-content td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+#star-category-details-content th {
+    background: var(--bg-elevated);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
 /* Stat grid inside cards */
 .dashboard-stat-row {
     display: flex;
@@ -3273,6 +3760,195 @@ table tbody tr:hover {
     padding: 14px 10px;
     background: var(--bg-elevated);
     border-radius: 12px;
+}
+
+/* Overview card stat boxes become interactive selections */
+.overview-stat {
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+
+.overview-stat:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.overview-stat.overview-stat-selected {
+    border-color: var(--accent);
+    background-color: var(--bg-surface);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* Starbucks box enlarges when selected */
+.overview-stat-starbucks.overview-stat-selected {
+    transform: scale(1.05);
+}
+
+.overview-detail-container {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    text-align: left;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    /* Ensure detail content (especially tables) cannot visually escape
+       the card on narrower viewports by constraining width and allowing
+       horizontal scrolling when needed. */
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.overview-detail-container h4 {
+    margin: 0 0 8px 0;
+    font-family: var(--font-heading);
+    font-size: 0.95rem;
+}
+
+.overview-detail-container table {
+    /* Let these tables size themselves to the content
+       instead of stretching to fill the card width. */
+    display: inline-table;
+    width: auto;
+    max-width: none;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 0.8125rem;
+}
+
+.overview-detail-container th,
+.overview-detail-container td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.overview-detail-container th {
+    background: var(--bg-elevated);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Days Present breakdown table: center numeric columns while keeping
+   the day label readable. */
+.days-present-table {
+    text-align: center;
+}
+
+.days-present-table th,
+.days-present-table td {
+    text-align: center;
+}
+
+.days-present-table th:first-child,
+.days-present-table td:first-child {
+    text-align: left;
+}
+
+/* Metric stacks inside overview detail cards, e.g. Days Present summary,
+   should align labels so numeric values appear in a neat column. */
+.overview-metrics {
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.overview-metrics-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.overview-metrics-label {
+    flex: 0 0 210px;
+    font-weight: 600;
+}
+
+.overview-metrics-value {
+    flex: 1 1 auto;
+}
+
+/* Extra cards created from Overview selections should only
+   be as large as needed for their contents. */
+.dashboard-card.overview-extra-card {
+    width: max-content;
+    max-width: 100%;
+    display: inline-block;
+}
+
+.dashboard-card.overview-extra-card .overview-detail-container {
+    /* Let the inner content define card width */
+    width: max-content;
+    max-width: 100%;
+}
+
+/* Layout helper: place paired graphs/tables in a row when space allows */
+.overview-two-col {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.overview-two-col > div {
+    flex: 0 0 auto;
+}
+
+/* In the Trigger Times card, force the trigger list and
+   day-of-week breakdown to sit side-by-side in a single row
+   and share available width. */
+.trigger-times-card .overview-two-col {
+    flex-wrap: nowrap;
+    gap: 32px;
+}
+
+.trigger-times-card .overview-two-col > div {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* Let the Trigger Times list use full column width so
+   time labels have more room and stay on one line. */
+.trigger-times-card .dashboard-breakdown-list {
+    margin: 0;
+    width: 100%;
+}
+
+/* In Trigger Times rows, size the time column just to
+   fit the time label on one line, without forcing the
+   whole card to grow wider than its grid column. */
+.trigger-times-card .dashboard-breakdown-item {
+    grid-template-columns: auto minmax(5rem, auto);
+    column-gap: 1.5rem;
+}
+
+/* Keep only the main time label on a single line.
+   The secondary "top class" subheader may wrap. */
+.trigger-times-card .dashboard-breakdown-name > span > div:first-child {
+    white-space: nowrap;
+}
+
+/* Let the Trigger Times + Day-of-week pair use the full
+   inner width of the card instead of shrinking to their
+   content width (which can make the card feel "too wide"). */
+.trigger-times-card .dashboard-breakdown-card-inner {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 16px 0;
+}
+
+/* Separate the Trigger Times list and Day-of-week table
+   a bit more visually inside the card. */
+.trigger-times-card .overview-two-col > div:last-child {
+    padding-left: 12px;
+}
+
+/* Keep the Day-of-week table safely inside the card and
+   allow it to scroll horizontally if needed on small screens. */
+.trigger-times-card .overview-detail-container {
+    max-width: 100%;
+    /* Keep content within the card and, when necessary on smaller
+       screens, allow horizontal scrolling instead of clipping. */
+    overflow-x: auto;
 }
 
 .dashboard-stat-value {
@@ -3295,6 +3971,7 @@ table tbody tr:hover {
 .dashboard-breakdown-list {
     list-style: none;
     padding: 0;
+    /* Left-align the breakdown "table" within its card */
     margin: 0;
     /* Shrink to data width so columns don't stretch across the card */
     width: max-content;
@@ -3330,9 +4007,70 @@ table tbody tr:hover {
     color: var(--text-primary);
 }
 
-/* Tighter spacing between label and number for Infractions breakdown list */
+/* Infractions breakdown overview table: override list-style row layout */
 .infractions-breakdown-list .dashboard-breakdown-item {
-    column-gap: 1rem;
+    display: table-row;
+    padding: 0;
+    border-bottom: none;
+    column-gap: 0;
+}
+
+/* Remove extra border under the last row; rely on header border for closure */
+.infractions-breakdown-list .dashboard-breakdown-item:last-child td {
+    border-bottom: none;
+}
+
+/* Reminder shown once per user; afterward only the (i) icon remains (click icon to show again) */
+.infractions-click-hint {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 6px 0 10px 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.infractions-click-hint-text {
+    margin: 0;
+    flex: 1;
+}
+.infractions-hint-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-style: italic;
+    cursor: pointer;
+}
+.infractions-hint-icon:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
+.infractions-hint-popover {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 6px;
+    padding: 8px 10px;
+    max-width: 480px;
+    box-sizing: border-box;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 10;
 }
 
 .dashboard-breakdown-dot {
@@ -3359,9 +4097,10 @@ table tbody tr:hover {
     text-align: right;
 }
 
-/* Starbucks table: columns only as wide as data */
+/* Starbucks table: columns only as wide as data; card fits table */
 #starbucks-table-container {
     display: inline-block;
+    width: fit-content;
     max-width: 100%;
     border-radius: 12px;
     border: 1px solid var(--border);
@@ -3370,10 +4109,10 @@ table tbody tr:hover {
     overflow-x: auto;
 }
 
+/* Override generic table { width: 100% } — this table must not stretch */
 #starbucks-table {
-    /* Do NOT stretch to full-width; shrink-wrap to content */
     display: inline-table;
-    width: auto !important;
+    width: fit-content !important;
     max-width: none;
     min-width: 0;
     table-layout: auto;
@@ -3388,11 +4127,13 @@ table tbody tr:hover {
 
 #starbucks-table th:nth-child(1),
 #starbucks-table td:nth-child(1) {
+    /* Let this column auto-size just enough for its text on one line */
     white-space: nowrap;
 }
 
 #starbucks-table th:nth-child(2),
 #starbucks-table td:nth-child(2) {
+    /* Let this column auto-size just enough for its text on one line */
     white-space: nowrap;
 }
 
@@ -3507,6 +4248,76 @@ table tbody tr:hover {
 
 @keyframes dashboard-spin {
     to { transform: rotate(360deg); }
+}
+
+/* Comparison tables inside dashboard cards (Summary & Frenzy) */
+.dashboard-compare-table {
+    /* Let the table shrink to just fit its content instead of stretching */
+    width: auto;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.dashboard-compare-table th,
+.dashboard-compare-table td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    text-align: center;
+    white-space: nowrap;
+}
+
+.dashboard-compare-table th:first-child,
+.dashboard-compare-table td:first-child {
+    text-align: left;
+    font-weight: 500;
+}
+
+.dashboard-compare-table thead th {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Wrap comparison tables so cards only grow as large as the table itself */
+.dashboard-compare-table-wrap {
+    display: inline-block;
+    width: auto;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+/* Shrink comparison cards to the width of their chart/table and center them */
+.dashboard-card:has(> .summary-compare-chart-wrap),
+.dashboard-card:has(> .dashboard-compare-table-wrap) {
+    width: max-content;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+/* ============================================================
+   REPORTS TAB — NUMERIC ALIGNMENT
+   ============================================================ */
+/* First column (times, labels) always left-aligned */
+#summary-view table th:first-child,
+#summary-view table td:first-child,
+#frenzy-view table th:first-child,
+#frenzy-view table td:first-child,
+#summary-view #point-card-data-container table th:first-child,
+#summary-view #point-card-data-container table td:first-child {
+    text-align: left;
+}
+
+#summary-view table th.numeric-cell,
+#summary-view table td.numeric-cell,
+#frenzy-view table th.numeric-cell,
+#frenzy-view table td.numeric-cell,
+#summary-view #point-card-data-container table th.numeric-cell,
+#summary-view #point-card-data-container table td.numeric-cell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Purpose/results tag cloud */

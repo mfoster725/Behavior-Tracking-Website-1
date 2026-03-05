@@ -72,9 +72,45 @@ FRENZY_PURPOSES = ["Sensory", "Escape", "Attention", "Tangible", "Unknown"]
 FRENZY_RESULTS = ["Redirected", "De-escalated", "Room clear", "Recovery", "Unknown"]
 
 
-def random_star_value():
-    """STAR points: min 0, max 2 per box."""
-    return random.randint(0, 2)
+def random_star_value(profile: str) -> int:
+    """
+    STAR points: min 0, max 2 per box.
+    Profile controls the bias so different students have different averages.
+    """
+    r = random.random()
+    # Rough target averages:
+    # - elite: ~95–100%
+    # - high:  ~90%
+    # - mid:   ~80%
+    # - low:   ~70%
+    if profile == "elite":
+        # Mostly 2s, occasional 1
+        if r < 0.9:
+            return 2
+        elif r < 0.99:
+            return 1
+        else:
+            return 0
+    elif profile == "high":
+        if r < 0.8:
+            return 2
+        elif r < 0.97:
+            return 1
+        else:
+            return 0
+    elif profile == "low":
+        if r < 0.45:
+            return 2
+        elif r < 0.85:
+            return 1
+        else:
+            return 0
+    # default: "mid"
+    if r < 0.65:
+        return 2
+    elif r < 0.9:
+        return 1
+    return 0
 
 
 def generate_school_days(count=100, end_date=None):
@@ -135,11 +171,63 @@ def main():
                 name=f"Test Student {i}",
                 email=f"student{i}@test.example",
                 grade=random.choice(["9", "10", "11", "12"]),
-                card_color=random.choice(["yellow", "green", "blue", None]),
+                card_color=None,  # will be assigned based on performance profile
             )
             db.session.add(s)
             students.append(s)
         db.session.flush()
+
+        # Assign performance profiles per student to bias STAR averages
+        # First 3: elite (~100%), next 5: high (~90%), most: mid (~80%), last few: low (~70%)
+        student_profiles = {}
+        for idx, s in enumerate(students, start=1):
+            if idx <= 3:
+                profile = "elite"
+            elif idx <= 8:
+                profile = "high"
+            elif idx <= 32:
+                profile = "mid"
+            else:
+                profile = "low"
+
+            # Card colors track the ranking system:
+            # yellow = bottom, green = middle, blue = top.
+            r = random.random()
+            if profile == "elite":
+                # Mostly blue, some green, almost no yellow
+                if r < 0.75:
+                    color = "blue"
+                elif r < 0.97:
+                    color = "green"
+                else:
+                    color = "yellow"
+            elif profile == "high":
+                # More green/blue than yellow
+                if r < 0.5:
+                    color = "green"
+                elif r < 0.8:
+                    color = "blue"
+                else:
+                    color = "yellow"
+            elif profile == "mid":
+                # Mostly green, some yellow, few blue
+                if r < 0.6:
+                    color = "green"
+                elif r < 0.8:
+                    color = "yellow"
+                else:
+                    color = "blue"
+            else:  # low profile
+                # Mostly yellow, some green
+                if r < 0.7:
+                    color = "yellow"
+                elif r < 0.95:
+                    color = "green"
+                else:
+                    color = "blue"
+
+            s.card_color = color
+            student_profiles[s.id] = profile
 
         # ----- Staff (Users) -----
         print("Creating", num_staff, "staff users...")
@@ -275,6 +363,7 @@ def main():
         for day_date in school_days:
             day_of_week = day_date.strftime("%A")
             for student in students:
+                profile = student_profiles.get(student.id, "mid")
                 # Decide attendance for this student-day:
                 # ~80% present, 10% excused, 10% unexcused
                 r = random.random()
@@ -300,11 +389,11 @@ def main():
                     continue
 
                 for time_range, location in STANDARD_PERIODS:
-                    # STAR: each box 0–2
-                    s_pts = random_star_value()
-                    t_pts = random_star_value()
-                    a_pts = random_star_value()
-                    r_pts = random_star_value()
+                    # STAR: each box 0–2, biased by student profile
+                    s_pts = random_star_value(profile)
+                    t_pts = random_star_value(profile)
+                    a_pts = random_star_value(profile)
+                    r_pts = random_star_value(profile)
 
                     # Random reminders/reset in info JSON
                     info_obj = {}

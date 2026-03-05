@@ -948,25 +948,17 @@ function setupEventListeners() {
             printSummaryBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('Print summary button clicked');
+                console.log('Print summary (point card) button clicked');
                 console.log('Button disabled?', printSummaryBtn.disabled);
                 if (printSummaryBtn.disabled) {
-                    alert('Please load summary data first before generating PDF.');
+                    alert('Please load summary data first before generating the point card PDF.');
                     return;
                 }
-                console.log('Calling showPdfTableSelectionModal...');
-                const pdfModalFunc = window.showPdfTableSelectionModal || showPdfTableSelectionModal;
-                console.log('Function exists?', typeof pdfModalFunc);
-                if (typeof pdfModalFunc === 'function') {
-                    try {
-                        pdfModalFunc('summary');
-                    } catch (error) {
-                        console.error('Error in print summary handler:', error);
-                        alert('Error opening PDF options: ' + (error.message || 'Unknown error'));
-                    }
-                } else {
-                    console.error('showPdfTableSelectionModal is not a function');
-                    alert('PDF modal function not available. Please refresh the page.');
+                try {
+                    openPointCardPrintWindow();
+                } catch (error) {
+                    console.error('Error in point card print handler:', error);
+                    alert('Error preparing point card PDF: ' + (error.message || 'Unknown error'));
                 }
             });
         } else {
@@ -1207,6 +1199,46 @@ function setupEventListeners() {
         if (saveEditUserBtn) {
             saveEditUserBtn.addEventListener('click', () => {
                 saveEditUser();
+            });
+        }
+
+        const archiveStudentBtn = document.getElementById('archive-student-btn');
+        if (archiveStudentBtn) {
+            archiveStudentBtn.addEventListener('click', () => {
+                const originalRoleInput = document.getElementById('edit-user-original-role');
+                const userIdInput = document.getElementById('edit-user-id');
+                const usernameInput = document.getElementById('edit-user-username');
+                const nameInput = document.getElementById('edit-user-name');
+
+                if (!originalRoleInput || !userIdInput || !usernameInput) {
+                    return;
+                }
+
+                const originalRole = originalRoleInput.value;
+                if (originalRole !== 'student') {
+                    return;
+                }
+
+                if (typeof isAdmin === 'function' && !isAdmin()) {
+                    if (typeof showMessage === 'function') {
+                        showMessage('Only admins can archive students.', 'error');
+                    } else {
+                        alert('Only admins can archive students.');
+                    }
+                    return;
+                }
+
+                const userId = parseInt(userIdInput.value, 10);
+                if (!userId) {
+                    return;
+                }
+
+                const username = usernameInput.value || '';
+                const displayName = (nameInput && nameInput.value) ? nameInput.value : username;
+
+                if (typeof archiveStudentUser === 'function') {
+                    archiveStudentUser(userId, username, displayName);
+                }
             });
         }
 
@@ -5082,8 +5114,35 @@ function buildSectionChartConfig(sectionType, data, source, groupBy) {
                 return {
                     title: 'Summary - STAR Averages',
                     type: 'bar',
-                    data: { labels, datasets: [{ label: 'Percentage', data: values.map(Number), backgroundColor: labels.map((_, i) => hex(i)) }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Percentage',
+                            data: values.map(Number),
+                            backgroundColor: labels.map((_, i) => hex(i))
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: true }
+                        },
+                        scales: { y: { beginAtZero: true, max: 100 } },
+                        onClick: (evt, elements) => {
+                            if (!elements || !elements.length) return;
+                            const index = elements[0].index;
+                            const catKeys = ['safety', 'teamwork', 'accountability', 'relationships', 'overall'];
+                            const catKey = catKeys[index];
+                            if (!catKey) return;
+                            try {
+                                showStarCategoryDetails(catKey, labels[index] || catKey);
+                            } catch (e) {
+                                console.error('Error showing STAR category details:', e);
+                            }
+                        }
+                    }
                 };
             }
             if (sectionType === 'summary_single_day') {
@@ -5605,6 +5664,147 @@ async function loadPointCardData() {
         console.error('Error loading point card data:', error);
         container.innerHTML = '<div class="error">Error loading point card data. Please try again.</div>';
     }
+}
+
+function openPointCardPrintWindow() {
+    const printBtn = document.getElementById('print-summary-btn');
+    // Prevent double-clicks while a PDF is being generated
+    if (printBtn && printBtn.dataset.generating === 'true') {
+        return;
+    }
+    if (printBtn) {
+        if (!printBtn.dataset.originalLabel) {
+            printBtn.dataset.originalLabel = printBtn.textContent || 'Print';
+        }
+        printBtn.dataset.generating = 'true';
+        printBtn.disabled = true;
+        printBtn.textContent = 'Generating PDF...';
+    }
+
+    const summaryContainer = document.getElementById('summary-results');
+    const dataContainer = document.getElementById('point-card-data-container');
+    // Determine which element to snapshot:
+    // 1) Prefer the summary results (new dashboard UI)
+    // 2) Fall back to the raw point-card cards if summary is empty
+    let targetEl = null;
+    if (summaryContainer && summaryContainer.innerHTML.trim()) {
+        targetEl = summaryContainer;
+    } else if (dataContainer) {
+        const hasCards = dataContainer.querySelector('.point-card-day');
+        if (!hasCards) {
+            alert('There are no point card days to print.');
+            return;
+        }
+        targetEl = dataContainer;
+    } else {
+        alert('No summary or point card data is available to print.');
+        return;
+    }
+
+    // If html2canvas + jsPDF are available, use the robust snapshot → single-page PDF approach
+    if (window.html2canvas && window.jspdf && window.jspdf.jsPDF) {
+        const { jsPDF } = window.jspdf;
+
+        // Small delay so any recent UI updates (e.g., charts) finish rendering
+        setTimeout(() => {
+            window.html2canvas(targetEl, {
+                // Slightly lower scale for faster rendering while keeping readability
+                scale: 1.5,
+                backgroundColor: '#ffffff',
+                useCORS: true,
+                logging: false
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const pdf = new jsPDF('portrait', 'pt', 'letter');
+
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const margin = 24;
+                const maxWidth = pageWidth - margin * 2;
+                const maxHeight = pageHeight - margin * 2;
+
+                const imgWidth = canvas.width;
+                const imgHeight = canvas.height;
+
+                const scale = Math.min(maxWidth / imgWidth, maxHeight / imgHeight);
+                const renderWidth = imgWidth * scale;
+                const renderHeight = imgHeight * scale;
+                const offsetX = (pageWidth - renderWidth) / 2;
+                const offsetY = (pageHeight - renderHeight) / 2;
+
+                pdf.addImage(imgData, 'PNG', offsetX, offsetY, renderWidth, renderHeight);
+                pdf.save('PointCardSummary.pdf');
+            }).finally(() => {
+                if (printBtn) {
+                    printBtn.disabled = false;
+                    printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+                    printBtn.dataset.generating = 'false';
+                }
+            }).catch(err => {
+                console.error('Error generating snapshot PDF:', err);
+                alert('There was a problem generating the PDF. Please try again.');
+                if (printBtn) {
+                    printBtn.disabled = false;
+                    printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+                    printBtn.dataset.generating = 'false';
+                }
+            });
+        }, 150);
+        return;
+    }
+
+    // Fallback: use browser print with the existing print-root approach
+    let printRoot = document.getElementById('point-card-print-root');
+    if (!printRoot) {
+        printRoot = document.createElement('div');
+        printRoot.id = 'point-card-print-root';
+        printRoot.className = 'print-root print-view';
+        printRoot.style.position = 'fixed';
+        printRoot.style.inset = '0';
+        printRoot.style.zIndex = '9999';
+        printRoot.style.background = '#ffffff';
+        printRoot.style.overflow = 'auto';
+        printRoot.style.display = 'none';
+        document.body.appendChild(printRoot);
+
+        const styleEl = document.createElement('style');
+        styleEl.id = 'point-card-print-style';
+        styleEl.textContent = `
+            @page {
+                size: letter;
+                margin: 0.5in;
+            }
+            @media print {
+                body > *:not(#point-card-print-root) {
+                    display: none !important;
+                }
+                #point-card-print-root {
+                    display: block !important;
+                }
+            }
+            #point-card-print-root {
+                box-sizing: border-box;
+                padding: 0.25in;
+                width: 100%;
+            }
+        `;
+        document.head.appendChild(styleEl);
+    }
+
+    printRoot.innerHTML = targetEl.innerHTML;
+    printRoot.style.display = 'block';
+
+    setTimeout(() => {
+        window.print();
+        setTimeout(() => {
+            printRoot.style.display = 'none';
+            if (printBtn) {
+                printBtn.disabled = false;
+                printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+                printBtn.dataset.generating = 'false';
+            }
+        }, 500);
+    }, 250);
 }
 
 function filterPointCardData(searchQuery, records) {
@@ -8243,7 +8443,21 @@ function initStarbucksManagement() {
         }
 
         tbody.innerHTML = '';
-        starbucksRows.forEach((row) => {
+        const sortedRows = [...starbucksRows].sort((a, b) => {
+            const aVal = typeof a.starbucks_count === 'number'
+                ? a.starbucks_count
+                : (a.starbucks_count ? Number(a.starbucks_count) || 0 : 0);
+            const bVal = typeof b.starbucks_count === 'number'
+                ? b.starbucks_count
+                : (b.starbucks_count ? Number(b.starbucks_count) || 0 : 0);
+            if (bVal !== aVal) return bVal - aVal;
+            const aName = (a.student_name || '').toLowerCase();
+            const bName = (b.student_name || '').toLowerCase();
+            if (aName < bName) return -1;
+            if (aName > bName) return 1;
+            return 0;
+        });
+        sortedRows.forEach((row) => {
             const tr = document.createElement('tr');
 
             const nameTd = document.createElement('td');
@@ -9638,12 +9852,88 @@ async function loadUsers() {
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
         const studentUsers = users.filter(u => u.role === 'student');
         
+        // Helper: safe string for sorting (treat null/undefined as empty, case-insensitive)
+        const sortKey = (value) => (value || '').toString().toLowerCase();
+        
+        // Helper: normalize grade to sortable number, with unknown grades last
+        const parseGradeForSort = (grade) => {
+            if (grade == null || grade === '' || grade === '-') return Number.POSITIVE_INFINITY;
+            if (typeof grade === 'number') return grade;
+            const g = grade.toString().trim().toUpperCase();
+            if (g === 'K' || g === 'KG' || g === 'KINDERGARTEN') return 0;
+            const n = parseInt(g, 10);
+            return Number.isNaN(n) ? Number.POSITIVE_INFINITY : n;
+        };
+        
         // Helper function to get display role
         const getDisplayRole = (user) => {
             if (user.role === 'admin') return 'Admin';
             if (user.role === 'staff') return user.designation || 'Staff';
             return 'Student';
         };
+        
+        // Sort collections per requirements
+        // Students: by grade, then name
+        studentUsers.sort((a, b) => {
+            const gradeDiff = parseGradeForSort(a.grade) - parseGradeForSort(b.grade);
+            if (gradeDiff !== 0) return gradeDiff;
+            const nameA = sortKey(a.name || a.student_name || a.username);
+            const nameB = sortKey(b.name || b.student_name || b.username);
+            if (nameA < nameB) return  -1;
+            if (nameA > nameB) return  1;
+            return 0;
+        });
+        
+        // Staff: by role (display role), then name
+        staffUsers.sort((a, b) => {
+            const roleA = sortKey(getDisplayRole(a));
+            const roleB = sortKey(getDisplayRole(b));
+            if (roleA < roleB) return -1;
+            if (roleA > roleB) return 1;
+            const nameA = sortKey(a.name || a.username);
+            const nameB = sortKey(b.name || b.username);
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+        
+        // Helper: ensure current user (if present in a given list) is first
+        const prioritizeCurrentUser = (list) => {
+            if (!window.currentUser || !Array.isArray(list)) return;
+            const idx = list.findIndex(u => u && u.id === window.currentUser.id);
+            if (idx > 0) {
+                const [current] = list.splice(idx, 1);
+                list.unshift(current);
+            }
+        };
+        
+        // Put the current user at the top of their respective table
+        prioritizeCurrentUser(studentUsers);
+        prioritizeCurrentUser(staffUsers);
+        prioritizeCurrentUser(outsideStaffUsers);
+        prioritizeCurrentUser(adminUsers);
+        
+        // Outside staff: by district, then name
+        outsideStaffUsers.sort((a, b) => {
+            const districtA = sortKey(a.district);
+            const districtB = sortKey(b.district);
+            if (districtA < districtB) return -1;
+            if (districtA > districtB) return 1;
+            const nameA = sortKey(a.name || a.username);
+            const nameB = sortKey(b.name || b.username);
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+        
+        // Admin users: by name
+        adminUsers.sort((a, b) => {
+            const nameA = sortKey(a.name || a.username);
+            const nameB = sortKey(b.name || b.username);
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
         
         // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
@@ -9702,6 +9992,17 @@ async function loadUsers() {
                 const archivedResponse = await fetch('/api/students/archived');
                 if (archivedResponse.ok) {
                     const archivedStudents = await archivedResponse.json();
+                    // Sort archived students by grade, then name to match current student ordering
+                    archivedStudents.sort((a, b) => {
+                        const gradeDiff = parseGradeForSort(a.grade) - parseGradeForSort(b.grade);
+                        if (gradeDiff !== 0) return gradeDiff;
+                        const nameA = sortKey(a.name || a.student_name);
+                        const nameB = sortKey(b.name || b.student_name);
+                        if (nameA < nameB) return -1;
+                        if (nameA > nameB) return 1;
+                        return 0;
+                    });
+                    
                     if (archivedStudents.length === 0) {
                         archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
@@ -9830,14 +10131,12 @@ function createStudentRow(user) {
     let practitioner = '-';
     let professional = '-';
     let groupLeader = '-';
-    let paraprofessional = '-';
     
     if (user.team_members) {
         caseManager = formatTeamMembers(user.team_members.case_manager);
         practitioner = formatTeamMembers(user.team_members.practitioner);
         professional = formatTeamMembers(user.team_members.professional);
         groupLeader = formatTeamMembers(user.team_members.group_leader);
-        paraprofessional = formatTeamMembers(user.team_members.paraprofessional);
     }
     
     const canDelete = isAdmin();
@@ -9861,7 +10160,6 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${practitioner}</td>
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
-        <td style="font-size: 13px;">${paraprofessional}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
@@ -10706,6 +11004,65 @@ async function saveEditUser() {
     }
 }
 
+async function archiveStudentUser(userId, username, displayName) {
+    if (typeof isAdmin === 'function' && !isAdmin()) {
+        if (typeof showMessage === 'function') {
+            showMessage('Only admins can archive students.', 'error');
+        } else {
+            alert('Only admins can archive students.');
+        }
+        return;
+    }
+
+    const nameForMessages = displayName || username || 'this student';
+    const confirmMessage = [
+        'Archive Student Account',
+        '',
+        `This will remove login access for "${nameForMessages}" and move them to the Archived Students list.`,
+        '',
+        'Their historical data will be preserved and the account can be restored later from Archived Students.',
+        '',
+        'Do you want to continue?'
+    ].join('\n');
+
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/users?id=${userId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            if (typeof showMessage === 'function') {
+                showMessage(`Student "${nameForMessages}" has been archived.`, 'success');
+            } else {
+                alert(`Student "${nameForMessages}" has been archived.`);
+            }
+            if (typeof loadUsers === 'function') {
+                await loadUsers();
+            }
+        } else {
+            const data = await response.json().catch(() => ({}));
+            const errorMsg = data.error || 'Failed to archive student.';
+            if (typeof showMessage === 'function') {
+                showMessage(errorMsg, 'error');
+            } else {
+                alert(errorMsg);
+            }
+        }
+    } catch (error) {
+        console.error('Error archiving student:', error);
+        if (typeof showMessage === 'function') {
+            showMessage('Error archiving student: ' + error.message, 'error');
+        } else {
+            alert('Error archiving student: ' + error.message);
+        }
+    }
+}
+
 async function deleteUser(userId, username, role) {
     const roleText = role === 'admin' ? 'ADMIN USER' : 
                      role === 'staff' ? 'STAFF USER' : 'STUDENT USER';
@@ -11336,6 +11693,18 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const adminSearch = document.getElementById('admin-search');
     if (adminSearch) {
+        // Start as read-only; enable editing once the user selects the field
+        adminSearch.readOnly = true;
+
+        const enableAdminSearchEditing = () => {
+            adminSearch.readOnly = false;
+            adminSearch.removeEventListener('focus', enableAdminSearchEditing);
+            adminSearch.removeEventListener('click', enableAdminSearchEditing);
+        };
+
+        adminSearch.addEventListener('focus', enableAdminSearchEditing);
+        adminSearch.addEventListener('click', enableAdminSearchEditing);
+
         adminSearch.addEventListener('input', (e) => filterUserTable('admin', e.target.value));
     }
     
@@ -11615,6 +11984,338 @@ function displayInfractionsModal(infractions, title) {
     }
     
     modal.style.display = 'block';
+}
+
+// STAR Category Details (from Reports STAR graph)
+function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
+    let data = summaryData || window.currentSummaryData;
+    // If the provided data object is missing detailed breakdowns but the global
+    // summary has them (common when restoring state), fall back to the global.
+    if (
+        data &&
+        (!data.by_time || !data.by_day_of_week) &&
+        window.currentSummaryData &&
+        (window.currentSummaryData.by_time || window.currentSummaryData.by_day_of_week)
+    ) {
+        data = window.currentSummaryData;
+    }
+
+    if (!data) {
+        showMessage('Summary data not available', 'error');
+        return null;
+    }
+
+    const categoryMap = {
+        safety: { pointsKey: 'safety_points', label: 'Safety (S)' },
+        teamwork: { pointsKey: 'teamwork_points', label: 'Teamwork (T)' },
+        accountability: { pointsKey: 'accountability_points', label: 'Accountability (A)' },
+        relationships: { pointsKey: 'relationships_points', label: 'Relationships (R)' },
+        overall: { pointsKey: null, label: 'Overall Average' }
+    };
+
+    const meta = categoryMap[categoryKey];
+    if (!meta) {
+        showMessage('Unknown STAR category selected', 'error');
+        return;
+    }
+
+    // Helpers to get percentage for a bucket using backend-computed percentages
+    function computeCategoryPercent(bucket) {
+        if (!bucket || !bucket.percentages) return null;
+        if (categoryKey === 'overall') {
+            const val = bucket.percentages.overall;
+            return typeof val === 'number' ? val : null;
+        }
+        const val = bucket.percentages[categoryKey];
+        return typeof val === 'number' ? val : null;
+    }
+
+    // Time-of-day stats
+    let bestTime = null;
+    let worstTime = null;
+    if (data.by_time) {
+        Object.entries(data.by_time).forEach(([label, bucket]) => {
+            if (!bucket || !bucket.total_days) return;
+            const pct = computeCategoryPercent(bucket);
+            if (pct == null || isNaN(pct)) return;
+            if (!bestTime || pct > bestTime.percent) bestTime = { label, percent: pct };
+            if (!worstTime || pct < worstTime.percent) worstTime = { label, percent: pct };
+        });
+    }
+
+    // Day-of-week stats
+    let bestDay = null;
+    let worstDay = null;
+    if (data.by_day_of_week) {
+        Object.entries(data.by_day_of_week).forEach(([day, bucket]) => {
+            if (!bucket || !bucket.total_days) return;
+            const pct = computeCategoryPercent(bucket);
+            if (pct == null || isNaN(pct)) return;
+            if (!bestDay || pct > bestDay.percent) bestDay = { label: day, percent: pct };
+            if (!worstDay || pct < worstDay.percent) worstDay = { label: day, percent: pct };
+        });
+    }
+
+    let html = '';
+
+    // Inline table pattern per TABLE-STYLES.md: horizontal lines only; header elevated, body white
+    const tableStyle = 'border-collapse: collapse; font-size: 0.85rem; margin-top: 4px;';
+    const thLeft = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; background: var(--bg-elevated);';
+    const thRight = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; background: var(--bg-elevated);';
+    const tdLeft = 'padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-surface);';
+    const tdRight = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; background: var(--bg-surface);';
+
+    html += `
+        <div class="star-category-detail-content">
+            <div class="star-performance-drilldown-tabs" role="tablist">
+                <button class="star-performance-drill-tab active" data-drill-tab="overview" role="tab" aria-selected="true">
+                    <span class="star-performance-drill-tab-label">Overview</span>
+                </button>
+            </div>
+            <div class="star-performance-drilldown-panels">
+                <div class="star-performance-drill-tab-panel is-active" data-drill-tab-panel="overview">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;">
+                        <div style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface);">
+                            <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 15px; font-weight: 600; color: var(--text-primary);">Time of Day - ${meta.label}</h3>
+                            ${bestTime || worstTime ? `
+                                <table style="${tableStyle}">
+                                    <thead>
+                                        <tr>
+                                            <th style="${thLeft}">Type</th>
+                                            <th style="${thLeft}">Time Period</th>
+                                            <th style="${thRight}">Average %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${bestTime ? `
+                                        <tr>
+                                            <td style="${tdLeft}; font-weight: 600;">Highest</td>
+                                            <td style="${tdLeft}">${escapeHtml(bestTime.label)}</td>
+                                            <td style="${tdRight}">${bestTime.percent.toFixed(1)}%</td>
+                                        </tr>` : ''}
+                                        ${worstTime ? `
+                                        <tr>
+                                            <td style="${tdLeft}; font-weight: 600;">Lowest</td>
+                                            <td style="${tdLeft}">${escapeHtml(worstTime.label)}</td>
+                                            <td style="${tdRight}">${worstTime.percent.toFixed(1)}%</td>
+                                        </tr>` : ''}
+                                    </tbody>
+                                </table>
+                                <button type="button" class="star-drill-show-all-btn" data-star-drill="by-time" style="margin-top: 8px; padding: 6px 12px; font-size: 0.8rem; cursor: pointer; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;">Show all time periods</button>
+                            ` : `
+                                <p style="margin: 4px 0; font-size: 14px; color: var(--text-secondary); font-style: italic;">No time-of-day data available for this category.</p>
+                            `}
+                        </div>
+
+                        <div style="padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); display: flex; flex-direction: column;">
+                            <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 15px; font-weight: 600; color: var(--text-primary);">Day of Week - ${meta.label}</h3>
+                            ${bestDay || worstDay ? `
+                                <table style="${tableStyle}">
+                                    <thead>
+                                        <tr>
+                                            <th style="${thLeft}">Type</th>
+                                            <th style="${thLeft}">Day</th>
+                                            <th style="${thRight}">Average %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${bestDay ? `
+                                        <tr>
+                                            <td style="${tdLeft}; font-weight: 600;">Highest</td>
+                                            <td style="${tdLeft}">${escapeHtml(bestDay.label)}</td>
+                                            <td style="${tdRight}">${bestDay.percent.toFixed(1)}%</td>
+                                        </tr>` : ''}
+                                        ${worstDay ? `
+                                        <tr>
+                                            <td style="${tdLeft}; font-weight: 600;">Lowest</td>
+                                            <td style="${tdLeft}">${escapeHtml(worstDay.label)}</td>
+                                            <td style="${tdRight}">${worstDay.percent.toFixed(1)}%</td>
+                                        </tr>` : ''}
+                                    </tbody>
+                                </table>
+                                <button type="button" class="star-drill-show-all-btn" data-star-drill="by-day" style="margin-top: 8px; padding: 6px 12px; font-size: 0.8rem; cursor: pointer; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;">Show all days</button>
+                            ` : `
+                                <p style="margin: 4px 0; font-size: 14px; color: var(--text-secondary); font-style: italic;">No day-of-week data available for this category.</p>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // If called without an explicit summaryData (section graph usage),
+    // render into the dedicated modal. For overview card clicks where
+    // summaryData is provided, we only return HTML so it can render in-card.
+    const detailsContentEl = document.getElementById('star-category-details-content');
+    const modal = document.getElementById('star-category-details-modal');
+    if (!summaryData && detailsContentEl && modal) {
+        const detailsTitleEl = document.getElementById('star-category-details-title');
+        if (detailsTitleEl) {
+            detailsTitleEl.textContent = `STAR Details - ${meta.label}`;
+        }
+        detailsContentEl.innerHTML = html;
+        wireStarCategoryDrilldown(detailsContentEl, data, categoryKey);
+        modal.style.display = 'block';
+    }
+
+    return html;
+}
+
+/**
+ * Wire Level 2 drill tabs and "Show all" buttons in STAR category detail content.
+ * root: container that has .star-performance-drilldown-tabs and .star-performance-drilldown-panels
+ * data: summary data (by_time, by_day_of_week)
+ * categoryKey: 'safety' | 'teamwork' | 'accountability' | 'relationships'
+ */
+function wireStarCategoryDrilldown(root, data, categoryKey) {
+    const drillTabsContainer = root.querySelector('.star-performance-drilldown-tabs');
+    const drillPanelsContainer = root.querySelector('.star-performance-drilldown-panels');
+    if (!drillTabsContainer || !drillPanelsContainer) return;
+
+    function computeCategoryPercent(bucket) {
+        if (!bucket || !bucket.percentages) return null;
+        if (categoryKey === 'overall') {
+            const val = bucket.percentages.overall;
+            return typeof val === 'number' ? val : null;
+        }
+        const val = bucket.percentages[categoryKey];
+        return typeof val === 'number' ? val : null;
+    }
+
+    const setActiveDrillTab = (tabName) => {
+        const allTabs = drillTabsContainer.querySelectorAll('.star-performance-drill-tab');
+        const allPanels = drillPanelsContainer.querySelectorAll('.star-performance-drill-tab-panel');
+        allTabs.forEach(tab => {
+            const isActive = tab.dataset.drillTab === tabName;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        allPanels.forEach(panel => {
+            panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
+        });
+    };
+
+    const wireDrillTabClicks = () => {
+        drillTabsContainer.querySelectorAll('.star-performance-drill-tab').forEach(tab => {
+            if (tab._starDrillWired) return;
+            tab._starDrillWired = true;
+            tab.addEventListener('click', (e) => {
+                const closeBtn = e.target.closest('.star-performance-drill-tab-close');
+                if (closeBtn) {
+                    e.stopPropagation();
+                    const name = tab.dataset.drillTab;
+                    if (name === 'overview') return;
+                    const panel = drillPanelsContainer.querySelector(`.star-performance-drill-tab-panel[data-drill-tab-panel="${name}"]`);
+                    if (panel) panel.remove();
+                    tab.remove();
+                    if (!drillTabsContainer.querySelector('.star-performance-drill-tab.active')) {
+                        setActiveDrillTab('overview');
+                    }
+                    return;
+                }
+                const tabName = tab.dataset.drillTab;
+                if (!tabName) return;
+                setActiveDrillTab(tabName);
+            });
+        });
+    };
+
+    const tableStyle = 'border-collapse: collapse; font-size: 0.85rem; margin-top: 4px;';
+    const thLeft = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; background: var(--bg-elevated);';
+    const thRight = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; background: var(--bg-elevated);';
+    const tdLeft = 'padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-surface);';
+    const tdRight = 'padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; background: var(--bg-surface);';
+
+    const createOrUpdateDrillSubtab = (tabName, label, innerHtml) => {
+        let tab = drillTabsContainer.querySelector(`.star-performance-drill-tab[data-drill-tab="${tabName}"]`);
+        let panel = drillPanelsContainer.querySelector(`.star-performance-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+
+        if (!tab) {
+            tab = document.createElement('button');
+            tab.className = 'star-performance-drill-tab';
+            tab.dataset.drillTab = tabName;
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-selected', 'false');
+            tab.innerHTML = `
+                <span class="star-performance-drill-tab-label">${escapeHtml(label || tabName)}</span>
+                <span class="star-performance-drill-tab-close" aria-label="Close" role="button">&times;</span>
+            `;
+            drillTabsContainer.appendChild(tab);
+        }
+
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'star-performance-drill-tab-panel';
+            panel.dataset.drillTabPanel = tabName;
+            drillPanelsContainer.appendChild(panel);
+        }
+
+        panel.innerHTML = `<div style="padding: 12px 14px;">${innerHtml}</div>`;
+        wireDrillTabClicks();
+        setActiveDrillTab(tabName);
+    };
+
+    const metaLabel = { safety: 'Safety (S)', teamwork: 'Teamwork (T)', accountability: 'Accountability (A)', relationships: 'Relationships (R)' }[categoryKey] || categoryKey;
+
+    // "Show all time periods" button
+    root.querySelectorAll('.star-drill-show-all-btn[data-star-drill="by-time"]').forEach(btn => {
+        if (btn._starDrillBtnWired) return;
+        btn._starDrillBtnWired = true;
+        btn.addEventListener('click', () => {
+            const byTime = data.by_time || {};
+            const rows = Object.entries(byTime)
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
+                .filter(r => r.pct != null && !isNaN(r.pct))
+                .sort((a, b) => (b.pct || 0) - (a.pct || 0));
+            let bodyRows = rows.map(r =>
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
+            ).join('');
+            const tableHtml = `
+                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by time period</h4>
+                <table style="${tableStyle}">
+                    <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
+                </table>
+            `;
+            createOrUpdateDrillSubtab('by-time', 'By Time', tableHtml);
+            const grid = btn.closest('.dashboard-card-grid');
+            if (grid && typeof scheduleMasonryLayoutAfterResize === 'function') scheduleMasonryLayoutAfterResize(grid);
+        });
+    });
+
+    // "Show all days" button
+    root.querySelectorAll('.star-drill-show-all-btn[data-star-drill="by-day"]').forEach(btn => {
+        if (btn._starDrillBtnWired) return;
+        btn._starDrillBtnWired = true;
+        btn.addEventListener('click', () => {
+            const byDay = data.by_day_of_week || {};
+            const rows = Object.entries(byDay)
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
+                .filter(r => r.pct != null && !isNaN(r.pct))
+                .sort((a, b) => (b.pct || 0) - (a.pct || 0));
+            let bodyRows = rows.map(r =>
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
+            ).join('');
+            const tableHtml = `
+                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by day of week</h4>
+                <table style="${tableStyle}">
+                    <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
+                </table>
+            `;
+            createOrUpdateDrillSubtab('by-day', 'By Day', tableHtml);
+            const grid = btn.closest('.dashboard-card-grid');
+            if (grid && typeof scheduleMasonryLayoutAfterResize === 'function') scheduleMasonryLayoutAfterResize(grid);
+        });
+    });
+}
+
+function closeStarCategoryDetailsModal() {
+    const modal = document.getElementById('star-category-details-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
 function closeInfractionsSummaryModal() {
@@ -11945,7 +12646,8 @@ function generateSummaryPDF() {
             'month': 'Month to Month',
             'quarter': 'Quarter to Quarter',
             'year': 'Year to Year',
-            'alltime': 'All Time'
+            'alltime': 'All Time',
+            'custom_range': 'Custom Range'
         };
         timeframeLabel = timeframeLabels[timeframe] || timeframe;
     }
@@ -12968,7 +13670,8 @@ function generateFrenzyStatsPDF() {
             'month': 'Month to Month',
             'quarter': 'Quarter to Quarter',
             'year': 'Year to Year',
-            'alltime': 'All Time'
+            'alltime': 'All Time',
+            'custom_range': 'Custom Range'
         };
         timeframeLabel = timeframeLabels[timeframe] || timeframe;
     }
@@ -13369,6 +14072,8 @@ function generateFrenzyStatsPDF() {
 // Make functions globally accessible
 window.showInfractionsSummary = showInfractionsSummary;
 window.showInfractionsSummarySingle = showInfractionsSummarySingle;
+window.showStarCategoryDetails = showStarCategoryDetails;
+window.closeStarCategoryDetailsModal = closeStarCategoryDetailsModal;
 window.closeInfractionsSummaryModal = closeInfractionsSummaryModal;
 window.generateSummaryPDF = generateSummaryPDF;
 window.generateFrenzyStatsPDF = generateFrenzyStatsPDF;
@@ -14698,6 +15403,12 @@ function setupBankStudentSearch() {
         if (balanceSection) balanceSection.style.display = display;
         if (paycheckSection) paycheckSection.style.display = display;
         if (transactionsSection) transactionsSection.style.display = display;
+    }
+
+    // Initial state: hide bank sections and show placeholder message until a student is selected.
+    setSectionsVisible(false);
+    if (noMsg) {
+        noMsg.style.display = 'block';
     }
 
     function showDropdown(items) {
@@ -16256,19 +16967,26 @@ async function exportChildData(studentId) {
 // ============================================================
 
 const DASHBOARD_COLORS = {
-    // STAR Performance bar colors
-    // Safety = red, Teamwork = blue, Accountability = green, Relationships = yellow
-    safety: '#DC2626',         // red
-    teamwork: '#2563EB',       // blue
-    accountability: '#16A34A', // green
-    relationships: '#FACC15',  // yellow
-    palette: ['#DC2626', '#2563EB', '#16A34A', '#FACC15', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
+    // STAR Performance bar colors (modern palette, same base: red, blue, green, yellow)
+    safety: '#EF4444',         // red
+    teamwork: '#3B82F6',       // blue
+    accountability: '#10B981', // green (emerald)
+    relationships: '#FACC15',  // yellow (reverted from warm gold)
+    palette: ['#EF4444', '#3B82F6', '#10B981', '#FACC15', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
+
+// Translucent bar colors for STAR Performance chart (same hues, less bold)
+const STAR_CHART_BAR_COLORS = [
+    'rgba(239, 68, 68, 0.65)',   // safety red
+    'rgba(59, 130, 246, 0.65)',  // teamwork blue
+    'rgba(16, 185, 129, 0.65)',  // accountability green
+    'rgba(250, 204, 21, 0.65)'   // relationships yellow
+];
 
 // ---- State ----
 let dashboardState = {
-    summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false },
-    frenzy:  { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false }
+    summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null },
+    frenzy:  { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null }
 };
 
 let summaryChartInstance = null;
@@ -16515,10 +17233,72 @@ function updateContextBanner(pageKey) {
     }
 }
 
-// ---- Filter Pills ----
+// ---- Filter controls (dropdown for summary, pills for frenzy) ----
 function setupFilterPills(pageKey) {
     const container = document.getElementById(`${pageKey}-filter-pills`);
     if (!container) return;
+
+    const dropdown = container.querySelector('.dashboard-period-select');
+
+    // New dropdown-based filter for summary (Point Card reports)
+    if (dropdown && pageKey === 'summary') {
+        const customWrap = document.getElementById('summary-custom-range');
+        const startInput = document.getElementById('summary-custom-start');
+        const endInput = document.getElementById('summary-custom-end');
+
+        const resetCompare = () => {
+            dashboardState[pageKey].compareMode = false;
+            const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
+            if (compareToggle) compareToggle.classList.remove('active');
+            const compareControls = document.getElementById(`${pageKey}-compare-controls`);
+            if (compareControls) compareControls.classList.remove('active');
+        };
+
+        const maybeTriggerCustomLoad = () => {
+            if (!startInput || !endInput) return;
+            const start = startInput.value;
+            const end = endInput.value;
+            if (!start || !end) return;
+            if (start > end) return;
+            dashboardState[pageKey].period = 'custom_range';
+            dashboardState[pageKey].customStart = start;
+            dashboardState[pageKey].customEnd = end;
+            resetCompare();
+            triggerDashboardLoad(pageKey);
+        };
+
+        dropdown.addEventListener('change', () => {
+            const value = dropdown.value;
+            if (value === 'custom_range') {
+                if (customWrap) customWrap.style.display = 'flex';
+                // Defer load until user selects both dates
+                dashboardState[pageKey].period = null;
+                dashboardState[pageKey].customStart = null;
+                dashboardState[pageKey].customEnd = null;
+                resetCompare();
+            } else {
+                if (customWrap) customWrap.style.display = 'none';
+                dashboardState[pageKey].period = value;
+                dashboardState[pageKey].customStart = null;
+                dashboardState[pageKey].customEnd = null;
+                resetCompare();
+                triggerDashboardLoad(pageKey);
+            }
+        });
+
+        if (startInput && endInput) {
+            startInput.addEventListener('change', maybeTriggerCustomLoad);
+            endInput.addEventListener('change', maybeTriggerCustomLoad);
+        }
+
+        // Initialize state from default dropdown value
+        if (dropdown.value && dropdown.value !== 'custom_range') {
+            dashboardState[pageKey].period = dropdown.value;
+        }
+        return;
+    }
+
+    // Existing pill-based filters (e.g., Frenzy stats)
     container.addEventListener('click', (e) => {
         const pill = e.target.closest('.dashboard-pill');
         if (!pill) return;
@@ -16547,10 +17327,228 @@ function setupCompareToggle(pageKey) {
         }
     });
     const select = controls.querySelector('select');
+    const customRangeContainer = document.getElementById(`${pageKey}-custom-range-controls`);
+    const customStartInput = controls.querySelector('input[data-role="custom-start"]');
+    const customEndInput = controls.querySelector('input[data-role="custom-end"]');
+    const customError = controls.querySelector('.dashboard-custom-error');
+
+    const handleCustomRangeVisibility = () => {
+        if (!customRangeContainer) return;
+        const useCustom = select && select.value === 'custom_range';
+        customRangeContainer.style.display = useCustom ? 'flex' : 'none';
+        if (!useCustom && customError) customError.textContent = '';
+        if (!useCustom && dashboardState[pageKey]) {
+            dashboardState[pageKey].customStart = null;
+            dashboardState[pageKey].customEnd = null;
+        }
+    };
+
     if (select) {
         select.addEventListener('change', () => {
+            if (select.value === 'custom_range' && pageKey === 'summary') {
+                handleCustomRangeVisibility();
+                // Wait for both dates before triggering load
+                return;
+            }
+            handleCustomRangeVisibility();
             if (select.value) triggerDashboardLoad(pageKey);
         });
+    }
+
+    const maybeTriggerCustomRangeLoad = () => {
+        if (!select || select.value !== 'custom_range') return;
+        if (!customStartInput || !customEndInput) return;
+        const start = customStartInput.value;
+        const end = customEndInput.value;
+        if (!start || !end) return;
+        if (new Date(start) > new Date(end)) {
+            if (customError) customError.textContent = 'Start date must be on or before end date.';
+            return;
+        }
+        if (customError) customError.textContent = '';
+        if (dashboardState[pageKey]) {
+            dashboardState[pageKey].customStart = start;
+            dashboardState[pageKey].customEnd = end;
+        }
+        triggerDashboardLoad(pageKey);
+    };
+
+    if (customStartInput && customEndInput) {
+        customStartInput.addEventListener('change', maybeTriggerCustomRangeLoad);
+        customEndInput.addEventListener('change', maybeTriggerCustomRangeLoad);
+    }
+}
+
+// ---- Incentive Tracking Toggle (Summary / Point Card) ----
+function setupIncentiveToggle() {
+    const toggle = document.getElementById('summary-incentive-toggle');
+    const controls = document.getElementById('summary-incentive-controls');
+    if (!toggle || !controls) return;
+
+    const startInput = document.getElementById('incentive-start-date');
+    const endInput = document.getElementById('incentive-end-date');
+    const generateBtn = document.getElementById('incentive-generate-btn');
+    const errorEl = document.getElementById('incentive-error');
+
+    const clearError = () => {
+        if (errorEl) errorEl.textContent = '';
+    };
+
+    const disableCompareMode = () => {
+        const compareToggle = document.getElementById('summary-compare-toggle');
+        const compareControls = document.getElementById('summary-compare-controls');
+        if (compareToggle) compareToggle.classList.remove('active');
+        if (compareControls) compareControls.classList.remove('active');
+        if (dashboardState && dashboardState.summary) {
+            dashboardState.summary.compareMode = false;
+        }
+    };
+
+    toggle.addEventListener('click', () => {
+        const isActive = toggle.classList.toggle('active');
+        controls.classList.toggle('active', isActive);
+        clearError();
+
+        if (isActive) {
+            disableCompareMode();
+        } else {
+            // When leaving Incentive mode, return to normal summary view
+            triggerDashboardLoad('summary');
+        }
+    });
+
+    const validateDates = () => {
+        if (!startInput || !endInput) return null;
+        const start = startInput.value;
+        const end = endInput.value;
+        if (!start || !end) {
+            if (errorEl) errorEl.textContent = 'Please select both start and end dates.';
+            return null;
+        }
+        if (new Date(start) > new Date(end)) {
+            if (errorEl) errorEl.textContent = 'Start date must be on or before end date.';
+            return null;
+        }
+        clearError();
+        return { start, end };
+    };
+
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async () => {
+            const range = validateDates();
+            if (!range) return;
+            await loadIncentiveTracking(range.start, range.end);
+        });
+    }
+}
+
+async function loadIncentiveTracking(startDate, endDate) {
+    const container = document.getElementById('summary-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading incentive tracking...</p></div>';
+
+    try {
+        const st = dashboardState.summary || {};
+        const params = [];
+        if (startDate) params.push(`start_date=${encodeURIComponent(startDate)}`);
+        if (endDate) params.push(`end_date=${encodeURIComponent(endDate)}`);
+        if (st.studentId) params.push(`student_id=${st.studentId}`);
+        if (st.staffId) params.push(`staff_id=${st.staffId}`);
+        const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+        if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+
+        const url = '/api/incentive-tracking?' + params.join('&');
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!response.ok) {
+            const msg = data && data.error ? data.error : 'Error loading incentive tracking data.';
+            container.innerHTML = `<div class="dashboard-empty"><p>${msg}</p></div>`;
+            return;
+        }
+
+        const formatRangeLabel = () => {
+            if (!startDate || !endDate) return 'All available data';
+            return `${startDate} to ${endDate}`;
+        };
+
+        const buildTable = (rows, title, description) => {
+            if (!rows || rows.length === 0) {
+                return `
+                    <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                        <h3>${title}</h3>
+                        <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">No students met this threshold in the selected range.</p>
+                    </div>
+                `;
+            }
+            const bodyRows = rows.map(s => `
+                <tr>
+                    <td>${s.name}</td>
+                    <td style="text-transform: capitalize;">${s.card_color || ''}</td>
+                    <td style="text-align:right;">${s.average_percent.toFixed(1)}%</td>
+                </tr>
+            `).join('');
+            return `
+                <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                    <h3>${title}</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
+                    <div style="overflow-x:auto; margin-top: 10px; display:inline-block;">
+                        <table style="width:auto; min-width:0; table-layout:auto; display:inline-table;">
+                            <thead>
+                                <tr>
+                                    <th style="white-space:nowrap;">Student</th>
+                                    <th style="white-space:nowrap;">Card</th>
+                                    <th style="text-align:right; white-space:nowrap;">Average %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bodyRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        };
+
+        const rangeLabel = formatRangeLabel();
+        const headerCard = `
+            <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                <h3>Incentive Tracking (${rangeLabel})</h3>
+                <p style="margin-top: 6px; color: var(--text-secondary); font-size: 0.9rem;">
+                    Shows students who meet incentive thresholds based on their overall point card averages
+                    within the selected date range.
+                </p>
+            </div>
+        `;
+
+        const yellowCardBlock = buildTable(
+            data.yellow_students || [],
+            'Yellow Card (≥ 85%)',
+            'Students with a yellow card whose overall point card average is at least 85% in this date range.'
+        );
+        const greenCardBlock = buildTable(
+            data.green_students || [],
+            'Green Card (≥ 90%)',
+            'Students with a green card whose overall point card average is at least 90% in this date range.'
+        );
+        const blueCardBlock = buildTable(
+            data.blue_students || [],
+            'Blue Card (≥ 90%)',
+            'Students with a blue card whose overall point card average is at least 90% in this date range.'
+        );
+
+        container.innerHTML = headerCard + yellowCardBlock + greenCardBlock + blueCardBlock;
+
+        // Hide raw point card data cards if visible
+        const pcContainer = document.getElementById('point-card-data-container');
+        if (pcContainer) pcContainer.style.display = 'none';
+    } catch (err) {
+        console.error('Error loading incentive tracking:', err);
+        const container = document.getElementById('summary-results');
+        if (container) {
+            container.innerHTML = `<div class="dashboard-empty"><p>Error loading incentive tracking: ${err.message}</p></div>`;
+        }
     }
 }
 
@@ -16596,11 +17594,20 @@ async function loadSummaryDashboard() {
     if (st.compareMode) {
         const selectEl = document.getElementById('quarter-select');
         const tf = selectEl ? selectEl.value : '';
-        if (tf) params.push(`timeframe=${tf}`);
-        if (tf === 'month') {
-            const sySelect = document.getElementById('summary-school-year-select');
-            const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
-            if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+        if (tf) {
+            params.push(`timeframe=${tf}`);
+            if (tf === 'month') {
+                const sySelect = document.getElementById('summary-school-year-select');
+                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+            } else if (tf === 'custom_range') {
+                const start = st.customStart;
+                const end = st.customEnd;
+                if (start && end) {
+                    params.push(`start_date=${encodeURIComponent(start)}`);
+                    params.push(`end_date=${encodeURIComponent(end)}`);
+                }
+            }
         }
     } else {
         if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
@@ -16711,116 +17718,57 @@ function renderSummarySingle(container, data) {
     html += `<div class="dashboard-card overview-card">
         <div class="dashboard-card-header"><h3 class="dashboard-card-title">Overview</h3></div>
         <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box">
-                <div class="dashboard-stat-value">${roundedPresentPct}%</div>
+            <div class="dashboard-stat-box overview-stat overview-stat-days-present" data-overview-key="days_present">
+                <div class="dashboard-stat-value">${totalDays > 0 ? `${roundedPresentPct}%` : '&nbsp;'}</div>
                 <div class="dashboard-stat-label">DAYS PRESENT</div>
             </div>
-            <div class="dashboard-stat-box">
+            <div class="dashboard-stat-box overview-stat overview-stat-star-percent" data-overview-key="star_percent">
                 <div class="dashboard-stat-value">${overallPct}%</div>
-                <div class="dashboard-stat-label">Average STAR Percent</div>
+                <div class="dashboard-stat-label">STAR Percent</div>
             </div>
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${frenzies}</div><div class="dashboard-stat-label">Frenzies</div></div>
+            <div class="dashboard-stat-box overview-stat overview-stat-starbucks" data-overview-key="starbucks">
+                <div class="dashboard-stat-value" style="color:#92400e">${starbucksTotal}</div>
+                <div class="dashboard-stat-label">Starbucks</div>
+            </div>
         </div>
         <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#92400e">${starbucksTotal}</div><div class="dashboard-stat-label">Starbucks</div></div>
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div><div class="dashboard-stat-label">Infractions</div></div>
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#D97706">${reminders}</div><div class="dashboard-stat-label">Reminders</div></div>
-            <div class="dashboard-stat-box" style="flex:1"><div class="dashboard-stat-value" style="color:#6366F1">${resets}</div><div class="dashboard-stat-label">Resets</div></div>
+            <div class="dashboard-stat-box overview-stat overview-stat-frenzies" data-overview-key="frenzies" style="flex:1">
+                <div class="dashboard-stat-value">${frenzies}</div>
+                <div class="dashboard-stat-label">Frenzies</div>
+            </div>
+            <div class="dashboard-stat-box overview-stat overview-stat-infractions" data-overview-key="infractions" style="flex:1">
+                <div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div>
+                <div class="dashboard-stat-label">Infractions</div>
+            </div>
+            <div class="dashboard-stat-box overview-stat overview-stat-reminders" data-overview-key="reminders" style="flex:1">
+                <div class="dashboard-stat-value" style="color:#D97706">${reminders}</div>
+                <div class="dashboard-stat-label">Reminders</div>
+            </div>
+            <div class="dashboard-stat-box overview-stat overview-stat-resets" data-overview-key="resets" style="flex:1">
+                <div class="dashboard-stat-value" style="color:#6366F1">${resets}</div>
+                <div class="dashboard-stat-label">Resets</div>
+            </div>
         </div>
         ${hardestTriggerLabel ? `
         <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box" style="flex:1">
+            <div class="dashboard-stat-box overview-stat overview-stat-trigger-times" data-overview-key="trigger_times" style="flex:1">
                 <div class="dashboard-stat-value">${escapeHtml(hardestTriggerLabel)}</div>
                 <div class="dashboard-stat-label">Trigger Time${hardestTriggerSubtitle ? ' \u2022 ' + hardestTriggerSubtitle : ''}</div>
             </div>
         </div>` : ''}
     </div>`;
 
-    // Row 2: STAR Performance Chart Card
-    html += `<div class="dashboard-card star-performance-card">
-        <div class="dashboard-card-header">
-            <div>
-                <h3 class="dashboard-card-title">STAR Performance</h3>
-                <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
-            </div>
-        </div>
-        <div class="dashboard-chart-wrap summary-star-chart-wrap"><canvas id="summary-star-chart"></canvas></div>
-    </div>`;
-
-    // Row 3: Trigger Times Card — group by time period, with most common class subheader
-    // Always render this card so its position within the grid is stable
-    html += `<div class="dashboard-card trigger-times-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>`;
-    if (sortedTriggerKeys.length > 0) {
-        // Full Trigger Times list
-        html += `<ul class="dashboard-breakdown-list">`;
-        sortedTriggerKeys.forEach((key, i) => {
-            const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
-            const pctOverall = rowData.percentages?.overall ?? '';
-
-            const infractionsCount = typeof rowData.total_infractions === 'number'
-                ? rowData.total_infractions
-                : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
-
-            const displayLabel = key;
-            const topClass = useByTime ? (rowData.top_class || null) : null;
-
-            html += `<li class="dashboard-breakdown-item">
-                <span class="dashboard-breakdown-name">
-                    <span>
-                        <div>${escapeHtml(displayLabel)}</div>
-                        ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
-                    </span>
-                </span>
-                <span>
-                    <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
-                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
-                </span>
-            </li>`;
-        });
-        html += `</ul>`;
-    } else {
-        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
-    }
-    html += `</div>`;
-
-    // Row 3: Infractions Log Card (reminders/resets stay only in the Overview card)
-    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
-    html += `<div class="dashboard-card infractions-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Infractions</h3></div>`;
-    if (infractionKeys.length > 0) {
-        // Use the same breakdown table style as the Trigger Times card, with tighter spacing for this list
-        html += `<ul class="dashboard-breakdown-list infractions-breakdown-list">`;
-        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
-            html += `<li class="dashboard-breakdown-item">
-                <span class="dashboard-breakdown-name">${escapeHtml(k)}</span>
-                <span>
-                    <span class="dashboard-breakdown-value">${infractions[k]}</span>
-                </span>
-            </li>`;
-        });
-        html += `</ul>`;
-    } else {
-        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
-    }
-    html += `</div>`;
-
-    // Row 2: Day of Week Chart Card (always render; show message if no data)
-    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const hasDayData = dayOrder.some(d => byDay[d]);
-    html += `<div class="dashboard-card day-of-week-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Day of Week Breakdown</h3></div>
-        ${
-            hasDayData
-                ? `<div class="dashboard-chart-wrap summary-day-chart-wrap" style="height:200px"><canvas id="summary-day-chart"></canvas></div>`
-                : `<p style="color:var(--text-secondary);font-size:0.875rem;">No day-of-week data for this period.</p>`
-        }
-    </div>`;
-
     html += `</div>`;
     container.innerHTML = html;
 
-    // Render STAR Chart
+    // Attach interactive behavior for Overview card selections
+    try {
+        attachOverviewCardInteractions(container, data);
+    } catch (e) {
+        console.error('Error wiring overview card interactions:', e);
+    }
+
+    // Render STAR Chart (modern bar style)
     const starCanvas = document.getElementById('summary-star-chart');
     if (starCanvas && typeof Chart !== 'undefined') {
         if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
@@ -16831,47 +17779,56 @@ function renderSummarySingle(container, data) {
                 datasets: [{
                     label: 'Average %',
                     data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
-                    backgroundColor: [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships],
-                    borderRadius: 8,
+                    backgroundColor: STAR_CHART_BAR_COLORS,
+                    borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
                     borderSkipped: false,
-                    maxBarThickness: 32
+                    maxBarThickness: 40
                 }]
             },
             options: {
-                // Default indexAxis ('x') so STAR is on x-axis and % on y-axis
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
                     datalabels: {
                         anchor: 'end',
-                        align: 'end',
-                        offset: -4,
-                        color: '#111827',
-                        font: {
-                            weight: '600',
-                            size: 11
-                        },
+                        align: 'top',
+                        offset: 4,
+                        color: '#64748b',
+                        font: { weight: 400, size: 12 },
                         formatter: (value) => `${Math.round(value)}%`
                     }
                 },
                 layout: {
-                    padding: { top: 10, right: 8, bottom: 0, left: 8 }
+                    padding: { top: 20, right: 20, bottom: 12, left: 12 }
                 },
                 scales: {
                     x: {
                         grid: { display: false },
+                        barPercentage: 0.7,
+                        categoryPercentage: 0.85,
                         ticks: {
                             maxRotation: 0,
                             minRotation: 0,
-                            autoSkip: false
-                        }
+                            autoSkip: false,
+                            font: { size: 12 },
+                            color: '#64748b',
+                            padding: 10
+                        },
+                        border: { display: false }
                     },
                     y: {
                         beginAtZero: true,
                         max: 100,
-                        grid: { color: 'rgba(0,0,0,0.04)' },
-                        ticks: { callback: v => v + '%' }
+                        grid: { display: false },
+                        ticks: {
+                            callback: v => v + '%',
+                            font: { size: 11 },
+                            color: '#64748b',
+                            padding: 8,
+                            maxTicksLimit: 6
+                        },
+                        border: { display: false }
                     }
                 }
             }
@@ -16924,6 +17881,1641 @@ function renderSummarySingle(container, data) {
             }
         });
     }
+
+    // Initial masonry-like layout for the summary dashboard cards
+    const gridEl = container.querySelector('.dashboard-card-grid');
+    if (gridEl) {
+        applySummaryMasonryLayout(gridEl);
+    }
+}
+
+// Masonry-style layout for summary dashboard cards:
+// - Keeps the Overview card fixed in the left column.
+// - Places all other dashboard cards (including extra overview cards)
+//   into equal-width columns, always choosing the column with the
+//   current smallest height so new cards "wrap" directly beneath
+//   the shortest column (typically the Overview card in the first
+//   row). This avoids the large blank gap under the Overview card
+//   without equalizing card heights.
+// - On small screens we skip this and allow the default flex layout.
+function applySummaryMasonryLayout(grid) {
+    if (!grid) return;
+
+    const cards = Array.from(grid.querySelectorAll('.dashboard-card'));
+    if (!cards.length) return;
+
+    // Reset any previous layout so measurements are correct
+    grid.style.position = '';
+    grid.style.height = '';
+    const summaryContainer = grid.parentElement;
+    if (summaryContainer && summaryContainer.id === 'summary-results') {
+        summaryContainer.style.minHeight = '';
+    }
+    cards.forEach(card => {
+        card.style.position = '';
+        card.style.top = '';
+        card.style.left = '';
+        card.style.width = '';
+    });
+
+    // On narrow screens, rely on the normal flex layout
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
+    if (viewportWidth <= 768) {
+        return;
+    }
+
+    const gap = 20; // match CSS .dashboard-card-grid gap
+    const containerWidth = grid.clientWidth || grid.offsetWidth;
+    if (!containerWidth) return;
+
+    // Use up to 3 equal-width columns on desktop
+    const maxColumns = 3;
+    const minCardWidth = 260;
+    const possibleColumns = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)));
+    const columnCount = Math.min(maxColumns, possibleColumns);
+    const totalGapWidth = gap * (columnCount - 1);
+    const columnWidth = (containerWidth - totalGapWidth);
+    const perColWidth = columnWidth / columnCount;
+
+    // Normalise widths and measure heights with static positioning
+    grid.style.position = 'relative';
+    cards.forEach(card => {
+        card.style.position = 'static';
+        card.style.width = perColWidth + 'px';
+    });
+
+    // Force reflow so expanded content (tabs, drilldowns) is laid out before we measure
+    void grid.offsetHeight;
+    const measuredHeights = new Map();
+    cards.forEach(card => {
+        measuredHeights.set(card, card.offsetHeight);
+    });
+
+    const columnHeights = new Array(columnCount).fill(0);
+
+    // Track index of overview-generated extra cards so we can treat
+    // the very first one specially (placing it to the right of the
+    // Overview card instead of directly beneath it).
+    let extraCardIndex = 0;
+
+    // Layout cards in selection / DOM order into the shortest column,
+    // always pinning the overview card to the first column so it
+    // remains leftmost in the top row.
+    cards.forEach(card => {
+        let colIndex;
+        if (card.classList.contains('overview-card')) {
+            colIndex = 0;
+        } else {
+            // For overview extra detail cards, treat the *first* one
+            // as if the Overview card has already "consumed" the first
+            // position. That means we place the first extra card into
+            // the second column (if it exists), rather than directly
+            // underneath the Overview card.
+            if (card.classList.contains('overview-extra-card') && extraCardIndex === 0 && columnCount > 1) {
+                colIndex = 1;
+                extraCardIndex += 1;
+            } else {
+                // Find the column with the smallest current height
+                let minHeight = columnHeights[0];
+                colIndex = 0;
+                for (let i = 1; i < columnCount; i++) {
+                    if (columnHeights[i] < minHeight) {
+                        minHeight = columnHeights[i];
+                        colIndex = i;
+                    }
+                }
+                if (card.classList.contains('overview-extra-card')) {
+                    extraCardIndex += 1;
+                }
+            }
+        }
+
+        const top = columnHeights[colIndex];
+        const left = colIndex * (perColWidth + gap);
+        const h = measuredHeights.get(card) || card.offsetHeight;
+
+        card.style.position = 'absolute';
+        card.style.top = top + 'px';
+        card.style.left = left + 'px';
+        card.style.width = perColWidth + 'px';
+
+        columnHeights[colIndex] = top + h + gap;
+    });
+
+    let maxHeight = Math.max.apply(null, columnHeights);
+    grid.style.height = maxHeight + 'px';
+    if (summaryContainer && summaryContainer.id === 'summary-results') {
+        summaryContainer.style.minHeight = maxHeight + 'px';
+    }
+
+    // Ensure grid and container are at least the actual bottom of the lowest card
+    requestAnimationFrame(() => {
+        const gridRect = grid.getBoundingClientRect();
+        let maxBottom = 0;
+        cards.forEach(card => {
+            const rect = card.getBoundingClientRect();
+            const cardBottomRelativeToGrid = rect.bottom - gridRect.top;
+            if (cardBottomRelativeToGrid > maxBottom) maxBottom = cardBottomRelativeToGrid;
+        });
+        const needed = Math.ceil(maxBottom) + gap;
+        if (needed > maxHeight) {
+            maxHeight = needed;
+            grid.style.height = maxHeight + 'px';
+            if (summaryContainer && summaryContainer.id === 'summary-results') {
+                summaryContainer.style.minHeight = maxHeight + 'px';
+            }
+        }
+    });
+}
+
+/**
+ * Run masonry layout after card content has grown, so the grid height expands and
+ * the page can scroll. Uses two animation frames so the browser has laid out new
+ * DOM before we measure, plus several delayed runs to catch late layout (fonts,
+ * async content). Call this whenever a card's content is expanded (tabs, drilldowns, etc.).
+ */
+function scheduleMasonryLayoutAfterResize(grid) {
+    if (!grid || typeof applySummaryMasonryLayout !== 'function') return;
+    const run = () => {
+        if (grid.isConnected) applySummaryMasonryLayout(grid);
+    };
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            run();
+            setTimeout(run, 100);
+            setTimeout(run, 250);
+            setTimeout(run, 450);
+        });
+    });
+}
+
+function attachOverviewCardInteractions(container, data) {
+    const overviewCard = container.querySelector('.overview-card');
+    if (!overviewCard) return;
+
+    const statBoxes = overviewCard.querySelectorAll('.overview-stat');
+    if (!statBoxes.length) return;
+
+    const grid = overviewCard.closest('.dashboard-card-grid') || container;
+
+    // Map overview stat keys to the data-overview-card keys used on the
+    // corresponding detail cards. Only stats in this map create cards.
+    const STAT_KEY_TO_CARD_KEY = {
+        days_present: 'days_present',
+        star_percent: 'star_performance',
+        infractions: 'infractions_card',
+        reminders: 'reminders',
+        resets: 'resets',
+        trigger_times: 'trigger_times'
+    };
+
+    const STORAGE_KEY = 'summary_overview_selected_stats_v1';
+
+    let selectionOrder = [];
+
+    const persistSelectionOrder = () => {
+        try {
+            const toStore = selectionOrder.slice();
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+        } catch (e) {
+            console.warn('Unable to persist overview selection order:', e);
+        }
+    };
+
+    const loadSelectionOrder = () => {
+        try {
+            const raw = window.localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            // Only keep known stat keys that actually create cards
+            return parsed.filter(k => Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, k));
+        } catch {
+            return [];
+        }
+    };
+
+    const getExtraCard = (cardKey) =>
+        grid.querySelector(`.overview-extra-card[data-overview-card="${cardKey}"]`);
+
+    const removeExtraCard = (cardKey) => {
+        const existing = getExtraCard(cardKey);
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+    };
+
+    // After selection changes, move existing extra cards so their DOM order
+    // matches the selection order. This makes cards appear left-to-right,
+    // top-to-bottom in the order they were selected, with wrapping handled
+    // purely by CSS flexbox.
+    const reorderExtraCards = () => {
+        const fragment = document.createDocumentFragment();
+        selectionOrder.forEach(statKey => {
+            const cardKey = STAT_KEY_TO_CARD_KEY[statKey];
+            if (!cardKey) return;
+            const card = getExtraCard(cardKey);
+            if (card) {
+                fragment.appendChild(card);
+            }
+        });
+        // Remove any extra cards that no longer have a corresponding stat key
+        const existingCards = Array.from(grid.querySelectorAll('.overview-extra-card'));
+        existingCards.forEach(card => {
+            const cardKey = card.dataset.overviewCard;
+            const statKey = Object.keys(STAT_KEY_TO_CARD_KEY).find(
+                sk => STAT_KEY_TO_CARD_KEY[sk] === cardKey
+            );
+            if (!statKey || !selectionOrder.includes(statKey)) {
+                card.parentNode && card.parentNode.removeChild(card);
+            }
+        });
+        grid.appendChild(fragment);
+    };
+
+    const toggleExtraCard = (cardKey, buildFn) => {
+        const existing = getExtraCard(cardKey);
+        if (existing) {
+            removeExtraCard(cardKey);
+            return false;
+        }
+        buildFn();
+        return true;
+    };
+
+    const buildDaysPresentCard = () => {
+        // Recompute attendance summary here so this helper does not rely on
+        // locals from renderSummarySingle's scope (which are not visible in
+        // this function's lexical scope).
+        const attendance = data.attendance_summary || {};
+        const presentPct = typeof attendance.present_pct === 'number'
+            ? attendance.present_pct
+            : 0;
+        const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
+        const totalDays = data.total_days || 0;
+
+        const byDay = data.attendance_by_day_of_week || {};
+        const dayEntries = Object.entries(byDay);
+        if (!dayEntries.length) {
+            const card = document.createElement('div');
+            card.className = 'dashboard-card full-width overview-extra-card';
+            card.dataset.overviewCard = 'days_present';
+            card.innerHTML = `
+                <div class="dashboard-card-header">
+                    <h3 class="dashboard-card-title">Days Present — Attendance Breakdown</h3>
+                </div>
+                <div class="dashboard-card-body">
+                    <p style="color:var(--text-secondary);font-size:0.85rem;">
+                        Attendance by day of week is not available for this timeframe.
+                    </p>
+                </div>
+            `;
+            grid.appendChild(card);
+            return;
+        }
+        let maxAbsent = -1;
+        let maxAbsentDays = [];
+        let totalAbsences = 0;
+        let totalUnexcusedAbsences = 0;
+        dayEntries.forEach(([day, counts]) => {
+            const absent = (counts.excused || 0) + (counts.unexcused || 0);
+            totalAbsences += absent;
+            totalUnexcusedAbsences += (counts.unexcused || 0);
+            if (absent > maxAbsent) {
+                maxAbsent = absent;
+                maxAbsentDays = [day];
+            } else if (absent === maxAbsent && absent > 0) {
+                maxAbsentDays.push(day);
+            }
+        });
+        const formatDays = (days) => days.join(', ');
+        const mostAbsentText = maxAbsent > 0
+            ? `${formatDays(maxAbsentDays)} (${maxAbsent} absence${maxAbsent !== 1 ? 's' : ''})`
+            : 'No absences recorded';
+
+        let rows = '';
+        const sortedDayEntries = dayEntries.slice().sort(([, aCounts], [, bCounts]) => {
+            const aTotalAbsent = (aCounts.excused || 0) + (aCounts.unexcused || 0);
+            const bTotalAbsent = (bCounts.excused || 0) + (bCounts.unexcused || 0);
+            return bTotalAbsent - aTotalAbsent;
+        });
+        sortedDayEntries.forEach(([day, counts]) => {
+            const absentExcused = counts.excused || 0;
+            const absentUnexcused = counts.unexcused || 0;
+            const totalForDay = absentExcused + absentUnexcused;
+            rows += `<tr>
+                <td>${day}</td>
+                <td>${absentUnexcused}</td>
+                <td>${absentExcused}</td>
+                <td>${totalForDay}</td>
+            </tr>`;
+        });
+
+        const card = document.createElement('div');
+        card.className = 'dashboard-card full-width overview-extra-card';
+        card.dataset.overviewCard = 'days_present';
+        card.innerHTML = `
+            <div class="dashboard-card-header">
+                <h3 class="dashboard-card-title">Days Present — Attendance Breakdown</h3>
+            </div>
+            <div class="dashboard-card-body overview-detail-container">
+                <div class="overview-metrics">
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>% of days present:</strong></span>
+                        <span class="overview-metrics-value">${roundedPresentPct}%</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total absences:</strong></span>
+                        <span class="overview-metrics-value">${totalAbsences}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total unexcused absences:</strong></span>
+                        <span class="overview-metrics-value">${totalUnexcusedAbsences}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total expected days:</strong></span>
+                        <span class="overview-metrics-value">${totalDays}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Most absences:</strong></span>
+                        <span class="overview-metrics-value">${mostAbsentText}</span>
+                    </div>
+                </div>
+                <table class="days-present-table">
+                    <thead>
+                        <tr>
+                            <th>Day</th>
+                            <th>Unexcused</th>
+                            <th>Excused</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+        grid.appendChild(card);
+    };
+
+    const renderInfractionTypeBreakdown = (type, targetOverride) => {
+        const infractionsByType = data.infractions_by_type || {};
+        const entry = infractionsByType[type];
+        const target = targetOverride;
+        if (!target) return;
+
+        if (!entry) {
+            target.innerHTML = `<p style="color:var(--text-secondary);font-size:0.85rem;">No detailed data for ${escapeHtml(type)}.</p>`;
+            return;
+        }
+
+        const byTime = entry.by_time || {};
+        const byDay = entry.by_day_of_week || {};
+
+        // Build the inner "subtabs" for this infraction's details. The default
+        // subtab is an Overview that shows the by-time/by-day tables. Additional
+        // subtabs contain separate cards focused on a selected time or day.
+        let timeRows = '';
+        Object.entries(byTime)
+            .sort(([, a], [, b]) => (b || 0) - (a || 0))
+            .forEach(([label, count]) => {
+                const overallByTime = (data.by_time || {})[label] || {};
+                const topClass =
+                    overallByTime.top_class ||
+                    overallByTime.topClass ||
+                    overallByTime.primary_class ||
+                    '';
+                const classSubheader = topClass
+                    ? `<div style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(topClass)}</div>`
+                    : '';
+                timeRows += `
+                    <tr data-time-label="${label}">
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${escapeHtml(label)}${classSubheader}
+                        </td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${count}
+                        </td>
+                    </tr>
+                `;
+            });
+
+        let dayRows = '';
+        Object.entries(byDay)
+            .sort(([, a], [, b]) => (b || 0) - (a || 0))
+            .forEach(([label, count]) => {
+                dayRows += `
+                    <tr data-day-label="${label}">
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${escapeHtml(label)}
+                        </td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${count}
+                        </td>
+                    </tr>
+                `;
+            });
+
+        const DETAILS_HINT_KEY = 'infractions_details_click_hint_seen';
+        const detailsHintSeen = localStorage.getItem(DETAILS_HINT_KEY);
+        const detailsHintMsg = 'Click a time row to see STAR metrics and infractions for that time; click a day row to see the time breakdown for that day.';
+        const detailsHintMsgAttr = detailsHintMsg.replace(/"/g, '&quot;');
+        const detailsTitleHintBlock = `
+            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${DETAILS_HINT_KEY}" data-hint-message="${detailsHintMsgAttr}">
+                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+            </div>`;
+        const detailsFirstTimeText = detailsHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${DETAILS_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(detailsHintMsg)}</p>`;
+
+        target.innerHTML = `
+            <div class="infractions-drilldown-tabs" role="tablist">
+                <button class="infractions-drill-tab active" data-drill-tab="overview" role="tab" aria-selected="true">
+                    <span class="infractions-drill-tab-label">Overview</span>
+                </button>
+            </div>
+            <div class="infractions-drilldown-panels">
+                <div class="infractions-drill-tab-panel is-active" data-drill-tab-panel="overview">
+                    <div class="infractions-details-section-header">
+                        <h4 style="margin:0;">${escapeHtml(type)} — When It Occurs</h4>
+                        ${detailsTitleHintBlock}
+                    </div>
+                    ${detailsFirstTimeText}
+                    <div class="overview-two-col">
+                        <div>
+                            <h4>By Time of Day</h4>
+                            ${timeRows ? `
+                                <table class="infractions-time-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Time</th>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${timeRows}
+                                    </tbody>
+                                </table>` :
+                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No time-of-day data.</p>`}
+                        </div>
+                        <div>
+                            <h4>By Day of Week</h4>
+                            ${dayRows ? `
+                                <table class="infractions-day-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Day</th>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${dayRows}
+                                    </tbody>
+                                </table>` :
+                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data.</p>`}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Wire subtab interactions scoped to this details panel
+        const detailsPanel = target.closest('.infractions-tab-panel');
+        if (!detailsPanel) return;
+        const drillTabsContainer = target.querySelector('.infractions-drilldown-tabs');
+        const drillPanelsContainer = target.querySelector('.infractions-drilldown-panels');
+        if (!drillTabsContainer || !drillPanelsContainer) return;
+
+        const setActiveDrillTab = (tabName) => {
+            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
+            const allPanels = drillPanelsContainer.querySelectorAll('.infractions-drill-tab-panel');
+            allTabs.forEach(tab => {
+                const isActive = tab.dataset.drillTab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach(panel => {
+                panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
+            });
+        };
+
+        const wireDrillTabClicks = () => {
+            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
+            allTabs.forEach(tab => {
+                if (tab._infractionsDrillWired) return;
+                tab._infractionsDrillWired = true;
+                tab.addEventListener('click', (e) => {
+                    const closeBtn = e.target.closest('.infractions-drill-tab-close');
+                    if (closeBtn) {
+                        e.stopPropagation();
+                        const name = tab.dataset.drillTab;
+                        // Prevent closing the Overview subtab
+                        if (name === 'overview') return;
+                        const panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${name}"]`);
+                        if (panel) {
+                            panel.remove();
+                        }
+                        tab.remove();
+                        if (!drillTabsContainer.querySelector('.infractions-drill-tab.active')) {
+                            setActiveDrillTab('overview');
+                        }
+                        return;
+                    }
+                    const tabName = tab.dataset.drillTab;
+                    if (!tabName) return;
+                    setActiveDrillTab(tabName);
+                });
+            });
+        };
+
+        wireDrillTabClicks();
+
+        const createOrUpdateDrillSubtab = (tabName, label, innerCardHtml) => {
+            let tab = drillTabsContainer.querySelector(`.infractions-drill-tab[data-drill-tab="${tabName}"]`);
+            let panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+
+            if (!tab) {
+                tab = document.createElement('button');
+                tab.className = 'infractions-drill-tab';
+                tab.dataset.drillTab = tabName;
+                tab.setAttribute('role', 'tab');
+                tab.setAttribute('aria-selected', 'false');
+                const safeLabel = label || tabName;
+                tab.innerHTML = `
+                    <span class="infractions-drill-tab-label">${escapeHtml(safeLabel)}</span>
+                    <span class="infractions-drill-tab-close" aria-label="Close" role="button">&times;</span>
+                `;
+                drillTabsContainer.appendChild(tab);
+            }
+
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.className = 'infractions-drill-tab-panel';
+                panel.dataset.drillTabPanel = tabName;
+                drillPanelsContainer.appendChild(panel);
+            }
+
+            panel.innerHTML = `
+                <div class="dashboard-card" style="margin-top:8px;">
+                    ${innerCardHtml}
+                </div>
+            `;
+
+            wireDrillTabClicks();
+            setActiveDrillTab(tabName);
+        };
+
+        // Time-of-day row clicks: show average percent and lowest STAR category for that time bucket
+        const timeRowsEls = target.querySelectorAll('.infractions-time-table tbody tr[data-time-label]');
+        timeRowsEls.forEach(row => {
+            if (row._infractionsTimeWired) return;
+            row._infractionsTimeWired = true;
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', () => {
+                const timeLabel = row.dataset.timeLabel;
+                if (!timeLabel) return;
+                localStorage.setItem(DETAILS_HINT_KEY, '1');
+                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
+                if (detailsTextEl) detailsTextEl.remove();
+                const bucket = (data.by_time || {})[timeLabel] || {};
+                const pct = bucket.percentages || {};
+                const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
+
+                const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
+                let lowestKey = null;
+                let lowestVal = null;
+                categories.forEach(k => {
+                    const v = typeof pct[k] === 'number' ? pct[k] : null;
+                    if (v == null) return;
+                    if (lowestVal == null || v < lowestVal) {
+                        lowestVal = v;
+                        lowestKey = k;
+                    }
+                });
+
+                // Build infractions table for this time bucket
+                const infractionsMap = bucket.infractions || {};
+                let infraRows = '';
+                const infraEntries = Object.entries(infractionsMap);
+                if (infraEntries.length) {
+                    infraEntries
+                        .sort(([, a], [, b]) => (Number(b) || 0) - (Number(a) || 0))
+                        .forEach(([infType, count]) => {
+                            infraRows += `
+                                <tr>
+                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                                        ${escapeHtml(infType)}
+                                    </td>
+                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                        ${count}
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                }
+
+                const lowestLabel = lowestKey
+                    ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
+                    : 'N/A';
+
+                const contentHtml = `
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — ${escapeHtml(timeLabel)} Focus</h4>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
+                        Based on all data for this time period in the selected summary range.
+                    </p>
+                    <table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                        <thead>
+                            <tr>
+                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Metric</th>
+                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Average STAR %</td>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                    ${overallPct != null ? `${overallPct}%` : 'Not available'}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Lowest STAR Category</td>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                    ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <h5 style="margin:12px 0 6px 0;font-size:0.9rem;">Infractions during this time</h5>
+                    ${
+                        infraRows
+                            ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:2px;">
+                                   <thead>
+                                       <tr>
+                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Infractions</th>
+                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">Count</th>
+                                       </tr>
+                                   </thead>
+                                   <tbody>
+                                       ${infraRows}
+                                   </tbody>
+                               </table>`
+                            : `<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">
+                                   No infractions recorded for this time period.
+                               </p>`
+                    }
+                `;
+
+                const tabName = `time-${timeLabel}`;
+                createOrUpdateDrillSubtab(tabName, timeLabel, contentHtml);
+                scheduleMasonryLayoutAfterResize(grid);
+            });
+        });
+
+        // Day-of-week row clicks: show a Time-of-day breakdown for that day
+        const dayRowsEls = target.querySelectorAll('.infractions-day-table tbody tr[data-day-label]');
+        dayRowsEls.forEach(row => {
+            if (row._infractionsDayWired) return;
+            row._infractionsDayWired = true;
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', () => {
+                const dayLabel = row.dataset.dayLabel;
+                if (!dayLabel) return;
+                localStorage.setItem(DETAILS_HINT_KEY, '1');
+                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
+                if (detailsTextEl) detailsTextEl.remove();
+
+                const byTimeByDay = data.by_time_by_day || {};
+                const timesForDay = byTimeByDay[dayLabel] || {};
+
+                let rowsHtml = '';
+                const entries = Object.entries(timesForDay)
+                    .map(([timeLabel, bucket]) => {
+                        const infra = bucket.infractions || {};
+                        const count = typeof infra[type] === 'number' ? infra[type] : 0;
+                        return { timeLabel, bucket, count };
+                    })
+                    .filter(e => e.count > 0);
+
+                if (entries.length) {
+                    entries
+                        .sort((a, b) => b.count - a.count)
+                        .forEach(({ timeLabel, bucket, count }) => {
+                            const pct = bucket.percentages || {};
+                            const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
+                            const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
+                            let lowestKey = null;
+                            let lowestVal = null;
+                            categories.forEach(k => {
+                                const v = typeof pct[k] === 'number' ? pct[k] : null;
+                                if (v == null) return;
+                                if (lowestVal == null || v < lowestVal) {
+                                    lowestVal = v;
+                                    lowestKey = k;
+                                }
+                            });
+                            const lowestLabel = lowestKey
+                                ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
+                                : 'N/A';
+                            rowsHtml += `
+                                <tr>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">${escapeHtml(timeLabel)}</td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${overallPct != null ? `${overallPct}%` : 'Not available'}
+                                    </td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
+                                    </td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${count}
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                }
+
+                const contentHtml = `
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — Time of Day on ${escapeHtml(dayLabel)}</h4>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
+                        Time-of-day STAR performance for ${escapeHtml(dayLabel)} in this summary range.
+                    </p>
+                    ${rowsHtml
+                        ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Time</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Average STAR %</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Lowest STAR Category</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Infractions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rowsHtml}
+                                </tbody>
+                           </table>`
+                        : `<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:4px;">
+                               No time-of-day data available for ${escapeHtml(dayLabel)}.
+                           </p>`
+                    }
+                `;
+
+                const tabName = `day-${dayLabel}`;
+                createOrUpdateDrillSubtab(tabName, dayLabel, contentHtml);
+                scheduleMasonryLayoutAfterResize(grid);
+            });
+        });
+    };
+
+    const renderReminderOrResetDetails = (mode) => {
+        const label = mode === 'reminders' ? 'Reminders' : 'Resets';
+        const assocKey = mode === 'reminders' ? 'infractions_for_reminders' : 'infractions_for_resets';
+        const assocMap = data.additional_info?.[assocKey] || {};
+        const entries = Object.entries(assocMap).sort((a, b) => b[1] - a[1]);
+        const byTime = data.by_time || {};
+        const byDay = data.by_day_of_week || {};
+
+        let timeRows = '';
+        Object.entries(byTime)
+            .map(([labelTime, tdata]) => {
+                const count = mode === 'reminders'
+                    ? (tdata.total_reminders || 0)
+                    : (tdata.total_resets || 0);
+                return { labelTime, count };
+            })
+            .filter(r => r.count)
+            .sort((a, b) => b.count - a.count)
+            .forEach(({ labelTime, count }) => {
+                timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td></tr>`;
+            });
+
+        let dayRows = '';
+        Object.entries(byDay)
+            .map(([dayLabel, ddata]) => {
+                const count = mode === 'reminders'
+                    ? (ddata.total_reminders || 0)
+                    : (ddata.total_resets || 0);
+                return { dayLabel, count };
+            })
+            .filter(r => r.count)
+            .sort((a, b) => b.count - a.count)
+            .forEach(({ dayLabel, count }) => {
+                dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td></tr>`;
+            });
+
+        let infraRows = '';
+        entries.forEach(([t, count]) => {
+            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td></tr>`;
+        });
+
+        const key = mode === 'reminders' ? 'reminders' : 'resets';
+        removeExtraCard(key);
+        const card = document.createElement('div');
+        card.className = 'dashboard-card full-width overview-extra-card';
+        card.dataset.overviewCard = key;
+        card.innerHTML = `
+        <div class="dashboard-card-header">
+        <h3 class="dashboard-card-title">${label} — When & What</h3>
+        </div>
+        <div class="dashboard-card-body overview-detail-container">
+        <div class="overview-two-col" style="margin-bottom:12px;">
+                    <div>
+                        <h4>By Time of Day</h4>
+                        ${timeRows ? `
+                            <table>
+                                <thead><tr><th>Time</th><th>Count</th></tr></thead>
+                                <tbody>${timeRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`}
+                    </div>
+                    <div>
+                        <h4>By Day of Week</h4>
+                        ${dayRows ? `
+                            <table>
+                                <thead><tr><th>Day</th><th>Count</th></tr></thead>
+                                <tbody>${dayRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`}
+                    </div>
+                    <div>
+                        <h4>${label} — Connected Infractions</h4>
+                        ${infraRows ? `
+                            <table>
+                                <thead><tr><th>Infraction</th><th>Count</th></tr></thead>
+                                <tbody>${infraRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`}
+                    </div>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    };
+
+    const toggleTriggerTimesDayTable = () => {
+        const triggerCard = container.querySelector('.trigger-times-card');
+        if (!triggerCard) return;
+        const target = triggerCard.querySelector('.trigger-times-day-of-week');
+        if (!target) return;
+
+        // If already visible, hide and clear on repeat click
+        if (target.style.display !== 'none' && target.innerHTML) {
+            target.style.display = 'none';
+            target.innerHTML = '';
+            return;
+        }
+
+        const byDayData = data.by_day_of_week || {};
+        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        const rows = [];
+        weekdays.forEach(d => {
+            const dd = byDayData[d];
+            if (!dd) return;
+            const pct = typeof dd.percentages?.overall === 'number'
+                ? dd.percentages.overall
+                : 0;
+            const infractionsCount = typeof dd.total_infractions === 'number'
+                ? dd.total_infractions
+                : 0;
+            rows.push({
+                label: d.substring(0, 3),
+                pct,
+                infractions: infractionsCount
+            });
+        });
+
+        if (!rows.length) {
+            target.innerHTML = `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data for this period.</p>`;
+            target.style.display = 'block';
+            return;
+        }
+
+        rows.sort((a, b) => {
+            if (b.infractions !== a.infractions) return b.infractions - a.infractions;
+            return (b.pct || 0) - (a.pct || 0);
+        });
+        let bodyRows = '';
+        rows.forEach(r => {
+            bodyRows += `<tr>
+                <td>${r.label}</td>
+                <td>${Math.round(r.pct)}%</td>
+                <td>${r.infractions}</td>
+            </tr>`;
+        });
+
+        target.innerHTML = `
+            <h4>Day of Week Breakdown</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>Overall %</th>
+                        <th>Infractions</th>
+                    </tr>
+                </thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        `;
+        target.style.display = 'block';
+        scheduleMasonryLayoutAfterResize(grid);
+    };
+
+    const buildStarPerformanceCard = () => {
+        const avgs = data.averages || {};
+        const totalDays = data.total_days || 0;
+        const card = document.createElement('div');
+        card.className = 'dashboard-card star-performance-card overview-extra-card';
+        card.dataset.overviewCard = 'star_performance';
+
+        const STAR_OVERVIEW_HINT_KEY = 'star_performance_click_hint_seen';
+        const starHintSeen = localStorage.getItem(STAR_OVERVIEW_HINT_KEY);
+        const starHintMsg = 'Click a STAR bar to see highest and lowest time of day and day of week for that category.';
+        const starHintMsgAttr = starHintMsg.replace(/"/g, '&quot;');
+        const starTitleHintBlock = `
+            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" data-hint-message="${starHintMsgAttr}">
+                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+            </div>`;
+        const starFirstTimeText = starHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(starHintMsg)}</p>`;
+
+        const overviewContent = starFirstTimeText + `
+            <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 260px; min-height:220px;">
+                    <canvas id="overview-star-chart"></canvas>
+                </div>
+                <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
+            </div>
+        `;
+        card.innerHTML = `
+            <div class="dashboard-breakdown-card-inner">
+                <div class="dashboard-card-header star-performance-card-header">
+                    <div>
+                        <h3 class="dashboard-card-title">STAR Performance</h3>
+                        <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
+                    </div>
+                    ${starTitleHintBlock}
+                </div>
+                <div class="star-performance-tabs" role="tablist">
+                    <button class="star-performance-tab active" data-tab="overview" role="tab" aria-selected="true">
+                        <span class="star-performance-tab-label">Overview</span>
+                    </button>
+                </div>
+                <div class="star-performance-tab-panels">
+                    <div class="star-performance-tab-panel star-performance-tab-overview is-active" data-tab-panel="overview">
+                        ${overviewContent}
+                    </div>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+
+        const tabsContainer = card.querySelector('.star-performance-tabs');
+        const panelsContainer = card.querySelector('.star-performance-tab-panels');
+        const setActiveTab = (tabName) => {
+            const allTabs = card.querySelectorAll('.star-performance-tab');
+            const allPanels = card.querySelectorAll('.star-performance-tab-panel');
+            allTabs.forEach(tab => {
+                const isActive = tab.dataset.tab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach(panel => {
+                panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
+            });
+        };
+
+        const wireTabClicks = () => {
+            const allTabs = card.querySelectorAll('.star-performance-tab');
+            allTabs.forEach(tab => {
+                if (tab._starPerformanceWired) return;
+                tab._starPerformanceWired = true;
+                tab.addEventListener('click', (e) => {
+                    const closeBtn = e.target.closest('.star-performance-tab-close');
+                    if (closeBtn) {
+                        e.stopPropagation();
+                        const name = tab.dataset.tab;
+                        if (name === 'overview') return;
+                        const panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${name}"]`);
+                        if (panel) panel.remove();
+                        tab.remove();
+                        if (!card.querySelector('.star-performance-tab.active')) {
+                            setActiveTab('overview');
+                        }
+                        return;
+                    }
+                    const tabName = tab.dataset.tab;
+                    if (!tabName || tab.disabled) return;
+                    setActiveTab(tabName);
+                });
+            });
+        };
+        wireTabClicks();
+
+        // (i) icon: click shows hint in popover (same text as first-time reminder)
+        card.addEventListener('click', (e) => {
+            const icon = e.target.closest('.infractions-hint-icon');
+            if (icon) {
+                e.preventDefault();
+                const hintDiv = icon.closest('.infractions-click-hint');
+                if (!hintDiv) return;
+                const popover = hintDiv.querySelector('.infractions-hint-popover');
+                if (!popover) return;
+                const msg = hintDiv.getAttribute('data-hint-message');
+                if (msg != null) popover.textContent = msg;
+                const isOpen = popover.getAttribute('aria-hidden') === 'false';
+                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+                if (!isOpen) {
+                    const cardEl = hintDiv.closest('.star-performance-card') || card;
+                    const cardRect = cardEl.getBoundingClientRect();
+                    const hintRect = hintDiv.getBoundingClientRect();
+                    const padding = 16;
+                    const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
+                    popover.style.maxWidth = maxW + 'px';
+                    popover.style.display = 'block';
+                    popover.setAttribute('aria-hidden', 'false');
+                }
+                return;
+            }
+            if (!e.target.closest('.infractions-hint-popover')) {
+                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+            }
+        });
+        if (!window._starHintPopoverBound) {
+            window._starHintPopoverBound = true;
+            document.addEventListener('click', (e) => {
+                if (e.target.closest('.star-performance-card')) return;
+                document.querySelectorAll('.star-performance-card .infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+            }, true);
+        }
+
+        const starCanvas = card.querySelector('#overview-star-chart');
+        if (starCanvas && typeof Chart !== 'undefined') {
+            if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
+            summaryChartInstance = new Chart(starCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['Safety', 'Teamwork', 'Accountability', 'Relationships'],
+                    datasets: [{
+                        label: 'Average %',
+                        data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
+                        backgroundColor: STAR_CHART_BAR_COLORS,
+                        borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
+                        borderSkipped: false,
+                        maxBarThickness: 40
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            offset: 4,
+                            color: '#64748b',
+                            font: { weight: 400, size: 12 },
+                            formatter: (value) => `${Math.round(value)}%`
+                        }
+                    },
+                    layout: {
+                        padding: { top: 20, right: 20, bottom: 12, left: 12 }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            barPercentage: 0.7,
+                            categoryPercentage: 0.85,
+                            ticks: {
+                                maxRotation: 0,
+                                minRotation: 0,
+                                autoSkip: false,
+                                font: { size: 12 },
+                                color: '#64748b',
+                                padding: 10
+                            },
+                            border: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { display: false },
+                            ticks: {
+                                callback: v => v + '%',
+                                font: { size: 11 },
+                                color: '#64748b',
+                                padding: 8,
+                                maxTicksLimit: 6
+                            },
+                            border: { display: false }
+                        }
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements || !elements.length) return;
+                        const index = elements[0].index;
+                        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
+                        const labels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
+                        const catKey = catKeys[index];
+                        if (!catKey) return;
+                        const tabName = `star-${catKey}`;
+                        let catTab = Array.from(card.querySelectorAll('.star-performance-tab')).find(t => t.dataset.tab === tabName);
+                        let panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${tabName}"]`);
+
+                        if (!catTab) {
+                            catTab = document.createElement('button');
+                            catTab.className = 'star-performance-tab';
+                            catTab.dataset.tab = tabName;
+                            catTab.setAttribute('role', 'tab');
+                            catTab.setAttribute('aria-selected', 'false');
+                            const shortLabel = labels[index] || catKey;
+                            catTab.innerHTML = `
+                                <span class="star-performance-tab-label">${escapeHtml(shortLabel)}</span>
+                                <span class="star-performance-tab-close" aria-label="Close" role="button">&times;</span>
+                            `;
+                            tabsContainer.appendChild(catTab);
+
+                            panel = document.createElement('div');
+                            panel.className = 'star-performance-tab-panel';
+                            panel.dataset.tabPanel = tabName;
+                            panelsContainer.appendChild(panel);
+                            wireTabClicks();
+                        }
+
+                        try {
+                            localStorage.setItem(STAR_OVERVIEW_HINT_KEY, '1');
+                            const starHintTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + STAR_OVERVIEW_HINT_KEY + '"]');
+                            if (starHintTextEl) starHintTextEl.remove();
+                            const html = showStarCategoryDetails(catKey, labels[index] || catKey, data);
+                            if (html) {
+                                panel.innerHTML = html;
+                                if (typeof wireStarCategoryDrilldown === 'function') {
+                                    wireStarCategoryDrilldown(panel, data, catKey);
+                                }
+                                setActiveTab(tabName);
+                                scheduleMasonryLayoutAfterResize(grid);
+                            } else {
+                                setActiveTab(tabName);
+                            }
+                        } catch (e) {
+                            console.error('Error showing STAR category details from overview STAR chart:', e);
+                            setActiveTab(tabName);
+                        }
+                    }
+                }
+            });
+        }
+    };
+
+    const buildTriggerTimesCard = () => {
+        const byClass = data.by_class || {};
+        const byTime = data.by_time || {};
+
+        const timeKeys = Object.keys(byTime);
+        const classNames = Object.keys(byClass);
+        const useByTime = timeKeys.length > 0;
+        const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+        let sortedTriggerKeys = [];
+
+        if (triggerEntries.length > 0) {
+            sortedTriggerKeys = triggerEntries.sort((a, b) => {
+                const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+                const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+
+                const aPct = typeof aData.percentages?.overall === 'number'
+                    ? Math.round(aData.percentages.overall)
+                    : Number.POSITIVE_INFINITY;
+                const bPct = typeof bData.percentages?.overall === 'number'
+                    ? Math.round(bData.percentages.overall)
+                    : Number.POSITIVE_INFINITY;
+                if (aPct !== bPct) {
+                    return aPct - bPct;
+                }
+
+                const aInfra = typeof aData.total_infractions === 'number'
+                    ? aData.total_infractions
+                    : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+                const bInfra = typeof bData.total_infractions === 'number'
+                    ? bData.total_infractions
+                    : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+
+                return bInfra - aInfra;
+            });
+        }
+
+        const card = document.createElement('div');
+        card.className = 'dashboard-card trigger-times-card overview-extra-card';
+        card.dataset.overviewCard = 'trigger_times';
+
+        let innerHtml = `
+            <div class="dashboard-breakdown-card-inner">
+                <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>
+                <div class="overview-two-col">`;
+
+        // Left column: trigger time/class breakdown list
+        innerHtml += `<div>`;
+        if (sortedTriggerKeys.length > 0) {
+            innerHtml += `<ul class="dashboard-breakdown-list">`;
+            sortedTriggerKeys.forEach((key) => {
+                const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
+                const pctOverall = rowData.percentages?.overall ?? '';
+
+                const infractionsCount = typeof rowData.total_infractions === 'number'
+                    ? rowData.total_infractions
+                    : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
+
+                const displayLabel = key;
+                const topClass = useByTime ? (rowData.top_class || null) : null;
+
+                innerHtml += `<li class="dashboard-breakdown-item">
+                    <span class="dashboard-breakdown-name">
+                        <span>
+                            <div>${escapeHtml(displayLabel)}</div>
+                            ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
+                        </span>
+                    </span>
+                    <span>
+                        <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
+                    </span>
+                </li>`;
+            });
+            innerHtml += `</ul>`;
+        } else {
+            innerHtml += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
+        }
+        innerHtml += `</div>`;
+
+        // Right column: day-of-week breakdown table (initially hidden until populated)
+        innerHtml += `<div class="overview-detail-container trigger-times-day-of-week" style="margin-top:10px; display:none;"></div>`;
+
+        innerHtml += `</div></div>`;
+
+        card.innerHTML = innerHtml;
+        grid.appendChild(card);
+    };
+
+    const applySelectionChange = (box, key, { restore = false } = {}) => {
+        if (!key) return;
+
+        // Handle each selection type with toggle behavior
+        if (key === 'days_present') {
+            const opened = toggleExtraCard('days_present', buildDaysPresentCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
+                selectionOrder.push('days_present');
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
+            }
+        } else if (key === 'star_percent') {
+            // Toggle STAR Performance card
+            const opened = toggleExtraCard('star_performance', buildStarPerformanceCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
+                selectionOrder.push('star_percent');
+                if (!restore) {
+                    const starCard = container.querySelector('.star-performance-card');
+                    if (starCard && typeof starCard.scrollIntoView === 'function') {
+                        starCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
+            }
+        } else if (key === 'starbucks') {
+            // Starbucks: only visual selection, no extra card
+            box.classList.toggle('overview-stat-selected');
+        } else if (key === 'frenzies') {
+            // Switch to Frenzy reports tab
+            if (!restore) {
+                const frenzyToggleBtn = document.querySelector('#summary-view .reports-toggle-btn[data-reports-view="frenzy"]');
+                if (frenzyToggleBtn) frenzyToggleBtn.click();
+            }
+        } else if (key === 'infractions') {
+            // Toggle Infractions card; details are shown when a row is selected
+            const opened = toggleExtraCard('infractions_card', () => {
+                    const card = document.createElement('div');
+                    card.className = 'dashboard-card infractions-card overview-extra-card';
+                    card.dataset.overviewCard = 'infractions_card';
+
+                    const infractions = data.infractions || data.additional_info?.infractions || {};
+                    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
+
+                    const OVERVIEW_HINT_KEY = 'infractions_overview_click_hint_seen';
+                    const overviewHintSeen = localStorage.getItem(OVERVIEW_HINT_KEY);
+                    const overviewHintMsg = 'Click an infraction to see breakdowns by time of day and day of week.';
+                    const overviewHintMsgAttr = overviewHintMsg.replace(/"/g, '&quot;');
+                    const overviewTitleHintBlock = `
+                            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
+                                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+                            </div>`;
+                    const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
+
+                    let overviewContent = overviewFirstTimeText;
+
+                    if (infractionKeys.length > 0) {
+                        overviewContent += `
+                            <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Infraction</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
+                            overviewContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
+                                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${infractions[k]}</span></td>
+                            </tr>`;
+                        });
+                        overviewContent += `</tbody></table>`;
+                    } else {
+                        overviewContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                    }
+
+                    const innerHtml = `
+                        <div class="dashboard-breakdown-card-inner">
+                            <div class="dashboard-card-header infractions-card-header">
+                                <h3 class="dashboard-card-title">Infractions</h3>
+                                ${overviewTitleHintBlock}
+                            </div>
+                            <div class="infractions-tabs" role="tablist">
+                                <button class="infractions-tab active" data-tab="overview" role="tab" aria-selected="true">
+                                    <span class="infractions-tab-label">Overview</span>
+                                </button>
+                            </div>
+                            <div class="infractions-tab-panels">
+                                <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
+                                    ${overviewContent}
+                                </div>
+                            </div>
+                        </div>`;
+
+                    card.innerHTML = innerHtml;
+                    grid.appendChild(card);
+
+                    // Tab behavior within the Infractions card
+                    const tabsContainer = card.querySelector('.infractions-tabs');
+                    const panelsContainer = card.querySelector('.infractions-tab-panels');
+
+                    const setActiveTab = (tabName) => {
+                        const allTabs = card.querySelectorAll('.infractions-tab');
+                        const allPanels = card.querySelectorAll('.infractions-tab-panel');
+                        allTabs.forEach(tab => {
+                            const isActive = tab.dataset.tab === tabName;
+                            tab.classList.toggle('active', isActive);
+                            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                        });
+                        allPanels.forEach(panel => {
+                            panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
+                        });
+                    };
+
+                    const wireTabClicks = () => {
+                        const allTabs = card.querySelectorAll('.infractions-tab');
+                        allTabs.forEach(tab => {
+                            if (tab._infractionsWired) return;
+                            tab._infractionsWired = true;
+                            tab.addEventListener('click', (e) => {
+                                const closeBtn = e.target.closest('.infractions-tab-close');
+                                if (closeBtn) {
+                                    e.stopPropagation();
+                                    const name = tab.dataset.tab;
+                                    // Prevent closing the primary Overview tab
+                                    if (name === 'overview') return;
+                                    const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${name}"]`);
+                                    if (panel) {
+                                        panel.remove();
+                                    }
+                                    tab.remove();
+                                    // If the closed tab was active, fall back to Overview
+                                    if (!card.querySelector('.infractions-tab.active')) {
+                                        setActiveTab('overview');
+                                    }
+                                    return;
+                                }
+
+                                const tabName = tab.dataset.tab;
+                                if (!tabName || tab.disabled) return;
+                                setActiveTab(tabName);
+                            });
+                        });
+                    };
+
+                    wireTabClicks();
+
+                    // (i) icon: click shows hint in popover (same text as first-time reminder)
+                    card.addEventListener('click', (e) => {
+                        const icon = e.target.closest('.infractions-hint-icon');
+                        if (icon) {
+                            e.preventDefault();
+                            const hintDiv = icon.closest('.infractions-click-hint');
+                            if (!hintDiv) return;
+                            const popover = hintDiv.querySelector('.infractions-hint-popover');
+                            if (!popover) return;
+                            const msg = hintDiv.getAttribute('data-hint-message');
+                            if (msg != null) popover.textContent = msg;
+                            const isOpen = popover.getAttribute('aria-hidden') === 'false';
+                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                            if (!isOpen) {
+                                const cardEl = hintDiv.closest('.infractions-card') || card;
+                                const cardRect = cardEl.getBoundingClientRect();
+                                const hintRect = hintDiv.getBoundingClientRect();
+                                const padding = 16;
+                                const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
+                                popover.style.maxWidth = maxW + 'px';
+                                popover.style.display = 'block';
+                                popover.setAttribute('aria-hidden', 'false');
+                            }
+                            return;
+                        }
+                        const inPopover = e.target.closest('.infractions-hint-popover');
+                        if (!inPopover) {
+                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                        }
+                    });
+                    if (!window._infractionsHintPopoverBound) {
+                        window._infractionsHintPopoverBound = true;
+                        document.addEventListener('click', (e) => {
+                            if (e.target.closest('.infractions-card')) return;
+                            document.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                        }, true);
+                    }
+
+                    // Wire row clicks inside this newly created card
+                    const infractionRows = card.querySelectorAll('.dashboard-breakdown-item[data-infraction-type]');
+                    infractionRows.forEach(row => {
+                        row.style.cursor = 'pointer';
+                        row.addEventListener('click', () => {
+                            const type = row.getAttribute('data-infraction-type');
+                            if (!type) return;
+                            localStorage.setItem(OVERVIEW_HINT_KEY, '1');
+                            const overviewTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + OVERVIEW_HINT_KEY + '"]');
+                            if (overviewTextEl) overviewTextEl.remove();
+                            const labelText = (row.querySelector('.dashboard-breakdown-name')?.textContent || type).trim();
+                            const shortLabel = labelText.length > 28 ? `${labelText.slice(0, 25)}…` : labelText;
+                            const tabName = `inf-${type}`;
+
+                            // Look for an existing tab for this infraction
+                            let infTab = Array.from(card.querySelectorAll('.infractions-tab'))
+                                .find(t => t.dataset.tab === tabName);
+                            let targetContainer = null;
+
+                            if (!infTab) {
+                                // Create a new tab
+                                infTab = document.createElement('button');
+                                infTab.className = 'infractions-tab';
+                                infTab.dataset.tab = tabName;
+                                infTab.setAttribute('role', 'tab');
+                                infTab.setAttribute('aria-selected', 'false');
+                                const safeLabel = shortLabel || type;
+                                infTab.innerHTML = `
+                                    <span class="infractions-tab-label">${escapeHtml(safeLabel)}</span>
+                                    <span class="infractions-tab-close" aria-label="Close" role="button">&times;</span>
+                                `;
+                                tabsContainer.appendChild(infTab);
+
+                                // Create its panel
+                                const panel = document.createElement('div');
+                                panel.className = 'infractions-tab-panel';
+                                panel.dataset.tabPanel = tabName;
+
+                                targetContainer = document.createElement('div');
+                                targetContainer.className = 'overview-detail-container infractions-by-time-day';
+                                targetContainer.style.marginTop = '10px';
+
+                                panel.appendChild(targetContainer);
+                                panelsContainer.appendChild(panel);
+
+                                // (Re)wire click handlers now that a new tab exists
+                                wireTabClicks();
+                            } else {
+                                // Reuse existing panel for this infraction
+                                const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${tabName}"]`);
+                                if (panel) {
+                                    targetContainer = panel.querySelector('.infractions-by-time-day');
+                                }
+                            }
+
+                            if (targetContainer) {
+                                renderInfractionTypeBreakdown(type, targetContainer);
+                            }
+
+                            // Activate this infraction's tab
+                            setActiveTab(tabName);
+                            scheduleMasonryLayoutAfterResize(grid);
+                        });
+                    });
+                });
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
+                selectionOrder.push('infractions');
+                if (!restore) {
+                    const infractionsCard = container.querySelector('.infractions-card');
+                    if (infractionsCard && typeof infractionsCard.scrollIntoView === 'function') {
+                        infractionsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
+            }
+        } else if (key === 'reminders') {
+            const opened = !getExtraCard('reminders');
+            if (opened) {
+                renderReminderOrResetDetails('reminders');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+                selectionOrder.push('reminders');
+            } else {
+                removeExtraCard('reminders');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+            }
+            box.classList.toggle('overview-stat-selected', opened);
+        } else if (key === 'resets') {
+            const opened = !getExtraCard('resets');
+            if (opened) {
+                renderReminderOrResetDetails('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'resets');
+                selectionOrder.push('resets');
+            } else {
+                removeExtraCard('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'resets');
+            }
+            box.classList.toggle('overview-stat-selected', opened);
+        } else if (key === 'trigger_times') {
+            // Trigger Times: create/toggle the Trigger Times card and show day-of-week breakdown
+            const opened = toggleExtraCard('trigger_times', buildTriggerTimesCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
+                selectionOrder.push('trigger_times');
+                if (!restore) {
+                    const triggerCard = container.querySelector('.trigger-times-card');
+                    if (triggerCard && typeof triggerCard.scrollIntoView === 'function') {
+                        triggerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                    toggleTriggerTimesDayTable();
+                } else {
+                    // On restore, still populate the day-of-week table once
+                    toggleTriggerTimesDayTable();
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
+            }
+        }
+
+        // After any change that affects cards, normalize DOM order so cards
+        // appear in selection sequence and store updated order.
+        if (Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, key)) {
+            reorderExtraCards();
+            persistSelectionOrder();
+            // Re-apply masonry layout so newly added/removed cards
+            // are positioned into columns immediately after any
+            // selection change (including the very first one).
+            applySummaryMasonryLayout(grid);
+        }
+    };
+
+    statBoxes.forEach(box => {
+        box.addEventListener('click', () => {
+            const key = box.dataset.overviewKey;
+            applySelectionChange(box, key, { restore: false });
+        });
+    });
+
+    // Restore previously selected overview stats (if any) so that cards
+    // re-appear in the same order as last time the user viewed this page.
+    const storedOrder = loadSelectionOrder();
+    if (storedOrder.length) {
+        selectionOrder = [];
+        storedOrder.forEach(statKey => {
+            const box = overviewCard.querySelector(`.overview-stat[data-overview-key="${statKey}"]`);
+            if (!box) return;
+            applySelectionChange(box, statKey, { restore: true });
+        });
+        reorderExtraCards();
+    }
+
+    // Apply layout whenever overview interactions are (re)wired
+    applySummaryMasonryLayout(grid);
+
 }
 
 function renderSummaryComparison(container, data) {
@@ -16933,17 +19525,26 @@ function renderSummaryComparison(container, data) {
         return;
     }
     let html = `<div class="dashboard-card-grid">`;
+    // Comparison chart card – matches dashboard card style
     html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Comparison</h3></div>
-        <div class="dashboard-chart-wrap" style="height:280px"><canvas id="summary-compare-chart"></canvas></div>
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Comparison</h3>
+                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap summary-compare-chart-wrap" style="height:260px"><canvas id="summary-compare-chart"></canvas></div>
     </div>`;
 
-    // Comparison table
+    // Comparison table card – use dashboard card header + shared table styling
     html += `<div class="dashboard-card full-width">
-        <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
-        <thead><tr style="background:var(--bg-elevated);">
-            <th style="padding:10px 12px;border:1px solid var(--border);text-align:left;">Metric</th>`;
+        <div class="dashboard-card-header">
+            <h3 class="dashboard-card-title">Comparison breakdown</h3>
+        </div>
+        <div class="dashboard-compare-table-wrap">
+        <table class="dashboard-compare-table">
+        <thead><tr>
+            <th>Metric</th>`;
     periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
     html += `</tr></thead><tbody>`;
     const rows = [
@@ -16958,9 +19559,9 @@ function renderSummaryComparison(container, data) {
         { label: 'Resets', get: p => p.additional_info?.total_resets || 0 }
     ];
     rows.forEach(r => {
-        html += `<tr><td style="padding:8px 12px;border:1px solid var(--border);font-weight:500;">${r.label}</td>`;
+        html += `<tr><td>${r.label}</td>`;
         periods.forEach(p => {
-            html += `<td style="padding:8px 12px;border:1px solid var(--border);text-align:center;">${r.get(data.periods[p])}</td>`;
+            html += `<td>${r.get(data.periods[p])}</td>`;
         });
         html += `</tr>`;
     });
@@ -16972,30 +19573,73 @@ function renderSummaryComparison(container, data) {
     const canvas = document.getElementById('summary-compare-chart');
     if (canvas && typeof Chart !== 'undefined') {
         if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
-        const cats = ['safety', 'teamwork', 'accountability', 'relationships'];
-        const colors = [DASHBOARD_COLORS.safety, DASHBOARD_COLORS.teamwork, DASHBOARD_COLORS.accountability, DASHBOARD_COLORS.relationships];
+        // Show one chart with STAR categories on the x-axis and
+        // the selected periods rendered as side-by-side bars
+        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
+        const catLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
+        const periodColors = [
+            '#1D4ED8', // blue
+            '#F97316', // orange
+            '#059669', // green
+            '#7C3AED'  // purple
+        ];
         summaryChartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: {
-                labels: periods,
-                datasets: cats.map((c, i) => ({
-                    label: c.charAt(0).toUpperCase() + c.slice(1),
-                    data: periods.map(p => {
-                        const pd = data.periods[p];
-                        return pd.percentages?.[c] || pd.averages?.[c] || 0;
-                    }),
-                    backgroundColor: colors[i],
-                    borderRadius: 6,
-                    maxBarThickness: 32
-                }))
+                // X-axis is STAR categories
+                labels: catLabels,
+                // Each compared period becomes its own dataset;
+                // bars for that period sit next to each other per category
+                datasets: periods.map((p, periodIndex) => {
+                    const pd = data.periods[p] || {};
+                    return {
+                        label: p,
+                        data: catKeys.map(key => {
+                            return pd.percentages?.[key] || pd.averages?.[key] || 0;
+                        }),
+                        backgroundColor: periodColors[periodIndex % periodColors.length],
+                        // Match non-comparison STAR chart style (4 rounded corners)
+                        borderRadius: 8,
+                        borderSkipped: false,
+                        // Make each bar relatively thick so grouped bars visually fill the category
+                        barThickness: 32,
+                        maxBarThickness: 48
+                    };
+                })
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
+                plugins: {
+                    legend: { position: 'top' },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'end',
+                        offset: -4,
+                        color: '#111827',
+                        clip: false,
+                        font: {
+                            weight: '600',
+                            size: 10
+                        },
+                        formatter: (value) => `${Math.round(value)}%`
+                    }
+                },
                 scales: {
                     y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
-                    x: { grid: { display: false } }
+                    x: {
+                        grid: { display: false },
+                        stacked: false,
+                        // Keep bars within a category tight, but add more
+                        // whitespace between the STAR categories themselves.
+                        categoryPercentage: 0.7,
+                        barPercentage: 0.95,
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: false
+                        }
+                    }
                 }
             }
         });
@@ -17019,11 +19663,20 @@ async function loadFrenzyDashboard() {
     if (st.compareMode) {
         const selectEl = document.getElementById('frenzy-timeframe-select');
         const tf = selectEl ? selectEl.value : '';
-        if (tf) params.push(`timeframe=${tf}`);
-        if (tf === 'month') {
-            const sySelect = document.getElementById('frenzy-school-year-select');
-            const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
-            if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+        if (tf) {
+            params.push(`timeframe=${tf}`);
+            if (tf === 'month') {
+                const sySelect = document.getElementById('frenzy-school-year-select');
+                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+            } else if (tf === 'custom_range') {
+                const start = st.customStart;
+                const end = st.customEnd;
+                if (start && end) {
+                    params.push(`start_date=${encodeURIComponent(start)}`);
+                    params.push(`end_date=${encodeURIComponent(end)}`);
+                }
+            }
         }
     } else {
         if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
@@ -17084,7 +19737,7 @@ function renderFrenzySingle(container, data) {
     html += `<div class="dashboard-card">
         <div class="dashboard-card-header"><h3 class="dashboard-card-title">Duration Breakdown</h3></div>
         <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalCount}</div><div class="dashboard-stat-label">Total</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalCount}</div><div class="dashboard-stat-label">Frenzies</div></div>
             <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDuration}</div><div class="dashboard-stat-label">Minutes</div></div>
             <div class="dashboard-stat-box"><div class="dashboard-stat-value">${typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0'}</div><div class="dashboard-stat-label">Avg Min</div></div>
         </div>`;
@@ -17189,14 +19842,22 @@ function renderFrenzyComparison(container, data) {
     }
     let html = `<div class="dashboard-card-grid">`;
     html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Frenzy Comparison</h3></div>
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Frenzy Comparison</h3>
+                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
+            </div>
+        </div>
         <div class="dashboard-chart-wrap" style="height:260px"><canvas id="frenzy-compare-chart"></canvas></div>
     </div>`;
     html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header">
+            <h3 class="dashboard-card-title">Comparison breakdown</h3>
+        </div>
         <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
-        <thead><tr style="background:var(--bg-elevated);">
-            <th style="padding:10px 12px;border:1px solid var(--border);text-align:left;">Metric</th>`;
+        <table class="dashboard-compare-table">
+        <thead><tr>
+            <th>Metric</th>`;
     periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
     html += `</tr></thead><tbody>`;
     const rows = [
@@ -17205,9 +19866,9 @@ function renderFrenzyComparison(container, data) {
         { label: 'Avg Duration (min)', get: p => typeof p.avg_duration === 'number' ? p.avg_duration.toFixed(1) : '0' }
     ];
     rows.forEach(r => {
-        html += `<tr><td style="padding:8px 12px;border:1px solid var(--border);font-weight:500;">${r.label}</td>`;
+        html += `<tr><td>${r.label}</td>`;
         periods.forEach(p => {
-            html += `<td style="padding:8px 12px;border:1px solid var(--border);text-align:center;">${r.get(data.periods[p])}</td>`;
+            html += `<td>${r.get(data.periods[p])}</td>`;
         });
         html += `</tr>`;
     });
@@ -17239,6 +19900,71 @@ function renderFrenzyComparison(container, data) {
     }
 }
 
+// Ensure numeric values in Reports tab tables are right-aligned
+function setupReportsNumberAlignment() {
+    const summaryContainer = document.getElementById('summary-results');
+    const frenzyContainer = document.getElementById('frenzy-results');
+    const pointCardContainer = document.getElementById('point-card-data-container');
+
+    const targets = [summaryContainer, frenzyContainer, pointCardContainer].filter(Boolean);
+    if (!targets.length || typeof MutationObserver === 'undefined') {
+        return;
+    }
+
+    const numericRegex = /^[^A-Za-z]*\d[^A-Za-z]*$/;
+
+    function alignNumericCells(root) {
+        if (!root) return;
+        const cells = root.querySelectorAll('table th, table td');
+        cells.forEach(cell => {
+            // First column (times/labels) stays left-aligned — do not treat as numeric
+            if (cell.cellIndex === 0) {
+                cell.classList.remove('numeric-cell');
+                return;
+            }
+            const text = (cell.textContent || '').trim();
+            if (text && numericRegex.test(text)) {
+                cell.classList.add('numeric-cell');
+            } else {
+                cell.classList.remove('numeric-cell');
+            }
+        });
+    }
+
+    targets.forEach(target => {
+        let scheduled = false;
+        const raf = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); };
+
+        function scheduleAlign() {
+            if (scheduled) return;
+            scheduled = true;
+            raf(() => {
+                scheduled = false;
+                alignNumericCells(target);
+            });
+        }
+
+        // Initial pass in case content is already present
+        alignNumericCells(target);
+
+        const observer = new MutationObserver((mutations) => {
+            for (let i = 0; i < mutations.length; i++) {
+                const m = mutations[i];
+                if (m.type === 'childList' || m.type === 'characterData') {
+                    scheduleAlign();
+                    break;
+                }
+            }
+        });
+
+        observer.observe(target, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+    });
+}
+
 // ---- Initialize Dashboard ----
 function initDashboard() {
     ['summary', 'frenzy'].forEach(pageKey => {
@@ -17248,6 +19974,12 @@ function initDashboard() {
         setupCompareToggle(pageKey);
         setupContextClear(pageKey);
     });
+
+    // Incentive Tracking is specific to the Summary (Point Card) view
+    setupIncentiveToggle();
+
+    // Right-align numeric values in Reports tab tables
+    setupReportsNumberAlignment();
 
     // Wire managed-by-me checkboxes
     const summaryManagedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
