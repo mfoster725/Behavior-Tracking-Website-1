@@ -18181,10 +18181,19 @@ function buildOverviewDashboardCardHtml(data) {
     }
 
     let starSub = '';
+    let starSubClass = 'is-muted';
     if (starDelta != null && !Number.isNaN(Number(starDelta))) {
-        starSub = Math.abs(Number(starDelta)) < 0.05 ? 'No change' : `${formatOverviewSignedInt(starDelta)}%`;
+        const starDeltaNum = Number(starDelta);
+        if (Math.abs(starDeltaNum) < 0.05) {
+            starSub = 'No change';
+            starSubClass = 'is-muted';
+        } else {
+            starSub = `${formatOverviewSignedInt(starDelta)}%`;
+            starSubClass = starDeltaNum < 0 ? 'is-neg' : 'is-pos';
+        }
     } else {
         starSub = 'No change';
+        starSubClass = 'is-muted';
     }
 
     const buckets = bucketInfractionsOverview(infractions);
@@ -18347,7 +18356,7 @@ function buildOverviewDashboardCardHtml(data) {
                     </svg>
                     <div class="overview-gauge-center">
                         <div class="overview-gauge-big">${overallPct}%</div>
-                        <div class="overview-gauge-small is-muted">${escapeHtml(starSub)}</div>
+                        <div class="overview-gauge-small ${starSubClass}">${escapeHtml(starSub)}</div>
                     </div>
                 </div>
             </div>
@@ -18453,13 +18462,11 @@ function applySummaryMasonryLayout(grid) {
     const cards = Array.from(grid.querySelectorAll('.dashboard-card'));
     if (!cards.length) return;
 
-    // Reset any previous layout so measurements are correct
+    // Reset positioning so measurements are correct.
+    // Keep existing grid/container heights during recalculation to avoid
+    // temporary document shrink that can clamp scroll and cause jump-to-top.
     grid.style.position = '';
-    grid.style.height = '';
     const summaryContainer = grid.parentElement;
-    if (summaryContainer && summaryContainer.id === 'summary-results') {
-        summaryContainer.style.minHeight = '';
-    }
     cards.forEach(card => {
         card.style.position = '';
         card.style.top = '';
@@ -18471,6 +18478,10 @@ function applySummaryMasonryLayout(grid) {
     // overview can stack above trend content instead of being clipped.
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
     if (viewportWidth <= 1200) {
+        grid.style.height = '';
+        if (summaryContainer && summaryContainer.id === 'summary-results') {
+            summaryContainer.style.minHeight = '';
+        }
         return;
     }
 
@@ -18838,12 +18849,37 @@ function attachOverviewCardInteractions(container, data) {
             </tr>`;
         });
 
+        const chartCanvasId = `days-present-donut-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const drilldownCanvasId = `days-present-drilldown-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const attendancePresent = Number(attendance.present || 0);
+        const attendanceExcused = Number(attendance.excused || 0);
+        const attendanceUnexcused = Number(attendance.unexcused || 0);
+        const topAbsenceDay = maxAbsent > 0 && maxAbsentDays.length
+            ? maxAbsentDays[0]
+            : 'No absences';
+        const presentDelta = data.overview_trends?.present_pct_delta;
+        let deltaText = '—';
+        let deltaClass = 'delta-neutral';
+        if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
+            const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
+            if (roundedTenths === 0) {
+                deltaText = '—';
+            } else {
+                const sign = roundedTenths > 0 ? '+' : '';
+                deltaText = `${sign}${roundedTenths.toFixed(1)}%`;
+                deltaClass = roundedTenths > 0 ? 'delta-positive' : 'delta-negative';
+            }
+        }
         const card = document.createElement('div');
-        card.className = 'dashboard-card full-width overview-extra-card';
+        card.className = 'dashboard-card overview-extra-card days-present-card';
         card.dataset.overviewCard = 'days_present';
         card.innerHTML = `
             <div class="dashboard-card-header">
                 <h3 class="dashboard-card-title">Days Present — Attendance Breakdown</h3>
+                <div class="view-mode-toggle" role="tablist" aria-label="Days Present view mode">
+                    <button type="button" class="view-mode-toggle-btn active" data-days-present-view="graph" role="tab" aria-selected="true">Graph</button>
+                    <button type="button" class="view-mode-toggle-btn" data-days-present-view="table" role="tab" aria-selected="false">Table</button>
+                </div>
             </div>
             <div class="dashboard-card-body overview-detail-container">
                 <div class="overview-metrics">
@@ -18868,20 +18904,309 @@ function attachOverviewCardInteractions(container, data) {
                         <span class="overview-metrics-value">${mostAbsentText}</span>
                     </div>
                 </div>
-                <table class="days-present-table">
-                    <thead>
-                        <tr>
-                            <th>Day</th>
-                            <th>Unexcused</th>
-                            <th>Excused</th>
-                            <th>Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
+                <div class="view-mode-chart-wrap days-present-chart-wrap" data-days-present-panel="graph">
+                    <div class="days-present-tabs" role="tablist">
+                        <button class="days-present-tab active" data-days-present-tab="overview" role="tab" aria-selected="true">
+                            <span class="days-present-tab-label">Overview</span>
+                        </button>
+                    </div>
+                    <div class="days-present-tab-panels">
+                        <div class="days-present-tab-panel is-active" data-days-present-tab-panel="overview">
+                            <div class="days-present-donut-main">
+                                <div class="days-present-donut-shell">
+                                    <canvas id="${chartCanvasId}" aria-label="Attendance breakdown by status" role="img"></canvas>
+                                    <div class="days-present-donut-center">
+                                        <div class="days-present-donut-center-pct">${roundedPresentPct}%</div>
+                                        <div class="days-present-donut-center-delta ${deltaClass}">${deltaText}</div>
+                                        <div class="days-present-donut-center-day">${escapeHtml(topAbsenceDay)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div data-days-present-panel="table" hidden>
+                    <table class="days-present-table">
+                        <thead>
+                            <tr>
+                                <th>Day</th>
+                                <th>Unexcused</th>
+                                <th>Excused</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
             </div>
         `;
         grid.appendChild(card);
+
+        const graphPanel = card.querySelector('[data-days-present-panel="graph"]');
+        const tablePanel = card.querySelector('[data-days-present-panel="table"]');
+        const metricsPanel = card.querySelector('.overview-metrics');
+        const modeButtons = card.querySelectorAll('[data-days-present-view]');
+        const daysTabsContainer = card.querySelector('.days-present-tabs');
+        const daysPanelsContainer = card.querySelector('.days-present-tab-panels');
+        const setActiveDaysTab = (tabName) => {
+            const allTabs = card.querySelectorAll('.days-present-tab');
+            const allPanels = card.querySelectorAll('.days-present-tab-panel');
+            allTabs.forEach((tab) => {
+                const isActive = tab.dataset.daysPresentTab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach((panel) => {
+                panel.classList.toggle('is-active', panel.dataset.daysPresentTabPanel === tabName);
+            });
+        };
+        const wireDaysTabClicks = () => {
+            const allTabs = card.querySelectorAll('.days-present-tab');
+            allTabs.forEach((tab) => {
+                if (tab._daysPresentWired) return;
+                tab._daysPresentWired = true;
+                tab.addEventListener('click', (evt) => {
+                    const closeBtn = evt.target.closest('.days-present-tab-close');
+                    if (closeBtn) {
+                        evt.stopPropagation();
+                        const tabName = tab.dataset.daysPresentTab;
+                        if (tabName === 'overview') return;
+                        const panel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
+                        if (panel) panel.remove();
+                        tab.remove();
+                        setActiveDaysTab('overview');
+                        relayoutDaysPresent();
+                        return;
+                    }
+                    const tabName = tab.dataset.daysPresentTab;
+                    if (!tabName || tab.disabled) return;
+                    setActiveDaysTab(tabName);
+                });
+            });
+        };
+        const relayoutDaysPresent = () => {
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+        const setDaysPresentView = (mode) => {
+            const isGraph = mode === 'graph';
+            if (graphPanel) graphPanel.hidden = !isGraph;
+            if (tablePanel) tablePanel.hidden = isGraph;
+            if (metricsPanel) metricsPanel.hidden = isGraph;
+            if (isGraph) setActiveDaysTab('overview');
+            modeButtons.forEach((btn) => {
+                const active = btn.dataset.daysPresentView === mode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+        };
+        modeButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                setDaysPresentView(btn.dataset.daysPresentView || 'graph');
+                relayoutDaysPresent();
+            });
+        });
+        wireDaysTabClicks();
+        setDaysPresentView('graph');
+
+        const donutCanvas = card.querySelector(`#${chartCanvasId}`);
+        const donutLabels = ['Present', 'Excused', 'Unexcused'];
+        const donutValues = [attendancePresent, attendanceExcused, attendanceUnexcused];
+        const donutColors = ['#16A34A', '#F59E0B', '#FB6F5A'];
+        const hasDonutData = donutValues.some((value) => value > 0);
+        const drilldownLabels = sortedDayEntries.map(([day]) => day);
+        const drilldownValues = sortedDayEntries.map(([, counts]) => (counts.excused || 0) + (counts.unexcused || 0));
+        const hasDrilldownData = drilldownValues.some((value) => value > 0);
+        if (donutCanvas && hasDonutData && typeof Chart !== 'undefined') {
+            const legendDeltaForLabel = (label) => {
+                if (label !== 'Present') return { text: '—', cls: 'delta-neutral' };
+                if (presentDelta == null || Number.isNaN(Number(presentDelta))) {
+                    return { text: '—', cls: 'delta-neutral' };
+                }
+                const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
+                if (roundedTenths === 0) return { text: '—', cls: 'delta-neutral' };
+                const sign = roundedTenths > 0 ? '+' : '';
+                return {
+                    text: `${sign}${roundedTenths.toFixed(1)}%`,
+                    cls: roundedTenths > 0 ? 'delta-positive' : 'delta-negative'
+                };
+            };
+            const legendRows = donutLabels.map((label, idx) => {
+                const value = Number(donutValues[idx] || 0);
+                const delta = legendDeltaForLabel(label);
+                return `
+                    <div class="days-present-legend-item">
+                        <div class="days-present-legend-label">
+                            <span class="days-present-legend-dot" style="background:${donutColors[idx]};"></span>
+                            <span>${escapeHtml(label)}</span>
+                        </div>
+                        <div class="days-present-legend-value">
+                            ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            const overviewPanel = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-main');
+            if (overviewPanel) {
+                overviewPanel.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${legendRows}</div>`);
+            }
+            new Chart(donutCanvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: donutLabels,
+                    datasets: [{
+                        data: donutValues,
+                        backgroundColor: donutLabels.map((_, idx) => donutColors[idx % donutColors.length]),
+                        borderColor: '#ffffff',
+                        borderWidth: 2,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    rotation: 180,
+                    cutout: '62%',
+                    layout: {
+                        padding: { top: 18, right: 22, bottom: 30, left: 22 }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        datalabels: {
+                            color: '#ffffff',
+                            font: { size: 12, weight: '700' },
+                            anchor: 'end',
+                            align: 'end',
+                            offset: 6,
+                            clamp: true,
+                            backgroundColor: (context) => {
+                                const idx = context.dataIndex || 0;
+                                return donutColors[idx % donutColors.length];
+                            },
+                            borderRadius: 8,
+                            padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                            formatter: (value, context) => {
+                                const values = context.chart.data.datasets[0].data || [];
+                                const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
+                                if (!total || !value) return '';
+                                const pct = Math.round((Number(value) / total) * 100);
+                                return pct > 0 ? `${pct}%` : '';
+                            }
+                        }
+                    }
+                }
+            });
+            const openDrilldownFromDonut = () => {
+                const tabName = 'day-of-week';
+                let dayTab = card.querySelector(`.days-present-tab[data-days-present-tab="${tabName}"]`);
+                let dayPanel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
+                if (!dayTab && daysTabsContainer && daysPanelsContainer) {
+                    dayTab = document.createElement('button');
+                    dayTab.className = 'days-present-tab';
+                    dayTab.dataset.daysPresentTab = tabName;
+                    dayTab.setAttribute('role', 'tab');
+                    dayTab.setAttribute('aria-selected', 'false');
+                    dayTab.innerHTML = `
+                        <span class="days-present-tab-label">Day of Week</span>
+                        <span class="days-present-tab-close" aria-label="Close" role="button">&times;</span>
+                    `;
+                    daysTabsContainer.appendChild(dayTab);
+                    dayPanel = document.createElement('div');
+                    dayPanel.className = 'days-present-tab-panel';
+                    dayPanel.dataset.daysPresentTabPanel = tabName;
+                    dayPanel.innerHTML = `
+                        <div class="days-present-pie-heading">Absences by Day of Week</div>
+                        <div class="days-present-donut-shell">
+                            <canvas id="${drilldownCanvasId}" aria-label="Absence totals by day of week" role="img"></canvas>
+                        </div>
+                    `;
+                    daysPanelsContainer.appendChild(dayPanel);
+                    wireDaysTabClicks();
+                }
+                const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
+                if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
+                    const drillPalette = ['#FB6F5A', '#F59E0B', '#4FB6B0', '#8CB79A', '#8B5CF6', '#60A5FA', '#14B8A6'];
+                    new Chart(drilldownCanvas.getContext('2d'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: drilldownLabels,
+                            datasets: [{
+                                data: drilldownValues,
+                                backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
+                                borderColor: '#ffffff',
+                                borderWidth: 2,
+                                hoverOffset: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            rotation: 180,
+                            cutout: '62%',
+                            layout: {
+                                padding: { top: 18, right: 22, bottom: 30, left: 22 }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        boxWidth: 12,
+                                        boxHeight: 12,
+                                        usePointStyle: true,
+                                        pointStyle: 'circle'
+                                    }
+                                },
+                                datalabels: {
+                                    color: '#111827',
+                                    font: { size: 12, weight: '700' },
+                                    anchor: 'end',
+                                    align: 'end',
+                                    offset: 6,
+                                    clamp: true,
+                                    borderRadius: 8,
+                                    padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                                    formatter: (value, context) => {
+                                        const values = context.chart.data.datasets[0].data || [];
+                                        const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
+                                        if (!total || !value) return '';
+                                        const pct = Math.round((Number(value) / total) * 100);
+                                        return pct > 0 ? `${pct}%` : '';
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    drilldownCanvas.dataset.chartBuilt = '1';
+                } else if (dayPanel && !hasDrilldownData) {
+                    dayPanel.innerHTML = `
+                        <p style="color:var(--text-secondary);font-size:0.85rem;">
+                            No day-of-week absence totals are available for this timeframe.
+                        </p>
+                    `;
+                }
+                setActiveDaysTab(tabName);
+                relayoutDaysPresent();
+            };
+            donutCanvas.style.cursor = 'pointer';
+            donutCanvas.addEventListener('click', openDrilldownFromDonut);
+            const donutShell = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-shell');
+            if (donutShell) {
+                donutShell.style.cursor = 'pointer';
+                donutShell.addEventListener('click', (evt) => {
+                    if (evt.target === donutCanvas) return;
+                    openDrilldownFromDonut();
+                });
+            }
+        } else if (graphPanel) {
+            graphPanel.innerHTML = `
+                <p style="color:var(--text-secondary);font-size:0.85rem;">
+                    No attendance totals are available to graph for this timeframe.
+                </p>
+            `;
+        }
     };
 
     const renderInfractionTypeBreakdown = (type, targetOverride) => {

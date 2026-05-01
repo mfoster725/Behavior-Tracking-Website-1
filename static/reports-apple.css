@@ -1,0 +1,735 @@
+/* ============================================================
+   Reports tab — Apple / Cursor-inspired restyle
+   ------------------------------------------------------------
+   This file is intentionally self-contained and scoped to
+   #summary-view (the Reports tab) + #star-category-details-modal
+   (the modal opened from a Reports chart). It is loaded AFTER
+   static/style.css so its rules cascade on top.
+
+   To revert the entire Reports redesign:
+     1) Remove the matching <link> tag in templates/index.html, or
+     2) Delete this file, or
+     3) Drop the reports-apple-restyle branch.
+
+   Nothing in static/style.css is modified. No JS changes required.
+   ============================================================ */
+
+/* ---- Local design tokens (only inside the Reports tab) ---- */
+#summary-view {
+    /* Surfaces */
+    --rp-bg-card: #FFFFFF;
+    --rp-bg-inset: #F7F7F8;
+    --rp-bg-translucent: rgba(255, 255, 255, 0.85);
+
+    /* Text — Cursor Light theme foreground values */
+    --rp-text-primary: #141414EB;
+    --rp-text-secondary: #141414AD;
+    --rp-text-tertiary: #1414147A;
+
+    /* Hairline borders — Cursor's signature: very fine, defines panels */
+    --rp-border-hairline: rgba(0, 0, 0, 0.07);
+    --rp-border-strong: rgba(0, 0, 0, 0.12);
+    --rp-border-divider: rgba(0, 0, 0, 0.05);
+
+    /* Graphite accent — Cursor uses minimal accent, mostly mono */
+    --rp-accent: #18181B;
+    --rp-accent-hover: #27272A;
+    --rp-accent-soft: rgba(0, 0, 0, 0.05);
+    /* Delta colors from Cursor Light added/deleted line colors */
+    --rp-delta-positive: #1F8A65;
+    --rp-delta-negative: #CF2D56;
+    --rp-delta-neutral: #64748B;
+
+    /* Radii — Cursor uses tight radii: 6-8px on small, 10-12 on cards */
+    --rp-radius-sm: 8px;
+    --rp-radius-md: 8px;
+    --rp-radius-lg: 10px;
+    --rp-radius-xl: 12px;
+
+    /* Shadows — Cursor uses minimal shadows; cards defined by hairlines */
+    --rp-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --rp-shadow-card-hover: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.05);
+    --rp-shadow-popover: 0 2px 4px rgba(0, 0, 0, 0.06), 0 12px 28px rgba(0, 0, 0, 0.10);
+    --rp-focus-ring: 0 0 0 3px rgba(0, 0, 0, 0.08);
+
+    /* Typography — system font, matching Appearance -> UI Font Family */
+    --rp-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Ubuntu", "Cantarell", "Noto Sans", sans-serif;
+    --rp-tracking-tight: -0.01em;
+    --rp-tracking-tighter: -0.022em;
+}
+
+/* ---- Force the entire Reports tab onto the new font + base sizing ---- */
+#summary-view,
+#summary-view * {
+    font-family: var(--rp-font) !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+#summary-view {
+    color: var(--rp-text-primary);
+    line-height: 1.5;
+    letter-spacing: var(--rp-tracking-tight);
+}
+
+/* Keep original page background; style only reports components */
+#summary-view .form-section {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    border-bottom: none !important;
+    padding-bottom: 1.5rem;
+    isolation: isolate;
+}
+
+#summary-view .form-section h2 {
+    font-family: var(--rp-font) !important;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.024em;
+    color: var(--rp-text-primary);
+    margin-bottom: 1.25rem;
+    line-height: 1.2;
+}
+
+#summary-view .form-section h3,
+#summary-view .form-section h4 {
+    font-family: var(--rp-font) !important;
+    color: var(--rp-text-primary);
+    letter-spacing: var(--rp-tracking-tight);
+    font-weight: 600;
+}
+
+#summary-view label {
+    color: var(--rp-text-secondary);
+}
+
+/* ============================================================
+   CONTROLS — search, dropdowns, banner, timeframe, segmented
+   ============================================================ */
+
+/* Search inputs */
+#summary-view .dashboard-search-wrap input {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-sm);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-primary);
+    padding: 8px 12px 8px 34px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#summary-view .dashboard-search-wrap input::placeholder {
+    color: var(--rp-text-tertiary);
+}
+
+#summary-view .dashboard-search-wrap input:focus {
+    border-color: var(--rp-border-strong);
+    box-shadow: var(--rp-focus-ring);
+}
+
+#summary-view .dashboard-search-icon {
+    color: var(--rp-text-tertiary);
+}
+
+/* Search dropdown — frosted, layered shadow */
+#summary-view .dashboard-search-dropdown {
+    background: var(--rp-bg-translucent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-xl);
+    box-shadow: var(--rp-shadow-popover);
+    padding: 4px;
+    overflow: hidden;
+    top: calc(100% + 6px);
+}
+
+#summary-view .dashboard-search-option {
+    border-radius: var(--rp-radius-md);
+    color: var(--rp-text-primary);
+    padding: 9px 12px;
+}
+
+#summary-view .dashboard-search-option:first-child,
+#summary-view .dashboard-search-option:last-child {
+    border-radius: var(--rp-radius-md);
+}
+
+#summary-view .dashboard-search-option:hover,
+#summary-view .dashboard-search-option.highlighted {
+    background: var(--rp-accent-soft);
+}
+
+#summary-view .dashboard-search-option .search-meta {
+    color: var(--rp-text-secondary);
+}
+
+/* Managed-by-me toggle */
+#summary-view .dashboard-managed-check {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-sm);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-secondary);
+    padding: 8px 14px;
+    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+#summary-view .dashboard-managed-check:hover {
+    border-color: var(--rp-border-strong);
+    color: var(--rp-text-primary);
+}
+
+#summary-view .dashboard-managed-check input[type="checkbox"] {
+    accent-color: var(--rp-accent);
+    width: 14px;
+    height: 14px;
+}
+
+/* "Viewing: …" context banner — neutral, no more blue */
+#summary-view .dashboard-context-banner {
+    background: var(--rp-bg-inset);
+    border: 1px solid var(--rp-border-hairline);
+    color: var(--rp-text-primary);
+    border-radius: var(--rp-radius-lg);
+    padding: 9px 14px;
+}
+
+#summary-view .dashboard-context-banner svg {
+    color: var(--rp-text-secondary);
+}
+
+#summary-view .dashboard-context-banner .context-label {
+    color: var(--rp-text-primary);
+    font-weight: 600;
+}
+
+#summary-view .dashboard-context-banner .context-clear {
+    color: var(--rp-text-secondary);
+    border-radius: var(--rp-radius-sm);
+    padding: 3px 8px;
+}
+
+#summary-view .dashboard-context-banner .context-clear:hover {
+    background: var(--rp-accent-soft);
+    color: var(--rp-text-primary);
+}
+
+/* Filter row label */
+#summary-view .dashboard-filter-label {
+    color: var(--rp-text-secondary);
+    letter-spacing: var(--rp-tracking-tight);
+}
+
+/* Timeframe <select> — Cursor-style: 8px radius, custom chevron */
+#summary-view .dashboard-period-select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-sm);
+    background-color: var(--rp-bg-card);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236B6B73' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><polyline points='5 8 10 13 15 8'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 13px 13px;
+    color: var(--rp-text-primary);
+    padding: 6px 30px 6px 12px;
+    min-width: 180px;
+    font-weight: 400;
+    line-height: 1.4;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#summary-view .dashboard-period-select:hover {
+    border-color: var(--rp-border-strong);
+}
+
+#summary-view .dashboard-period-select:focus {
+    border-color: var(--rp-border-strong);
+    box-shadow: var(--rp-focus-ring);
+    outline: none;
+}
+
+/* Custom date range row */
+#summary-view .dashboard-custom-range input[type="date"] {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-sm);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-primary);
+    padding: 6px 10px;
+    min-height: 30px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#summary-view .dashboard-custom-range input[type="date"]:hover {
+    border-color: var(--rp-border-strong);
+}
+
+#summary-view .dashboard-custom-range input[type="date"]:focus {
+    border-color: var(--rp-border-strong);
+    box-shadow: var(--rp-focus-ring);
+    outline: none;
+}
+
+#summary-view .dashboard-custom-range-separator {
+    color: var(--rp-text-tertiary);
+}
+
+/* Trends card controls: remove capsule pills, use same rounded rectangles */
+#summary-view .reports-trend-card .behavior-trend-title-line select,
+#summary-view .reports-trend-card .behavior-trend-compare-btn,
+#summary-view .reports-trend-card .behavior-trend-custom-range input[type="date"],
+#summary-view .reports-trend-card .behavior-trend-compare-wrap .behavior-trend-custom-range input[type="date"] {
+    border-radius: var(--rp-radius-sm);
+}
+
+/* Comparison controls (shown when Compare is active) */
+#summary-view .dashboard-compare-controls select {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-md);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-primary);
+    padding: 8px 12px;
+}
+
+/* ---- Segmented buttons (Compare / Incentive / Insights / Print / Past) ---- */
+#summary-view .dashboard-compare-toggle,
+#summary-view a.dashboard-compare-toggle,
+#summary-view #print-summary-btn,
+#summary-view #show-point-card-btn {
+    border: 1px solid var(--rp-border-hairline);
+    border-style: solid;
+    border-radius: var(--rp-radius-sm);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-primary);
+    padding: 6px 11px;
+    font-weight: 400;
+    letter-spacing: var(--rp-tracking-tight);
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    margin-left: 0;
+    line-height: 1.4;
+}
+
+#summary-view .dashboard-compare-toggle:hover,
+#summary-view a.dashboard-compare-toggle:hover,
+#summary-view #print-summary-btn:hover:not(:disabled),
+#summary-view #show-point-card-btn:hover {
+    border-color: var(--rp-border-strong);
+    background: var(--rp-bg-inset);
+}
+
+/* Active state — subtle inset feel, not heavy fill */
+#summary-view .dashboard-compare-toggle.active {
+    background: var(--rp-accent);
+    border-color: var(--rp-accent);
+    color: #FAFAFA;
+}
+
+#summary-view .dashboard-compare-toggle.active:hover {
+    background: var(--rp-accent-hover);
+    border-color: var(--rp-accent-hover);
+    color: #FAFAFA;
+}
+
+/* "Past Point Cards" disabled-look */
+#summary-view #show-point-card-btn.is-inactive {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+#summary-view #print-summary-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Pills (kept for any legacy use) */
+#summary-view .dashboard-pill {
+    border: 1px solid var(--rp-border-hairline);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-secondary);
+    border-radius: var(--rp-radius-sm);
+}
+
+#summary-view .dashboard-pill:hover {
+    border-color: var(--rp-border-strong);
+    color: var(--rp-text-primary);
+}
+
+#summary-view .dashboard-pill.active {
+    background: var(--rp-accent);
+    border-color: var(--rp-accent);
+    color: #FAFAFA;
+}
+
+/* Toolbar buttons inside the Reports tab */
+#summary-view .dashboard-toolbar button {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-md);
+    background: var(--rp-bg-card);
+    color: var(--rp-text-secondary);
+}
+
+#summary-view .dashboard-toolbar button:hover {
+    border-color: var(--rp-border-strong);
+    color: var(--rp-text-primary);
+    background: var(--rp-bg-inset);
+}
+
+/* Incentive error text */
+#summary-view #incentive-error,
+#summary-view .dashboard-custom-error {
+    color: #B91C1C;
+    font-size: 0.78rem;
+}
+
+/* "Generate Tables" primary button (incentive) */
+#summary-view #incentive-generate-btn.btn-primary {
+    background: var(--rp-accent);
+    border: 1px solid var(--rp-accent);
+    color: #FAFAFA;
+    border-radius: var(--rp-radius-md);
+    padding: 8px 14px;
+    font-weight: 500;
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+#summary-view #incentive-generate-btn.btn-primary:hover {
+    background: var(--rp-accent-hover);
+    border-color: var(--rp-accent-hover);
+}
+
+/* ============================================================
+   RESULTS — cards, headers, charts, stats, lists, badges
+   ============================================================ */
+
+/* All cards — Cursor's quiet card style: hairline + minimal shadow */
+#summary-view .dashboard-card,
+#summary-view #summary-results .dashboard-card,
+#summary-view #summary-results .dashboard-card.full-width,
+#summary-view #summary-results .overview-card,
+#summary-view #summary-results .overview-card--rich,
+#summary-view #summary-results .overview-extra-card,
+#summary-view #summary-results .student-performance-card,
+#summary-view #summary-results .dashboard-card.day-of-week-card,
+#summary-view #summary-results .dashboard-card.star-performance-card,
+#summary-view #summary-results .infractions-card {
+    background: var(--rp-bg-card);
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-xl);
+    box-shadow: var(--rp-shadow-card);
+    transition: box-shadow 0.18s ease, border-color 0.18s ease;
+    padding: 18px;
+}
+
+#summary-view .dashboard-card:hover,
+#summary-view #summary-results .dashboard-card:hover {
+    box-shadow: var(--rp-shadow-card-hover);
+    border-color: var(--rp-border-strong);
+}
+
+/* Card header / title typography */
+#summary-view .dashboard-card-header {
+    margin-bottom: 12px;
+}
+
+#summary-view .dashboard-card-title {
+    color: var(--rp-text-primary);
+    letter-spacing: var(--rp-tracking-tighter);
+    font-weight: 700;
+    font-size: 1.1rem;
+    line-height: 1.25;
+}
+
+#summary-view .dashboard-card-subtitle {
+    color: var(--rp-text-secondary);
+    letter-spacing: var(--rp-tracking-tight);
+    font-weight: 400;
+}
+
+/* Close-X on overview-extra-cards */
+#summary-view .overview-extra-close {
+    color: var(--rp-text-tertiary);
+}
+
+#summary-view .overview-extra-close:hover {
+    background: var(--rp-accent-soft);
+    color: var(--rp-text-primary);
+}
+
+/* ---- Stat tiles ---- */
+#summary-view .dashboard-stat-box {
+    background: var(--rp-bg-inset);
+    border-radius: var(--rp-radius-lg);
+    border: 1px solid transparent;
+}
+
+#summary-view .dashboard-stat-value {
+    color: var(--rp-text-primary);
+    letter-spacing: var(--rp-tracking-tighter);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 1.375rem;
+    line-height: 1.15;
+}
+
+#summary-view .dashboard-stat-label {
+    color: var(--rp-text-secondary);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+#summary-view .dashboard-breakdown-meta {
+    color: var(--rp-text-tertiary);
+}
+
+#summary-view .dashboard-empty p {
+    color: var(--rp-text-secondary);
+}
+
+/* Make every overview panel title match ATTENDANCE title styling */
+#summary-view .overview-card--rich .overview-panel-kicker,
+#summary-view .overview-card--rich .overview-trends-title,
+#summary-view .overview-card--rich .overview-trigger-meta-k {
+    color: #64748b;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: none;
+}
+
+/* Restore original warm/elevated look inside overview sub-panels */
+#summary-view .overview-card--rich .overview-beige-panel {
+    background: var(--bg-elevated, #faf6ef);
+}
+
+/* Delta palette: apply consistently across all Reports delta labels */
+#summary-view .delta-positive,
+#summary-view .dashboard-stat-delta.delta-positive,
+#summary-view .overview-attendance-ring-delta.delta-positive,
+#summary-view .overview-infractions-ring-delta.delta-positive,
+#summary-view .overview-infractions-legend-value.delta-positive,
+#summary-view .infractions-ring-center-delta.delta-positive,
+#summary-view .days-present-donut-center-delta.delta-positive,
+#summary-view .days-present-legend-delta.delta-positive,
+#summary-view .overview-trend-line-pos {
+    color: var(--rp-delta-positive);
+}
+
+#summary-view .delta-negative,
+#summary-view .dashboard-stat-delta.delta-negative,
+#summary-view .overview-attendance-ring-delta.delta-negative,
+#summary-view .overview-infractions-ring-delta.delta-negative,
+#summary-view .overview-infractions-legend-value.delta-negative,
+#summary-view .infractions-ring-center-delta.delta-negative,
+#summary-view .days-present-donut-center-delta.delta-negative,
+#summary-view .days-present-legend-delta.delta-negative,
+#summary-view .overview-trend-line-neg {
+    color: var(--rp-delta-negative);
+}
+
+#summary-view .delta-neutral,
+#summary-view .dashboard-stat-delta.delta-neutral,
+#summary-view .overview-attendance-ring-delta.delta-neutral,
+#summary-view .overview-infractions-ring-delta.delta-neutral,
+#summary-view .overview-infractions-legend-value.delta-neutral,
+#summary-view .infractions-ring-center-delta.delta-neutral,
+#summary-view .days-present-legend-delta.delta-neutral,
+#summary-view .overview-trend-line-neutral {
+    color: var(--rp-delta-neutral);
+}
+
+/* Attendance/STAR gauge center deltas use is-pos/is-neg classes, not delta-* */
+#summary-view .overview-gauge-small.is-pos {
+    color: var(--rp-delta-positive);
+}
+
+#summary-view .overview-gauge-small.is-neg {
+    color: var(--rp-delta-negative);
+}
+
+#summary-view .overview-gauge-small.is-muted {
+    color: var(--rp-delta-neutral);
+}
+
+/* Attendance card legend text should be normal weight (not bold). */
+#summary-view .days-present-legend-label,
+#summary-view .days-present-legend-value,
+#summary-view .days-present-legend-delta {
+    font-weight: 400;
+}
+
+
+/* Overview stat hover/selected states — neutral graphite */
+#summary-view .overview-stat:hover {
+    border-color: var(--rp-border-strong);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+#summary-view .overview-stat.overview-stat-selected {
+    border-color: var(--rp-border-hairline);
+    background-color: var(--rp-bg-card);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+#summary-view .overview-card .overview-stat .dashboard-stat-label,
+#summary-view .overview-card .overview-stat-star-percent .star-percent-label,
+#summary-view .overview-card .overview-infractions-title {
+    color: var(--rp-text-secondary);
+    letter-spacing: 0.06em;
+}
+
+/* ---- Breakdown lists ---- */
+#summary-view .dashboard-breakdown-item {
+    border-bottom: 1px solid var(--rp-border-divider);
+    font-variant-numeric: tabular-nums;
+}
+
+#summary-view .dashboard-breakdown-name {
+    color: var(--rp-text-primary);
+}
+
+#summary-view .dashboard-breakdown-value {
+    color: var(--rp-text-primary);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+#summary-view .dashboard-breakdown-meta {
+    color: var(--rp-text-tertiary);
+}
+
+/* ---- Log lists ---- */
+#summary-view .dashboard-log-item {
+    background: var(--rp-bg-inset);
+    border-radius: var(--rp-radius-md);
+}
+
+#summary-view .dashboard-log-item .log-type {
+    color: var(--rp-text-primary);
+}
+
+#summary-view .dashboard-log-item .log-count {
+    color: var(--rp-text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- Badges — flatter, calmer, with neutral structure ---- */
+#summary-view .dashboard-badge {
+    border: 1px solid transparent;
+    border-radius: var(--rp-radius-sm);
+    padding: 3px 10px;
+    font-weight: 500;
+    letter-spacing: var(--rp-tracking-tight);
+}
+
+#summary-view .dashboard-badge.badge-red {
+    background: rgba(220, 38, 38, 0.08);
+    color: #991B1B;
+    border-color: rgba(220, 38, 38, 0.18);
+}
+
+#summary-view .dashboard-badge.badge-amber {
+    background: rgba(217, 119, 6, 0.10);
+    color: #92400E;
+    border-color: rgba(217, 119, 6, 0.20);
+}
+
+#summary-view .dashboard-badge.badge-blue {
+    background: rgba(59, 130, 246, 0.08);
+    color: #1E40AF;
+    border-color: rgba(59, 130, 246, 0.18);
+}
+
+#summary-view .dashboard-badge.badge-green {
+    background: rgba(22, 163, 74, 0.08);
+    color: #065F46;
+    border-color: rgba(22, 163, 74, 0.18);
+}
+
+#summary-view .dashboard-badge.badge-gray {
+    background: var(--rp-bg-inset);
+    color: var(--rp-text-secondary);
+    border-color: var(--rp-border-hairline);
+}
+
+/* Starbucks table inset */
+#summary-view #starbucks-table-container {
+    border: 1px solid var(--rp-border-hairline);
+    border-radius: var(--rp-radius-lg);
+    background: var(--rp-bg-card);
+}
+
+#summary-view #starbucks-table th,
+#summary-view #starbucks-table td {
+    border-color: var(--rp-border-divider);
+}
+
+/* ---- Empty / loading ---- */
+#summary-view .dashboard-empty,
+#summary-view .dashboard-loading {
+    color: var(--rp-text-tertiary);
+}
+
+#summary-view .dashboard-empty-icon {
+    opacity: 0.45;
+}
+
+#summary-view .dashboard-spinner {
+    border: 3px solid var(--rp-border-hairline);
+    border-top-color: var(--rp-accent);
+}
+
+/* Chart wrapper — a touch of breathing room */
+#summary-view .dashboard-chart-wrap {
+    padding: 4px 0;
+}
+
+/* ============================================================
+   STAR Category Details modal (opened from Reports STAR chart)
+   ============================================================ */
+#star-category-details-modal {
+    background-color: rgba(10, 10, 10, 0.45);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+}
+
+#star-category-details-modal .modal-content {
+    background: var(--rp-bg-card, #FFFFFF);
+    border: 1px solid var(--rp-border-hairline, rgba(0, 0, 0, 0.08));
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 24px 60px rgba(0, 0, 0, 0.18);
+    padding: 1.75rem;
+}
+
+#star-category-details-modal h2 {
+    color: #0A0A0A;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    font-size: 1.15rem;
+}
+
+#star-category-details-modal .close {
+    color: #A1A1AA;
+    transition: color 0.18s ease;
+}
+
+#star-category-details-modal .close:hover {
+    color: #0A0A0A;
+}
+
+#star-category-details-modal .btn-secondary {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    background: #FFFFFF;
+    color: #52525B;
+    padding: 8px 14px;
+    font-weight: 500;
+    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+#star-category-details-modal .btn-secondary:hover {
+    border-color: rgba(0, 0, 0, 0.14);
+    background: #F4F4F5;
+    color: #0A0A0A;
+}
