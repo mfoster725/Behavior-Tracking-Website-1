@@ -4581,6 +4581,26 @@ a.dashboard-compare-toggle {
     margin-top: 4px;
 }
 
+.overview-trend-text {
+    display: grid;
+    grid-template-columns: auto 56px;
+    align-items: baseline;
+    column-gap: 8px;
+    width: 100%;
+}
+
+.overview-trend-metric {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.overview-trend-delta {
+    justify-self: start;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+
 .overview-spark {
     width: 36px;
     height: 14px;
@@ -5009,6 +5029,10 @@ a.dashboard-compare-toggle {
     line-height: 1.1;
     margin-top: 3px;
     white-space: nowrap;
+}
+
+.overview-card--rich .overview-trend-text {
+    grid-template-columns: auto 48px;
 }
 
 .overview-card--rich .overview-spark {

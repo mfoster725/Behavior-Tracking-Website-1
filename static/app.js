@@ -18273,11 +18273,17 @@ function buildOverviewDashboardCardHtml(data) {
     const topOverviewIncrease = positiveOverviewDeltas.length ? positiveOverviewDeltas[0] : null;
     const topOverviewDecrease = negativeOverviewDeltas.length ? negativeOverviewDeltas[0] : null;
 
-    const formatOverviewDeltaLabel = (metric) => {
-        if (!metric) return '—';
+    const formatOverviewDeltaParts = (metric) => {
+        if (!metric) return { metric: '—', delta: '' };
         const formatted = formatOverviewSignedInt(metric.delta);
-        return `${metric.label} ${formatted}${metric.isPercent ? '%' : ''}`;
+        return {
+            metric: metric.label,
+            delta: `${formatted}${metric.isPercent ? '%' : ''}`
+        };
     };
+
+    const positiveParts = formatOverviewDeltaParts(topOverviewIncrease);
+    const negativeParts = formatOverviewDeltaParts(topOverviewDecrease);
 
     const trendInf = trends && formatOverviewSignedInt(infDelta);
     const trendRem = trends && formatOverviewSignedInt(remDelta);
@@ -18287,11 +18293,11 @@ function buildOverviewDashboardCardHtml(data) {
             <div class="overview-trends-title">Trends</div>
             <div class="overview-trend-line ${topOverviewIncrease ? 'overview-trend-line-pos' : 'overview-trend-line-neutral'}">
                 <svg class="overview-spark overview-spark--up" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,12 14,8 26,10 40,4"/></svg>
-                <span>Top positive: ${escapeHtml(formatOverviewDeltaLabel(topOverviewIncrease))}</span>
+                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(positiveParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(positiveParts.delta)}</span></span>
             </div>
             <div class="overview-trend-line ${topOverviewDecrease ? 'overview-trend-line-neg' : 'overview-trend-line-neutral'}">
                 <svg class="overview-spark overview-spark--down" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,4 12,10 24,6 40,12"/></svg>
-                <span>Top negative: ${escapeHtml(formatOverviewDeltaLabel(topOverviewDecrease))}</span>
+                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(negativeParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(negativeParts.delta)}</span></span>
             </div>
         </div>`;
 
