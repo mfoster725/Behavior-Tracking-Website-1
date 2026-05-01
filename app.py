@@ -1,3 +1,24 @@
+import os
+import sys
+
+# Windows + recent Python: SQLAlchemy import can block on WMI via platform.machine().
+if sys.platform == 'win32':
+    os.environ.setdefault('DISABLE_SQLALCHEMY_CEXT_RUNTIME', '1')
+    import platform as _platform
+
+    _platform_machine_orig = _platform.machine
+
+    def _platform_machine_fast():
+        arch = os.environ.get('PROCESSOR_ARCHITECTURE')
+        if arch:
+            return arch
+        try:
+            return _platform_machine_orig()
+        except Exception:
+            return 'AMD64'
+
+    _platform.machine = _platform_machine_fast
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
@@ -7,7 +28,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from functools import wraps
 from decimal import Decimal
-import os
 import re
 import secrets
 import csv
@@ -903,8 +923,9 @@ def init_db():
         with app.app_context():
             # Test database connection first
             try:
+                print("Connecting to database...", flush=True)
                 db.engine.connect()
-                print("Database connection successful")
+                print("Database connection successful", flush=True)
             except Exception as conn_error:
                 print(f"Database connection error: {conn_error}")
                 import traceback
@@ -914,7 +935,7 @@ def init_db():
             # Create all tables
             db.create_all()
             ensure_daily_query_indexes()
-            print("Database tables created/verified")
+            print("Database tables created/verified", flush=True)
             
             # Ensure OutsideStaffStudent table exists and run migrations
             try:
@@ -1081,11 +1102,12 @@ def init_db():
 # This ensures tables are created even when app is imported by gunicorn
 _db_initialized = False
 try:
+    print("Loading app: running database setup (this can take a few seconds)...", flush=True)
     init_db()
     _db_initialized = True
-    print("Database initialized successfully on import")
+    print("Database initialized successfully on import", flush=True)
 except Exception as e:
-    print(f"Warning: Database initialization failed on import: {e}")
+    print(f"Warning: Database initialization failed on import: {e}", flush=True)
     import traceback
     traceback.print_exc()
     # Don't fail completely - let the app start and try again on first request
@@ -1101,7 +1123,7 @@ def ensure_db_initialized():
         try:
             init_db()
             _db_initialized = True
-            print("Database initialized successfully on first request")
+            print("Database initialized successfully on first request", flush=True)
         except Exception as e:
             print(f"Database initialization still failing: {e}")
             # Log but don't block - let the route handle the error
@@ -1310,6 +1332,65 @@ def index():
         date=date,
         must_change_password=getattr(current_user, 'must_change_password', False) and current_user.role == 'staff'
     )
+
+
+@app.route('/insights')
+@login_required
+def insights_dashboard():
+    insights_student_id = None
+    insights_staff_id = None
+    insights_managed_by_me = False
+    if current_user.role == 'student' and getattr(current_user, 'student_id', None):
+        insights_student_id = current_user.student_id
+    return render_template(
+        'insights-dashboard.html',
+        user=current_user,
+        insights_student_id=insights_student_id,
+        insights_staff_id=insights_staff_id,
+        insights_managed_by_me=insights_managed_by_me,
+    )
+
+
+@app.route('/api/insights', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def api_insights():
+    student_id_arg = request.args.get('student_id', type=int)
+    log_phi_access(
+        action='VIEW',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='insights',
+        resource_id=student_id_arg,
+        details='insights dashboard api',
+        ip_address=get_remote_address(),
+    )
+
+    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    time_blocks = ['Before School', 'Block 1', 'Block 2', 'Block 3', 'Block 4', 'After School']
+    empty_cell = {'count': 0, 'infractions': [], 'resets': 0, 'frenzies': 0}
+    cells = [[dict(empty_cell) for _ in time_blocks] for _ in days]
+
+    labels_week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    zeros7 = [0, 0, 0, 0, 0, 0, 0]
+    star_labels = ['Safety', 'Teamwork', 'Accountability', 'Relationships']
+    zeros4 = [0.0, 0.0, 0.0, 0.0]
+    growth_labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4']
+    zeros_growth = [0, 0, 0, 0]
+
+    return jsonify({
+        'pulse': {
+            'attendancePercent': 0,
+            'starAveragePercent': 0,
+            'currentState': 'stagnation',
+        },
+        'heatmap': {'days': days, 'timeBlocks': time_blocks, 'cells': cells},
+        'escalation': {'labels': labels_week, 'reminders': zeros7, 'resets': zeros7, 'frenzies': zeros7},
+        'infractionCategories': {'labels': ['Pattern A', 'Pattern B', 'Pattern C', 'Other'], 'values': [0, 0, 0, 0]},
+        'starRadar': {'labels': star_labels, 'currentMonth': zeros4, 'previousMonth': zeros4},
+        'growthTimeline': {'labels': growth_labels, 'starPercent': zeros_growth, 'totalIncidents': zeros_growth},
+    })
 
 @app.route('/api/students', methods=['GET', 'POST'])
 @limiter.limit("30 per minute")
@@ -2137,6 +2218,8 @@ def daily_records():
         )
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
+        staff_id = request.args.get('staff_id', type=int)
+        managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
         
         # Get daily records (filtered by role and optional student_id/student_ids)
         query = DailyRecord.query
@@ -2157,6 +2240,32 @@ def daily_records():
                 query = query.filter(DailyRecord.student_id.in_(assigned_student_ids))
         elif requested_student_ids:
             query = query.filter(DailyRecord.student_id.in_(requested_student_ids))
+        elif staff_id and current_user.role in ['staff', 'admin']:
+            staff_user = User.query.get(staff_id)
+            if staff_user:
+                staff_name = staff_user.name or ''
+                staff_username = staff_user.username or ''
+                team_members = TeamMember.query.filter(
+                    (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+                    (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+                ).all()
+                staff_student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+                if not staff_student_ids:
+                    return jsonify([])
+                query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
+        elif managed_by_me and current_user.role in ['staff', 'admin']:
+            user_name = (current_user.name or current_user.username or '').strip()
+            user_username = (current_user.username or '').strip()
+            team_members = TeamMember.query.filter(
+                db.or_(
+                    db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                    db.func.lower(TeamMember.name) == db.func.lower(user_username),
+                )
+            ).all()
+            managed_student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+            if not managed_student_ids:
+                return jsonify([])
+            query = query.filter(DailyRecord.student_id.in_(managed_student_ids))
         if start_date:
             query = query.filter(DailyRecord.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
         if end_date:
@@ -3382,7 +3491,32 @@ def summary():
             'by_time_by_day': by_time_by_day_formatted,
             'infractions_by_type': infractions_by_type,
         }
-    
+
+    def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance):
+        """Numeric deltas vs an equal-length prior window (e.g. previous 30 school days)."""
+
+        def inf_total(st):
+            d = st.get('infractions') or {}
+            return sum(int(v or 0) for v in d.values())
+
+        cur_ai = cur_stats.get('additional_info') or {}
+        prev_ai = prev_stats.get('additional_info') or {}
+        cur_star = (cur_stats.get('percentages') or {}).get('overall')
+        prev_star = (prev_stats.get('percentages') or {}).get('overall')
+        cur_present = (cur_attendance or {}).get('present_pct')
+        prev_present = (prev_attendance or {}).get('present_pct')
+
+        return {
+            'infractions_delta': inf_total(cur_stats) - inf_total(prev_stats),
+            'reminders_delta': int(cur_ai.get('total_reminders') or 0) - int(prev_ai.get('total_reminders') or 0),
+            'resets_delta': int(cur_ai.get('total_resets') or 0) - int(prev_ai.get('total_resets') or 0),
+            'present_pct_delta': None if cur_present is None or prev_present is None else round(
+                float(cur_present) - float(prev_present), 1),
+            'star_overall_delta': None if cur_star is None or prev_star is None else round(
+                float(cur_star) - float(prev_star), 1),
+            'has_prior': True,
+        }
+
     # Filter by period if specified (takes precedence over timeframe)
     if period:
         from datetime import date, timedelta
@@ -3482,6 +3616,34 @@ def summary():
             'attendance_summary': attendance_summary,
             'attendance_by_day_of_week': attendance_by_day,
         }
+        overview_trends = None
+        if period == '30day' and len(unique_dates) > 30:
+            previous_dates_set = unique_dates[30:60]
+            prev_metric_records = []
+            prev_attendance_records = []
+            for record in all_records_raw:
+                if record.date in previous_dates_set:
+                    prev_attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        prev_metric_records.append(record)
+            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_attendance = compute_attendance_summary(prev_attendance_records)
+            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+        elif period == 'weekly' and week_start and week_end:
+            prev_week_start = week_start - timedelta(days=7)
+            prev_week_end = week_end - timedelta(days=7)
+            prev_metric_records = []
+            prev_attendance_records = []
+            for record in all_records_raw:
+                if prev_week_start <= record.date <= prev_week_end:
+                    prev_attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        prev_metric_records.append(record)
+            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_attendance = compute_attendance_summary(prev_attendance_records)
+            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+        if overview_trends:
+            result['overview_trends'] = overview_trends
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
             result['week_start'] = week_start.isoformat()
@@ -3512,7 +3674,23 @@ def summary():
         print(f"After weekly filtering: {len(records)} records from {most_recent_monday} to {most_recent_sunday}")
         # Calculate single summary
         stats = calculate_summary_stats(records)
-        return _summary_response({
+        attendance_records_cur = [
+            r for r in all_records_raw if most_recent_monday <= r.date <= most_recent_sunday
+        ]
+        attendance_summary_cur = compute_attendance_summary(attendance_records_cur)
+        attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
+
+        overview_trends = None
+        prev_week_start = most_recent_monday - timedelta(days=7)
+        prev_week_end = most_recent_sunday - timedelta(days=7)
+        prev_metric_records = [r for r in all_records if prev_week_start <= r.date <= prev_week_end]
+        prev_attendance_records = [r for r in all_records_raw if prev_week_start <= r.date <= prev_week_end]
+        if prev_metric_records or prev_attendance_records:
+            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_attendance = compute_attendance_summary(prev_attendance_records)
+            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+
+        weekly_resp = {
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -3535,7 +3713,12 @@ def summary():
             'week_start': most_recent_monday.isoformat(),
             'week_end': most_recent_sunday.isoformat(),
             'starbucks_total': starbucks_total,
-        })
+            'attendance_summary': attendance_summary_cur,
+            'attendance_by_day_of_week': attendance_by_day_cur,
+        }
+        if overview_trends:
+            weekly_resp['overview_trends'] = overview_trends
+        return _summary_response(weekly_resp)
     elif timeframe == '30day':
         # Get unique dates that have data, sorted descending
         unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
@@ -3550,7 +3733,25 @@ def summary():
         print(f"After 30 day filtering: {len(records)} records from {len(selected_dates)} unique dates")
         # Calculate single summary
         stats = calculate_summary_stats(records)
-        return _summary_response({
+        attendance_records_cur = [r for r in all_records_raw if r.date in selected_dates]
+        attendance_summary_cur = compute_attendance_summary(attendance_records_cur)
+        attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
+
+        overview_trends = None
+        if len(unique_dates) > 30:
+            previous_dates_set = unique_dates[30:60]
+            prev_metric_records = []
+            prev_attendance_records = []
+            for record in all_records_raw:
+                if record.date in previous_dates_set:
+                    prev_attendance_records.append(record)
+                    if record.attendance_status != 'excused':
+                        prev_metric_records.append(record)
+            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_attendance = compute_attendance_summary(prev_attendance_records)
+            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+
+        tf30_resp = {
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -3573,7 +3774,12 @@ def summary():
             'available_data_points': available_data_points,
             'has_full_30_days': available_data_points >= 30,
             'starbucks_total': starbucks_total,
-        })
+            'attendance_summary': attendance_summary_cur,
+            'attendance_by_day_of_week': attendance_by_day_cur,
+        }
+        if overview_trends:
+            tf30_resp['overview_trends'] = overview_trends
+        return _summary_response(tf30_resp)
     elif timeframe == '30day_to_30day':
         # Get unique dates that have data, sorted descending
         unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
@@ -8472,6 +8678,7 @@ def check_users():
         return jsonify({'error': f'Error checking users: {str(e)}'}), 500
 
 if __name__ == '__main__':
+    print("Starting development server (schema checks)...", flush=True)
     with app.app_context():
         db.create_all()
         ensure_daily_query_indexes()
@@ -8526,5 +8733,6 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Migration check completed (table may not exist yet or column already exists): {e}")
     port = int(os.environ.get('PORT', 5000))
+    print(f"Flask server starting on port {port} (Ctrl+C to stop)...", flush=True)
     app.run(host='0.0.0.0', port=port, debug=False)
 

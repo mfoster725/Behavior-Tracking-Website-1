@@ -1003,108 +1003,6 @@ function setupEventListeners() {
             });
         }
         
-        const showPointCardBtn = document.getElementById('show-point-card-btn');
-        if (showPointCardBtn) {
-            showPointCardBtn.addEventListener('click', () => {
-                const container = document.getElementById('point-card-data-container');
-                if (!container) {
-                    console.warn('point-card-data-container not found');
-                    return;
-                }
-
-                // Toggle visibility: if currently visible, hide it; otherwise load data and show it
-                const isVisible = container.style.display !== 'none' && container.style.display !== '';
-                if (isVisible) {
-                    container.style.display = 'none';
-                    showPointCardBtn.textContent = 'View Point Cards';
-                } else {
-                    console.log('Show point card data button clicked');
-                    loadPointCardData();
-                }
-            });
-        } else {
-            console.warn('show-point-card-btn not found');
-        }
-
-        const loadFrenzyStatsBtn = document.getElementById('load-frenzy-stats-btn');
-        if (loadFrenzyStatsBtn) {
-            loadFrenzyStatsBtn.addEventListener('click', () => {
-                console.log('Load frenzy stats button clicked');
-                loadFrenzyStats();
-            });
-        } else {
-            console.warn('load-frenzy-stats-btn not found');
-        }
-        
-        const printFrenzyBtn = document.getElementById('print-frenzy-btn');
-        if (printFrenzyBtn) {
-            printFrenzyBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Print frenzy stats button clicked');
-                console.log('Button disabled?', printFrenzyBtn.disabled);
-                if (printFrenzyBtn.disabled) {
-                    alert('Please load frenzy statistics data first before generating PDF.');
-                    return;
-                }
-                console.log('Calling showPdfTableSelectionModal...');
-                const pdfModalFunc = window.showPdfTableSelectionModal || showPdfTableSelectionModal;
-                console.log('Function exists?', typeof pdfModalFunc);
-                if (typeof pdfModalFunc === 'function') {
-                    try {
-                        pdfModalFunc('frenzy');
-                    } catch (error) {
-                        console.error('Error in print frenzy handler:', error);
-                        alert('Error opening PDF options: ' + (error.message || 'Unknown error'));
-                    }
-                } else {
-                    console.error('showPdfTableSelectionModal is not a function');
-                    alert('PDF modal function not available. Please refresh the page.');
-                }
-            });
-        } else {
-            console.warn('print-frenzy-btn not found');
-        }
-        
-        // Make period and timeframe dropdowns mutually exclusive for frenzy
-        const frenzyPeriodSelect = document.getElementById('frenzy-period-select');
-        const frenzyTimeframeSelect = document.getElementById('frenzy-timeframe-select');
-        if (frenzyPeriodSelect && frenzyTimeframeSelect) {
-            frenzyPeriodSelect.addEventListener('change', () => {
-                if (frenzyPeriodSelect.value) {
-                    frenzyTimeframeSelect.value = '';
-                }
-            });
-            frenzyTimeframeSelect.addEventListener('change', () => {
-                if (frenzyTimeframeSelect.value) {
-                    frenzyPeriodSelect.value = '';
-                }
-            });
-        }
-        
-        const frenzyManagedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
-        if (frenzyManagedByMeCheckbox) {
-            frenzyManagedByMeCheckbox.addEventListener('change', async () => {
-                console.log('Frenzy managed by me checkbox changed:', frenzyManagedByMeCheckbox.checked);
-                const frenzySelect = document.getElementById('frenzy-student-select');
-                const currentSelection = frenzySelect ? frenzySelect.value : null;
-                
-                // Reload students - update all dropdowns (summary and frenzy share the same source)
-                await loadStudents(frenzyManagedByMeCheckbox.checked, false);
-                
-                // If a student was selected, check if it still exists in the filtered list
-                if (currentSelection && frenzySelect) {
-                    const optionExists = Array.from(frenzySelect.options).some(opt => opt.value === currentSelection);
-                    if (!optionExists) {
-                        // Selected student is no longer in the filtered list, clear selection
-                        frenzySelect.value = '';
-                        console.log('Cleared frenzy student selection - student not in filtered list');
-                    }
-                }
-            });
-        }
-
-
         // Admin panel buttons
         const addStaffBtn = document.getElementById('add-staff-btn');
         if (addStaffBtn) {
@@ -1348,6 +1246,10 @@ function setupEventListeners() {
 }
 
 async function switchView(viewName) {
+    if (viewName === 'frenzy') {
+        viewName = 'summary';
+    }
+
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     
@@ -1357,10 +1259,6 @@ async function switchView(viewName) {
     }
     
     let navButton = document.querySelector(`[data-view="${viewName}"]`);
-    // When viewing Frenzy via the combined Reports tab, keep the Reports nav button active
-    if (!navButton && viewName === 'frenzy') {
-        navButton = document.querySelector('[data-view="summary"]');
-    }
     if (navButton) {
         navButton.classList.add('active');
     }
@@ -1417,6 +1315,8 @@ async function switchView(viewName) {
     
     // If switching to summary view, reload summary data
     if (viewName === 'summary') {
+        removeLegacyReportsToggleButtons();
+
         // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
         const summaryManagedByMeCheckbox = document.getElementById('summary-managed-by-me-checkbox');
         if (summaryManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
@@ -1441,24 +1341,6 @@ async function switchView(viewName) {
         // so the default 30-day + "managed by me" state shows data immediately.
         if (typeof triggerDashboardLoad === 'function') {
             triggerDashboardLoad('summary');
-        }
-    }
-    
-    // If switching to frenzy view, reload frenzy stats if timeframe is selected
-    if (viewName === 'frenzy') {
-        // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
-        const frenzyManagedByMeCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
-        if (frenzyManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
-            const shouldCheck = window.currentUser.role === 'staff';
-            if (frenzyManagedByMeCheckbox.checked !== shouldCheck) {
-                frenzyManagedByMeCheckbox.checked = shouldCheck;
-                frenzyManagedByMeCheckbox.dispatchEvent(new Event('change'));
-            }
-        }
-        
-        const timeframeSelect = document.getElementById('frenzy-timeframe-select');
-        if (timeframeSelect && timeframeSelect.value) {
-            loadFrenzyStats();
         }
     }
     
@@ -1555,6 +1437,27 @@ async function switchView(viewName) {
         }
         handleMarketplaceView();
     }
+}
+
+function removeLegacyReportsToggleButtons() {
+    const summaryView = document.getElementById('summary-view');
+    if (!summaryView) return;
+
+    // Remove stale legacy sub-toggle buttons ("Point Card" / "Frenzy") if present.
+    const legacyLabels = new Set(['point card', 'frenzy']);
+    summaryView.querySelectorAll('button').forEach((btn) => {
+        const label = (btn.textContent || '').trim().toLowerCase();
+        if (legacyLabels.has(label)) {
+            btn.remove();
+        }
+    });
+
+    // Remove empty legacy wrappers after button cleanup.
+    summaryView.querySelectorAll('.reports-toggle').forEach((wrap) => {
+        if (!wrap.querySelector('button')) {
+            wrap.remove();
+        }
+    });
 }
 
 function loadQuarterConfig() {
@@ -9813,6 +9716,131 @@ async function updateUserManagementPreference(sectionKey, hidden) {
 }
 
 // User Management Functions
+let userManagementAutoFitRaf = null;
+let userManagementAutoFitObserverInitialized = false;
+
+function autoFitUserManagementTable(table) {
+    if (!table) return;
+
+    const headerCells = Array.from(table.querySelectorAll('thead th'));
+    if (headerCells.length === 0) return;
+
+    const allBodyRows = Array.from(table.querySelectorAll('tbody tr'));
+    const bodyRows = allBodyRows.filter(row =>
+        row.style.display !== 'none' && !row.classList.contains('empty-row')
+    );
+
+    // Reset widths so measurements reflect current content.
+    headerCells.forEach(cell => {
+        cell.style.width = '';
+        cell.style.minWidth = '';
+    });
+    allBodyRows.forEach(row => {
+        Array.from(row.cells).forEach(cell => {
+            cell.style.width = '';
+            cell.style.minWidth = '';
+        });
+    });
+
+    // No data rows: keep natural table width so empty-state text stays centered.
+    if (bodyRows.length === 0) {
+        return;
+    }
+
+    const maxWidths = headerCells.map(cell => cell.scrollWidth);
+
+    bodyRows.forEach(row => {
+        Array.from(row.cells).forEach((cell, index) => {
+            if (index < maxWidths.length) {
+                maxWidths[index] = Math.max(maxWidths[index], cell.scrollWidth);
+            }
+        });
+    });
+
+    maxWidths.forEach((width, index) => {
+        const pixelWidth = `${Math.ceil(width + 2)}px`;
+        headerCells[index].style.width = pixelWidth;
+        headerCells[index].style.minWidth = pixelWidth;
+    });
+
+    bodyRows.forEach(row => {
+        Array.from(row.cells).forEach((cell, index) => {
+            if (index < maxWidths.length) {
+                const pixelWidth = `${Math.ceil(maxWidths[index] + 2)}px`;
+                cell.style.width = pixelWidth;
+                cell.style.minWidth = pixelWidth;
+            }
+        });
+    });
+}
+
+function autoFitAllUserManagementTables() {
+    const tables = document.querySelectorAll('#users-view .users-table');
+    tables.forEach(autoFitUserManagementTable);
+}
+
+function updateUserManagementTableEmptyState(tbody) {
+    if (!tbody) return;
+
+    const scrollContainer = tbody.closest('.user-table-scroll');
+    if (!scrollContainer) return;
+
+    const dataRows = Array.from(tbody.querySelectorAll('tr')).filter(row => !row.classList.contains('empty-row'));
+    const hasDataRows = dataRows.length > 0;
+    scrollContainer.classList.toggle('table-empty', !hasDataRows);
+}
+
+function updateAllUserManagementTableEmptyStates() {
+    const bodyIds = [
+        'student-users-table-body',
+        'archived-students-table-body',
+        'staff-users-table-body',
+        'outside-staff-users-table-body',
+        'admin-users-table-body'
+    ];
+    bodyIds.forEach((id) => updateUserManagementTableEmptyState(document.getElementById(id)));
+}
+
+function scheduleUserManagementTablesAutoFit() {
+    if (userManagementAutoFitRaf != null) {
+        cancelAnimationFrame(userManagementAutoFitRaf);
+    }
+    userManagementAutoFitRaf = requestAnimationFrame(() => {
+        userManagementAutoFitRaf = null;
+        autoFitAllUserManagementTables();
+        updateAllUserManagementTableEmptyStates();
+    });
+}
+
+function initializeUserManagementTableAutoFitObserver() {
+    if (userManagementAutoFitObserverInitialized) return;
+    userManagementAutoFitObserverInitialized = true;
+
+    const tableBodyIds = [
+        'student-users-table-body',
+        'archived-students-table-body',
+        'staff-users-table-body',
+        'outside-staff-users-table-body',
+        'admin-users-table-body'
+    ];
+
+    tableBodyIds.forEach((id) => {
+        const tbody = document.getElementById(id);
+        if (!tbody) return;
+
+        const observer = new MutationObserver(() => {
+            scheduleUserManagementTablesAutoFit();
+        });
+        observer.observe(tbody, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+    });
+
+    window.addEventListener('resize', scheduleUserManagementTablesAutoFit);
+}
+
 async function loadUsers() {
     try {
         const response = await fetch('/api/users');
@@ -9839,10 +9867,11 @@ async function loadUsers() {
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
-                archivedStudentsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
+            scheduleUserManagementTablesAutoFit();
             return;
         }
         
@@ -9937,7 +9966,7 @@ async function loadUsers() {
         
         // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
-            adminTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
+            adminTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
         } else {
             const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
@@ -9948,7 +9977,7 @@ async function loadUsers() {
         
         // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
-            staffTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
             const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
@@ -9960,7 +9989,7 @@ async function loadUsers() {
         // Populate Outside Staff table (DocumentFragment for single reflow)
         if (outsideStaffTbody) {
             if (outsideStaffUsers.length === 0) {
-                outsideStaffTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
+                outsideStaffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
             } else {
                 const outsideFrag = document.createDocumentFragment();
                 outsideStaffUsers.forEach(user => {
@@ -9972,7 +10001,7 @@ async function loadUsers() {
         
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -10004,7 +10033,7 @@ async function loadUsers() {
                     });
                     
                     if (archivedStudents.length === 0) {
-                        archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
                         const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
@@ -10045,6 +10074,8 @@ async function loadUsers() {
                 archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
             }
         }
+
+        scheduleUserManagementTablesAutoFit();
     } catch (error) {
         console.error('Error loading users:', error);
         showMessage('Error loading users. Please try again.', 'error');
@@ -11675,6 +11706,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // User management buttons
+    initializeUserManagementTableAutoFitObserver();
+
     const refreshUsersBtn = document.getElementById('refresh-users-btn');
     if (refreshUsersBtn) {
         refreshUsersBtn.addEventListener('click', loadUsers);
@@ -11758,6 +11791,8 @@ function filterUserTable(tableType, searchQuery) {
         
         row.style.display = shouldShow ? '' : 'none';
     }
+
+    scheduleUserManagementTablesAutoFit();
 }
 
 async function removeStudent(userId, studentId, studentName) {
@@ -17233,18 +17268,18 @@ function updateContextBanner(pageKey) {
     }
 }
 
-// ---- Filter controls (dropdown for summary, pills for frenzy) ----
+// ---- Filter controls (dropdown for Summary + Frenzy reports; pills elsewhere) ----
 function setupFilterPills(pageKey) {
     const container = document.getElementById(`${pageKey}-filter-pills`);
     if (!container) return;
 
     const dropdown = container.querySelector('.dashboard-period-select');
 
-    // New dropdown-based filter for summary (Point Card reports)
-    if (dropdown && pageKey === 'summary') {
-        const customWrap = document.getElementById('summary-custom-range');
-        const startInput = document.getElementById('summary-custom-start');
-        const endInput = document.getElementById('summary-custom-end');
+    // Dropdown-based timeframe (Point Card + Frenzy reports)
+    if (dropdown && (pageKey === 'summary' || pageKey === 'frenzy')) {
+        const customWrap = pageKey === 'summary' ? document.getElementById('summary-custom-range') : null;
+        const startInput = pageKey === 'summary' ? document.getElementById('summary-custom-start') : null;
+        const endInput = pageKey === 'summary' ? document.getElementById('summary-custom-end') : null;
 
         const resetCompare = () => {
             dashboardState[pageKey].compareMode = false;
@@ -17276,12 +17311,16 @@ function setupFilterPills(pageKey) {
                 dashboardState[pageKey].customStart = null;
                 dashboardState[pageKey].customEnd = null;
                 resetCompare();
+                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+                if (legacyHidden) legacyHidden.value = '';
             } else {
                 if (customWrap) customWrap.style.display = 'none';
                 dashboardState[pageKey].period = value;
                 dashboardState[pageKey].customStart = null;
                 dashboardState[pageKey].customEnd = null;
                 resetCompare();
+                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+                if (legacyHidden && value !== 'custom_range') legacyHidden.value = value;
                 triggerDashboardLoad(pageKey);
             }
         });
@@ -17294,11 +17333,13 @@ function setupFilterPills(pageKey) {
         // Initialize state from default dropdown value
         if (dropdown.value && dropdown.value !== 'custom_range') {
             dashboardState[pageKey].period = dropdown.value;
+            const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+            if (legacyHidden) legacyHidden.value = dropdown.value;
         }
         return;
     }
 
-    // Existing pill-based filters (e.g., Frenzy stats)
+    // Existing pill-based filters (legacy / other views)
     container.addEventListener('click', (e) => {
         const pill = e.target.closest('.dashboard-pill');
         if (!pill) return;
@@ -17572,6 +17613,27 @@ function setupContextClear(pageKey) {
 }
 
 // ---- Load Trigger ----
+function syncSummaryPointCardButton() {
+    const btn = document.getElementById('show-point-card-btn');
+    if (!btn || typeof dashboardState === 'undefined' || !dashboardState.summary) return;
+    const st = dashboardState.summary;
+    const pc = document.getElementById('point-card-data-container');
+    if (st.studentId) {
+        btn.classList.remove('is-inactive');
+        btn.dataset.studentId = String(st.studentId);
+        const tf = st.compareMode
+            ? ((document.getElementById('quarter-select') || {}).value || 'alltime')
+            : (st.period === 'all_time' ? 'alltime' : (st.period || '30day'));
+        btn.dataset.timeframe = tf;
+    } else {
+        btn.classList.add('is-inactive');
+        delete btn.dataset.studentId;
+        delete btn.dataset.timeframe;
+        btn.textContent = 'View Past Point Cards';
+        if (pc) pc.style.display = 'none';
+    }
+}
+
 function triggerDashboardLoad(pageKey) {
     if (pageKey === 'summary') loadSummaryDashboard();
     else loadFrenzyDashboard();
@@ -17634,252 +17696,733 @@ async function loadSummaryDashboard() {
         } else {
             renderSummarySingle(container, data);
         }
+        syncSummaryPointCardButton();
     } catch (err) {
         container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
+        syncSummaryPointCardButton();
     }
 }
 
-function renderSummarySingle(container, data) {
+function bucketInfractionsOverview(infractions) {
+    const raw = infractions || {};
+    const out = { Safety: 0, Task: 0, Attention: 0, Social: 0 };
+    for (const [type, count] of Object.entries(raw)) {
+        const n = Number(count) || 0;
+        const label = String(type || '');
+        let bucket = 'Social';
+        if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) bucket = 'Safety';
+        else if (/disrespect/i.test(label)) bucket = 'Safety';
+        else if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) bucket = 'Attention';
+        else if (/nfd|self\s*control|^task/i.test(label)) bucket = 'Task';
+        else if (/lang|volume|myob|personal/i.test(label)) bucket = 'Social';
+        out[bucket] += n;
+    }
+    return out;
+}
+
+function formatOverviewSignedInt(n) {
+    if (n == null || Number.isNaN(Number(n))) return '';
+    const v = Number(n);
+    if (v > 0) return `+${v}`;
+    return String(v);
+}
+
+function overviewTrendDeltaClass(metric, delta) {
+    if (delta == null || Number.isNaN(Number(delta))) return 'overview-trend-line-neutral';
+    const v = Number(delta);
+    if (metric === 'infractions' || metric === 'reminders' || metric === 'resets') {
+        if (v < 0) return 'overview-trend-line-pos';
+        if (v > 0) return 'overview-trend-line-neg';
+    }
+    return 'overview-trend-line-neutral';
+}
+
+function collectOverviewTimeSlots(byTimeByDay) {
+    const hints = ['AM Bus', '9:00', '10:30', '12:00', '1:30', 'PM Bus'];
+    const pool = new Set();
+    Object.values(byTimeByDay || {}).forEach(tm => {
+        Object.keys(tm || {}).forEach(k => pool.add(k));
+    });
+    let arr = [...pool];
+    const ordered = [];
+    hints.forEach(h => {
+        const idx = arr.findIndex(k =>
+            k === h || k.includes(h) || (h.length <= 4 && k.startsWith(h)));
+        if (idx >= 0) {
+            ordered.push(arr[idx]);
+            arr = arr.filter((_, i) => i !== idx);
+        }
+    });
+    arr.sort((a, b) => a.localeCompare(b));
+    return ordered.concat(arr);
+}
+
+function overviewHeatmapMeta(byTimeByDay) {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const timeSlots = collectOverviewTimeSlots(byTimeByDay);
+    let maxInf = 0;
+    let worst = null;
+    let bestOv = -1;
+    let best = null;
+    days.forEach(day => {
+        const tm = (byTimeByDay || {})[day] || {};
+        timeSlots.forEach(timeLabel => {
+            const cell = tm[timeLabel];
+            if (!cell) return;
+            const inf = cell.total_infractions || 0;
+            const ov = typeof cell.percentages?.overall === 'number' ? cell.percentages.overall : null;
+            if (inf > maxInf) {
+                maxInf = inf;
+                worst = { day, timeLabel };
+            }
+            if (ov != null && ov > bestOv) {
+                bestOv = ov;
+                best = { day, timeLabel };
+            }
+        });
+    });
+    return { days, timeSlots, maxInf: maxInf || 1, worst, best };
+}
+
+function overviewHeatColor(cell, maxInf) {
+    const inf = cell?.total_infractions || 0;
+    const ov = typeof cell?.percentages?.overall === 'number' ? cell.percentages.overall : null;
+    let t = 0;
+    if (maxInf > 0) t = Math.min(1, inf / maxInf);
+    else if (ov != null) t = Math.min(1, (100 - ov) / 100);
+    const r = Math.round(34 + t * (239 - 34));
+    const g = Math.round(197 + t * (68 - 197));
+    const b = Math.round(94 + t * (68 - 94));
+    return `rgb(${r},${g},${b})`;
+}
+
+function overviewDayInitial(day) {
+    const m = { Monday: 'M', Tuesday: 'T', Wednesday: 'W', Thursday: 'Th', Friday: 'F' };
+    return m[day] || (day || '').slice(0, 2);
+}
+
+function buildBehaviorTrendCardHtml() {
+    return `
+        <div class="dashboard-card behavior-trend-card reports-trend-card" data-summary-card="behavior-trend">
+            <div class="behavior-trend-controls">
+                <div class="behavior-trend-title-line">
+                    <select id="summary-trend-metric" aria-label="Trend metric">
+                        <option value="overall" selected>STAR Performance</option>
+                        <option value="safety">Safety</option>
+                        <option value="teamwork">Teamwork</option>
+                        <option value="accountability">Accountability</option>
+                        <option value="relationships">Relationships</option>
+                    </select>
+                    <select id="summary-trend-aggregation" aria-label="Trend aggregation">
+                        <option value="average" selected>Average</option>
+                    </select>
+                    <span>trend over</span>
+                    <select id="summary-trend-window" aria-label="Trend window">
+                        <option value="30day" selected>30 School Days</option>
+                    </select>
+                    <button type="button" class="behavior-trend-compare-btn" id="summary-trend-compare-btn">Compare</button>
+                </div>
+            </div>
+            <div class="behavior-trend-timeline" id="summary-behavior-trend-body">
+                <div class="behavior-trend-empty">Loading trend data...</div>
+            </div>
+        </div>`;
+}
+
+function getSummaryTrendFetchRange() {
+    const st = dashboardState.summary || {};
+    const period = st.period || '30day';
+    if (period === 'custom_range' && st.customStart && st.customEnd) {
+        return { start: st.customStart, end: st.customEnd };
+    }
+
+    const today = new Date();
+    const end = today.toISOString().split('T')[0];
+    let lookbackDays = 120;
+    if (period === 'weekly') lookbackDays = 21;
+    else if (period === 'current_year') lookbackDays = 330;
+    else if (/^quarter[1-4]$/.test(period)) lookbackDays = 150;
+    else if (period === 'all_time') return {};
+
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - lookbackDays);
+    return { start: startDate.toISOString().split('T')[0], end };
+}
+
+async function fetchSummaryTrendRecords() {
+    const st = dashboardState.summary || {};
+    const params = new URLSearchParams();
+    if (st.studentId) params.set('student_id', String(st.studentId));
+    if (st.staffId) params.set('staff_id', String(st.staffId));
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
+
+    const range = getSummaryTrendFetchRange();
+    if (range.start) params.set('start_date', range.start);
+    if (range.end) params.set('end_date', range.end);
+
+    const url = `/api/daily-records${params.toString() ? `?${params.toString()}` : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Unable to load trend records (${response.status})`);
+    }
+    return response.json();
+}
+
+function parseIsoDateLocal(isoDate) {
+    const [year, month, day] = String(isoDate || '').split('-').map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+}
+
+function formatTrendDateLabel(isoDate) {
+    const d = parseIsoDateLocal(isoDate);
+    if (!d) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function calculateTrendPercent(records, metric) {
+    let safety = 0;
+    let teamwork = 0;
+    let accountability = 0;
+    let relationships = 0;
+    let possible = 0;
+
+    records.forEach(record => {
+        if (record.attendance_status === 'excused') return;
+        (record.periods || []).forEach(period => {
+            safety += Number(period.safety_points) || 0;
+            teamwork += Number(period.teamwork_points) || 0;
+            accountability += Number(period.accountability_points) || 0;
+            relationships += Number(period.relationships_points) || 0;
+            possible += Number(period.points_possible) || 4;
+        });
+    });
+
+    const numPeriods = possible > 0 ? possible / 4 : 0;
+    const maxPerCategory = numPeriods > 0 ? numPeriods * 2 : 0;
+    if (!maxPerCategory) return null;
+
+    const pct = {
+        safety: (safety / maxPerCategory) * 100,
+        teamwork: (teamwork / maxPerCategory) * 100,
+        accountability: (accountability / maxPerCategory) * 100,
+        relationships: (relationships / maxPerCategory) * 100
+    };
+    pct.overall = (pct.safety + pct.teamwork + pct.accountability + pct.relationships) / 4;
+    return Math.max(0, Math.min(100, pct[metric] ?? pct.overall));
+}
+
+function buildSummaryTrendPoints(records, metric) {
+    const recordsByDate = new Map();
+    (records || []).forEach(record => {
+        if (!record || !record.date) return;
+        if (!recordsByDate.has(record.date)) recordsByDate.set(record.date, []);
+        recordsByDate.get(record.date).push(record);
+    });
+
+    const dateKeys = Array.from(recordsByDate.keys()).sort();
+    const selectedDates = dateKeys.slice(-30);
+    if (!selectedDates.length) return [];
+
+    const bucketCount = Math.min(5, Math.ceil(selectedDates.length / 4));
+    const bucketSize = Math.ceil(selectedDates.length / bucketCount);
+    const points = [];
+
+    for (let i = 0; i < selectedDates.length; i += bucketSize) {
+        const bucketDates = selectedDates.slice(i, i + bucketSize);
+        const bucketRecords = bucketDates.flatMap(date => recordsByDate.get(date) || []);
+        const value = calculateTrendPercent(bucketRecords, metric);
+        if (value == null) continue;
+        points.push({
+            label: formatTrendDateLabel(bucketDates[bucketDates.length - 1]),
+            value: Math.round(value)
+        });
+    }
+
+    return points;
+}
+
+function renderSummaryTrendSvg(points) {
+    if (!points || points.length < 2) {
+        return `
+            <div class="behavior-trend-empty">
+                Not enough point-card data to build a 30-school-day trend yet.
+            </div>`;
+    }
+
+    const width = 1000;
+    const height = 216;
+    const left = 54;
+    const right = 32;
+    const top = 26;
+    const bottom = 44;
+    const chartW = width - left - right;
+    const chartH = height - top - bottom;
+    const xStep = points.length > 1 ? chartW / (points.length - 1) : chartW;
+    const toX = i => left + (i * xStep);
+    const toY = value => top + ((100 - Math.max(0, Math.min(100, value))) / 100) * chartH;
+    const plotted = points.map((p, i) => ({ ...p, x: toX(i), y: toY(p.value) }));
+    const gridValues = [100, 75, 50, 25, 0];
+
+    let grid = '';
+    gridValues.forEach(v => {
+        const y = toY(v);
+        grid += `<line class="behavior-trend-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>`;
+        grid += `<text class="behavior-trend-axis-label" x="${left - 16}" y="${y + 4}" text-anchor="end">${v}%</text>`;
+    });
+
+    let segments = '';
+    for (let i = 0; i < plotted.length - 1; i++) {
+        const a = plotted[i];
+        const b = plotted[i + 1];
+        const color = b.value > a.value ? '#22c55e' : b.value < a.value ? '#ef4444' : '#64748b';
+        segments += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="3" stroke-linecap="round"></line>`;
+    }
+
+    const markers = plotted.map((p) => `
+        <g class="behavior-trend-point-group">
+            <circle class="behavior-trend-marker" cx="${p.x}" cy="${p.y}" r="5" fill="#ffffff" stroke="#64748b" stroke-width="2"></circle>
+            <text class="behavior-trend-point-value" x="${p.x}" y="${p.y - 11}" text-anchor="middle" fill="#64748b">${p.value}%</text>
+            <text class="behavior-trend-point-label" x="${p.x}" y="${height - 12}" text-anchor="middle">${escapeHtml(p.label)}</text>
+        </g>
+    `).join('');
+
+    return `
+        <div class="behavior-trend-chart-wrap">
+            <svg class="behavior-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="STAR performance trend">
+                ${grid}
+                ${segments}
+                ${markers}
+            </svg>
+        </div>`;
+}
+
+function populateSummaryBehaviorTrendCard(records) {
+    const body = document.getElementById('summary-behavior-trend-body');
+    if (!body) return;
+    const metricSelect = document.getElementById('summary-trend-metric');
+    const metric = metricSelect ? metricSelect.value : 'overall';
+    const points = buildSummaryTrendPoints(records || [], metric);
+    body.innerHTML = renderSummaryTrendSvg(points);
+    const grid = body.closest('.dashboard-card-grid');
+    if (grid) scheduleMasonryLayoutAfterResize(grid);
+}
+
+async function loadSummaryBehaviorTrendCard() {
+    const body = document.getElementById('summary-behavior-trend-body');
+    if (!body) return;
+    try {
+        const records = await fetchSummaryTrendRecords();
+        window.currentSummaryTrendRecords = Array.isArray(records) ? records : [];
+        populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords);
+    } catch (err) {
+        body.innerHTML = `<div class="behavior-trend-empty">Unable to load trend data: ${escapeHtml(err.message || 'Unknown error')}</div>`;
+    }
+}
+
+function wireSummaryBehaviorTrendCard() {
+    const metricSelect = document.getElementById('summary-trend-metric');
+    if (metricSelect && !metricSelect.dataset.bound) {
+        metricSelect.dataset.bound = 'true';
+        metricSelect.addEventListener('change', () => {
+            populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords || []);
+        });
+    }
+
+    const compareBtn = document.getElementById('summary-trend-compare-btn');
+    if (compareBtn && !compareBtn.dataset.bound) {
+        compareBtn.dataset.bound = 'true';
+        compareBtn.addEventListener('click', () => {
+            const compareToggle = document.getElementById('summary-compare-toggle');
+            if (compareToggle) compareToggle.click();
+        });
+    }
+
+    loadSummaryBehaviorTrendCard();
+}
+
+function buildDefaultTriggerTimesCardHtml(data) {
+    const byClass = data.by_class || {};
+    const byTime = data.by_time || {};
+    const timeKeys = Object.keys(byTime);
+    const classNames = Object.keys(byClass);
+    const useByTime = timeKeys.length > 0;
+    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+
+    const sortedTriggerKeys = triggerEntries.sort((a, b) => {
+        const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+        const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+        const aPct = typeof aData.percentages?.overall === 'number' ? Math.round(aData.percentages.overall) : Number.POSITIVE_INFINITY;
+        const bPct = typeof bData.percentages?.overall === 'number' ? Math.round(bData.percentages.overall) : Number.POSITIVE_INFINITY;
+        if (aPct !== bPct) return aPct - bPct;
+        const aInfra = typeof aData.total_infractions === 'number' ? aData.total_infractions : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+        const bInfra = typeof bData.total_infractions === 'number' ? bData.total_infractions : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+        return bInfra - aInfra;
+    });
+
+    let rows = '';
+    sortedTriggerKeys.slice(0, 6).forEach(key => {
+        const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
+        const pctOverall = rowData.percentages?.overall;
+        const infractionsCount = typeof rowData.total_infractions === 'number'
+            ? rowData.total_infractions
+            : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
+        const topClass = useByTime ? (rowData.top_class || '') : '';
+        rows += `<tr>
+            <td>${escapeHtml(key)}${topClass ? `<div class="trigger-times-sub">${escapeHtml(topClass)}</div>` : ''}</td>
+            <td>${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</td>
+            <td>${infractionsCount}</td>
+        </tr>`;
+    });
+
+    const empty = `<p class="trigger-times-empty">No trigger time data for this period.</p>`;
+    return `
+        <div class="dashboard-card trigger-times-card summary-default-trigger-card" data-summary-card="trigger-times">
+            <div class="dashboard-card-header">
+                <h3 class="dashboard-card-title">Trigger Times</h3>
+                <button type="button" class="trigger-times-mode-btn active">Table</button>
+            </div>
+            <div class="trigger-times-table-wrap">
+                ${rows ? `
+                    <table class="trigger-times-table">
+                        <thead>
+                            <tr><th>Time</th><th>Average</th><th>Infractions</th></tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>` : empty}
+            </div>
+        </div>`;
+}
+
+function buildOverviewDashboardCardHtml(data) {
     const avgs = data.averages || {};
     const totalDays = data.total_days || 0;
     const infractions = data.infractions || data.additional_info?.infractions || {};
-    const totalInfractions = Object.values(infractions).reduce((s, c) => s + c, 0);
+    const totalInfractions = Object.values(infractions).reduce((s, c) => s + Number(c) || 0, 0);
     const reminders = data.additional_info?.total_reminders || 0;
     const resets = data.additional_info?.total_resets || 0;
-    const frenzies = data.total_frenzies || 0;
-    const starbucksTotal = typeof data.starbucks_total === 'number'
-        ? data.starbucks_total
-        : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
     const attendance = data.attendance_summary || {};
     const presentPct = typeof attendance.present_pct === 'number'
         ? attendance.present_pct
         : 0;
     const byClass = data.by_class || {};
-    const byDay = data.by_day_of_week || {};
     const byTime = data.by_time || {};
+    const byTimeByDay = data.by_time_by_day || {};
+    const trends = data.overview_trends || null;
 
-    // Trigger Time helpers (top/hardest time or class)
     const timeKeys = Object.keys(byTime);
     const classNames = Object.keys(byClass);
     const useByTime = timeKeys.length > 0;
     const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-    let sortedTriggerKeys = [];
     let hardestTriggerLabel = '';
     let hardestTriggerSubtitle = '';
-
     if (triggerEntries.length > 0) {
-        // Hardest times:
-        // 1) Lowest overall % first (harder = lower score)
-        // 2) Then most infractions (harder = more infractions)
-        sortedTriggerKeys = triggerEntries.sort((a, b) => {
+        const sortedTriggerKeys = triggerEntries.sort((a, b) => {
             const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
             const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-
             const aPct = typeof aData.percentages?.overall === 'number'
                 ? Math.round(aData.percentages.overall)
                 : Number.POSITIVE_INFINITY;
             const bPct = typeof bData.percentages?.overall === 'number'
                 ? Math.round(bData.percentages.overall)
                 : Number.POSITIVE_INFINITY;
-            if (aPct !== bPct) {
-                return aPct - bPct;
-            }
-
+            if (aPct !== bPct) return aPct - bPct;
             const aInfra = typeof aData.total_infractions === 'number'
                 ? aData.total_infractions
                 : (typeof aData.infractions === 'number' ? aData.infractions : 0);
             const bInfra = typeof bData.total_infractions === 'number'
                 ? bData.total_infractions
                 : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-
             return bInfra - aInfra;
         });
-
         const hardestKey = sortedTriggerKeys[0];
         const hardestData = useByTime ? (byTime[hardestKey] || {}) : (byClass[hardestKey] || {});
         const hardestPctOverall = hardestData.percentages?.overall;
         const hardestInfractionsCount = typeof hardestData.total_infractions === 'number'
             ? hardestData.total_infractions
             : (typeof hardestData.infractions === 'number' ? hardestData.infractions : 0);
-
         hardestTriggerSubtitle = typeof hardestPctOverall === 'number'
-            ? `${Math.round(hardestPctOverall)}% average • ${hardestInfractionsCount} infractions`
+            ? `${Math.round(hardestPctOverall)}% avg • ${hardestInfractionsCount} infractions`
             : `${hardestInfractionsCount} infractions`;
         hardestTriggerLabel = hardestKey;
     }
 
-    // Rounded attendance helper for Overview card
+    const hm = overviewHeatmapMeta(byTimeByDay);
+    let headlineTime = '';
+    let headlineDay = '';
+    if (hm.worst) {
+        headlineTime = hm.worst.timeLabel;
+        headlineDay = hm.worst.day || '';
+    } else if (hardestTriggerLabel) {
+        headlineTime = hardestTriggerLabel;
+        headlineDay = '';
+    }
+
     const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
     const overallPct = Math.round(avgs.overall || 0);
+    const safetyP = Math.min(100, Math.max(0, Number(avgs.safety) || 0));
+    const teamworkP = Math.min(100, Math.max(0, Number(avgs.teamwork) || 0));
+    const accountabilityP = Math.min(100, Math.max(0, Number(avgs.accountability) || 0));
+    const relationshipsP = Math.min(100, Math.max(0, Number(avgs.relationships) || 0));
 
+    const presentDelta = trends?.present_pct_delta;
+    const starDelta = trends?.star_overall_delta;
+    const infDelta = trends?.infractions_delta;
+    const remDelta = trends?.reminders_delta;
+    const rstDelta = trends?.resets_delta;
+
+    let attendanceSub = '';
+    if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
+        const abs = Math.abs(Number(presentDelta));
+        attendanceSub = abs < 0.05 ? 'No change' : `${formatOverviewSignedInt(presentDelta)}%`;
+    } else {
+        attendanceSub = totalDays > 0 ? '' : '—';
+    }
+
+    let starSub = '';
+    if (starDelta != null && !Number.isNaN(Number(starDelta))) {
+        starSub = Math.abs(Number(starDelta)) < 0.05 ? 'No change' : `${formatOverviewSignedInt(starDelta)}%`;
+    } else {
+        starSub = 'No change';
+    }
+
+    const buckets = bucketInfractionsOverview(infractions);
+    const bSocial = buckets.Social;
+    const bTask = buckets.Task;
+    const bAttention = buckets.Attention;
+    const bSafety = buckets.Safety;
+    const bucketTotal = bSocial + bTask + bAttention + bSafety;
+    const pct = v => (bucketTotal <= 0 ? 0 : Math.round((v / bucketTotal) * 100));
+    const donutColors = ['#9333ea', '#2563eb', '#22c55e', '#dc2626'];
+    let donutGradient = '';
+    if (bucketTotal > 0) {
+        let acc = 0;
+        const segs = [
+            { v: bSocial, c: donutColors[0] },
+            { v: bTask, c: donutColors[1] },
+            { v: bAttention, c: donutColors[2] },
+            { v: bSafety, c: donutColors[3] }
+        ];
+        const parts = [];
+        segs.forEach(s => {
+            const p = (s.v / bucketTotal) * 100;
+            if (p <= 0) return;
+            const start = acc;
+            acc += p;
+            parts.push(`${s.c} ${start}% ${acc}%`);
+        });
+        donutGradient = parts.length ? `conic-gradient(${parts.join(', ')})` : '#e5e7eb';
+    } else {
+        donutGradient = '#e5e7eb';
+    }
+
+    const incidentMax = Math.max(1, reminders, resets);
+    const remH = Math.round((reminders / incidentMax) * 100);
+    const rstH = Math.round((resets / incidentMax) * 100);
+
+    let heatRows = '';
+    hm.timeSlots.forEach(tlabel => {
+        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(tlabel)}</div>`;
+        hm.days.forEach(day => {
+            const cell = (byTimeByDay[day] || {})[tlabel];
+            const bg = overviewHeatColor(cell, hm.maxInf);
+            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && (cell?.total_infractions || 0) > 0;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && cell
+                && typeof cell.percentages?.overall === 'number';
+            let cls = 'overview-heatmap-cell';
+            if (isWorst) cls += ' overview-heatmap-cell--worst';
+            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
+            const title = cell
+                ? `${Math.round(cell.percentages?.overall || 0)}% • ${cell.total_infractions || 0} infractions`
+                : 'No data';
+            row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
+        });
+        row += '</div>';
+        heatRows += row;
+    });
+
+    if (!heatRows) {
+        heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
+    }
+
+    const overviewDeltaMetrics = [
+        { key: 'present_pct', label: 'Attendance', delta: presentDelta, isPercent: true, lowerIsBetter: false },
+        { key: 'star_overall', label: 'STAR %', delta: starDelta, isPercent: true, lowerIsBetter: false },
+        { key: 'infractions', label: 'Infractions', delta: infDelta, isPercent: false, lowerIsBetter: true },
+        { key: 'reminders', label: 'Reminders', delta: remDelta, isPercent: false, lowerIsBetter: true },
+        { key: 'resets', label: 'Resets', delta: rstDelta, isPercent: false, lowerIsBetter: true }
+    ].filter(m => m.delta != null && !Number.isNaN(Number(m.delta)));
+
+    const scoredOverviewDeltas = overviewDeltaMetrics.map((m) => {
+        const raw = Number(m.delta);
+        return {
+            ...m,
+            delta: raw,
+            goodnessDelta: m.lowerIsBetter ? -raw : raw
+        };
+    });
+
+    const positiveOverviewDeltas = scoredOverviewDeltas
+        .filter(m => m.goodnessDelta > 0)
+        .sort((a, b) => b.goodnessDelta - a.goodnessDelta);
+    const negativeOverviewDeltas = scoredOverviewDeltas
+        .filter(m => m.goodnessDelta < 0)
+        .sort((a, b) => a.goodnessDelta - b.goodnessDelta);
+
+    const topOverviewIncrease = positiveOverviewDeltas.length ? positiveOverviewDeltas[0] : null;
+    const topOverviewDecrease = negativeOverviewDeltas.length ? negativeOverviewDeltas[0] : null;
+
+    const formatOverviewDeltaLabel = (metric) => {
+        if (!metric) return '—';
+        const formatted = formatOverviewSignedInt(metric.delta);
+        return `${metric.label} ${formatted}${metric.isPercent ? '%' : ''}`;
+    };
+
+    const trendInf = trends && formatOverviewSignedInt(infDelta);
+    const trendRem = trends && formatOverviewSignedInt(remDelta);
+
+    const trendsBlock = `
+        <div class="overview-trends-card" aria-label="Trends vs prior window">
+            <div class="overview-trends-title">Trends</div>
+            <div class="overview-trend-line ${topOverviewIncrease ? 'overview-trend-line-pos' : 'overview-trend-line-neutral'}">
+                <svg class="overview-spark overview-spark--up" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,12 14,8 26,10 40,4"/></svg>
+                <span>Top positive: ${escapeHtml(formatOverviewDeltaLabel(topOverviewIncrease))}</span>
+            </div>
+            <div class="overview-trend-line ${topOverviewDecrease ? 'overview-trend-line-neg' : 'overview-trend-line-neutral'}">
+                <svg class="overview-spark overview-spark--down" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,4 12,10 24,6 40,12"/></svg>
+                <span>Top negative: ${escapeHtml(formatOverviewDeltaLabel(topOverviewDecrease))}</span>
+            </div>
+        </div>`;
+
+    const headlineRight = headlineDay
+        ? `${escapeHtml(headlineTime)} on ${escapeHtml(headlineDay)}`
+        : escapeHtml(headlineTime || '—');
+
+    const triggerMetaLines = headlineTime ? `
+            <div class="overview-trigger-meta">
+                <div><span class="overview-trigger-meta-k">Trigger Time</span> ${escapeHtml(headlineTime)}</div>
+                <div><span class="overview-trigger-meta-k">Trigger Day</span> ${escapeHtml(headlineDay || '—')}</div>
+            </div>` : '';
+
+    const dashLen = 100;
+    const attOff = dashLen - Math.min(100, Math.max(0, roundedPresentPct));
+    const arcOff = pctVal => dashLen - Math.min(100, Math.max(0, pctVal));
+
+    return `<div class="dashboard-card overview-card overview-card--rich">
+        <div class="overview-rich-header">
+            <h3 class="dashboard-card-title">Overview</h3>
+            ${trendsBlock}
+        </div>
+
+        <div class="overview-rich-row overview-rich-gauges">
+            <div class="overview-beige-panel overview-stat overview-gauge-attendance" data-overview-key="days_present">
+                <div class="overview-panel-kicker">Attendance</div>
+                <div class="overview-gauge-wrap overview-gauge-wrap--attendance-donut">
+                    <svg class="overview-gauge-svg overview-gauge-svg--attendance-donut" viewBox="0 0 100 100" aria-hidden="true">
+                        <circle class="overview-gauge-track overview-gauge-track--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#e3e8ef" stroke-width="10" pathLength="100" />
+                        <circle class="overview-gauge-fill overview-gauge-fill--green overview-gauge-fill--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#16a34a" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${attOff}" />
+                    </svg>
+                    <div class="overview-gauge-center overview-gauge-center--attendance-donut">
+                        <div class="overview-gauge-big">${totalDays > 0 ? `${roundedPresentPct}%` : '—'}</div>
+                        <div class="overview-gauge-small ${presentDelta != null && Number(presentDelta) < 0 ? 'is-neg' : presentDelta != null && Number(presentDelta) > 0 ? 'is-pos' : ''}">${escapeHtml(attendanceSub)}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-stat overview-gauge-star" data-overview-key="star_percent">
+                <div class="overview-panel-kicker">Star Percent</div>
+                <div class="overview-gauge-wrap overview-gauge-wrap--multi">
+                    <svg class="overview-gauge-svg" viewBox="0 0 100 54" aria-hidden="true">
+                        <path class="overview-gauge-track" d="M 8 46 A 42 42 0 0 1 92 46" fill="none" stroke="#efe9df" stroke-width="5" stroke-linecap="round" pathLength="100" />
+                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ef4444" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${arcOff(safetyP)}" />
+                        <path d="M 15 46 A 34 34 0 0 1 85 46" fill="none" stroke="#f97316" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${arcOff(teamworkP)}" />
+                        <path d="M 19 46 A 29 29 0 0 1 81 46" fill="none" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${arcOff(accountabilityP)}" />
+                        <path d="M 23 46 A 24 24 0 0 1 77 46" fill="none" stroke="#22c55e" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${arcOff(relationshipsP)}" />
+                    </svg>
+                    <div class="overview-gauge-center">
+                        <div class="overview-gauge-big">${overallPct}%</div>
+                        <div class="overview-gauge-small is-muted">${escapeHtml(starSub)}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
+            <div class="overview-trigger-head">
+                <div class="overview-panel-kicker">Trigger Time</div>
+                ${triggerMetaLines}
+            </div>
+            <div class="overview-trigger-hero">${headlineRight}</div>
+            ${hardestTriggerSubtitle ? `<div class="overview-trigger-sub">${escapeHtml(hardestTriggerSubtitle)}</div>` : ''}
+            <div class="overview-heatmap">
+                <div class="overview-heatmap-cols">
+                    <div></div>
+                    ${hm.days.map(d => `<div class="overview-heatmap-colhead">${overviewDayInitial(d)}</div>`).join('')}
+                </div>
+                ${heatRows}
+                <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
+            </div>
+        </div>
+
+        <div class="overview-rich-row overview-rich-bottom">
+            <div class="overview-beige-panel overview-stat overview-infractions-panel" data-overview-key="infractions">
+                <div class="overview-panel-kicker">Infractions</div>
+                <div class="overview-infractions-body">
+                    <ul class="overview-infractions-legend">
+                        <li><span class="dot" style="background:#9333ea"></span>Social ${pct(bSocial)}%</li>
+                        <li><span class="dot" style="background:#2563eb"></span>Task ${pct(bTask)}%</li>
+                        <li><span class="dot" style="background:#22c55e"></span>Attention ${pct(bAttention)}%</li>
+                        <li><span class="dot" style="background:#dc2626"></span>Safety ${pct(bSafety)}%</li>
+                    </ul>
+                    <div class="overview-donut-wrap">
+                        <div class="overview-donut" style="background:${donutGradient}"></div>
+                        <div class="overview-donut-center">
+                            <div class="overview-donut-total">${totalInfractions}</div>
+                            <div class="overview-donut-delta ${overviewTrendDeltaClass('infractions', infDelta)}">${trendInf ? escapeHtml(trendInf) : ''}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-incidents-panel">
+                <div class="overview-panel-kicker">Incidents</div>
+                <div class="overview-incidents-bars">
+                    <div class="overview-stat overview-incident-bar-col" data-overview-key="reminders">
+                        <div class="overview-incident-delta ${overviewTrendDeltaClass('reminders', remDelta)}">${trendRem ? escapeHtml(trendRem) : ''}</div>
+                        <div class="overview-incident-bar-track">
+                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reminder" style="height:${remH}%"></div>
+                        </div>
+                        <div class="overview-incident-label">Reminder</div>
+                    </div>
+                    <div class="overview-stat overview-incident-bar-col" data-overview-key="resets">
+                        <div class="overview-incident-delta ${overviewTrendDeltaClass('resets', rstDelta)}">${trends ? escapeHtml(formatOverviewSignedInt(rstDelta)) : ''}</div>
+                        <div class="overview-incident-bar-track">
+                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reset" style="height:${rstH}%"></div>
+                        </div>
+                        <div class="overview-incident-label">Reset</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function renderSummarySingle(container, data) {
     let html = `<div class="dashboard-card-grid">`;
 
-    // Row 1: Overview Stats Card (full width)
-    html += `<div class="dashboard-card overview-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Overview</h3></div>
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box overview-stat overview-stat-days-present" data-overview-key="days_present">
-                <div class="dashboard-stat-value">${totalDays > 0 ? `${roundedPresentPct}%` : '&nbsp;'}</div>
-                <div class="dashboard-stat-label">DAYS PRESENT</div>
-            </div>
-            <div class="dashboard-stat-box overview-stat overview-stat-star-percent" data-overview-key="star_percent">
-                <div class="dashboard-stat-value">${overallPct}%</div>
-                <div class="dashboard-stat-label">STAR Percent</div>
-            </div>
-            <div class="dashboard-stat-box overview-stat overview-stat-starbucks" data-overview-key="starbucks">
-                <div class="dashboard-stat-value" style="color:#92400e">${starbucksTotal}</div>
-                <div class="dashboard-stat-label">Starbucks</div>
-            </div>
-        </div>
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box overview-stat overview-stat-frenzies" data-overview-key="frenzies" style="flex:1">
-                <div class="dashboard-stat-value">${frenzies}</div>
-                <div class="dashboard-stat-label">Frenzies</div>
-            </div>
-            <div class="dashboard-stat-box overview-stat overview-stat-infractions" data-overview-key="infractions" style="flex:1">
-                <div class="dashboard-stat-value" style="color:#DC2626">${totalInfractions}</div>
-                <div class="dashboard-stat-label">Infractions</div>
-            </div>
-            <div class="dashboard-stat-box overview-stat overview-stat-reminders" data-overview-key="reminders" style="flex:1">
-                <div class="dashboard-stat-value" style="color:#D97706">${reminders}</div>
-                <div class="dashboard-stat-label">Reminders</div>
-            </div>
-            <div class="dashboard-stat-box overview-stat overview-stat-resets" data-overview-key="resets" style="flex:1">
-                <div class="dashboard-stat-value" style="color:#6366F1">${resets}</div>
-                <div class="dashboard-stat-label">Resets</div>
-            </div>
-        </div>
-        ${hardestTriggerLabel ? `
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box overview-stat overview-stat-trigger-times" data-overview-key="trigger_times" style="flex:1">
-                <div class="dashboard-stat-value">${escapeHtml(hardestTriggerLabel)}</div>
-                <div class="dashboard-stat-label">Trigger Time${hardestTriggerSubtitle ? ' \u2022 ' + hardestTriggerSubtitle : ''}</div>
-            </div>
-        </div>` : ''}
-    </div>`;
+    html += buildBehaviorTrendCardHtml(data);
+    html += buildOverviewDashboardCardHtml(data);
+    html += buildDefaultTriggerTimesCardHtml(data);
 
     html += `</div>`;
     container.innerHTML = html;
+    window.currentSummaryTrendRecords = [];
+    wireSummaryBehaviorTrendCard();
 
     // Attach interactive behavior for Overview card selections
     try {
         attachOverviewCardInteractions(container, data);
     } catch (e) {
         console.error('Error wiring overview card interactions:', e);
-    }
-
-    // Render STAR Chart (modern bar style)
-    const starCanvas = document.getElementById('summary-star-chart');
-    if (starCanvas && typeof Chart !== 'undefined') {
-        if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
-        summaryChartInstance = new Chart(starCanvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: ['Safety', 'Teamwork', 'Accountability', 'Relationships'],
-                datasets: [{
-                    label: 'Average %',
-                    data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
-                    backgroundColor: STAR_CHART_BAR_COLORS,
-                    borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
-                    borderSkipped: false,
-                    maxBarThickness: 40
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    datalabels: {
-                        anchor: 'end',
-                        align: 'top',
-                        offset: 4,
-                        color: '#64748b',
-                        font: { weight: 400, size: 12 },
-                        formatter: (value) => `${Math.round(value)}%`
-                    }
-                },
-                layout: {
-                    padding: { top: 20, right: 20, bottom: 12, left: 12 }
-                },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        barPercentage: 0.7,
-                        categoryPercentage: 0.85,
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false,
-                            font: { size: 12 },
-                            color: '#64748b',
-                            padding: 10
-                        },
-                        border: { display: false }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        grid: { display: false },
-                        ticks: {
-                            callback: v => v + '%',
-                            font: { size: 11 },
-                            color: '#64748b',
-                            padding: 8,
-                            maxTicksLimit: 6
-                        },
-                        border: { display: false }
-                    }
-                }
-            }
-        });
-    }
-
-    // Render Day of Week Chart
-    const dayCanvas = document.getElementById('summary-day-chart');
-    if (dayCanvas && typeof Chart !== 'undefined' && hasDayData) {
-        const dayLabels = dayOrder.filter(d => byDay[d]);
-        const dayData = dayLabels.map(d => byDay[d]?.percentages?.overall || 0);
-        // Use distinct colors per day that do not reuse the STAR Performance red/blue/green/yellow palette.
-        // Chosen set: violet, orange, teal, pink, deep teal.
-        const dayColorPalette = ['#7C3AED', '#F97316', '#14B8A6', '#EC4899', '#0F766E'];
-        const dayBackgroundColors = dayLabels.map((_, idx) => dayColorPalette[idx % dayColorPalette.length]);
-        new Chart(dayCanvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: dayLabels.map(d => d.substring(0, 3)),
-                datasets: [{
-                    label: 'Overall %',
-                    data: dayData,
-                    backgroundColor: dayBackgroundColors,
-                    borderRadius: 6,
-                    borderSkipped: false,
-                    maxBarThickness: 32
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    datalabels: {
-                        anchor: 'end',
-                        align: 'end',
-                        offset: -4,
-                        color: '#111827',
-                        font: {
-                            weight: '600',
-                            size: 11
-                        },
-                        formatter: (value) => `${Math.round(value)}%`
-                    }
-                },
-                scales: {
-                    y: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: v => v + '%' } },
-                    x: { grid: { display: false } }
-                }
-            }
-        });
     }
 
     // Initial masonry-like layout for the summary dashboard cards
@@ -17890,7 +18433,7 @@ function renderSummarySingle(container, data) {
 }
 
 // Masonry-style layout for summary dashboard cards:
-// - Keeps the Overview card fixed in the left column.
+// - Keeps the Overview card fixed in the right column.
 // - Places all other dashboard cards (including extra overview cards)
 //   into equal-width columns, always choosing the column with the
 //   current smallest height so new cards "wrap" directly beneath
@@ -17918,9 +18461,10 @@ function applySummaryMasonryLayout(grid) {
         card.style.width = '';
     });
 
-    // On narrow screens, rely on the normal flex layout
+    // On narrow/medium screens, rely on the normal flex layout so
+    // overview can stack above trend content instead of being clipped.
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
-    if (viewportWidth <= 768) {
+    if (viewportWidth <= 1200) {
         return;
     }
 
@@ -17936,6 +18480,77 @@ function applySummaryMasonryLayout(grid) {
     const totalGapWidth = gap * (columnCount - 1);
     const columnWidth = (containerWidth - totalGapWidth);
     const perColWidth = columnWidth / columnCount;
+
+    const trendCard = grid.querySelector('.reports-trend-card');
+    const defaultTriggerCard = grid.querySelector('.summary-default-trigger-card');
+    const overviewCard = grid.querySelector('.overview-card');
+    const useRestoredReportsLayout = trendCard && defaultTriggerCard && overviewCard && columnCount >= 3;
+
+    if (useRestoredReportsLayout) {
+        const leftWidth = (perColWidth * 2) + gap;
+        const rightWidth = perColWidth;
+        const leftCards = [trendCard, defaultTriggerCard].filter(Boolean);
+        const rightLeft = leftWidth + gap;
+
+        grid.style.position = 'relative';
+        trendCard.style.width = leftWidth + 'px';
+        defaultTriggerCard.style.width = leftWidth + 'px';
+        overviewCard.style.width = rightWidth + 'px';
+
+        [...leftCards, overviewCard].forEach(card => {
+            card.style.position = 'static';
+        });
+
+        void grid.offsetHeight;
+
+        let leftTop = 0;
+        leftCards.forEach(card => {
+            card.style.position = 'absolute';
+            card.style.left = '0px';
+            card.style.top = leftTop + 'px';
+            card.style.width = leftWidth + 'px';
+            leftTop += card.offsetHeight + gap;
+        });
+
+        let overviewTopOffset = 0;
+        const formSection = grid.closest('.form-section');
+        const sectionTitle = formSection ? formSection.querySelector('h2') : null;
+        if (sectionTitle) {
+            const gridRect = grid.getBoundingClientRect();
+            const titleRect = sectionTitle.getBoundingClientRect();
+            overviewTopOffset = Math.round(titleRect.top - gridRect.top);
+        }
+
+        overviewCard.style.position = 'absolute';
+        overviewCard.style.left = rightLeft + 'px';
+        overviewCard.style.top = overviewTopOffset + 'px';
+        overviewCard.style.width = rightWidth + 'px';
+
+        let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
+        const handled = new Set([trendCard, defaultTriggerCard, overviewCard]);
+        const extraCards = cards.filter(card => !handled.has(card));
+        extraCards.forEach(card => {
+            card.style.position = 'absolute';
+            card.style.width = perColWidth + 'px';
+            if (rightTop <= leftTop) {
+                card.style.left = rightLeft + 'px';
+                card.style.top = rightTop + 'px';
+                rightTop += card.offsetHeight + gap;
+            } else {
+                card.style.left = '0px';
+                card.style.top = leftTop + 'px';
+                card.style.width = leftWidth + 'px';
+                leftTop += card.offsetHeight + gap;
+            }
+        });
+
+        const maxHeight = Math.max(leftTop, rightTop, overviewCard.offsetHeight + Math.max(0, overviewTopOffset));
+        grid.style.height = maxHeight + 'px';
+        if (summaryContainer && summaryContainer.id === 'summary-results') {
+            summaryContainer.style.minHeight = maxHeight + 'px';
+        }
+        return;
+    }
 
     // Normalise widths and measure heights with static positioning
     grid.style.position = 'relative';
@@ -17953,29 +18568,38 @@ function applySummaryMasonryLayout(grid) {
 
     const columnHeights = new Array(columnCount).fill(0);
 
-    // Track index of overview-generated extra cards so we can treat
-    // the very first one specially (placing it to the right of the
-    // Overview card instead of directly beneath it).
-    let extraCardIndex = 0;
+    // Keep Overview anchored at the far-right desktop column.
+    const overviewColumnIndex = Math.max(0, columnCount - 1);
+    let overviewTopOffset = 0;
+    const formSection = grid.closest('.form-section');
+    const sectionTitle = formSection ? formSection.querySelector('h2') : null;
+    if (sectionTitle) {
+        const gridRect = grid.getBoundingClientRect();
+        const titleRect = sectionTitle.getBoundingClientRect();
+        // Lift Overview so its top aligns with the Summary & Reports title row.
+        overviewTopOffset = Math.round(titleRect.top - gridRect.top);
+    }
 
     // Layout cards in selection / DOM order into the shortest column,
-    // always pinning the overview card to the first column so it
-    // remains leftmost in the top row.
+    // while pinning the overview card to the rightmost column.
     cards.forEach(card => {
         let colIndex;
+        let topOverride = null;
         if (card.classList.contains('overview-card')) {
-            colIndex = 0;
+            colIndex = overviewColumnIndex;
+            topOverride = overviewTopOffset;
         } else {
-            // For overview extra detail cards, treat the *first* one
-            // as if the Overview card has already "consumed" the first
-            // position. That means we place the first extra card into
-            // the second column (if it exists), rather than directly
-            // underneath the Overview card.
-            if (card.classList.contains('overview-extra-card') && extraCardIndex === 0 && columnCount > 1) {
-                colIndex = 1;
-                extraCardIndex += 1;
-            } else {
-                // Find the column with the smallest current height
+            // Keep the first generated overview detail card out of the
+            // overview column so the top row fills left-to-right.
+            if (card.classList.contains('overview-extra-card') && columnCount > 1) {
+                const fallbackCol = overviewColumnIndex === 0 ? 1 : 0;
+                if (columnHeights[fallbackCol] === 0) {
+                    colIndex = fallbackCol;
+                }
+            }
+
+            // If no preferred placement was selected, use shortest column.
+            if (colIndex == null) {
                 let minHeight = columnHeights[0];
                 colIndex = 0;
                 for (let i = 1; i < columnCount; i++) {
@@ -17984,13 +18608,10 @@ function applySummaryMasonryLayout(grid) {
                         colIndex = i;
                     }
                 }
-                if (card.classList.contains('overview-extra-card')) {
-                    extraCardIndex += 1;
-                }
             }
         }
 
-        const top = columnHeights[colIndex];
+        const top = topOverride != null ? topOverride : columnHeights[colIndex];
         const left = colIndex * (perColWidth + gap);
         const h = measuredHeights.get(card) || card.offsetHeight;
 
@@ -19192,11 +19813,8 @@ function attachOverviewCardInteractions(container, data) {
             // Starbucks: only visual selection, no extra card
             box.classList.toggle('overview-stat-selected');
         } else if (key === 'frenzies') {
-            // Switch to Frenzy reports tab
-            if (!restore) {
-                const frenzyToggleBtn = document.querySelector('#summary-view .reports-toggle-btn[data-reports-view="frenzy"]');
-                if (frenzyToggleBtn) frenzyToggleBtn.click();
-            }
+            // Frenzy reports view has been removed.
+            return;
         } else if (key === 'infractions') {
             // Toggle Infractions card; details are shown when a row is selected
             const opened = toggleExtraCard('infractions_card', () => {
@@ -19524,6 +20142,45 @@ function renderSummaryComparison(container, data) {
         container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
         return;
     }
+
+    const trendMetrics = [
+        { label: 'Total Days', get: p => Number(p?.total_days || 0) },
+        { label: 'Safety %', get: p => Number(p?.percentages?.safety || p?.averages?.safety || 0) },
+        { label: 'Teamwork %', get: p => Number(p?.percentages?.teamwork || p?.averages?.teamwork || 0) },
+        { label: 'Accountability %', get: p => Number(p?.percentages?.accountability || p?.averages?.accountability || 0) },
+        { label: 'Relationships %', get: p => Number(p?.percentages?.relationships || p?.averages?.relationships || 0) },
+        { label: 'Overall %', get: p => Number(p?.percentages?.overall || p?.averages?.overall || 0) },
+        { label: 'Infractions', get: p => Number(Object.values(p?.infractions || {}).reduce((s, c) => s + c, 0)) },
+        { label: 'Reminders', get: p => Number(p?.additional_info?.total_reminders || 0) },
+        { label: 'Resets', get: p => Number(p?.additional_info?.total_resets || 0) }
+    ];
+
+    let topIncrease = null;
+    let topDecrease = null;
+    if (periods.length >= 2) {
+        const newestKey = periods.includes('Most Recent 30 Days') ? 'Most Recent 30 Days' : periods[periods.length - 1];
+        const oldestKey = periods.includes('Previous 30 Days') ? 'Previous 30 Days' : periods[0];
+        const newest = data.periods?.[newestKey] || {};
+        const oldest = data.periods?.[oldestKey] || {};
+
+        const deltas = trendMetrics
+            .map(m => ({ label: m.label, delta: m.get(newest) - m.get(oldest) }))
+            .filter(d => Number.isFinite(d.delta));
+
+        const positives = deltas.filter(d => d.delta > 0).sort((a, b) => b.delta - a.delta);
+        const negatives = deltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta);
+
+        topIncrease = positives.length ? positives[0] : null;
+        topDecrease = negatives.length ? negatives[0] : null;
+    }
+
+    const formatDelta = (value) => {
+        if (!Number.isFinite(value)) return 'n/a';
+        const rounded = Math.round(value * 10) / 10;
+        const sign = rounded > 0 ? '+' : '';
+        return `${sign}${rounded}`;
+    };
+
     let html = `<div class="dashboard-card-grid">`;
     // Comparison chart card – matches dashboard card style
     html += `<div class="dashboard-card full-width">
@@ -19531,6 +20188,19 @@ function renderSummaryComparison(container, data) {
             <div>
                 <h3 class="dashboard-card-title">Comparison</h3>
                 <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
+            </div>
+            <div style="margin-left:auto; min-width:230px; max-width:320px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--bg-elevated);">
+                <div style="font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-secondary); margin-bottom:6px;">Trends</div>
+                <div style="display:flex; flex-direction:column; gap:4px; font-size:12px;">
+                    <div>
+                        <strong style="color:${topIncrease ? '#16a34a' : 'var(--text-secondary)'};">Top increase:</strong>
+                        ${topIncrease ? `${escapeHtml(topIncrease.label)} (${formatDelta(topIncrease.delta)})` : 'n/a'}
+                    </div>
+                    <div>
+                        <strong style="color:${topDecrease ? '#dc2626' : 'var(--text-secondary)'};">Top decrease:</strong>
+                        ${topDecrease ? `${escapeHtml(topDecrease.label)} (${formatDelta(topDecrease.delta)})` : 'n/a'}
+                    </div>
+                </div>
             </div>
         </div>
         <div class="dashboard-chart-wrap summary-compare-chart-wrap" style="height:260px"><canvas id="summary-compare-chart"></canvas></div>
@@ -19967,6 +20637,8 @@ function setupReportsNumberAlignment() {
 
 // ---- Initialize Dashboard ----
 function initDashboard() {
+    removeLegacyReportsToggleButtons();
+
     ['summary', 'frenzy'].forEach(pageKey => {
         setupDashboardSearch(`${pageKey}`, 'student');
         setupDashboardSearch(`${pageKey}`, 'staff');
@@ -19986,12 +20658,7 @@ function initDashboard() {
     if (summaryManagedCheckbox) {
         summaryManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('summary'));
     }
-    const frenzyManagedCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
-    if (frenzyManagedCheckbox) {
-        frenzyManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('frenzy'));
-    }
-
-    // Wire Reports sub-toggle buttons (Point Card vs Frenzy) to switch views
+    // Wire Reports sub-toggle button(s) to switch views
     const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
     reportsToggleButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -20002,23 +20669,21 @@ function initDashboard() {
             if (typeof triggerDashboardLoad === 'function') {
                 if (targetView === 'summary') {
                     setTimeout(() => triggerDashboardLoad('summary'), 100);
-                } else if (targetView === 'frenzy') {
-                    setTimeout(() => triggerDashboardLoad('frenzy'), 100);
                 }
             }
         });
     });
+
+    syncSummaryPointCardButton();
 }
 
-// Auto-load when switching to summary or frenzy tab
+// Auto-load when switching to summary tab
 const origNavHandler = document.querySelectorAll('.nav-btn');
 origNavHandler.forEach(btn => {
     btn.addEventListener('click', () => {
         const view = btn.dataset.view;
         if (view === 'summary') {
             setTimeout(() => triggerDashboardLoad('summary'), 100);
-        } else if (view === 'frenzy') {
-            setTimeout(() => triggerDashboardLoad('frenzy'), 100);
         }
     });
 });

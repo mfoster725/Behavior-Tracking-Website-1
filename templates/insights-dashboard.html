@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Behavioral Insights Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='insights.css') }}?v=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script>
+        if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+            Chart.register(ChartDataLabels);
+        }
+    </script>
+</head>
+<body class="insights-body">
+    <div class="container insights-container">
+        <header class="insights-header">
+            <div class="header-content">
+                <div class="header-brand">
+                    <img src="{{ url_for('static', filename='logo.png') }}" alt="Behavior Tracking System logo" class="site-logo">
+                    <div class="header-text">
+                        <h1>Behavioral Insights</h1>
+                        <p class="user-info">Focused view on times of greatest need</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button type="button"
+                            class="btn-secondary insights-back-btn"
+                            onclick="window.location.href='{{ url_for('index') }}'">
+                        Back to Main Dashboard
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="insights-main">
+            <!-- Pulse Header -->
+            <section class="insights-section">
+                <div class="section-header">
+                    <h2>The Pulse</h2>
+                    <p class="section-subtitle">Quick view of attendance, STAR performance, and current state.</p>
+                </div>
+                <div class="pulse-grid">
+                    <article class="pulse-card">
+                        <div class="pulse-card-header">
+                            <span class="pulse-label">Attendance</span>
+                            <span class="pulse-pill pulse-pill-attendance">Days Present</span>
+                        </div>
+                        <div class="pulse-value-wrap">
+                            <span id="pulse-attendance-value" class="pulse-value">--%</span>
+                        </div>
+                        <p class="pulse-caption">Consistent presence builds routines and relationships.</p>
+                    </article>
+
+                    <article class="pulse-card">
+                        <div class="pulse-card-header">
+                            <span class="pulse-label">STAR Performance</span>
+                            <span class="pulse-pill pulse-pill-star">Average</span>
+                        </div>
+                        <div class="pulse-value-wrap">
+                            <span id="pulse-star-value" class="pulse-value">--%</span>
+                        </div>
+                        <p class="pulse-caption">Snapshot of Safety, Teamwork, Accountability, and Relationships.</p>
+                    </article>
+
+                    <article class="pulse-card pulse-card-state">
+                        <div class="pulse-card-header">
+                            <span class="pulse-label">Current State</span>
+                        </div>
+                        <div class="pulse-state-chip" id="pulse-state-chip">
+                            <span id="pulse-state-label">Loading…</span>
+                        </div>
+                        <p class="pulse-caption" id="pulse-state-description">
+                            Interpreting trends in STAR and incident patterns.
+                        </p>
+                    </article>
+                </div>
+            </section>
+
+            <!-- Behavioral Weather Heatmap -->
+            <section class="insights-section">
+                <div class="section-header">
+                    <h2>Behavioral Weather</h2>
+                    <p class="section-subtitle">
+                        Heatmap of when support is needed most during the week.
+                    </p>
+                </div>
+                <div class="heatmap-legend">
+                    <span class="legend-label">Incident Density</span>
+                    <div class="legend-scale">
+                        <span class="legend-swatch density-low"></span>
+                        <span class="legend-swatch density-medium"></span>
+                        <span class="legend-swatch density-high"></span>
+                    </div>
+                    <span class="legend-caption">Darker ambers and corals show times of greatest need.</span>
+                </div>
+                <div class="heatmap-grid" id="behavior-heatmap">
+                    <!-- JS will populate grid cells -->
+                </div>
+                <div id="heatmap-tooltip" class="heatmap-tooltip" aria-hidden="true"></div>
+            </section>
+
+            <!-- Charts Grid -->
+            <section class="insights-section">
+                <div class="section-header">
+                    <h2>Interventions & Patterns</h2>
+                    <p class="section-subtitle">
+                        How reminders, resets, and incident types are shaping the week.
+                    </p>
+                </div>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Response Escalation Log</h3>
+                            <p>Tracking Reminders, Resets, and Frenzies across the week.</p>
+                        </div>
+                        <canvas id="responseEscalationChart" aria-label="Response escalation over the week" role="img"></canvas>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>Infraction Category Breakdown</h3>
+                            <p>Grouping specific behaviors into clear, family-friendly categories.</p>
+                        </div>
+                        <canvas id="infractionCategoryChart" aria-label="Infraction categories" role="img"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="insights-section">
+                <div class="section-header">
+                    <h2>STAR Performance Shape</h2>
+                    <p class="section-subtitle">
+                        Comparing STAR this month against last month to see growth or regression.
+                    </p>
+                </div>
+                <div class="charts-grid charts-grid-single">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>STAR Performance Radar</h3>
+                        </div>
+                        <canvas id="starRadarChart" aria-label="STAR performance radar chart" role="img"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="insights-section">
+                <div class="section-header">
+                    <h2>Growth & Stagnation Timeline</h2>
+                    <p class="section-subtitle">
+                        Watching for moments when STAR performance dips as incident volume rises.
+                    </p>
+                </div>
+                <div class="charts-grid charts-grid-single">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h3>STAR vs Incident Volume</h3>
+                        </div>
+                        <canvas id="growthTimelineChart" aria-label="Growth and stagnation timeline" role="img"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        window.currentUser = {
+            id: {% if user.id is not none %}{{ user.id }}{% else %}null{% endif %},
+            username: {{ user.username|tojson }},
+            name: {{ (user.name|default(user.username))|tojson }},
+            role: {{ user.role|tojson }},
+            studentId: {% if user.student_id is not none %}{{ user.student_id }}{% else %}null{% endif %},
+            is_outside_staff: {{ 'true' if user.is_outside_staff else 'false' }}
+        };
+        window.insightsContext = {
+            studentId: {% if insights_student_id is not none %}{{ insights_student_id }}{% else %}null{% endif %},
+            staffId: {% if insights_staff_id is not none %}{{ insights_staff_id }}{% else %}null{% endif %},
+            managedByMe: {{ 'true' if insights_managed_by_me else 'false' }}
+        };
+    </script>
+    <script src="{{ url_for('static', filename='insights.js') }}?v=2"></script>
+</body>
+</html>
+

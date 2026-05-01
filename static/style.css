@@ -322,6 +322,7 @@ nav {
    ============================================================ */
 .form-section {
     margin-bottom: 2rem;
+    position: relative;
 }
 
 .form-section h2 {
@@ -948,6 +949,13 @@ table tbody tr:hover {
     border-bottom: 1px solid var(--border);
 }
 
+.daily-heatmap-nav-focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    position: relative;
+    z-index: 1;
+}
+
 .daily-location-cell {
     padding: 5px 8px;
     background: transparent;
@@ -1255,6 +1263,530 @@ table tbody tr:hover {
     resize: vertical;
 }
 
+/* Severity dropdown (Info modal) */
+.severity-dropdown-wrap {
+    position: relative;
+}
+.severity-trigger-btn {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.severity-trigger-btn:hover {
+    border-color: var(--accent);
+}
+.severity-trigger-btn:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+.severity-dropdown-panel {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.severity-dropdown-panel.is-open {
+    display: block;
+}
+.severity-option {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+.severity-option:hover {
+    background: var(--bg-elevated);
+}
+.severity-option.selected {
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* Frenzy card severity options (multi-select) */
+.frenzy-severity-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.frenzy-severity-options .severity-option {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+}
+.frenzy-severity-options .severity-option.selected {
+    border-color: var(--accent);
+}
+
+/* ============================================================
+   FRENZY DASHBOARD REDESIGN — Overview Card + Masonry
+   ============================================================ */
+
+/* Overview card: absolute-positioned at top-right like Point Card */
+#frenzy-results {
+    overflow: visible;
+    min-height: 0;
+}
+
+#frenzy-results > .frenzy-overview-card {
+    position: absolute !important;
+    top: 0;
+    right: 0;
+    width: calc(33% - 10px);
+    z-index: 2;
+    overflow: visible !important;
+}
+
+@media (max-width: 900px) {
+    #frenzy-results > .frenzy-overview-card {
+        position: static !important;
+        width: 100%;
+    }
+}
+
+.frenzy-overview-card .dashboard-stat-row {
+    overflow: visible;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Header row with Overview title on the left and the three compact
+   stat boxes (Frenzies / Total Min / Avg Min) inline on the right. */
+.frenzy-overview-card .frenzy-overview-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.frenzy-overview-card .frenzy-overview-inline-stats {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.frenzy-overview-card .frenzy-overview-inline-stats .frenzy-overview-inline-stat {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: 90px;
+    padding: 0.35rem 0.5rem 0.45rem !important;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.frenzy-overview-card .frenzy-overview-inline-stat .dashboard-stat-label {
+    font-size: 0.65rem;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+
+.frenzy-overview-card .frenzy-overview-inline-stat .frenzy-duration-stats {
+    margin-top: 0;
+    gap: 0;
+}
+
+.frenzy-overview-card .frenzy-overview-inline-stat .frenzy-duration-stat-value {
+    font-size: 1.05rem;
+    line-height: 1.1;
+}
+
+.frenzy-overview-card .dashboard-stat-box.overview-stat {
+    padding: 0.5rem 1.2rem 0.75rem;
+    overflow: visible;
+}
+
+/* Keep visible tile outlines for Frenzy overview metric boxes */
+.frenzy-overview-card .dashboard-stat-box.overview-stat.frenzy-overview-stat-ring,
+.frenzy-overview-card .dashboard-stat-box.overview-stat.frenzy-overview-stat-duration {
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    flex: 0 0 auto;
+    width: fit-content;
+    min-width: 120px;
+}
+
+.frenzy-overview-card .dashboard-stat-box[data-overview-key="frenzy_top_locations"] {
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    padding: 0.55rem 0.7rem 0.65rem;
+}
+
+.frenzy-overview-card .dashboard-stat-box[data-overview-key="frenzy_top_locations"] .dashboard-card-subtitle {
+    margin-bottom: 6px !important;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+}
+
+.frenzy-overview-card .dashboard-stat-box[data-overview-key="frenzy_top_locations"] .dashboard-breakdown-list {
+    margin: 0;
+    gap: 6px;
+}
+
+.frenzy-overview-card .dashboard-stat-box[data-overview-key="frenzy_top_locations"] .dashboard-breakdown-item {
+    padding: 2px 0;
+}
+
+.frenzy-overview-card .frenzy-overview-donut-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+}
+
+/* Inside the donut row, the legend sits on the left with the ring right
+   next to it. A 15px gap separates the %-column from the donut chart. */
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-content {
+    justify-content: flex-start;
+    align-items: center;
+    text-align: left;
+    gap: 15px;
+}
+
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-header {
+    justify-content: flex-start;
+    align-items: flex-start;
+    text-align: left;
+}
+
+/* Size each donut box to just its content (legend + 15px gap + 90px ring)
+   rather than stretching to fill the row. */
+.frenzy-overview-card .frenzy-overview-donut-row > .dashboard-stat-box {
+    flex: 0 0 auto;
+    min-width: 0;
+    width: auto;
+}
+
+/* Use CSS grid on the legend column so that every row shares the same
+   column tracks: swatch | label | value. This forces all % values to
+   line up in a single vertical column across rows, regardless of label
+   text length. `display: contents` on each legend item promotes its
+   children (swatch / label / value) to direct grid children. */
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-legend {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    column-gap: 4px;
+    row-gap: 2px;
+    align-items: center;
+    min-width: 0;
+    flex: 0 1 auto;
+}
+
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-legend-item {
+    display: contents;
+}
+
+/* Labels stay on a single horizontal line; the grid column auto-sizes to
+   the widest label so the value column (%) aligns across all rows. */
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-legend-label {
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+/* Right-align values within the value column so the %-signs align too,
+   and nudge the value column 10px to the right for clearer separation
+   from the labels. */
+.frenzy-overview-card .frenzy-overview-donut-row .overview-infractions-legend-value {
+    justify-self: end;
+    margin-left: 10px;
+}
+
+.frenzy-overview-card .overview-infractions-header,
+.frenzy-overview-card .overview-infractions-content,
+.frenzy-overview-card .frenzy-duration-stats,
+.frenzy-overview-card .frenzy-duration-stat {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+.frenzy-overview-card .overview-stat .dashboard-stat-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.03em;
+    margin-bottom: 6px;
+}
+
+/* Frenzy overview ring (donut) */
+.frenzy-overview-stat-ring {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.frenzy-overview-ring-wrap {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto;
+}
+
+.frenzy-overview-ring-wrap canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.frenzy-overview-ring-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.frenzy-overview-ring-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* Duration stats block */
+.frenzy-overview-stat-duration {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.frenzy-duration-stats {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 4px;
+}
+
+.frenzy-duration-stat {
+    text-align: center;
+}
+
+.frenzy-duration-stat-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.frenzy-duration-stat-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 2px;
+}
+
+/* Severity volume bars in overview card */
+.frenzy-severity-volume {
+    padding: 0.4rem 0.5rem 0.5rem !important;
+}
+
+.frenzy-severity-volume .incident-volume-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+}
+
+/* Vertical stack of horizontal severity bars in the Frenzy overview card */
+.frenzy-severity-volume-vertical .frenzy-severity-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.frenzy-severity-volume-vertical .frenzy-severity-row {
+    display: grid;
+    grid-template-columns: 110px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.frenzy-severity-volume-vertical .frenzy-severity-row-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.frenzy-severity-volume-vertical .frenzy-severity-row-track {
+    position: relative;
+    height: 12px;
+    background: var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.frenzy-severity-volume-vertical .frenzy-severity-row-fill {
+    height: 100%;
+    width: calc(var(--bar-width, 50) * 1%);
+    min-width: 6px;
+    background: var(--bar-color, #94A3B8);
+    border-radius: 6px;
+    transition: width 0.2s ease;
+}
+
+.frenzy-severity-volume-vertical .frenzy-severity-row-value {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    min-width: 24px;
+    text-align: right;
+}
+
+/* Purpose donut chart layout */
+.frenzy-purpose-chart-layout {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 8px 0;
+}
+
+.frenzy-purpose-ring-wrap {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    flex-shrink: 0;
+}
+
+.frenzy-purpose-ring-wrap canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.frenzy-purpose-ring-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.frenzy-purpose-ring-total {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.frenzy-purpose-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.frenzy-purpose-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+}
+
+.frenzy-purpose-legend-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.frenzy-purpose-legend-count {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Purpose chart container in overview card */
+.frenzy-overview-stat-purpose {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Frenzy extra cards should span full masonry column width */
+#frenzy-results .dashboard-card.overview-extra-card {
+    width: 100%;
+    max-width: 100%;
+    display: block;
+}
+
+/* Location breakdown horizontal bars */
+.frenzy-location-item {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.frenzy-location-bar-wrap {
+    height: 6px;
+    background: var(--bg-page);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.frenzy-location-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    min-width: 2px;
+}
+
 /* ============================================================
    SCHEDULE MANAGEMENT
    ============================================================ */
@@ -1539,9 +2071,11 @@ table tbody tr:hover {
 }
 
 .users-table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     background: var(--bg-surface);
+    table-layout: auto;
 }
 
 .users-table th {
@@ -1559,6 +2093,16 @@ table tbody tr:hover {
 .users-table td {
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border);
+}
+
+.users-table tbody tr.empty-row td.empty-message-cell {
+    position: static !important;
+    left: auto !important;
+    z-index: 0 !important;
+    text-align: center !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    background: var(--bg-surface);
 }
 
 /* Center the Password and Actions column headers in User Management tables */
@@ -1700,6 +2244,15 @@ table tbody tr:hover {
     position: relative;
     max-height: 400px;
     overflow: auto;
+}
+
+.user-table-scroll.table-empty {
+    overflow-x: hidden;
+}
+
+.user-table-scroll.table-empty .users-table {
+    width: 100% !important;
+    min-width: 100% !important;
 }
 
 /* Freeze header row and first (name) column in User Management tables */
@@ -1913,16 +2466,22 @@ table tbody tr:hover {
 }
 
 #point-card-data-container {
+    margin-top: 1.25rem;
+}
+
+.point-card-days-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 1.25rem;
     align-items: flex-start;
 }
 
-#point-card-data-container .point-card-day {
+.point-card-days-grid .point-card-day {
     margin-bottom: 0;
-    width: max-content;
-    max-width: 100%;
+    /* Aim for three cards per row on desktop while still wrapping responsively */
+    flex: 1 1 calc(33.333% - 1.25rem);
+    max-width: calc(33.333% - 1.25rem);
+    min-width: 260px;
 }
 
 .point-card-day {
@@ -1947,6 +2506,17 @@ table tbody tr:hover {
     margin: 0;
     color: var(--text-primary);
     font-family: var(--font-heading);
+}
+
+/* Make historical point card tables more compact so more cards fit per row */
+.point-card-grid table {
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+}
+
+.point-card-grid table th,
+.point-card-grid table td {
+    padding: 4px 6px;
 }
 
 .edit-day-btn {
@@ -3033,6 +3603,17 @@ table tbody tr:hover {
     color: #1E40AF;
 }
 
+/* In the Reports tab, keep the blue "Viewing" banner from running
+   underneath the right-side Overview card. On wider screens, limit
+   the banner width so it starts at the left edge of the page and
+   stops 20px before the Overview card. (Tweaked for visual spacing.) */
+@media (min-width: 901px) {
+    #summary-view .dashboard-context-banner,
+    #frenzy-view .dashboard-context-banner {
+        max-width: calc(67% - 10px);
+    }
+}
+
 .dashboard-context-banner.active {
     display: flex;
 }
@@ -3119,10 +3700,6 @@ table tbody tr:hover {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
-.dashboard-period-select:hover {
-    background: var(--bg-elevated);
-}
-
 .dashboard-filter-label {
     font-size: 13px;
     color: var(--text-muted);
@@ -3151,8 +3728,9 @@ table tbody tr:hover {
     color: var(--text-muted);
 }
 
-/* Print button in summary filter row - match toolbar button styling */
-#print-summary-btn {
+/* Print buttons in reports filter rows - match toolbar button styling */
+#print-summary-btn,
+#print-frenzy-btn {
     padding: 7px 14px;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -3165,14 +3743,96 @@ table tbody tr:hover {
     transition: all 0.15s;
 }
 
-#print-summary-btn:hover:not(:disabled) {
+#print-summary-btn:hover:not(:disabled),
+#print-frenzy-btn:hover:not(:disabled) {
     border-color: var(--border-strong);
     color: var(--text-primary);
 }
 
-#print-summary-btn:disabled {
+#print-summary-btn:disabled,
+#print-frenzy-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+/* Historical point card button – match print button size & style */
+#show-point-card-btn {
+    padding: 7px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-left: 0.35rem;
+    position: relative;
+}
+
+#show-point-card-btn:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+/* Dimmed / inactive state when no student is selected */
+#show-point-card-btn.is-inactive {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+#show-point-card-btn.is-inactive:hover {
+    border-color: var(--border);
+    color: var(--text-secondary);
+}
+
+/* Custom tooltip for "View Past Point Cards" button */
+#show-point-card-btn[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 6px);
+    transform: translateX(-50%);
+    background: var(--bg-surface);
+    /* Match base Print button border + text */
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    font-family: var(--font-body);
+    white-space: nowrap;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.15);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.08s ease-out, transform 0.08s ease-out;
+    z-index: 20;
+}
+
+#show-point-card-btn[data-tooltip]:hover::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    /* Match Print button hover state */
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+/* Chart tooltips (Reports tab, Insights Dashboard): ensure stacking and light theme.
+   Do NOT set opacity here - JS controls visibility (0 = hidden, 1 = visible on hover). */
+.reports-chart-tooltip,
+.chartjs-tooltip {
+    position: fixed !important;
+    z-index: 10000 !important;
+    background: var(--bg-surface, #FFFFFF) !important;
+    color: var(--text-primary, #1C1917) !important;
+}
+
+.reports-chart-tooltip thead,
+.reports-chart-tooltip th,
+.chartjs-tooltip thead,
+.chartjs-tooltip th {
+    background: transparent !important;
 }
 
 .dashboard-compare-toggle {
@@ -3188,6 +3848,13 @@ table tbody tr:hover {
     transition: all 0.2s;
     white-space: nowrap;
     margin-left: 4px;
+}
+
+a.dashboard-compare-toggle {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
 }
 
 .dashboard-compare-toggle:hover {
@@ -3253,37 +3920,550 @@ table tbody tr:hover {
     cursor: not-allowed;
 }
 
-/* Reports sub-toggle (Point Card / Frenzy) */
-.reports-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin: 12px 0 16px;
-    padding: 2px;
-    background: var(--bg-elevated);
-    border-radius: 999px;
-    border: 1px solid var(--border);
-}
-
-.reports-toggle-btn {
-    border: none;
-    background: transparent;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.8125rem;
-    cursor: pointer;
-    color: var(--text-secondary);
-}
-
-.reports-toggle-btn.active {
-    background: var(--accent);
-    color: #fff;
-}
-
 /* Summary results: allow content to expand page height (no clipping) */
 #summary-results {
     overflow: visible;
     min-height: 0;
+}
+
+.behavior-trend-card {
+    width: 65%;
+    max-width: 100%;
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-surface);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+    /* Let the grid's 20px gap control vertical spacing between this card
+       and the cards below, so separation matches other dashboard cards. */
+    margin-bottom: 0;
+    overflow: visible;
+    padding: 6px 20px;
+}
+
+.reports-trend-card {
+    min-height: 250px;
+    padding: 14px 18px 18px;
+}
+
+.reports-trend-card .behavior-trend-controls {
+    padding: 0 0 8px;
+    row-gap: 6px;
+}
+
+.reports-trend-card .behavior-trend-title-line {
+    gap: 9px;
+}
+
+.reports-trend-card .behavior-trend-title-line select {
+    min-width: 0;
+    padding: 0.42rem 0.78rem;
+    font-size: 0.82rem;
+}
+
+.reports-trend-card #summary-trend-metric {
+    min-width: 150px;
+}
+
+.reports-trend-card #summary-trend-aggregation {
+    min-width: 136px;
+}
+
+.reports-trend-card #summary-trend-window {
+    min-width: 150px;
+}
+
+.reports-trend-card .behavior-trend-compare-btn {
+    padding: 0.38rem 0.82rem;
+    font-size: 0.78rem;
+    border-color: var(--border);
+    background: var(--bg-surface);
+}
+
+.reports-trend-card .behavior-trend-timeline {
+    padding: 0 10px;
+    min-height: 172px;
+}
+
+.reports-trend-card .behavior-trend-svg {
+    aspect-ratio: 1000 / 216;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot {
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Multi-student point card view: render behavior trend chart taller. */
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-svg {
+    aspect-ratio: 1000 / 540;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-svg.behavior-trend-compare-bar {
+    aspect-ratio: auto;
+    min-height: 180px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-svg.behavior-trend-compare-bar .behavior-trend-bar-value {
+    font-size: 12px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-svg.behavior-trend-compare-bar .behavior-trend-axis-label,
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-svg.behavior-trend-compare-bar .behavior-trend-point-label {
+    font-size: 11px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-point-value,
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-point-label,
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-bar-value {
+    font-size: 36px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-point-label {
+    font-size: 29px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-axis-label {
+    font-size: 29px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-no-data-hint {
+    font-size: 30px;
+}
+
+/* Multi-student behavior trend controls: compact dropdowns so filter row stays on one line. */
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-title-line {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-title-line select {
+    min-width: 0;
+    width: auto;
+    padding: 0.38rem 0.62rem;
+    font-size: 0.78rem;
+    line-height: 1.2;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-title-line span {
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.behavior-trend-card.behavior-trend-card--single-slot .behavior-trend-compare-btn {
+    padding: 0.34rem 0.62rem;
+    font-size: 0.76rem;
+    white-space: nowrap;
+}
+
+/* Staff caseload summary: per-student performance table */
+.dashboard-card.student-performance-card {
+    /* Match standard card top spacing; keep compact bottom spacing. */
+    padding-top: 20px;
+    padding-bottom: 6px;
+}
+
+.student-performance-card .dashboard-card-header {
+    margin-bottom: 0;
+}
+
+.student-performance-table-wrap {
+    overflow-x: auto;
+    padding: 0 4px 12px;
+    margin-top: -6px;
+}
+
+.student-performance-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    font-family: var(--font-body);
+}
+
+.student-performance-table thead th {
+    text-align: left;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    background: #f5f0e8;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.student-performance-table thead th:last-child {
+    text-align: right;
+}
+
+.student-performance-row td {
+    vertical-align: top;
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.student-performance-cell-student {
+    width: 38%;
+}
+
+.student-performance-name {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.student-performance-trigger {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.student-performance-trigger-time,
+.student-performance-trigger-class {
+    display: block;
+}
+
+.student-performance-cell-metrics {
+    text-align: right;
+    vertical-align: top;
+}
+
+/* Three columns: labels | values | deltas — shared track widths per student row */
+.student-performance-metrics-grid {
+    display: grid;
+    grid-template-columns: max-content max-content max-content;
+    column-gap: 0.65rem;
+    row-gap: 0.35rem;
+    justify-content: end;
+    align-items: baseline;
+}
+
+.student-performance-metrics-grid .student-performance-label {
+    color: var(--text-secondary);
+    font-weight: 400;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.student-performance-metrics-grid .student-performance-value {
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.student-performance-metrics-grid .student-performance-delta-wrap {
+    text-align: center;
+    justify-self: stretch;
+}
+
+.student-performance-metrics-grid .student-performance-grid-muted {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.student-performance-metrics-grid .student-performance-grid-muted.student-performance-value {
+    font-weight: 600;
+}
+
+.student-performance-metrics-grid .dashboard-stat-delta {
+    margin-left: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: inline-block;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.student-performance-metrics-grid .dashboard-stat-delta.delta-emdash {
+    display: block;
+    width: 100%;
+    text-align: center;
+}
+
+.behavior-trend-controls {
+    display: flex;
+    flex-direction: column;
+    row-gap: 10px;
+    padding: 0 18px 20px 18px;
+}
+
+.behavior-trend-title-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    font-weight: 400;
+    color: var(--text-primary);
+}
+
+.behavior-trend-compare-btn {
+    padding: 0.4rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated);
+    font-size: 0.8125rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.behavior-trend-compare-btn:hover {
+    background: var(--border);
+}
+
+.behavior-trend-compare-wrap .behavior-trend-custom-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.behavior-trend-compare-wrap {
+    display: flex;
+    flex-direction: column;
+    row-gap: 10px;
+}
+
+.behavior-trend-compare-wrap .behavior-trend-title-line {
+    margin: 0;
+}
+
+.behavior-trend-compare-wrap #behavior-trend-compare-custom-range {
+    margin-top: 0 !important;
+}
+
+.behavior-trend-compare-wrap .behavior-trend-custom-range input[type="date"] {
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    font-size: 0.75rem;
+}
+
+.behavior-trend-legend-label {
+    font-size: 11px;
+    fill: var(--text-secondary);
+    font-family: var(--font-body);
+}
+
+.behavior-trend-title-line select {
+    min-width: 190px;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: #ffffff;
+    font-size: 0.875rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.behavior-trend-custom-range {
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.behavior-trend-custom-range input[type="date"] {
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    font-size: 0.75rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    background: #ffffff;
+}
+
+.behavior-trend-timeline {
+    padding: 0 10px 0 10px;
+    min-height: 120px;
+    position: relative;
+    overflow: visible;
+}
+
+.behavior-trend-chart-wrap {
+    /* Chart container */
+}
+
+.behavior-trend-tooltip {
+    position: absolute;
+    display: none;
+    padding: 8px 12px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+}
+
+.behavior-trend-tooltip.behavior-trend-tooltip-visible {
+    display: block;
+}
+
+.behavior-trend-svg {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1000 / 216;
+    display: block;
+    overflow: visible;
+}
+
+.behavior-trend-grid-line {
+    stroke: #e5e7eb;
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+}
+
+.behavior-trend-axis-label,
+.behavior-trend-point-value,
+.behavior-trend-point-label {
+    font-size: 12px;
+    font-weight: 400;
+    font-family: var(--font-body);
+}
+
+.behavior-trend-axis-label {
+    fill: #9ca3af;
+}
+
+.behavior-trend-point-label {
+    fill: #6b7280;
+}
+
+.behavior-trend-no-data-label {
+    fill: #9ca3af;
+}
+
+.behavior-trend-no-data-hint {
+    font-size: 10px;
+    fill: #9ca3af;
+    font-style: italic;
+}
+
+.behavior-trend-point-group {
+    cursor: default;
+}
+
+.behavior-trend-point-group:hover .behavior-trend-marker {
+    filter: brightness(0.95);
+}
+
+/* Compare mode bar chart - aspect ratio from viewBox */
+.behavior-trend-compare-bar-wrap {
+    min-height: 192px;
+}
+
+.behavior-trend-svg.behavior-trend-compare-bar {
+    height: auto;
+    min-height: 180px;
+    display: block;
+    vertical-align: top;
+}
+
+.behavior-trend-bar {
+    rx: 4;
+    transition: opacity 0.15s ease;
+}
+
+.behavior-trend-bar-group:hover .behavior-trend-bar {
+    opacity: 0.9;
+}
+
+.behavior-trend-bar-value {
+    font-size: 12px;
+    font-weight: 500;
+    fill: var(--text-primary);
+}
+
+.behavior-trend-segment-delta {
+    font-size: 10px;
+    font-weight: 400;
+    fill: var(--text-secondary);
+}
+
+.behavior-trend-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--text-secondary);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+
+.summary-default-trigger-card {
+    min-height: 190px;
+    padding: 18px 20px;
+}
+
+.summary-default-trigger-card .dashboard-card-header {
+    margin-bottom: 12px;
+}
+
+.trigger-times-mode-btn {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    padding: 4px 10px;
+}
+
+.trigger-times-mode-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.trigger-times-table-wrap {
+    overflow-x: auto;
+}
+
+.trigger-times-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.trigger-times-table th,
+.trigger-times-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+
+.trigger-times-table th {
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: var(--bg-elevated);
+}
+
+.trigger-times-table th:not(:first-child),
+.trigger-times-table td:not(:first-child) {
+    text-align: right;
+}
+
+.trigger-times-sub,
+.trigger-times-empty {
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+}
+
+.trigger-times-sub {
+    margin-top: 2px;
 }
 
 /* Card grid */
@@ -3319,10 +4499,700 @@ table tbody tr:hover {
     border-radius: 16px;
     padding: 20px;
     transition: box-shadow 0.2s;
-    /* Let each card use its natural height instead of stretching
-       to match the tallest card in the row. */
     height: auto;
     box-sizing: border-box;
+    position: relative;
+}
+
+/* Overview card floats at top-right of .form-section, aligned with the
+   "Summary & Reports" heading, completely outside the masonry grid. */
+#summary-results .dashboard-card-grid > .overview-card {
+    position: absolute !important;
+    top: 0;
+    right: 0;
+    width: calc(33% - 10px);
+    z-index: 2;
+    overflow: visible !important;
+}
+
+.overview-card .dashboard-stat-row {
+    overflow: visible;
+}
+
+.overview-card .dashboard-stat-row:first-child {
+    min-height: 140px;
+}
+
+@media (max-width: 1200px) {
+    #summary-results .dashboard-card-grid > .overview-card {
+        position: static !important;
+        width: 100%;
+        order: -1;
+    }
+
+    #summary-results .reports-trend-card {
+        width: 100%;
+    }
+}
+
+/* Rich Overview layout (gauges, heatmap, donut) */
+#summary-results .dashboard-card-grid > .overview-card--rich {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+}
+
+.overview-card--rich .overview-rich-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.overview-card--rich .overview-rich-header .dashboard-card-title {
+    margin: 0;
+}
+
+.overview-trends-card {
+    flex: 0 0 auto;
+    background: var(--bg-elevated, #f5f2eb);
+    border-radius: 12px;
+    padding: 10px 14px;
+    min-width: 140px;
+    border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.overview-trends-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.overview-trend-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.overview-spark {
+    width: 36px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.overview-trend-line-pos {
+    color: #16a34a;
+}
+
+.overview-trend-line-neg {
+    color: #dc2626;
+}
+
+.overview-trend-line-neutral {
+    color: #64748b;
+}
+
+.overview-mini-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.overview-mini-metrics-item strong {
+    color: var(--text-primary);
+}
+
+.overview-mini-metrics-muted {
+    margin-left: auto;
+}
+
+@media (max-width: 600px) {
+    .overview-mini-metrics-muted {
+        margin-left: 0;
+        flex-basis: 100%;
+    }
+}
+
+.overview-rich-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: stretch;
+}
+
+.overview-rich-gauges .overview-beige-panel {
+    flex: 1;
+    min-width: 0;
+}
+
+.overview-rich-bottom .overview-beige-panel {
+    flex: 1;
+    min-width: 0;
+}
+
+.overview-beige-panel {
+    background: var(--bg-elevated, #faf6ef);
+    border-radius: 14px;
+    padding: 14px 16px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.overview-panel-kicker {
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 10px;
+}
+
+.overview-gauge-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 220px;
+    margin: 0 auto;
+}
+
+.overview-gauge-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.overview-gauge-center {
+    position: absolute;
+    left: 50%;
+    bottom: 4px;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.overview-gauge-big {
+    font-size: 1.65rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.overview-gauge-small {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.overview-gauge-small.is-muted {
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+.overview-gauge-small.is-neg {
+    color: #dc2626;
+}
+
+.overview-gauge-small.is-pos {
+    color: #16a34a;
+}
+
+.overview-gauge-wrap--attendance-donut {
+    width: 118px;
+    height: 118px;
+    margin: 2px auto 0;
+}
+
+.overview-gauge-svg--attendance-donut {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.overview-gauge-fill--attendance-donut {
+    transform-origin: 50% 50%;
+    transform: rotate(-90deg);
+}
+
+.overview-gauge-center--attendance-donut {
+    top: 50%;
+    left: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+}
+
+.overview-gauge-attendance .overview-gauge-big {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.01em;
+}
+
+.overview-gauge-attendance .overview-gauge-small {
+    margin-top: 2px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.overview-gauge-attendance .overview-gauge-small.is-neg {
+    color: #dc2626;
+}
+
+.overview-gauge-attendance .overview-gauge-small.is-pos {
+    color: #16a34a;
+}
+
+.overview-trigger-panel .overview-trigger-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.overview-trigger-meta {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    text-align: right;
+    line-height: 1.45;
+}
+
+.overview-trigger-meta-k {
+    color: #94a3b8;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+.overview-trigger-hero {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 10px 0 4px;
+}
+
+.overview-trigger-sub {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.overview-heatmap-cols {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.35fr) repeat(5, 1fr);
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.overview-heatmap-colhead {
+    text-align: center;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #64748b;
+}
+
+.overview-heatmap-row {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.35fr) repeat(5, 1fr);
+    gap: 4px;
+    margin-bottom: 4px;
+    align-items: stretch;
+}
+
+.overview-heatmap-time {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    padding-right: 4px;
+}
+
+.overview-heatmap-cell {
+    border-radius: 6px;
+    min-height: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.overview-heatmap-cell--worst {
+    box-shadow: inset 0 0 0 2px #991b1b;
+}
+
+.overview-heatmap-cell--best {
+    box-shadow: inset 0 0 0 2px #166534;
+}
+
+.overview-heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 0.68rem;
+    color: #64748b;
+}
+
+.overview-heatmap-legend-bar {
+    flex: 0 1 120px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+}
+
+.overview-heatmap-empty {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin: 8px 0;
+}
+
+.overview-infractions-body {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.overview-infractions-legend {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.overview-infractions-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.overview-infractions-legend .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.overview-donut-wrap {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    flex-shrink: 0;
+}
+
+.overview-donut {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    mask: radial-gradient(farthest-side, transparent calc(50% - 14px), #fff calc(50% - 13px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(50% - 14px), #fff calc(50% - 13px));
+}
+
+.overview-donut-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.overview-donut-total {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.overview-donut-delta {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.overview-incidents-panel .overview-incidents-bars {
+    display: flex;
+    gap: 28px;
+    justify-content: center;
+    align-items: flex-end;
+    min-height: 140px;
+    padding-top: 8px;
+}
+
+.overview-incident-bar-col {
+    flex: 1;
+    max-width: 100px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.overview-incident-delta {
+    font-size: 0.8rem;
+    font-weight: 700;
+    min-height: 1.2em;
+    margin-bottom: 6px;
+}
+
+.overview-incident-bar-track {
+    height: 100px;
+    background: #ece8df;
+    border-radius: 8px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.overview-incident-bar-fill {
+    width: 100%;
+    border-radius: 8px 8px 0 0;
+    transition: height 0.25s ease;
+}
+
+.overview-incident-bar-fill--reminder {
+    background: linear-gradient(180deg, #5eead4, #14b8a6);
+}
+
+.overview-incident-bar-fill--reset {
+    background: linear-gradient(180deg, #cbd5e1, #475569);
+}
+
+.overview-incident-label {
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-top: 10px;
+}
+
+/* Compact top-right Reports overview card, matching the saved mockup. */
+.overview-card--rich {
+    padding: 14px 16px;
+    border-radius: 14px;
+}
+
+.overview-card--rich .overview-rich-header {
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.overview-card--rich .overview-rich-header .dashboard-card-title {
+    font-size: 0.9rem;
+    line-height: 1.1;
+}
+
+.overview-card--rich .overview-trends-card {
+    min-width: 88px;
+    padding: 7px 8px;
+    border-radius: 8px;
+}
+
+.overview-card--rich .overview-trends-title {
+    font-size: 0.82rem;
+    margin-bottom: 4px;
+}
+
+.overview-card--rich .overview-trend-line {
+    gap: 4px;
+    font-size: 0.82rem;
+    line-height: 1.1;
+    margin-top: 3px;
+    white-space: nowrap;
+}
+
+.overview-card--rich .overview-spark {
+    width: 20px;
+    height: 8px;
+}
+
+.overview-card--rich .overview-rich-row {
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.overview-card--rich .overview-beige-panel {
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.overview-card--rich .overview-panel-kicker {
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+
+.overview-card--rich .overview-gauge-wrap {
+    max-width: 104px;
+}
+
+.overview-card--rich .overview-gauge-wrap--attendance-donut {
+    width: 78px;
+    height: 78px;
+    margin-top: 0;
+}
+
+.overview-card--rich .overview-gauge-attendance .overview-gauge-big {
+    font-size: 1.28rem;
+}
+
+.overview-card--rich .overview-gauge-attendance .overview-gauge-small {
+    font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-gauge-star .overview-gauge-center {
+    bottom: 1px;
+}
+
+.overview-card--rich .overview-gauge-star .overview-gauge-big {
+    font-size: 0.95rem;
+}
+
+.overview-card--rich .overview-gauge-star .overview-gauge-small {
+    font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-trigger-meta {
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+.overview-card--rich .overview-trigger-hero {
+    font-size: 0.78rem;
+    line-height: 1.15;
+    margin: 5px 0 2px;
+}
+
+.overview-card--rich .overview-trigger-sub {
+    font-size: 0.82rem;
+    margin-bottom: 6px;
+}
+
+.overview-card--rich .overview-heatmap-cols,
+.overview-card--rich .overview-heatmap-row {
+    grid-template-columns: minmax(32px, 0.35fr) repeat(5, 1fr);
+    gap: 2px;
+    margin-bottom: 2px;
+}
+
+.overview-card--rich .overview-heatmap-colhead {
+    font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-heatmap-time {
+    font-size: 0.82rem;
+    padding-right: 2px;
+}
+
+.overview-card--rich .overview-heatmap-cell {
+    min-height: 10px;
+    border-radius: 2px;
+}
+
+.overview-card--rich .overview-heatmap-legend {
+    gap: 5px;
+    margin-top: 5px;
+    font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-heatmap-legend-bar {
+    flex-basis: 70px;
+    height: 5px;
+}
+
+.overview-card--rich .overview-infractions-body {
+    gap: 7px;
+    flex-wrap: nowrap;
+}
+
+.overview-card--rich .overview-infractions-legend {
+    font-size: 0.82rem;
+    line-height: 1.1;
+}
+
+.overview-card--rich .overview-infractions-legend li {
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.overview-card--rich .overview-infractions-legend .dot {
+    width: 6px;
+    height: 6px;
+}
+
+.overview-card--rich .overview-donut-wrap {
+    width: 62px;
+    height: 62px;
+}
+
+.overview-card--rich .overview-donut {
+    mask: radial-gradient(farthest-side, transparent calc(50% - 8px), #fff calc(50% - 7px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(50% - 8px), #fff calc(50% - 7px));
+}
+
+.overview-card--rich .overview-donut-total {
+    font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-donut-delta {
+    font-size: 0.52rem;
+}
+
+.overview-card--rich .overview-incidents-panel .overview-incidents-bars {
+    gap: 14px;
+    min-height: 72px;
+    padding-top: 2px;
+}
+
+.overview-card--rich .overview-incident-bar-col {
+    max-width: 32px;
+}
+
+.overview-card--rich .overview-incident-delta {
+    font-size: 0.52rem;
+    margin-bottom: 3px;
+}
+
+.overview-card--rich .overview-incident-bar-track {
+    height: 48px;
+    border-radius: 4px;
+}
+
+.overview-card--rich .overview-incident-bar-fill {
+    border-radius: 4px 4px 0 0;
+}
+
+.overview-card--rich .overview-incident-label {
+    font-size: 0.42rem;
+    margin-top: 5px;
+}
+
+@media (max-width: 768px) {
+    .overview-rich-row {
+        flex-direction: column;
+    }
+
+    .overview-rich-header {
+        flex-direction: column;
+    }
+
+    .overview-trigger-meta {
+        text-align: left;
+    }
+
+    .overview-mini-metrics-muted {
+        margin-left: 0;
+    }
 }
 
 .dashboard-card:hover {
@@ -3350,6 +5220,33 @@ table tbody tr:hover {
     margin-bottom: 16px;
 }
 
+/* Close button for extra cards created from Overview selections */
+.overview-extra-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.dashboard-card.overview-extra-card .overview-extra-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+}
+
+.overview-extra-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+}
+
 /* Shared inner wrapper for Trigger Times & Infractions cards so
    the title and breakdown "table" are centered together, with
    the title left-aligned relative to the table */
@@ -3359,10 +5256,52 @@ table tbody tr:hover {
     margin: 0 auto 16px;
 }
 
-/* Infractions card: (i) icon next to title */
+/* In the Infractions card, keep the inner content left-aligned and
+   allow it to use the full card width instead of centering it. */
+.infractions-card .dashboard-breakdown-card-inner {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 16px 0;
+    padding-left: 0;
+}
+
+/* Infractions card: back button, title, (i) icon */
 .infractions-card-header {
     justify-content: flex-start;
     gap: 8px;
+    overflow: visible;
+}
+.infractions-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.infractions-back-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.infractions-back-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+}
+.infractions-title-clickable {
+    margin: 0;
+    cursor: default;
+}
+.infractions-title-clickable.infractions-title-in-drilldown {
+    cursor: pointer;
+    color: var(--text-primary);
+}
+.infractions-title-clickable.infractions-title-in-drilldown:hover {
+    text-decoration: underline;
 }
 .infractions-card-header .infractions-title-hint {
     margin: 0;
@@ -3426,31 +5365,40 @@ table tbody tr:hover {
     display: block;
 }
 
-/* Second row of tabs for time/day drilldowns */
+/* Third-tier tabs (Overview, time/day). Shown on the same line as Tier 2 (infraction) tabs. */
+.infractions-card .infractions-tier2-and-drill-tabs-row .infractions-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    margin: 0;
+}
 .infractions-card .infractions-drilldown-tabs {
     display: flex;
     align-items: flex-end;
     gap: 6px;
-    margin-top: 6px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
 }
 
 .infractions-card .infractions-drill-tab {
     position: relative;
     background: none;
     border: none;
-    padding: 4px 8px;
-    font-size: 0.75rem;
+    padding: 5px 10px;
+    font-size: 0.78rem;
     font-weight: 500;
     color: var(--text-secondary);
     cursor: pointer;
-    border-radius: 999px;
+    border-radius: 6px 6px 0 0;
     border: 1px solid transparent;
+    border-bottom: none;
 }
 
 .infractions-card .infractions-drill-tab.active {
     color: var(--text-primary);
-    background: var(--bg-elevated);
+    background: var(--bg-surface);
     border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
 }
 
 .infractions-card .infractions-drill-tab-panel {
@@ -3462,16 +5410,112 @@ table tbody tr:hover {
     display: block;
 }
 
+/* Nested drill tabs inside a selected Day drill panel (per-infraction within a day) */
+.infractions-card .infractions-day-infraction-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
+}
+
+.infractions-card .infractions-day-infraction-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.infractions-card .infractions-day-infraction-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.infractions-card .infractions-day-infraction-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.infractions-card .infractions-day-infraction-tab-panel.is-active {
+    display: block;
+}
+
+/* Single row for Tier 2 (infraction) tabs and Tier 3 (Overview, time/day) drill tabs */
+.infractions-card .infractions-tier2-and-drill-tabs-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
+}
+
+/* Tier 2 tabs (below tier 1, inside Type panel; content replaces the type table) */
+.infractions-card .infractions-tier2-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    margin: 0;
+}
+
+.infractions-card .infractions-tier2-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.infractions-card .infractions-tier2-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.infractions-card .infractions-tier2-tab-panel {
+    display: none;
+}
+
+.infractions-card .infractions-tier2-tab-panel.is-active {
+    display: block;
+}
+
+/* Single 12px gap between tier 2 tab row and content (tables or tier 3). Override
+   .overview-detail-container’s default top margin/padding/border so nothing invisible adds space. */
+.infractions-card .infractions-tier2-tab-panel .overview-detail-container {
+    margin-top: 12px;
+    padding-top: 0;
+    border-top: none;
+}
+
 /* Tab labels + close buttons */
 .infractions-card .infractions-tab-label,
-.infractions-card .infractions-drill-tab-label {
+.infractions-card .infractions-drill-tab-label,
+.infractions-card .infractions-tier2-tab-label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
 }
 
 .infractions-card .infractions-tab-close,
-.infractions-card .infractions-drill-tab-close {
+.infractions-card .infractions-drill-tab-close,
+.infractions-card .infractions-tier2-tab-close {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3488,6 +5532,220 @@ table tbody tr:hover {
 
 .infractions-card .infractions-tab-close:hover,
 .infractions-card .infractions-drill-tab-close:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+/* Reminders card — same tab/drill pattern as Infractions (Time, Day, Infractions tabs + drilldown) */
+.reminders-card-header {
+    justify-content: flex-start;
+    gap: 8px;
+    overflow: visible;
+}
+.reminders-card-header .infractions-title-hint {
+    margin: 0;
+}
+.reminders-card .reminders-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.reminders-card .reminders-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.reminders-card .reminders-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.reminders-card .reminders-tab-panels {
+    margin-top: 8px;
+}
+
+.reminders-card .reminders-tab-panel {
+    display: none;
+}
+
+.reminders-card .reminders-tab-panel.is-active {
+    display: block;
+}
+
+.reminders-card .reminders-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
+}
+
+.reminders-card .reminders-drill-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.reminders-card .reminders-drill-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.reminders-card .reminders-drill-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.reminders-card .reminders-drill-tab-panel.is-active {
+    display: block;
+}
+
+.reminders-card .reminders-drill-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.reminders-card .reminders-drill-tab-close:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+/* Resets card — same tab/drill pattern as Reminders/Infractions */
+.resets-card-header {
+    justify-content: flex-start;
+    gap: 8px;
+    overflow: visible;
+}
+.resets-card-header .infractions-title-hint {
+    margin: 0;
+}
+.resets-card .resets-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.resets-card .resets-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.resets-card .resets-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.resets-card .resets-tab-panels {
+    margin-top: 8px;
+}
+
+.resets-card .resets-tab-panel {
+    display: none;
+}
+
+.resets-card .resets-tab-panel.is-active {
+    display: block;
+}
+
+.resets-card .resets-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
+}
+
+.resets-card .resets-drill-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.resets-card .resets-drill-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.resets-card .resets-drill-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.resets-card .resets-drill-tab-panel.is-active {
+    display: block;
+}
+
+.resets-card .resets-drill-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.resets-card .resets-drill-tab-close:hover {
     background: rgba(0,0,0,0.06);
 }
 
@@ -3509,7 +5767,7 @@ table tbody tr:hover {
 .dashboard-chart-wrap {
     position: relative;
     width: 100%;
-    height: 220px;
+    height: 260px;
 }
 
 /* Summary charts that should only be as wide as their content,
@@ -3551,6 +5809,7 @@ table tbody tr:hover {
     justify-content: flex-start;
     align-items: baseline;
     gap: 8px;
+    overflow: visible;
 }
 .star-performance-card-header .infractions-title-hint {
     margin: 0;
@@ -3633,14 +5892,14 @@ table tbody tr:hover {
     background: rgba(0,0,0,0.06);
 }
 
-/* Level 2 drilldown tabs inside STAR category detail */
+/* Level 2 drilldown tabs inside STAR category detail — same look as parent tabs */
 .star-performance-card .star-performance-drilldown-tabs,
 #star-category-details-content .star-performance-drilldown-tabs {
     display: flex;
     align-items: flex-end;
-    gap: 6px;
-    margin-top: 6px;
-    margin-bottom: 8px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
 }
 
 .star-performance-card .star-performance-drill-tab,
@@ -3648,20 +5907,22 @@ table tbody tr:hover {
     position: relative;
     background: none;
     border: none;
-    padding: 4px 8px;
-    font-size: 0.75rem;
+    padding: 6px 10px;
+    font-size: 0.8rem;
     font-weight: 500;
     color: var(--text-secondary);
     cursor: pointer;
-    border-radius: 999px;
+    border-radius: 8px 8px 0 0;
     border: 1px solid transparent;
+    border-bottom: none;
 }
 
 .star-performance-card .star-performance-drill-tab.active,
 #star-category-details-content .star-performance-drill-tab.active {
     color: var(--text-primary);
-    background: var(--bg-elevated);
+    background: var(--bg-surface);
     border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
 }
 
 .star-performance-card .star-performance-drill-tab-panel,
@@ -3762,6 +6023,12 @@ table tbody tr:hover {
     border-radius: 12px;
 }
 
+/* Overview card: stat boxes use same padding as Trigger Time card */
+.overview-card .dashboard-stat-box.overview-stat {
+    padding: 0.5rem 1.2rem 0.75rem;
+    overflow: visible;
+}
+
 /* Overview card stat boxes become interactive selections */
 .overview-stat {
     cursor: pointer;
@@ -3780,9 +6047,231 @@ table tbody tr:hover {
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
 }
 
+/* Starbucks box: title at top-left, value/delta centered in middle */
+.overview-stat-starbucks {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.overview-stat-starbucks .overview-stat-value-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+}
+
+.overview-stat-starbucks .dashboard-stat-value,
+.overview-stat-starbucks .dashboard-stat-delta {
+    text-align: center;
+}
+
 /* Starbucks box enlarges when selected */
 .overview-stat-starbucks.overview-stat-selected {
     transform: scale(1.05);
+}
+
+/* Incident Volume style card (Reminders & Resets) */
+.incident-volume-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.incident-volume-card-align-right {
+    flex: 0 0 auto;
+    width: fit-content;
+    padding: 0.4rem 0.5rem 0.5rem !important;
+}
+
+/* Row with infractions + reminders/resets: keep infractions height, compact reminders/resets */
+.overview-infractions-reminders-row {
+    align-items: flex-start;
+}
+
+.overview-infractions-reminders-row .overview-stat-infractions {
+    flex: 1;
+    min-width: 0;
+    overflow: visible !important;
+}
+
+.overview-infractions-reminders-row {
+    overflow: visible;
+}
+
+.incident-volume-card-compact {
+    flex: 0 0 auto;
+}
+
+.incident-volume-card-compact .incident-volume-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 4px;
+    text-align: left;
+}
+
+.incident-volume-card-compact .incident-volume-bars {
+    gap: 4px !important;
+    flex: 1;
+    min-height: 0;
+    padding: 0 0.5rem;
+}
+
+.incident-volume-card-compact .incident-volume-bar-above {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 2px;
+}
+
+.incident-volume-card-compact .incident-volume-bar-value {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.incident-volume-card-compact .incident-volume-bar-above .dashboard-stat-delta {
+    font-size: 0.6rem;
+    margin: 0;
+    text-align: center;
+    width: 100%;
+}
+
+.incident-volume-card-compact .incident-volume-bar-track {
+    max-width: 24px;
+    height: 40px;
+    margin: 0 auto;
+}
+
+.incident-volume-card-compact .incident-volume-bar-fill {
+    height: calc(40px * var(--bar-height, 50) / 100);
+    min-height: 14px;
+}
+
+.incident-volume-card-compact .incident-volume-bar-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 2px;
+    margin-bottom: 0;
+    text-align: left;
+}
+
+.incident-volume-card-compact .incident-volume-bars .overview-stat {
+    padding: 4px 2px;
+}
+
+.incident-volume-header {
+    margin-bottom: 12px;
+}
+
+.incident-volume-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.incident-volume-total-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.incident-volume-total-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.incident-volume-total-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.incident-volume-total-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.incident-volume-trend {
+    font-size: 0.75rem;
+}
+
+.incident-volume-bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 16px;
+    flex: 1;
+}
+
+.incident-volume-card .overview-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 10px;
+    min-width: 0;
+}
+
+.incident-volume-bar-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 6px;
+    text-align: center;
+}
+
+.incident-volume-bar-track {
+    width: 100%;
+    max-width: 36px;
+    height: 56px;
+    margin: 0 auto 6px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: var(--border);
+    border-radius: 6px 6px 0 0;
+    overflow: hidden;
+}
+
+.incident-volume-bar-fill {
+    width: 100%;
+    height: calc(56px * var(--bar-height, 50) / 100);
+    min-height: 20px;
+    background: var(--bar-color);
+    border-radius: 4px 4px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.incident-volume-bar-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.incident-volume-card .dashboard-stat-delta {
+    font-size: 0.65rem;
+    margin: 0;
 }
 
 .overview-detail-container {
@@ -3844,6 +6333,97 @@ table tbody tr:hover {
     text-align: left;
 }
 
+/* Days Present doughnut chart wrapper (Reports > Point Card > Days Present card) */
+.days-present-ring-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 16px;
+    max-width: 320px;
+    margin-inline: auto;
+}
+
+.days-present-ring-layout {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.days-present-ring-chart-wrap {
+    position: relative;
+    width: 200px;
+    height: 200px;
+    max-width: 100%;
+    margin: 0 auto;
+    overflow: visible;
+}
+
+.days-present-ring-chart-wrap canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.days-present-ring-center {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.days-present-ring-wrap .infractions-ring-center-value {
+    font-size: 1.9rem;
+}
+
+.days-present-ring-wrap .infractions-ring-center-delta {
+    font-size: 1rem;
+}
+
+.days-present-ring-wrap .infractions-ring-legend {
+    margin-top: 8px;
+    width: 100%;
+}
+
+.days-present-ring-wrap .infractions-ring-legend .infractions-ring-legend-item {
+    font-size: 0.85rem;
+}
+
+.days-present-ring-wrap .infractions-ring-legend .infractions-ring-legend-name {
+    font-size: 0.85rem;
+}
+
+.days-present-ring-wrap .infractions-ring-legend .infractions-ring-legend-meta {
+    font-size: 0.8rem;
+}
+
+.days-present-ring-wrap .infractions-ring-legend .infractions-ring-legend-swatch {
+    width: 12px;
+    height: 12px;
+    margin-top: 3px;
+}
+
+.days-present-pie-canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.days-present-pie-heading {
+    font-family: var(--font-heading);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
 /* Metric stacks inside overview detail cards, e.g. Days Present summary,
    should align labels so numeric values appear in a neat column. */
 .overview-metrics {
@@ -3879,6 +6459,20 @@ table tbody tr:hover {
     /* Let the inner content define card width */
     width: max-content;
     max-width: 100%;
+}
+
+/* Days Present detail card should let charts span full card width */
+.dashboard-card.overview-extra-card[data-overview-card="days_present"] .overview-detail-container {
+    width: 100%;
+    /* Do not force scrolling inside this card; let content flow and respect card bounds */
+    overflow: visible;
+}
+
+/* Trigger Times card: use full masonry column width so the graph heatmap can span the card */
+.dashboard-card.overview-extra-card[data-overview-card="trigger_times"] {
+    width: 100%;
+    max-width: 100%;
+    display: block;
 }
 
 /* Layout helper: place paired graphs/tables in a row when space allows */
@@ -3951,6 +6545,593 @@ table tbody tr:hover {
     overflow-x: auto;
 }
 
+/* Trigger Times - Time tab table layout */
+.trigger-times-card .trigger-times-time-overview-content {
+    display: table;
+    width: 1px;
+}
+
+/* When the heatmap graph is present, fill the card width (avoid shrink-to-fit table layout) */
+.trigger-times-card .trigger-times-time-overview-content.trigger-times-time-overview-has-heatmap {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-time-overview-has-heatmap .view-mode-graph-only {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-time-overview-has-heatmap .trigger-overview-heatmap-wrap {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-time-overview-has-heatmap .trigger-heatmap-table {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-drill-tab-panel[data-drill-tab-panel="overview"] .trigger-times-time-overview-has-heatmap {
+    width: 100%;
+}
+
+/* Graph view only shows the Overview-style block, not auto bar charts from applyCardViewMode */
+.trigger-times-card .view-mode-graph-only .view-mode-chart-wrap {
+    display: none !important;
+}
+
+/* Graph view: same inner block as Overview trigger box (headline + subheaders + heatmap) */
+.trigger-times-card .trigger-times-graph-matches-overview {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-graph-matches-overview .trigger-time-overview-card {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.trigger-times-card .trigger-times-graph-matches-overview .trigger-overview-layout {
+    width: 100%;
+    max-width: 100%;
+}
+
+.trigger-times-card .trigger-times-time-table {
+    width: max-content;
+    max-width: 100%;
+}
+
+/* Trigger Times card Tier 1 tabs (Time / Day) – match other card tabs */
+.trigger-times-card .trigger-times-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.trigger-times-card .trigger-times-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.trigger-times-card .trigger-times-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.trigger-times-card .trigger-times-tab-panels {
+    margin-top: 8px;
+}
+
+.trigger-times-card .trigger-times-tab-panel {
+    display: none;
+}
+
+.trigger-times-card .trigger-times-tab-panel.is-active {
+    display: block;
+}
+
+/* Trigger Times card day-of-week drilldown (Overview + dynamic Day tabs) */
+.trigger-times-card .trigger-times-drilldown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 10px 0;
+}
+
+.trigger-times-card .trigger-times-drill-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.trigger-times-card .trigger-times-drill-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.trigger-times-card .trigger-times-drill-tab-panel {
+    display: none;
+    margin-top: 8px;
+}
+
+.trigger-times-card .trigger-times-drill-tab-panel.is-active {
+    display: block;
+}
+
+/* Hide redundant inner "Time" drill tab row when it is the only tab (matches Overview without duplicate label) */
+.trigger-times-card .trigger-times-drilldown-tabs:has(> .trigger-times-drill-tab:only-child) {
+    display: none;
+}
+
+.trigger-times-card .trigger-times-drill-wrapper:has(.trigger-times-drilldown-tabs:has(> .trigger-times-drill-tab:only-child)) .trigger-times-drilldown-panels {
+    margin-top: 0;
+}
+
+.trigger-times-card .trigger-times-drill-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.trigger-times-card .trigger-times-drill-tab-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+/* Trigger Time Overview – 2x taller, chart below text */
+.trigger-overview-row {
+    width: 100%;
+}
+
+/* Reports / Point Card overview: hide redundant sole "Overview" drill tab (heatmap drill still adds tabs when needed) */
+.trigger-time-overview-box .trigger-times-drilldown-tabs:has(> .trigger-times-drill-tab:only-child) {
+    display: none;
+}
+
+.trigger-time-overview-box .trigger-times-drill-wrapper:has(.trigger-times-drilldown-tabs:has(> .trigger-times-drill-tab:only-child)) .trigger-times-drilldown-panels {
+    margin-top: 0;
+}
+
+.trigger-time-overview-box {
+    text-align: left !important;
+    padding: 0 !important;
+    border: none !important;
+}
+
+.trigger-time-overview-box.overview-stat {
+    cursor: pointer;
+}
+
+.trigger-time-overview-box.overview-stat:hover,
+.trigger-time-overview-box.overview-stat.overview-stat-selected {
+    border: none !important;
+}
+
+.trigger-time-overview-box.overview-stat-selected .trigger-time-overview-card,
+.trigger-time-overview-box.overview-stat-selected .trigger-heatmap-table {
+    background: white;
+}
+
+.trigger-time-overview-card {
+    background: #f5f0e8;
+    border-radius: 0.6rem;
+    padding: 0.5rem 1.2rem 0.75rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    border: none;
+}
+
+.trigger-overview-layout {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    align-items: stretch;
+}
+
+.trigger-overview-top-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 1rem;
+    align-items: stretch;
+    justify-content: space-between;
+}
+
+.trigger-overview-primary {
+    flex: 0 1 auto;
+    min-width: 140px;
+}
+
+.trigger-overview-subheaders-wrap {
+    flex: 0 0 auto;
+    margin-left: auto;
+    margin-right: 10px;
+    max-width: 50%;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+}
+
+.trigger-overview-subheaders-table {
+    width: auto;
+    min-width: max-content;
+    font-size: 0.75rem;
+    color: #64748b;
+    border-collapse: collapse;
+}
+
+.trigger-overview-subheaders-table td {
+    padding: 2px 0 2px 1rem;
+    vertical-align: middle;
+}
+
+.trigger-overview-subheader-row {
+    cursor: pointer;
+}
+
+.trigger-overview-subheader-row:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+tr[data-aggregate-time-label],
+tr[data-aggregate-day-label] {
+    cursor: pointer;
+}
+
+.trigger-overview-subheaders-table .trigger-overview-subheader-label {
+    font-weight: 600;
+    color: #64748b;
+    white-space: nowrap;
+    width: 1%;
+}
+
+.trigger-overview-subheaders-table .trigger-overview-subheader-value {
+    color: #1e293b;
+    white-space: nowrap;
+}
+
+.trigger-overview-label,
+.trigger-overview-weekly-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+    margin-bottom: 8px;
+}
+
+.trigger-overview-time-block {
+    font-size: 0.96rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 2px;
+}
+
+.trigger-overview-deltas-wrap {
+    font-size: 0.65rem;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+.trigger-overview-deltas-wrap .trigger-overview-delta {
+    font-size: inherit;
+}
+
+.trigger-overview-delta.positive {
+    color: #059669;
+}
+
+.trigger-overview-delta.negative {
+    color: #DC2626;
+}
+
+.trigger-overview-meta {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 0;
+}
+
+.trigger-overview-chart-wrap {
+    flex: 0 0 auto;
+    width: 100%;
+}
+
+.trigger-overview-heatmap-wrap {
+    flex: 0 0 auto;
+    width: 100%;
+}
+
+.trigger-overview-sparkline-wrap {
+    height: 90px;
+    width: 100%;
+    margin-bottom: 4px;
+}
+
+.trigger-overview-chart-label {
+    font-size: 0.65rem;
+    color: #64748b;
+    text-align: center;
+    margin-top: 2px;
+}
+
+.trigger-time-sparkline {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Trigger Times Heatmap – 2D grid: Days (rows) × Time of day (columns) */
+.trigger-heatmap-row {
+    width: 100%;
+}
+
+.trigger-heatmap-box {
+    text-align: left !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden;
+}
+
+.trigger-heatmap-card {
+    background: #fff;
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.trigger-heatmap-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+    text-align: center;
+}
+
+.trigger-heatmap-table {
+    display: grid;
+    grid-template-columns: 20px repeat(var(--heatmap-cols, 16), minmax(6px, 1fr));
+    grid-template-rows: auto repeat(var(--heatmap-rows, 5), 1fr);
+    row-gap: 0;
+    column-gap: 1px;
+    width: 100%;
+    max-width: 100%;
+    background: #fff;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.trigger-overview-heatmap-wrap .trigger-heatmap-table {
+    background: #f5f0e8;
+    border: none;
+}
+
+.trigger-heatmap-corner {
+    grid-row: 1;
+    grid-column: 1;
+    margin: 0;
+    padding: 0;
+}
+
+.trigger-heatmap-col-label,
+.trigger-heatmap-day-label {
+    font-size: 0.5rem;
+    font-weight: 500;
+    color: #64748b;
+    margin: 0;
+}
+
+.trigger-heatmap-col-label {
+    text-align: center;
+    padding: 2px 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.trigger-heatmap-day-label {
+    text-align: left;
+    padding: 2px 2px 2px 0;
+    display: flex;
+    align-items: center;
+}
+
+.trigger-heatmap-axis-clickable {
+    cursor: pointer;
+}
+
+.trigger-heatmap-axis-clickable:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+
+.trigger-heatmap-cell {
+    min-width: 4px;
+    min-height: 8px;
+    background: var(--heatmap-bg, #e2e8f0);
+    border-radius: 1px;
+    margin: 0;
+    margin-bottom: 1px;
+    padding: 0;
+    border: none;
+}
+
+.trigger-heatmap-cell-last-row {
+    margin-bottom: 0;
+}
+
+.trigger-heatmap-cell-trigger {
+    outline: 2px solid #1e293b;
+    outline-offset: -1px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    border-radius: 1px;
+}
+
+.trigger-heatmap-cell-growth {
+    outline: 2px solid #059669;
+    outline-offset: -1px;
+    box-shadow: 0 0 0 1px #059669;
+}
+
+.trigger-heatmap-cell-regression {
+    outline: 2px solid #ea580c;
+    outline-offset: -1px;
+    box-shadow: 0 0 0 1px #ea580c;
+}
+
+.trigger-heatmap-cell:hover {
+    filter: brightness(1.08);
+}
+
+.trigger-heatmap-cell-interactive {
+    cursor: pointer;
+}
+
+.trigger-heatmap-cell-interactive:focus {
+    outline: 2px solid var(--text-primary, #1e293b);
+    outline-offset: 1px;
+    z-index: 1;
+}
+
+.trigger-heatmap-cell-interactive:hover {
+    filter: brightness(0.92);
+}
+
+.trigger-heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 1px;
+    font-size: 0.5rem;
+    color: #64748b;
+}
+
+.trigger-heatmap-legend-bar {
+    flex: 1;
+    max-width: 80px;
+    height: 6px;
+    border-radius: 2px;
+    background: linear-gradient(to right, #bbf7d0 0%, #22c55e 40%, #eab308 75%, #f97316 90%, #b91c1c 100%);
+}
+
+.trigger-heatmap-legend-low {
+    flex-shrink: 0;
+}
+
+.trigger-heatmap-hint {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    margin-top: 4px;
+}
+
+.trigger-heatmap-hint-line {
+    display: block;
+    margin-bottom: 2px;
+}
+
+.trigger-heatmap-hint-line:last-child {
+    margin-bottom: 0;
+}
+
+.trigger-heatmap-legend-high {
+    flex-shrink: 0;
+}
+
+.trigger-overview-bottom-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    align-items: flex-end;
+}
+
+.trigger-overview-weekly {
+    flex: 0 0 auto;
+    text-align: right;
+}
+
+.trigger-overview-week-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 42px;
+    margin-top: 4px;
+}
+
+.trigger-overview-week-bar-wrap {
+    flex: 1;
+    min-width: 20px;
+    max-width: 32px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.trigger-overview-week-bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    transition: height 0.2s ease;
+}
+
+.trigger-overview-week-bar.highlighted {
+    box-shadow: 0 0 0 2px #DC2626;
+}
+
+.trigger-overview-week-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+.trigger-overview-week-bar.active {
+    /* Color set inline per bar */
+}
+
+.trigger-overview-week-bar.inactive {
+    opacity: 0.5;
+}
+
 .dashboard-stat-value {
     font-family: var(--font-heading);
     font-size: 1.5rem;
@@ -3965,6 +7146,25 @@ table tbody tr:hover {
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin-top: 4px;
+}
+
+/* Overview card: all titles match Trigger Time card (font-size, font-weight, etc.) */
+.overview-card .overview-stat .dashboard-stat-label,
+.overview-card .overview-stat-star-percent .star-percent-label,
+.overview-card .overview-infractions-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+    margin-top: 0;
+    margin-bottom: 8px;
+    text-align: left;
+    align-self: flex-start;
+}
+
+.overview-card .overview-infractions-title {
+    margin-bottom: 2px;
 }
 
 /* Class/location breakdown list */
@@ -4015,6 +7215,340 @@ table tbody tr:hover {
     column-gap: 0;
 }
 
+/* Make the Infractions overview table text match the standard UI body
+   style (not bold, left-aligned, body font size and color). */
+.infractions-breakdown-list th {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+}
+
+.infractions-breakdown-list .dashboard-breakdown-name {
+    font-weight: 400;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+.infractions-card .dashboard-breakdown-value {
+    font-weight: 400;
+}
+
+/* Infractions category ring graphs (Type tab) */
+.infractions-category-rings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.infractions-category-rings.infractions-has-featured {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.infractions-ring-card {
+    background: #ffffff;
+    border-radius: var(--radius-md);
+    padding: 8px 6px 8px 0;
+    margin-left: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.infractions-ring-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+    text-align: center;
+}
+
+.infractions-ring-layout {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.infractions-ring-side {
+    min-width: 0;
+}
+
+.infractions-ring-chart-wrap {
+    position: relative;
+    width: 140px;
+    height: 140px;
+    aspect-ratio: 1 / 1;
+    margin: 0;
+    overflow: visible;
+    flex: 0 0 140px;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-chart-wrap {
+    width: min(100%, 320px);
+    max-width: 320px;
+    min-height: 320px;
+    aspect-ratio: 1;
+    height: 320px;
+    overflow: visible;
+    margin: 8px auto 0;
+    transform: none;
+    /* Constrain effective chart growth inside this box so edge labels
+       stay within card bounds even when the featured chart is large. */
+    padding: 0 18px;
+    box-sizing: border-box;
+}
+
+/* Featured mode uses asymmetric chart padding in JS (extra left room for labels),
+   so shift overlay text to the doughnut's true visual center. */
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-center {
+    transform: translate(calc(-50% + 16px), -50%);
+}
+
+/* Frenzy Top Locations rings should keep center labels truly centered. */
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .view-mode-doughnut-wrap[data-doughnut-style="frenzy-location-ring"] .infractions-ring-center {
+    transform: translate(-50%, -50%);
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-title {
+    font-size: 2rem;
+    line-height: 1.1;
+    margin-bottom: 4px;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured {
+    gap: 6px;
+    padding: 0 6px 0 0;
+    margin-top: 0;
+    margin-left: 0;
+    justify-self: center;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-layout {
+    margin-top: 0;
+    /* Extra horizontal breathing room prevents left-edge label clipping
+       without changing label-to-ring distance globally. */
+    padding: 0 24px;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card:not(.infractions-ring-card--featured) .infractions-ring-chart-wrap {
+    width: 120px;
+    height: 120px;
+}
+
+.infractions-ring-chart-wrap canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.infractions-ring-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: auto;
+}
+
+.infractions-ring-center-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.infractions-ring-center-delta {
+    margin-top: 0;
+    font-size: 0.75rem;
+    line-height: 1.1;
+}
+
+.infractions-ring-center-delta.delta-positive {
+    color: #16A34A; /* green */
+}
+
+.infractions-ring-center-delta.delta-negative {
+    color: #DC2626; /* red */
+}
+
+.infractions-ring-center-delta.delta-neutral {
+    color: #6B7280; /* muted gray */
+}
+
+.infractions-ring-center-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.infractions-ring-legend {
+    margin-top: 4px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: flex-start;
+    max-width: 100%;
+}
+
+.infractions-ring-legend-cols {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.infractions-ring-legend-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.infractions-ring-legend-row {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    column-gap: 14px;
+    align-items: start;
+}
+
+.infractions-ring-legend-cell {
+    min-width: 0;
+}
+
+.infractions-ring-legend-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* When a category is featured (3-column layout), hide legends for the small cards
+   but keep the legend visible on the featured (enlarged) card. */
+.infractions-category-rings.infractions-has-featured .infractions-ring-card:not(.infractions-ring-card--featured) .infractions-ring-legend {
+    display: none;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend {
+    display: flex;
+    width: 100%;
+    min-width: 100%;
+    align-self: stretch;
+    margin-top: 8px;
+    box-sizing: border-box;
+    justify-content: center;
+}
+
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-cols {
+    display: flex;
+    gap: 12px;
+    width: fit-content;
+    flex: 0 0 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    margin: 0 auto;
+}
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-rows {
+    margin: 0 auto;
+}
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-col {
+    gap: 4px;
+    min-width: max-content;
+    width: max-content;
+    flex: 0 0 auto;
+}
+
+/* Featured legend: larger font */
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-item {
+    font-size: 0.85rem;
+    width: max-content;
+    display: grid;
+    grid-template-columns: 12px auto;
+    column-gap: 8px;
+    align-items: start;
+}
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-name {
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-meta {
+    font-size: 0.8rem;
+}
+.infractions-category-rings.infractions-has-featured .infractions-ring-card.infractions-ring-card--featured .infractions-ring-legend .infractions-ring-legend-swatch {
+    width: 12px;
+    height: 12px;
+    margin-top: 2px;
+    justify-self: start;
+}
+
+.infractions-ring-legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.66rem;
+    color: var(--text-secondary);
+    min-width: 0;
+}
+
+.infractions-ring-legend-item--featured .infractions-ring-legend-name {
+    font-weight: 700;
+}
+
+.infractions-ring-legend-item--featured .infractions-ring-legend-swatch {
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.35);
+}
+
+.infractions-ring-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    margin-top: 2px;
+}
+
+.infractions-ring-legend-label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.infractions-ring-legend-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.66rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.infractions-ring-legend-meta {
+    font-size: 0.61rem;
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* Color legend deltas (reuse dashboard delta colors) */
+.delta-positive {
+    color: #16A34A; /* green */
+}
+.delta-negative {
+    color: #DC2626; /* red */
+}
+.delta-neutral {
+    color: #6B7280; /* muted gray */
+}
+
+.infractions-ring-legend-empty {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
 /* Remove extra border under the last row; rely on header border for closure */
 .infractions-breakdown-list .dashboard-breakdown-item:last-child td {
     border-bottom: none;
@@ -4029,6 +7563,7 @@ table tbody tr:hover {
     margin: 6px 0 10px 0;
     font-size: 0.8rem;
     color: var(--text-secondary);
+    overflow: visible;
 }
 .infractions-click-hint-text {
     margin: 0;
@@ -4055,13 +7590,22 @@ table tbody tr:hover {
     border-color: var(--text-secondary);
 }
 
+/* Inline hint icon when used inside card headers (e.g., Trigger Times) */
+.dashboard-card-header .infractions-title-hint {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 0 0 6px;
+    gap: 6px;
+}
+
 .infractions-hint-popover {
     position: absolute;
     left: 0;
     top: 100%;
     margin-top: 6px;
     padding: 8px 10px;
-    max-width: 480px;
+    width: 200px;
+    max-width: 200px;
     box-sizing: border-box;
     font-size: 0.8rem;
     line-height: 1.35;
@@ -4071,6 +7615,429 @@ table tbody tr:hover {
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     z-index: 10;
+}
+
+/* Overview card – Infractions donut summary */
+.overview-stat-infractions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    background: var(--bg-elevated);
+    overflow: visible !important;
+}
+
+.overview-stat-infractions.dashboard-stat-box {
+    overflow: visible !important;
+}
+
+.overview-infractions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.overview-infractions-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.overview-infractions-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    overflow: visible;
+}
+
+.overview-infractions-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+}
+
+.overview-infractions-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.overview-infractions-legend-swatch {
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.overview-infractions-legend-label {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.overview-infractions-legend-value {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.overview-infractions-legend-value.delta-positive {
+    color: #16A34A; /* green for decreased share of infractions */
+}
+
+.overview-infractions-legend-value.delta-negative {
+    color: #DC2626; /* red for increased share of infractions */
+}
+
+.overview-infractions-legend-value.delta-neutral {
+    color: #6B7280; /* muted gray for no change / no prior data */
+}
+
+/* Attendance doughnut in Overview card (Days Present box) */
+.overview-attendance-ring-wrap {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex-shrink: 0;
+    margin: 0 auto 8px;
+}
+
+.overview-attendance-ring-wrap canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.overview-attendance-ring-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.overview-attendance-ring-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.overview-attendance-ring-delta {
+    margin-top: -2px;
+    font-size: 0.7rem;
+    color: #6B7280;
+}
+
+.overview-attendance-ring-delta.delta-positive {
+    color: #16A34A;
+}
+
+.overview-attendance-ring-delta.delta-negative {
+    color: #DC2626;
+}
+
+.overview-attendance-ring-delta.delta-neutral {
+    color: #6B7280;
+}
+
+/* Overview Trends card – small card in header, top-right inline with Overview title */
+.overview-trends-card.overview-trends-in-header {
+    flex-shrink: 0;
+    padding: 0.35rem 0.6rem;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.overview-trends-in-header .overview-trends-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.25rem;
+    align-self: flex-start;
+}
+
+.overview-trends-in-header .overview-trends-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-end;
+}
+
+.overview-trends-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+}
+
+.overview-trends-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.overview-trends-icon {
+    display: block;
+}
+
+.overview-trends-icon-growth {
+    color: #16A34A;
+}
+
+.overview-trends-icon-regression {
+    color: #DC2626;
+}
+
+.overview-trends-value {
+    font-weight: 600;
+}
+
+.overview-stat-days-present {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+/* STAR Percent box – title first, gauge decoupled below, numbers tight under gauge */
+.overview-card .overview-stat-star-percent .star-percent-label {
+    margin-bottom: 24px;
+}
+
+.overview-stat-star-percent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 100px;
+    flex: 1.2;
+    overflow: visible;
+}
+
+.star-percent-gauge-wrap {
+    width: 100px;
+    height: 100px;
+    flex-shrink: 0;
+    margin: 14px auto 0;
+    overflow: visible;
+}
+
+.star-percent-gauge-svg-container {
+    width: 100px;
+    height: 100px;
+    flex-shrink: 0;
+    overflow: visible;
+}
+
+.star-percent-gauge-svg {
+    display: block;
+    width: 100px;
+    height: 100px;
+    overflow: visible;
+}
+
+.star-percent-value-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin-top: -95px;
+}
+
+.star-percent-value-block .star-percent-main-value {
+    font-size: 1rem;
+    line-height: 1.1;
+}
+
+.star-percent-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.star-percent-label {
+    font-size: 0.6rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
+.star-percent-main-value {
+    font-family: var(--font-heading);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.overview-stat-star-percent .dashboard-stat-delta {
+    margin-top: 0;
+    margin-bottom: 0;
+    font-size: 0.7rem;
+}
+
+.star-percent-bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 5px;
+    width: 100%;
+    min-width: 0;
+    margin-top: 4px;
+}
+
+.star-percent-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+.star-percent-bar-category {
+    font-size: 0.55rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 2px;
+    text-align: center;
+    line-height: 1.1;
+}
+
+.star-percent-bar-icon {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    margin-bottom: 2px;
+    flex-shrink: 0;
+}
+
+.star-percent-bar-track {
+    width: 100%;
+    max-width: 12px;
+    height: 32px;
+    margin: 0 auto 2px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.star-percent-bar-fill {
+    width: 100%;
+    height: calc(32px * var(--bar-height, 50) / 100);
+    min-height: 4px;
+    background: var(--bar-color);
+    border-radius: 4px 4px 0 0;
+}
+
+.star-percent-bar-lowest .star-percent-bar-track {
+    max-width: 14px;
+}
+
+.star-percent-bar-lowest .star-percent-bar-fill {
+    box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.1), 0 0 0 2px var(--bar-color);
+    outline: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.star-percent-bar-color-label {
+    font-size: 0.6rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.star-percent-bar-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.star-percent-bar-value {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 1px;
+}
+
+.star-percent-bar-value-placeholder {
+    height: 0.6rem;
+    margin-bottom: 1px;
+    visibility: hidden;
+}
+
+.overview-infractions-ring-wrap {
+    position: relative;
+    width: 90px;
+    height: 90px;
+    flex-shrink: 0;
+    overflow: visible;
+}
+
+.overview-infractions-ring-wrap canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.overview-infractions-ring-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.overview-infractions-ring-total {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.overview-infractions-ring-delta {
+    margin-top: -2px;
+    font-size: 0.7rem;
+    color: #6B7280;
+}
+
+.overview-infractions-ring-delta.delta-positive {
+    color: #16A34A;
+}
+
+.overview-infractions-ring-delta.delta-negative {
+    color: #DC2626;
+}
+
+.overview-infractions-ring-delta.delta-neutral {
+    color: #6B7280;
+}
+
+.overview-infractions-empty {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
 }
 
 .dashboard-breakdown-dot {
@@ -4340,4 +8307,532 @@ table tbody tr:hover {
     font-weight: 600;
     margin-left: 4px;
     color: var(--text-secondary);
+}
+
+/* ── Graph / Table view-mode toggle ── */
+.view-mode-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 8px;
+}
+.view-mode-toggle-btn {
+    padding: 3px 9px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.view-mode-toggle-btn.active {
+    background: var(--accent, #3B82F6);
+    color: #fff;
+}
+.view-mode-toggle-btn:not(.active):hover {
+    background: var(--bg-elevated);
+}
+.view-mode-chart-wrap {
+    position: relative;
+    min-height: 220px;
+    width: 100%;
+    margin-top: 6px;
+}
+.view-mode-chart-wrap canvas {
+    width: 100% !important;
+}
+
+/* Days Present – Day-of-Week Absence Bar Chart: give it more space */
+.days-present-chart-wrap {
+    width: 100%;
+    margin-top: 10px;
+    margin-inline: 0;
+    /* Fix the chart area height so it cannot keep growing */
+    height: 300px;
+    max-height: 300px;
+}
+
+/* Custom legend block for Days Present – Day-of-Week Absence Bar Chart */
+.days-present-bar-legend {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dp-bar-legend-title {
+    font-family: var(--font-heading);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.dp-bar-legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+}
+
+/* ============================================================
+   SUMMARY REPORTS — INLINE INSIGHTS CARD
+   ============================================================ */
+#summary-insights-btn.active {
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-color: var(--accent);
+}
+
+.summary-insights-card {
+    margin-top: 6px;
+}
+
+.summary-insights-head h3 {
+    margin-bottom: 4px;
+}
+
+.summary-insights-head p {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+}
+
+.summary-insights-pulse-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.summary-insights-pulse-card {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 86px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.summary-insights-pulse-label {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.summary-insights-pulse-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.summary-insights-state-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    width: fit-content;
+    margin-top: 6px;
+}
+
+.summary-insights-state-chip.needs-support {
+    background: rgba(251, 111, 90, 0.14);
+    color: #7c2d12;
+}
+
+.summary-insights-state-chip.stagnation {
+    background: rgba(107, 114, 128, 0.12);
+    color: #374151;
+}
+
+.summary-insights-state-chip.growth {
+    background: rgba(79, 182, 176, 0.16);
+    color: #0f766e;
+}
+
+.summary-insights-section {
+    margin-top: 12px;
+}
+
+.summary-insights-section h4 {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.summary-insights-heatmap-wrap {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+    padding: 8px;
+    overflow-x: auto;
+}
+
+.summary-insights-heatmap-grid-inner {
+    display: grid;
+    grid-template-columns: 100px repeat(7, minmax(72px, 1fr));
+    gap: 2px;
+}
+
+.summary-insights-heatmap-header-cell,
+.summary-insights-heatmap-row-label,
+.summary-insights-heatmap-cell {
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 5px 4px;
+}
+
+.summary-insights-heatmap-header-cell {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.summary-insights-heatmap-row-label {
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.summary-insights-heatmap-cell {
+    border-radius: 6px;
+    background: #e0f2f1;
+}
+
+.summary-insights-heatmap-cell[data-density="0"] { background: #edf2f7; }
+.summary-insights-heatmap-cell[data-density="1"] { background: #e0f2f1; }
+.summary-insights-heatmap-cell[data-density="2"] { background: #fed7aa; }
+.summary-insights-heatmap-cell[data-density="3"] { background: #fbbf68; }
+.summary-insights-heatmap-cell[data-density="4"] { background: #fb6f5a; }
+
+.summary-insights-heatmap-label {
+    display: block;
+    color: #1f2937;
+}
+
+.summary-insights-heatmap-count {
+    display: block;
+    color: #4b5563;
+    font-size: 0.64rem;
+}
+
+.summary-insights-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.summary-insights-chart-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.summary-insights-chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 240px;
+    max-height: 240px;
+}
+
+.summary-insights-chart-wrap canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 240px !important;
+}
+
+@media (max-width: 900px) {
+    .summary-insights-pulse-grid,
+    .summary-insights-chart-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.dp-bar-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+}
+
+.dp-bar-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.dp-bar-legend-label {
+    font-weight: 500;
+}
+
+/* ============================================================
+   OVERVIEW DELTA INDICATORS (Growth / Regression)
+   ============================================================ */
+.dashboard-stat-delta {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.dashboard-stat-delta.delta-positive {
+    color: #16A34A; /* green */
+}
+
+.dashboard-stat-delta.delta-negative {
+    color: #DC2626; /* red */
+}
+
+.dashboard-stat-delta.delta-neutral {
+    color: #6B7280; /* muted gray */
+}
+
+/* Scope to dashboard cards so rules never match unrelated ancestors. */
+.dashboard-card[data-view-mode="graph"] .view-mode-table-only { display: none !important; }
+.dashboard-card[data-view-mode="table"] .view-mode-graph-only { display: none !important; }
+
+/* After toggling to graph, inline display is cleared; keep STAR overview row as flex. */
+.star-performance-card .overview-star-layout.view-mode-graph-only {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 16px;
+}
+.view-mode-doughnut-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 280px;
+    margin: 8px auto 0;
+}
+.view-mode-doughnut-wrap canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.frenzy-purpose-breakdown-graph {
+    width: 100%;
+    overflow: visible;
+}
+
+.frenzy-summary-drill-wrapper .infractions-drill-inner {
+    overflow: visible;
+}
+
+.frenzy-purpose-breakdown-ring-card.infractions-ring-card {
+    background: transparent;
+    margin-left: 0;
+    padding: 0;
+    gap: 8px;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-title {
+    font-size: 1.74rem;
+    line-height: 1.05;
+    margin-bottom: 0;
+}
+
+.frenzy-purpose-breakdown-ring-wrap.view-mode-doughnut-wrap {
+    width: min(100%, 272px);
+    max-width: 272px;
+    height: 272px;
+    max-height: 272px;
+    min-height: 272px;
+    margin: 0 auto;
+    overflow: visible;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-legend {
+    margin-top: 6px;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-center {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-center-value {
+    font-size: 1.79rem;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-center-delta {
+    font-size: 0.81rem;
+    margin-top: 2px;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-legend-item {
+    font-size: 0.77rem;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-legend-name {
+    font-size: 0.87rem;
+    font-weight: 700;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-legend-meta {
+    font-size: 0.85rem;
+}
+
+.frenzy-purpose-breakdown-ring-card .infractions-ring-legend-swatch {
+    width: 10px;
+    height: 10px;
+    margin-top: 3px;
+}
+
+/* Overview card – Frenzy summary box (Point Card overview) */
+.overview-card .overview-frenzy-row {
+    width: 100%;
+}
+
+.overview-stat-frenzy-summary {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    gap: 10px;
+}
+
+.overview-frenzy-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.overview-frenzy-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.overview-frenzy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+.overview-frenzy-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 10px;
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    min-width: 0;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.overview-frenzy-item:hover {
+    border-color: var(--border-strong);
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+}
+
+.overview-frenzy-item-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.overview-frenzy-item-value-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    min-height: 2.4em;
+}
+
+.overview-frenzy-item-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    line-height: 1.2;
+    width: 100%;
+    text-align: center;
+}
+
+.overview-frenzy-item-delta {
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.15;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+    text-align: center;
+}
+
+
+/* Keep detail-card donut size large while inheriting the same legend/row
+   visual language as the main Overview infractions donut box. */
+
+.frenzy-overview-detail-card .overview-infractions-ring-wrap {
+    width: 96px;
+    height: 96px;
+    flex: 0 0 96px;
+    align-self: center;
+}
+
+.frenzy-overview-detail-card .overview-infractions-header {
+    justify-content: flex-start;
+    align-items: flex-start;
+    text-align: left;
+}
+
+@media (max-width: 640px) {
+    .overview-frenzy-grid {
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        gap: 8px;
+    }
+
+    .overview-frenzy-item {
+        padding: 7px 6px;
+    }
+
+    .overview-frenzy-item-value {
+        font-size: 1rem;
+    }
+
 }
