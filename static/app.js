@@ -18800,7 +18800,7 @@ function attachOverviewCardInteractions(container, data) {
             card.dataset.overviewCard = 'days_present';
             card.innerHTML = `
                 <div class="dashboard-card-header">
-                    <h3 class="dashboard-card-title">Days Present — Attendance Breakdown</h3>
+                    <h3 class="dashboard-card-title">Attendance</h3>
                 </div>
                 <div class="dashboard-card-body">
                     <p style="color:var(--text-secondary);font-size:0.85rem;">
@@ -18875,7 +18875,7 @@ function attachOverviewCardInteractions(container, data) {
         card.dataset.overviewCard = 'days_present';
         card.innerHTML = `
             <div class="dashboard-card-header">
-                <h3 class="dashboard-card-title">Days Present — Attendance Breakdown</h3>
+                <h3 class="dashboard-card-title">Attendance</h3>
                 <div class="view-mode-toggle" role="tablist" aria-label="Days Present view mode">
                     <button type="button" class="view-mode-toggle-btn active" data-days-present-view="graph" role="tab" aria-selected="true">Graph</button>
                     <button type="button" class="view-mode-toggle-btn" data-days-present-view="table" role="tab" aria-selected="false">Table</button>
