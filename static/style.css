@@ -4738,7 +4738,7 @@ a.dashboard-compare-toggle {
 
 .overview-gauge-fill--attendance-donut {
     transform-origin: 50% 50%;
-    transform: rotate(-90deg);
+    transform: rotate(90deg);
 }
 
 .overview-gauge-center--attendance-donut {
