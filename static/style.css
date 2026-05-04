@@ -1730,6 +1730,13 @@ table tbody tr:hover {
     min-width: 0;
 }
 
+.frenzy-purpose-legend:has(> .frenzy-purpose-legend-item:nth-child(5)) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 6px;
+}
+
 .frenzy-purpose-legend-item {
     display: flex;
     align-items: center;
@@ -7696,6 +7703,18 @@ tr[data-aggregate-day-label] {
     text-align: left;
 }
 
+/* If the infractions donut legend grows beyond 4 rows, switch to a 3-column grid */
+.overview-infractions-legend:has(> li:nth-child(5)) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 6px;
+}
+
+.overview-infractions-legend:has(> li:nth-child(5)) li {
+    margin-bottom: 0;
+}
+
 .overview-infractions-legend-item {
     display: flex;
     align-items: center;
@@ -8470,6 +8489,11 @@ tr[data-aggregate-day-label] {
     margin: 0 auto;
 }
 
+.days-present-donut-shell--day-of-week {
+    max-width: 280px;
+    height: 260px;
+}
+
 .days-present-donut-shell canvas {
     width: 100% !important;
     height: 100% !important;
@@ -8532,6 +8556,11 @@ tr[data-aggregate-day-label] {
     width: fit-content;
     margin-left: auto;
     margin-right: auto;
+}
+
+/* Dense donut legends: use 3 columns when there are more than 4 options */
+.days-present-legend:has(> .days-present-legend-item:nth-child(5)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .days-present-legend-item {
@@ -8825,6 +8854,25 @@ tr[data-aggregate-day-label] {
 
 .dashboard-stat-delta.delta-neutral {
     color: #6B7280; /* muted gray */
+}
+
+/* Chart.js HTML legend (doughnut charts): allow multi-column layout for dense legends */
+.chartjs-legend.chartjs-legend--cols-3 ul,
+ul.chartjs-legend.chartjs-legend--cols-3 {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px 10px;
+    justify-items: start;
+    width: 100%;
+}
+
+.chartjs-legend.chartjs-legend--cols-3 li,
+ul.chartjs-legend.chartjs-legend--cols-3 li {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
 }
 
 /* Scope to dashboard cards so rules never match unrelated ancestors. */

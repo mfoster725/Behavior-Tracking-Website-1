@@ -3492,7 +3492,7 @@ def summary():
             'infractions_by_type': infractions_by_type,
         }
 
-    def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance):
+    def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance, cur_attendance_by_day=None, prev_attendance_by_day=None):
         """Numeric deltas vs an equal-length prior window (e.g. previous 30 school days)."""
 
         def inf_total(st):
@@ -3505,6 +3505,24 @@ def summary():
         prev_star = (prev_stats.get('percentages') or {}).get('overall')
         cur_present = (cur_attendance or {}).get('present_pct')
         prev_present = (prev_attendance or {}).get('present_pct')
+        cur_present_cnt = int((cur_attendance or {}).get('present') or 0)
+        prev_present_cnt = int((prev_attendance or {}).get('present') or 0)
+        cur_excused = int((cur_attendance or {}).get('excused') or 0)
+        prev_excused = int((prev_attendance or {}).get('excused') or 0)
+        cur_unexcused = int((cur_attendance or {}).get('unexcused') or 0)
+        prev_unexcused = int((prev_attendance or {}).get('unexcused') or 0)
+        cur_by_day = cur_attendance_by_day or {}
+        prev_by_day = prev_attendance_by_day or {}
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+        def day_absence_total(by_day_map, day_label):
+            bucket = by_day_map.get(day_label) or {}
+            return int(bucket.get('excused') or 0) + int(bucket.get('unexcused') or 0)
+
+        day_of_week_absence_deltas = {
+            day: day_absence_total(cur_by_day, day) - day_absence_total(prev_by_day, day)
+            for day in day_order
+        }
 
         return {
             'infractions_delta': inf_total(cur_stats) - inf_total(prev_stats),
@@ -3512,10 +3530,52 @@ def summary():
             'resets_delta': int(cur_ai.get('total_resets') or 0) - int(prev_ai.get('total_resets') or 0),
             'present_pct_delta': None if cur_present is None or prev_present is None else round(
                 float(cur_present) - float(prev_present), 1),
+            'present_count_delta': cur_present_cnt - prev_present_cnt,
+            'excused_delta': cur_excused - prev_excused,
+            'unexcused_delta': cur_unexcused - prev_unexcused,
             'star_overall_delta': None if cur_star is None or prev_star is None else round(
                 float(cur_star) - float(prev_star), 1),
+            'day_of_week_absence_deltas': day_of_week_absence_deltas,
             'has_prior': True,
         }
+
+    def build_overview_trends_from_prior_window(cur_stats, cur_attendance, cur_attendance_by_day, cur_attendance_records):
+        """Fallback: compare current window to the immediately preceding set of school days.
+
+        Prefer an equal-length window immediately before the oldest day in the current window.
+        If history is shorter, use as many immediately preceding days as exist (partial prior).
+        """
+        cur_dates = sorted({r.date for r in (cur_attendance_records or [])}, reverse=True)
+        if not cur_dates:
+            return None
+
+        all_dates_desc = sorted({r.date for r in all_records_raw}, reverse=True)
+        oldest_cur_date = cur_dates[-1]
+        needed_days = len(cur_dates)
+        prior_dates = [d for d in all_dates_desc if d < oldest_cur_date][:needed_days]
+        if not prior_dates:
+            return None
+
+        prior_date_set = set(prior_dates)
+        prev_attendance_records = [r for r in all_records_raw if r.date in prior_date_set]
+        if not prev_attendance_records:
+            return None
+
+        prev_metric_records = [r for r in prev_attendance_records if r.attendance_status != 'excused']
+        prev_stats = calculate_summary_stats(prev_metric_records)
+        prev_attendance = compute_attendance_summary(prev_attendance_records)
+        prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+        trends = build_overview_trends(
+            cur_stats,
+            prev_stats,
+            cur_attendance,
+            prev_attendance,
+            cur_attendance_by_day,
+            prev_attendance_by_day
+        )
+        # Partial prior window: still useful for day-of-week deltas, but not a full symmetric window.
+        trends['has_prior'] = bool(len(prior_dates) >= needed_days)
+        return trends
 
     # Filter by period if specified (takes precedence over timeframe)
     if period:
@@ -3628,7 +3688,15 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary,
+                prev_attendance,
+                attendance_by_day,
+                prev_attendance_by_day
+            )
         elif period == 'weekly' and week_start and week_end:
             prev_week_start = week_start - timedelta(days=7)
             prev_week_end = week_end - timedelta(days=7)
@@ -3641,7 +3709,22 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary,
+                prev_attendance,
+                attendance_by_day,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary,
+                attendance_by_day,
+                attendance_records
+            )
         if overview_trends:
             result['overview_trends'] = overview_trends
         # Add metadata for weekly and 30-day periods
@@ -3688,7 +3771,22 @@ def summary():
         if prev_metric_records or prev_attendance_records:
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary_cur,
+                prev_attendance,
+                attendance_by_day_cur,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary_cur,
+                attendance_by_day_cur,
+                attendance_records_cur
+            )
 
         weekly_resp = {
             'timeframe': timeframe,
@@ -3749,7 +3847,22 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary_cur,
+                prev_attendance,
+                attendance_by_day_cur,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary_cur,
+                attendance_by_day_cur,
+                attendance_records_cur
+            )
 
         tf30_resp = {
             'timeframe': timeframe,
@@ -3960,7 +4073,16 @@ def summary():
         # "alltime" or "all" - use all records, single summary
         records = all_records
         stats = calculate_summary_stats(records)
-        return _summary_response({
+        attendance_records_all = list(all_records_raw)
+        attendance_summary_all = compute_attendance_summary(attendance_records_all)
+        attendance_by_day_all = compute_attendance_by_day_of_week(attendance_records_all)
+        overview_trends_all = build_overview_trends_from_prior_window(
+            stats,
+            attendance_summary_all,
+            attendance_by_day_all,
+            attendance_records_all
+        )
+        resp_alltime = {
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -3981,7 +4103,12 @@ def summary():
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
-        })
+            'attendance_summary': attendance_summary_all,
+            'attendance_by_day_of_week': attendance_by_day_all,
+        }
+        if overview_trends_all:
+            resp_alltime['overview_trends'] = overview_trends_all
+        return _summary_response(resp_alltime)
 
 @app.route('/api/case-manager-comparison', methods=['GET'])
 @limiter.limit("30 per minute")
