@@ -226,6 +226,39 @@ function baseChartOptions() {
     };
 }
 
+function wireChartJsDoughnutLegendColumns(chart) {
+    if (!chart || chart.config?.type !== 'doughnut') return;
+    const legendOpts = chart.options?.plugins?.legend;
+    if (!legendOpts || legendOpts.display === false) return;
+
+    const labelCount = Array.isArray(chart.data?.labels) ? chart.data.labels.length : 0;
+    const useThreeCols = labelCount > 4;
+
+    const apply = () => {
+        const root = chart.canvas?.parentElement;
+        const legendEl =
+            root?.querySelector?.('.chartjs-legend') ||
+            document.querySelector(`div.chartjs-legend[data-chart="${chart.id}"]`);
+        if (!legendEl) return;
+        const host = legendEl.classList?.contains('chartjs-legend')
+            ? legendEl
+            : legendEl.closest('.chartjs-legend') || legendEl;
+        host.classList.toggle('chartjs-legend--cols-3', useThreeCols);
+    };
+
+    const plugins = chart.config.plugins || (chart.config.plugins = []);
+    const hookName = '_donutLegendColsWired';
+    if (!plugins.some((p) => p && p[hookName])) {
+        plugins.push({
+            [hookName]: true,
+            afterUpdate: apply,
+            afterLayout: apply,
+        });
+    }
+
+    requestAnimationFrame(apply);
+}
+
 /* ------------------------------------------------------------
    RESPONSE ESCALATION (STEPPED LINE / STACKED AREA)
    ------------------------------------------------------------ */
@@ -305,7 +338,7 @@ function initInfractionCategoryChart() {
         return `${pct}%`;
     };
 
-    new Chart(ctx, {
+    const chart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels,
@@ -324,6 +357,7 @@ function initInfractionCategoryChart() {
             cutout: '58%',
         },
     });
+    wireChartJsDoughnutLegendColumns(chart);
 }
 
 /* ------------------------------------------------------------
