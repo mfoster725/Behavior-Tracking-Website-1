@@ -1,0 +1,11 @@
+{
+  "name": "cursor-flask-app",
+  "private": true,
+  "description": "After editing static/app.js, static/js/app-config.js, or static/js/app-marketplace-tab.js, run: npm run build:app",
+  "scripts": {
+    "build:app": "node scripts/build-app-bundle.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
