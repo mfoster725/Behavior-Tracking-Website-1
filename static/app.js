@@ -14646,39 +14646,6 @@ function renderMarketplaceAnalyticsCharts(data) {
     }
 }
 
-function wireChartJsDoughnutLegendColumns(chart) {
-    if (!chart || chart.config?.type !== 'doughnut') return;
-    const legendOpts = chart.options?.plugins?.legend;
-    if (!legendOpts || legendOpts.display === false) return;
-
-    const labelCount = Array.isArray(chart.data?.labels) ? chart.data.labels.length : 0;
-    const useThreeCols = labelCount > 4;
-
-    const apply = () => {
-        const root = chart.canvas?.parentElement;
-        const legendEl =
-            root?.querySelector?.('.chartjs-legend') ||
-            document.querySelector(`div.chartjs-legend[data-chart="${chart.id}"]`);
-        if (!legendEl) return;
-        const host = legendEl.classList?.contains('chartjs-legend')
-            ? legendEl
-            : legendEl.closest('.chartjs-legend') || legendEl;
-        host.classList.toggle('chartjs-legend--cols-3', useThreeCols);
-    };
-
-    const plugins = chart.config.plugins || (chart.config.plugins = []);
-    const hookName = '_donutLegendColsWired';
-    if (!plugins.some((p) => p && p[hookName])) {
-        plugins.push({
-            [hookName]: true,
-            afterUpdate: apply,
-            afterLayout: apply,
-        });
-    }
-
-    requestAnimationFrame(apply);
-}
-
 function renderMarketplaceAnalyticsDemographics(itemId) {
     var placeholder = document.getElementById('marketplace-analytics-demographics-placeholder');
     var chartsWrap = document.getElementById('marketplace-analytics-demographics-charts');
@@ -14736,7 +14703,6 @@ function renderMarketplaceAnalyticsDemographics(itemId) {
                 plugins: { legend: { position: 'bottom' } }
             }
         });
-        wireChartJsDoughnutLegendColumns(marketplaceAnalyticsCharts.color);
     }
 }
 
@@ -18892,9 +18858,6 @@ function attachOverviewCardInteractions(container, data) {
             ? maxAbsentDays[0]
             : 'No absences';
         const presentDelta = data.overview_trends?.present_pct_delta;
-        const presentCountDelta = data.overview_trends?.present_count_delta;
-        const excusedDelta = data.overview_trends?.excused_delta;
-        const unexcusedDelta = data.overview_trends?.unexcused_delta;
         let deltaText = '—';
         let deltaClass = 'delta-neutral';
         if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
@@ -19052,38 +19015,21 @@ function attachOverviewCardInteractions(container, data) {
         const donutValues = [attendancePresent, attendanceExcused, attendanceUnexcused];
         const donutColors = ['#16A34A', '#F59E0B', '#FB6F5A'];
         const hasDonutData = donutValues.some((value) => value > 0);
-        const dayOfWeekDeltas = data.overview_trends?.day_of_week_absence_deltas || {};
-        const normalizedDayOfWeekDeltas = Object.entries(dayOfWeekDeltas).reduce((acc, [label, value]) => {
-            acc[String(label || '').toLowerCase()] = Number(value);
-            return acc;
-        }, {});
         const drilldownLabels = sortedDayEntries.map(([day]) => day);
         const drilldownValues = sortedDayEntries.map(([, counts]) => (counts.excused || 0) + (counts.unexcused || 0));
         const hasDrilldownData = drilldownValues.some((value) => value > 0);
         if (donutCanvas && hasDonutData && typeof Chart !== 'undefined') {
             const legendDeltaForLabel = (label) => {
-                if (label === 'Present') {
-                    if (presentCountDelta == null || Number.isNaN(Number(presentCountDelta))) {
-                        return { text: '—', cls: 'delta-neutral' };
-                    }
-                    const n = Math.round(Number(presentCountDelta));
-                    if (n === 0) return { text: '0', cls: 'delta-neutral' };
-                    const sign = n > 0 ? '+' : '';
-                    return {
-                        text: `${sign}${n}`,
-                        cls: n > 0 ? 'delta-positive' : 'delta-negative'
-                    };
-                }
-                const raw = label === 'Excused' ? excusedDelta : unexcusedDelta;
-                if (raw == null || Number.isNaN(Number(raw))) {
+                if (label !== 'Present') return { text: '—', cls: 'delta-neutral' };
+                if (presentDelta == null || Number.isNaN(Number(presentDelta))) {
                     return { text: '—', cls: 'delta-neutral' };
                 }
-                const n = Math.round(Number(raw));
-                if (n === 0) return { text: '0', cls: 'delta-neutral' };
-                const sign = n > 0 ? '+' : '';
+                const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
+                if (roundedTenths === 0) return { text: '—', cls: 'delta-neutral' };
+                const sign = roundedTenths > 0 ? '+' : '';
                 return {
-                    text: `${sign}${n}`,
-                    cls: n > 0 ? 'delta-negative' : 'delta-positive'
+                    text: `${sign}${roundedTenths.toFixed(1)}%`,
+                    cls: roundedTenths > 0 ? 'delta-positive' : 'delta-negative'
                 };
             };
             const legendRows = donutLabels.map((label, idx) => {
@@ -19123,7 +19069,7 @@ function attachOverviewCardInteractions(container, data) {
                     rotation: 180,
                     cutout: '62%',
                     layout: {
-                        padding: { top: 22, right: 28, bottom: 34, left: 28 }
+                        padding: { top: 18, right: 22, bottom: 30, left: 22 }
                     },
                     plugins: {
                         legend: {
@@ -19136,7 +19082,6 @@ function attachOverviewCardInteractions(container, data) {
                             align: 'end',
                             offset: 6,
                             clamp: true,
-                            clip: false,
                             backgroundColor: (context) => {
                                 const idx = context.dataIndex || 0;
                                 return donutColors[idx % donutColors.length];
@@ -19174,10 +19119,8 @@ function attachOverviewCardInteractions(container, data) {
                     dayPanel.dataset.daysPresentTabPanel = tabName;
                     dayPanel.innerHTML = `
                         <div class="days-present-pie-heading">Absences by Day of Week</div>
-                        <div class="days-present-donut-main">
-                            <div class="days-present-donut-shell days-present-donut-shell--day-of-week">
-                                <canvas id="${drilldownCanvasId}" aria-label="Absence totals by day of week" role="img"></canvas>
-                            </div>
+                        <div class="days-present-donut-shell">
+                            <canvas id="${drilldownCanvasId}" aria-label="Absence totals by day of week" role="img"></canvas>
                         </div>
                     `;
                     daysPanelsContainer.appendChild(dayPanel);
@@ -19185,38 +19128,7 @@ function attachOverviewCardInteractions(container, data) {
                 }
                 const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
                 if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
-                    const drillPalette = ['#2563EB', '#7C3AED', '#0D9488', '#059669', '#EA580C', '#DC2626', '#475569'];
-                    const dayLegendRows = drilldownLabels.map((label, idx) => {
-                        const value = Number(drilldownValues[idx] || 0);
-                        const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
-                        const hasDelta = Number.isFinite(rawDelta);
-                        let delta = { text: '—', cls: 'delta-neutral' };
-                        if (hasDelta) {
-                            if (rawDelta === 0) {
-                                delta = { text: '0', cls: 'delta-neutral' };
-                            } else {
-                                delta = {
-                                    text: `${rawDelta > 0 ? '+' : ''}${rawDelta}`,
-                                    cls: rawDelta > 0 ? 'delta-positive' : 'delta-negative'
-                                };
-                            }
-                        }
-                        return `
-                            <div class="days-present-legend-item">
-                                <div class="days-present-legend-label">
-                                    <span class="days-present-legend-dot" style="background:${drillPalette[idx % drillPalette.length]};"></span>
-                                    <span>${escapeHtml(label)}</span>
-                                </div>
-                                <div class="days-present-legend-value">
-                                    ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                    const dayPanelMain = dayPanel.querySelector('.days-present-donut-main');
-                    if (dayPanelMain) {
-                        dayPanelMain.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${dayLegendRows}</div>`);
-                    }
+                    const drillPalette = ['#FB6F5A', '#F59E0B', '#4FB6B0', '#8CB79A', '#8B5CF6', '#60A5FA', '#14B8A6'];
                     new Chart(drilldownCanvas.getContext('2d'), {
                         type: 'doughnut',
                         data: {
@@ -19224,7 +19136,6 @@ function attachOverviewCardInteractions(container, data) {
                             datasets: [{
                                 data: drilldownValues,
                                 backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
-                                radius: '90%',
                                 borderColor: '#ffffff',
                                 borderWidth: 2,
                                 hoverOffset: 4
@@ -19236,24 +19147,25 @@ function attachOverviewCardInteractions(container, data) {
                             rotation: 180,
                             cutout: '62%',
                             layout: {
-                                padding: { top: 26, right: 36, bottom: 38, left: 36 }
+                                padding: { top: 18, right: 22, bottom: 30, left: 22 }
                             },
                             plugins: {
                                 legend: {
-                                    display: false
+                                    position: 'bottom',
+                                    labels: {
+                                        boxWidth: 12,
+                                        boxHeight: 12,
+                                        usePointStyle: true,
+                                        pointStyle: 'circle'
+                                    }
                                 },
                                 datalabels: {
-                                    color: '#ffffff',
+                                    color: '#111827',
                                     font: { size: 12, weight: '700' },
                                     anchor: 'end',
                                     align: 'end',
-                                    offset: 8,
+                                    offset: 6,
                                     clamp: true,
-                                    clip: false,
-                                    backgroundColor: (context) => {
-                                        const idx = context.dataIndex || 0;
-                                        return drillPalette[idx % drillPalette.length];
-                                    },
                                     borderRadius: 8,
                                     padding: { top: 6, right: 10, bottom: 6, left: 10 },
                                     formatter: (value, context) => {
