@@ -12065,6 +12065,38 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
         return typeof val === 'number' ? val : null;
     }
 
+    const deltaKey = categoryKey === 'overall' ? 'overall' : categoryKey;
+    const timeDeltaMap = data.overview_trends?.star_deltas_by_time || {};
+    const dayDeltaMap = data.overview_trends?.star_deltas_by_day_of_week || {};
+    const normalizeDeltaLabel = (label) => String(label || '').trim().toLowerCase();
+    const buildNormalizedDeltaMap = (rawMap) => {
+        const out = {};
+        Object.entries(rawMap || {}).forEach(([label, value]) => {
+            out[normalizeDeltaLabel(label)] = value;
+        });
+        return out;
+    };
+    const timeDeltaMapNorm = buildNormalizedDeltaMap(timeDeltaMap);
+    const dayDeltaMapNorm = buildNormalizedDeltaMap(dayDeltaMap);
+    const formatDrillDelta = (delta) => {
+        const n = Number(delta);
+        if (!Number.isFinite(n)) return 'No data';
+        if (Math.abs(n) < 0.000001) return '—';
+        return `${formatOverviewSignedInt(n)}%`;
+    };
+    const drillDeltaColor = (delta) => {
+        const n = Number(delta);
+        if (!Number.isFinite(n) || Math.abs(n) < 0.000001) return '#64748b';
+        return n > 0 ? '#16a34a' : '#dc2626';
+    };
+    const getBucketDelta = (map, normMap, label) => {
+        const raw = map?.[label]?.[deltaKey];
+        if (raw != null && Number.isFinite(Number(raw))) return raw;
+        const normRaw = normMap?.[normalizeDeltaLabel(label)]?.[deltaKey];
+        if (normRaw != null && Number.isFinite(Number(normRaw))) return normRaw;
+        return null;
+    };
+
     // Time-of-day stats
     let bestTime = null;
     let worstTime = null;
@@ -12073,8 +12105,8 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
             if (!bucket || !bucket.total_days) return;
             const pct = computeCategoryPercent(bucket);
             if (pct == null || isNaN(pct)) return;
-            if (!bestTime || pct > bestTime.percent) bestTime = { label, percent: pct };
-            if (!worstTime || pct < worstTime.percent) worstTime = { label, percent: pct };
+            if (!bestTime || pct > bestTime.percent) bestTime = { label, percent: pct, delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) };
+            if (!worstTime || pct < worstTime.percent) worstTime = { label, percent: pct, delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) };
         });
     }
 
@@ -12086,8 +12118,8 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
             if (!bucket || !bucket.total_days) return;
             const pct = computeCategoryPercent(bucket);
             if (pct == null || isNaN(pct)) return;
-            if (!bestDay || pct > bestDay.percent) bestDay = { label: day, percent: pct };
-            if (!worstDay || pct < worstDay.percent) worstDay = { label: day, percent: pct };
+            if (!bestDay || pct > bestDay.percent) bestDay = { label: day, percent: pct, delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, day) };
+            if (!worstDay || pct < worstDay.percent) worstDay = { label: day, percent: pct, delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, day) };
         });
     }
 
@@ -12119,6 +12151,7 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <th style="${thLeft}">Type</th>
                                             <th style="${thLeft}">Time Period</th>
                                             <th style="${thRight}">Average %</th>
+                                            <th style="${thRight}">Delta</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -12127,12 +12160,14 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestTime.label)}</td>
                                             <td style="${tdRight}">${bestTime.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(bestTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestTime.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstTime ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstTime.label)}</td>
                                             <td style="${tdRight}">${worstTime.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(worstTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstTime.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
                                 </table>
@@ -12151,6 +12186,7 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <th style="${thLeft}">Type</th>
                                             <th style="${thLeft}">Day</th>
                                             <th style="${thRight}">Average %</th>
+                                            <th style="${thRight}">Delta</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -12159,12 +12195,14 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestDay.label)}</td>
                                             <td style="${tdRight}">${bestDay.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(bestDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestDay.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstDay ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstDay.label)}</td>
                                             <td style="${tdRight}">${worstDay.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(worstDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstDay.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
                                 </table>
@@ -12217,6 +12255,38 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         const val = bucket.percentages[categoryKey];
         return typeof val === 'number' ? val : null;
     }
+
+    const deltaKey = categoryKey === 'overall' ? 'overall' : categoryKey;
+    const timeDeltaMap = data.overview_trends?.star_deltas_by_time || {};
+    const dayDeltaMap = data.overview_trends?.star_deltas_by_day_of_week || {};
+    const normalizeDeltaLabel = (label) => String(label || '').trim().toLowerCase();
+    const buildNormalizedDeltaMap = (rawMap) => {
+        const out = {};
+        Object.entries(rawMap || {}).forEach(([label, value]) => {
+            out[normalizeDeltaLabel(label)] = value;
+        });
+        return out;
+    };
+    const timeDeltaMapNorm = buildNormalizedDeltaMap(timeDeltaMap);
+    const dayDeltaMapNorm = buildNormalizedDeltaMap(dayDeltaMap);
+    const formatDrillDelta = (delta) => {
+        const n = Number(delta);
+        if (!Number.isFinite(n)) return 'No data';
+        if (Math.abs(n) < 0.000001) return '—';
+        return `${formatOverviewSignedInt(n)}%`;
+    };
+    const drillDeltaColor = (delta) => {
+        const n = Number(delta);
+        if (!Number.isFinite(n) || Math.abs(n) < 0.000001) return '#64748b';
+        return n > 0 ? '#16a34a' : '#dc2626';
+    };
+    const getBucketDelta = (map, normMap, label) => {
+        const raw = map?.[label]?.[deltaKey];
+        if (raw != null && Number.isFinite(Number(raw))) return raw;
+        const normRaw = normMap?.[normalizeDeltaLabel(label)]?.[deltaKey];
+        if (normRaw != null && Number.isFinite(Number(normRaw))) return normRaw;
+        return null;
+    };
 
     const setActiveDrillTab = (tabName) => {
         const allTabs = drillTabsContainer.querySelectorAll('.star-performance-drill-tab');
@@ -12300,17 +12370,17 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         btn.addEventListener('click', () => {
             const byTime = data.by_time || {};
             const rows = Object.entries(byTime)
-                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket), delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) }))
                 .filter(r => r.pct != null && !isNaN(r.pct))
                 .sort((a, b) => (b.pct || 0) - (a.pct || 0));
             let bodyRows = rows.map(r =>
-                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
             ).join('');
             const tableHtml = `
                 <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by time period</h4>
                 <table style="${tableStyle}">
-                    <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th></tr></thead>
-                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
+                    <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
                 </table>
             `;
             createOrUpdateDrillSubtab('by-time', 'By Time', tableHtml);
@@ -12326,17 +12396,17 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         btn.addEventListener('click', () => {
             const byDay = data.by_day_of_week || {};
             const rows = Object.entries(byDay)
-                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket), delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, label) }))
                 .filter(r => r.pct != null && !isNaN(r.pct))
                 .sort((a, b) => (b.pct || 0) - (a.pct || 0));
             let bodyRows = rows.map(r =>
-                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
             ).join('');
             const tableHtml = `
                 <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by day of week</h4>
                 <table style="${tableStyle}">
-                    <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th></tr></thead>
-                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
+                    <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
                 </table>
             `;
             createOrUpdateDrillSubtab('by-day', 'By Day', tableHtml);
@@ -17036,20 +17106,20 @@ async function exportChildData(studentId) {
 // ============================================================
 
 const DASHBOARD_COLORS = {
-    // STAR Performance bar colors (modern palette, same base: red, blue, green, yellow)
-    safety: '#EF4444',         // red
-    teamwork: '#3B82F6',       // blue
-    accountability: '#10B981', // green (emerald)
-    relationships: '#FACC15',  // yellow (reverted from warm gold)
-    palette: ['#EF4444', '#3B82F6', '#10B981', '#FACC15', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
+    // Keep STAR colors consistent with Overview STAR Percent gauge
+    safety: '#ff3b30',
+    teamwork: '#007aff',
+    accountability: '#34c759',
+    relationships: '#ffcc00',
+    palette: ['#ff3b30', '#007aff', '#34c759', '#ffcc00', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
 
-// Translucent bar colors for STAR Performance chart (same hues, less bold)
+// Use the exact same STAR colors as the Overview STAR Percent gauge
 const STAR_CHART_BAR_COLORS = [
-    'rgba(239, 68, 68, 0.65)',   // safety red
-    'rgba(59, 130, 246, 0.65)',  // teamwork blue
-    'rgba(16, 185, 129, 0.65)',  // accountability green
-    'rgba(250, 204, 21, 0.65)'   // relationships yellow
+    '#ff3b30', // safety
+    '#007aff', // teamwork
+    '#34c759', // accountability
+    '#ffcc00'  // relationships
 ];
 
 // ---- State ----
@@ -19893,6 +19963,27 @@ function attachOverviewCardInteractions(container, data) {
     const buildStarPerformanceCard = () => {
         const avgs = data.averages || {};
         const totalDays = data.total_days || 0;
+        const schoolDays = Number.isFinite(Number(data.available_data_points))
+            ? Number(data.available_data_points)
+            : totalDays;
+        const starTrendDeltas = [
+            data.overview_trends?.star_safety_delta ?? data.overview_trends?.safety_delta,
+            data.overview_trends?.star_teamwork_delta ?? data.overview_trends?.teamwork_delta,
+            data.overview_trends?.star_accountability_delta ?? data.overview_trends?.accountability_delta,
+            data.overview_trends?.star_relationships_delta ?? data.overview_trends?.relationships_delta
+        ];
+        const formatDeltaPercent = (delta) => {
+            const n = Number(delta);
+            if (!Number.isFinite(n)) return 'No data';
+            if (Math.abs(n) < 0.05) return '—';
+            return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
+        };
+        const deltaColor = (delta) => {
+            const n = Number(delta);
+            if (!Number.isFinite(n)) return '#64748b';
+            if (Math.abs(n) < 0.05) return '#64748b';
+            return n > 0 ? '#16a34a' : '#dc2626';
+        };
         const card = document.createElement('div');
         card.className = 'dashboard-card star-performance-card overview-extra-card';
         card.dataset.overviewCard = 'star_performance';
@@ -19910,7 +20001,7 @@ function attachOverviewCardInteractions(container, data) {
 
         const overviewContent = starFirstTimeText + `
             <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
-                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 260px; min-height:220px;">
+                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:0 0 265px; max-width:265px; min-height:220px; margin:0 auto;">
                     <canvas id="overview-star-chart"></canvas>
                 </div>
                 <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
@@ -19921,7 +20012,7 @@ function attachOverviewCardInteractions(container, data) {
                 <div class="dashboard-card-header star-performance-card-header">
                     <div>
                         <h3 class="dashboard-card-title">STAR Performance</h3>
-                        <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
+                        <div class="dashboard-card-subtitle">${schoolDays} school day${schoolDays !== 1 ? 's' : ''}</div>
                     </div>
                     ${starTitleHintBlock}
                 </div>
@@ -20040,7 +20131,8 @@ function attachOverviewCardInteractions(container, data) {
                         backgroundColor: STAR_CHART_BAR_COLORS,
                         borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
                         borderSkipped: false,
-                        maxBarThickness: 40
+                        barThickness: 35,
+                        maxBarThickness: 35
                     }]
                 },
                 options: {
@@ -20049,29 +20141,49 @@ function attachOverviewCardInteractions(container, data) {
                     plugins: {
                         legend: { display: false },
                         datalabels: {
-                            anchor: 'end',
-                            align: 'top',
-                            offset: 4,
-                            color: '#64748b',
-                            font: { weight: 400, size: 12 },
-                            formatter: (value) => `${Math.round(value)}%`
+                            labels: {
+                                value: {
+                                    anchor: 'end',
+                                    align: 'top',
+                                    offset: 18,
+                                    color: '#64748b',
+                                    font: { weight: 400, size: 12 },
+                                    formatter: (value) => `${Math.round(value)}%`
+                                },
+                                delta: {
+                                    anchor: 'end',
+                                    align: 'top',
+                                    offset: 2,
+                                    color: (context) => {
+                                        const idx = context?.dataIndex ?? 0;
+                                        return deltaColor(starTrendDeltas[idx]);
+                                    },
+                                    font: { weight: 600, size: 9 },
+                                    formatter: (_value, context) => {
+                                        const idx = context?.dataIndex ?? 0;
+                                        return formatDeltaPercent(starTrendDeltas[idx]);
+                                    }
+                                }
+                            }
                         }
                     },
                     layout: {
-                        padding: { top: 20, right: 20, bottom: 12, left: 12 }
+                        padding: { top: 20, right: 12, bottom: 4, left: 12 }
                     },
                     scales: {
                         x: {
                             grid: { display: false },
-                            barPercentage: 0.7,
-                            categoryPercentage: 0.85,
+                            barPercentage: 1.0,
+                            categoryPercentage: 1.0,
+                            // Keep edge bars fully inside the chart area (prevents clipping)
+                            offset: true,
                             ticks: {
-                                maxRotation: 0,
-                                minRotation: 0,
+                                maxRotation: 35,
+                                minRotation: 35,
                                 autoSkip: false,
                                 font: { size: 12 },
                                 color: '#64748b',
-                                padding: 10
+                                padding: 4
                             },
                             border: { display: false }
                         },

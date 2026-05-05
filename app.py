@@ -3341,6 +3341,13 @@ def summary():
                     'relationships': round(relationships_percent_day, 1),
                     'overall': round(overall_percent_day, 1)
                 },
+                'raw_percentages': {
+                    'safety': safety_percent_day,
+                    'teamwork': teamwork_percent_day,
+                    'accountability': accountability_percent_day,
+                    'relationships': relationships_percent_day,
+                    'overall': overall_percent_day
+                },
                 'total_infractions': total_infractions_day,
                 'total_reminders': day_data['total_reminders'],
                 'total_resets': day_data['total_resets']
@@ -3410,6 +3417,13 @@ def summary():
                     'accountability': round(accountability_percent_time, 1),
                     'relationships': round(relationships_percent_time, 1),
                     'overall': round(overall_percent_time, 1),
+                },
+                'raw_percentages': {
+                    'safety': safety_percent_time,
+                    'teamwork': teamwork_percent_time,
+                    'accountability': accountability_percent_time,
+                    'relationships': relationships_percent_time,
+                    'overall': overall_percent_time,
                 },
                 'total_infractions': total_infractions_time,
                 'infractions': dict(time_data.get('infractions', {})),
@@ -3501,6 +3515,8 @@ def summary():
 
         cur_ai = cur_stats.get('additional_info') or {}
         prev_ai = prev_stats.get('additional_info') or {}
+        cur_pct = cur_stats.get('percentages') or {}
+        prev_pct = prev_stats.get('percentages') or {}
         cur_star = (cur_stats.get('percentages') or {}).get('overall')
         prev_star = (prev_stats.get('percentages') or {}).get('overall')
         cur_present = (cur_attendance or {}).get('present_pct')
@@ -3519,10 +3535,55 @@ def summary():
             bucket = by_day_map.get(day_label) or {}
             return int(bucket.get('excused') or 0) + int(bucket.get('unexcused') or 0)
 
+        def bucket_pct(bucket, key):
+            if not bucket:
+                return None
+            pcts = bucket.get('raw_percentages') or bucket.get('percentages') or {}
+            val = pcts.get(key)
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        def build_star_delta_map(cur_map, prev_map):
+            keys = ('overall', 'safety', 'teamwork', 'accountability', 'relationships')
+            labels = set((cur_map or {}).keys()) | set((prev_map or {}).keys())
+            result = {}
+            for label in labels:
+                cur_bucket = (cur_map or {}).get(label) or {}
+                prev_bucket = (prev_map or {}).get(label) or {}
+                per_key = {}
+                for key in keys:
+                    cur_v = bucket_pct(cur_bucket, key)
+                    prev_v = bucket_pct(prev_bucket, key)
+                    per_key[key] = None if cur_v is None or prev_v is None else round(cur_v - prev_v, 1)
+                result[label] = per_key
+            return result
+
         day_of_week_absence_deltas = {
             day: day_absence_total(cur_by_day, day) - day_absence_total(prev_by_day, day)
             for day in day_order
         }
+
+        by_time_star_deltas = build_star_delta_map(
+            cur_stats.get('by_time') or {},
+            prev_stats.get('by_time') or {}
+        )
+        by_day_star_deltas = build_star_delta_map(
+            cur_stats.get('by_day_of_week') or {},
+            prev_stats.get('by_day_of_week') or {}
+        )
+
+        star_safety_delta = None if cur_pct.get('safety') is None or prev_pct.get('safety') is None else round(
+            float(cur_pct.get('safety')) - float(prev_pct.get('safety')), 1)
+        star_teamwork_delta = None if cur_pct.get('teamwork') is None or prev_pct.get('teamwork') is None else round(
+            float(cur_pct.get('teamwork')) - float(prev_pct.get('teamwork')), 1)
+        star_accountability_delta = None if cur_pct.get('accountability') is None or prev_pct.get('accountability') is None else round(
+            float(cur_pct.get('accountability')) - float(prev_pct.get('accountability')), 1)
+        star_relationships_delta = None if cur_pct.get('relationships') is None or prev_pct.get('relationships') is None else round(
+            float(cur_pct.get('relationships')) - float(prev_pct.get('relationships')), 1)
 
         return {
             'infractions_delta': inf_total(cur_stats) - inf_total(prev_stats),
@@ -3535,7 +3596,18 @@ def summary():
             'unexcused_delta': cur_unexcused - prev_unexcused,
             'star_overall_delta': None if cur_star is None or prev_star is None else round(
                 float(cur_star) - float(prev_star), 1),
+            'star_safety_delta': star_safety_delta,
+            'star_teamwork_delta': star_teamwork_delta,
+            'star_accountability_delta': star_accountability_delta,
+            'star_relationships_delta': star_relationships_delta,
+            # Backwards-compatible aliases for any existing frontend consumers.
+            'safety_delta': star_safety_delta,
+            'teamwork_delta': star_teamwork_delta,
+            'accountability_delta': star_accountability_delta,
+            'relationships_delta': star_relationships_delta,
             'day_of_week_absence_deltas': day_of_week_absence_deltas,
+            'star_deltas_by_time': by_time_star_deltas,
+            'star_deltas_by_day_of_week': by_day_star_deltas,
             'has_prior': True,
         }
 

@@ -6552,6 +6552,15 @@ a.dashboard-compare-toggle {
     display: block;
 }
 
+/* STAR Performance should stay the same column width as Overview
+   so chart auto-sizing does not cause width oscillation. */
+.dashboard-card.overview-extra-card[data-overview-card="star_performance"] {
+    width: calc(33% - 10px);
+    max-width: calc(33% - 10px);
+    min-width: 0;
+    display: block;
+}
+
 /* Trigger Times card: use full masonry column width so the graph heatmap can span the card */
 .dashboard-card.overview-extra-card[data-overview-card="trigger_times"] {
     width: 100%;
@@ -8647,6 +8656,12 @@ tr[data-aggregate-day-label] {
 
 @media (max-width: 980px) {
     .dashboard-card.overview-extra-card[data-overview-card="days_present"] {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .dashboard-card.overview-extra-card[data-overview-card="star_performance"] {
         width: 100%;
         max-width: 100%;
         min-width: 0;
