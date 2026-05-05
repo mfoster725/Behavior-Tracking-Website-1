@@ -239,6 +239,18 @@ function getCurrentSchoolYear() {
 
 // Load school year dates - automatically calculated (August to August)
 function loadSchoolYearDates() {
+    try {
+        const stored = localStorage.getItem('schoolYearDates');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && parsed.start && parsed.end) {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.error('Error loading school year dates from localStorage:', e);
+    }
+
     const currentSchoolYear = getCurrentSchoolYear();
     const [startYear, endYear] = currentSchoolYear.split('-').map(Number);
     return {
@@ -1049,6 +1061,11 @@ function setupEventListeners() {
         if (saveQuarterDatesBtn) {
             saveQuarterDatesBtn.addEventListener('click', saveQuarterDatesConfig);
         }
+
+        const extractCalendarPdfBtn = document.getElementById('extract-calendar-pdf-btn');
+        if (extractCalendarPdfBtn) {
+            extractCalendarPdfBtn.addEventListener('click', extractCalendarDatesFromPdf);
+        }
         
 
         const createAdminAccountBtn = document.getElementById('create-admin-account-btn');
@@ -1530,6 +1547,75 @@ function saveQuarterDatesConfig() {
     updateQuarterDisplay();
     
     showMessage('Quarter dates saved successfully!', 'success');
+}
+
+function renderCalendarPdfResults(message, type = 'success') {
+    const container = document.getElementById('calendar-pdf-results');
+    if (!container) return;
+    const bg = type === 'error' ? 'rgba(220, 38, 38, 0.1)' : 'rgba(22, 163, 74, 0.1)';
+    const border = type === 'error' ? '#dc2626' : '#16a34a';
+    const text = type === 'error' ? '#991b1b' : '#166534';
+    container.style.display = 'block';
+    container.style.background = bg;
+    container.style.border = `1px solid ${border}`;
+    container.style.color = text;
+    container.style.borderRadius = '6px';
+    container.style.padding = '10px';
+    container.innerHTML = message;
+}
+
+async function extractCalendarDatesFromPdf() {
+    const fileInput = document.getElementById('calendar-pdf-file');
+    const actionBtn = document.getElementById('extract-calendar-pdf-btn');
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        renderCalendarPdfResults('Please select a calendar PDF file first.', 'error');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+        renderCalendarPdfResults('Only PDF files are supported for calendar extraction.', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    if (actionBtn) actionBtn.disabled = true;
+    renderCalendarPdfResults('Extracting dates from calendar PDF...', 'success');
+
+    try {
+        const response = await fetch('/api/calendar/extract-school-year', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to extract school year dates.');
+        }
+
+        if (!data.quarters || !data.school_year) {
+            throw new Error('The server response did not include quarter/school-year dates.');
+        }
+
+        saveQuarterDates(data.quarters);
+        quarterDates = data.quarters;
+        saveSchoolYearDates(data.school_year);
+        loadQuarterConfig();
+        updateQuarterDisplay();
+
+        renderCalendarPdfResults(
+            `Detected school year: <strong>${data.school_year.start}</strong> to <strong>${data.school_year.end}</strong>.<br>` +
+            'Quarter 1-4 dates have been filled. Click "Save Quarter Dates" to confirm.',
+            'success'
+        );
+        showMessage('Calendar PDF parsed successfully. Quarter dates were applied.', 'success');
+    } catch (error) {
+        console.error('Error extracting calendar dates:', error);
+        renderCalendarPdfResults(`Error: ${error.message}`, 'error');
+    } finally {
+        if (actionBtn) actionBtn.disabled = false;
+    }
 }
 
 

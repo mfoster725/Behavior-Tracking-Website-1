@@ -655,6 +655,16 @@
                     <!-- Quarter Configuration -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                         <h3>Quarter Date Configuration</h3>
+                        <h4 style="margin: 0 0 8px 0; color: var(--primary-color);">Calendar PDF Import (NEW)</h4>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                            Upload a calendar PDF to auto-detect the current school year using
+                            <strong>first day of school</strong> and <strong>last day of school</strong>.
+                        </p>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+                            <input type="file" id="calendar-pdf-file" accept=".pdf,application/pdf">
+                            <button id="extract-calendar-pdf-btn" class="btn-primary" type="button">Extract Dates From PDF</button>
+                        </div>
+                        <div id="calendar-pdf-results" style="display: none; margin-bottom: 12px;"></div>
                         <p style="font-size: 13px; color: #666; margin-bottom: 15px;">Set the start and end dates for each quarter (MM/DD/YYYY format)</p>
                         <div id="quarter-config" style="display: grid; gap: 15px; margin-top: 15px;">
                             <!-- Quarter config will be loaded dynamically -->
@@ -1885,7 +1895,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc16"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc17"></script>
 </body>
 </html>
 

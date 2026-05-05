@@ -8,3 +8,4 @@ gunicorn==21.2.0
 psycopg[binary]==3.2.13
 gspread==6.1.4
 google-auth==2.36.0
+pypdf==6.10.2
