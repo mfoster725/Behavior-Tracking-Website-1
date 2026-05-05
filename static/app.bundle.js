@@ -1,3 +1,4 @@
+/* Built from static/js/app-config.js + static/app.js + static/js/app-marketplace-tab.js — edit those files, then run: npm run build:app */
 // Standard time periods
 const STANDARD_PERIODS = [
     { time: 'AM Bus', location: 'Bus' },
@@ -42,6 +43,7 @@ const INFRACTION_TYPES = {
     general: ['Lang', 'NFD', 'Off Task', 'MYOB', 'Self Control', 'Shutdown', 'Volume', 'Attention Seeking', 'Refusal', 'Personal Space'],
     harmful: ['Walk', 'Aggression', 'Property Destruction', 'Sexual Reference', 'Threat', 'Disrespectful']
 };
+
 
 let currentStudentId = null;
 let currentDate = new Date().toISOString().split('T')[0];
@@ -239,18 +241,6 @@ function getCurrentSchoolYear() {
 
 // Load school year dates - automatically calculated (August to August)
 function loadSchoolYearDates() {
-    try {
-        const stored = localStorage.getItem('schoolYearDates');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed && parsed.start && parsed.end) {
-                return parsed;
-            }
-        }
-    } catch (e) {
-        console.error('Error loading school year dates from localStorage:', e);
-    }
-
     const currentSchoolYear = getCurrentSchoolYear();
     const [startYear, endYear] = currentSchoolYear.split('-').map(Number);
     return {
@@ -1061,11 +1051,6 @@ function setupEventListeners() {
         if (saveQuarterDatesBtn) {
             saveQuarterDatesBtn.addEventListener('click', saveQuarterDatesConfig);
         }
-
-        const extractCalendarPdfBtn = document.getElementById('extract-calendar-pdf-btn');
-        if (extractCalendarPdfBtn) {
-            extractCalendarPdfBtn.addEventListener('click', extractCalendarDatesFromPdf);
-        }
         
 
         const createAdminAccountBtn = document.getElementById('create-admin-account-btn');
@@ -1547,75 +1532,6 @@ function saveQuarterDatesConfig() {
     updateQuarterDisplay();
     
     showMessage('Quarter dates saved successfully!', 'success');
-}
-
-function renderCalendarPdfResults(message, type = 'success') {
-    const container = document.getElementById('calendar-pdf-results');
-    if (!container) return;
-    const bg = type === 'error' ? 'rgba(220, 38, 38, 0.1)' : 'rgba(22, 163, 74, 0.1)';
-    const border = type === 'error' ? '#dc2626' : '#16a34a';
-    const text = type === 'error' ? '#991b1b' : '#166534';
-    container.style.display = 'block';
-    container.style.background = bg;
-    container.style.border = `1px solid ${border}`;
-    container.style.color = text;
-    container.style.borderRadius = '6px';
-    container.style.padding = '10px';
-    container.innerHTML = message;
-}
-
-async function extractCalendarDatesFromPdf() {
-    const fileInput = document.getElementById('calendar-pdf-file');
-    const actionBtn = document.getElementById('extract-calendar-pdf-btn');
-    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-        renderCalendarPdfResults('Please select a calendar PDF file first.', 'error');
-        return;
-    }
-
-    const file = fileInput.files[0];
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-        renderCalendarPdfResults('Only PDF files are supported for calendar extraction.', 'error');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    if (actionBtn) actionBtn.disabled = true;
-    renderCalendarPdfResults('Extracting dates from calendar PDF...', 'success');
-
-    try {
-        const response = await fetch('/api/calendar/extract-school-year', {
-            method: 'POST',
-            body: formData
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to extract school year dates.');
-        }
-
-        if (!data.quarters || !data.school_year) {
-            throw new Error('The server response did not include quarter/school-year dates.');
-        }
-
-        saveQuarterDates(data.quarters);
-        quarterDates = data.quarters;
-        saveSchoolYearDates(data.school_year);
-        loadQuarterConfig();
-        updateQuarterDisplay();
-
-        renderCalendarPdfResults(
-            `Detected school year: <strong>${data.school_year.start}</strong> to <strong>${data.school_year.end}</strong>.<br>` +
-            'Quarter 1-4 dates have been filled. Click "Save Quarter Dates" to confirm.',
-            'success'
-        );
-        showMessage('Calendar PDF parsed successfully. Quarter dates were applied.', 'success');
-    } catch (error) {
-        console.error('Error extracting calendar dates:', error);
-        renderCalendarPdfResults(`Error: ${error.message}`, 'error');
-    } finally {
-        if (actionBtn) actionBtn.disabled = false;
-    }
 }
 
 
@@ -12151,38 +12067,6 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
         return typeof val === 'number' ? val : null;
     }
 
-    const deltaKey = categoryKey === 'overall' ? 'overall' : categoryKey;
-    const timeDeltaMap = data.overview_trends?.star_deltas_by_time || {};
-    const dayDeltaMap = data.overview_trends?.star_deltas_by_day_of_week || {};
-    const normalizeDeltaLabel = (label) => String(label || '').trim().toLowerCase();
-    const buildNormalizedDeltaMap = (rawMap) => {
-        const out = {};
-        Object.entries(rawMap || {}).forEach(([label, value]) => {
-            out[normalizeDeltaLabel(label)] = value;
-        });
-        return out;
-    };
-    const timeDeltaMapNorm = buildNormalizedDeltaMap(timeDeltaMap);
-    const dayDeltaMapNorm = buildNormalizedDeltaMap(dayDeltaMap);
-    const formatDrillDelta = (delta) => {
-        const n = Number(delta);
-        if (!Number.isFinite(n)) return 'No data';
-        if (Math.abs(n) < 0.000001) return '—';
-        return `${formatOverviewSignedInt(n)}%`;
-    };
-    const drillDeltaColor = (delta) => {
-        const n = Number(delta);
-        if (!Number.isFinite(n) || Math.abs(n) < 0.000001) return '#64748b';
-        return n > 0 ? '#16a34a' : '#dc2626';
-    };
-    const getBucketDelta = (map, normMap, label) => {
-        const raw = map?.[label]?.[deltaKey];
-        if (raw != null && Number.isFinite(Number(raw))) return raw;
-        const normRaw = normMap?.[normalizeDeltaLabel(label)]?.[deltaKey];
-        if (normRaw != null && Number.isFinite(Number(normRaw))) return normRaw;
-        return null;
-    };
-
     // Time-of-day stats
     let bestTime = null;
     let worstTime = null;
@@ -12191,8 +12075,8 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
             if (!bucket || !bucket.total_days) return;
             const pct = computeCategoryPercent(bucket);
             if (pct == null || isNaN(pct)) return;
-            if (!bestTime || pct > bestTime.percent) bestTime = { label, percent: pct, delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) };
-            if (!worstTime || pct < worstTime.percent) worstTime = { label, percent: pct, delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) };
+            if (!bestTime || pct > bestTime.percent) bestTime = { label, percent: pct };
+            if (!worstTime || pct < worstTime.percent) worstTime = { label, percent: pct };
         });
     }
 
@@ -12204,8 +12088,8 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
             if (!bucket || !bucket.total_days) return;
             const pct = computeCategoryPercent(bucket);
             if (pct == null || isNaN(pct)) return;
-            if (!bestDay || pct > bestDay.percent) bestDay = { label: day, percent: pct, delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, day) };
-            if (!worstDay || pct < worstDay.percent) worstDay = { label: day, percent: pct, delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, day) };
+            if (!bestDay || pct > bestDay.percent) bestDay = { label: day, percent: pct };
+            if (!worstDay || pct < worstDay.percent) worstDay = { label: day, percent: pct };
         });
     }
 
@@ -12237,7 +12121,6 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <th style="${thLeft}">Type</th>
                                             <th style="${thLeft}">Time Period</th>
                                             <th style="${thRight}">Average %</th>
-                                            <th style="${thRight}">Delta</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -12246,14 +12129,12 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestTime.label)}</td>
                                             <td style="${tdRight}">${bestTime.percent.toFixed(1)}%</td>
-                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(bestTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestTime.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstTime ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstTime.label)}</td>
                                             <td style="${tdRight}">${worstTime.percent.toFixed(1)}%</td>
-                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(worstTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstTime.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
                                 </table>
@@ -12272,7 +12153,6 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <th style="${thLeft}">Type</th>
                                             <th style="${thLeft}">Day</th>
                                             <th style="${thRight}">Average %</th>
-                                            <th style="${thRight}">Delta</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -12281,14 +12161,12 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestDay.label)}</td>
                                             <td style="${tdRight}">${bestDay.percent.toFixed(1)}%</td>
-                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(bestDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestDay.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstDay ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstDay.label)}</td>
                                             <td style="${tdRight}">${worstDay.percent.toFixed(1)}%</td>
-                                            <td style="${tdRight}"><span style="color:${drillDeltaColor(worstDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstDay.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
                                 </table>
@@ -12341,38 +12219,6 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         const val = bucket.percentages[categoryKey];
         return typeof val === 'number' ? val : null;
     }
-
-    const deltaKey = categoryKey === 'overall' ? 'overall' : categoryKey;
-    const timeDeltaMap = data.overview_trends?.star_deltas_by_time || {};
-    const dayDeltaMap = data.overview_trends?.star_deltas_by_day_of_week || {};
-    const normalizeDeltaLabel = (label) => String(label || '').trim().toLowerCase();
-    const buildNormalizedDeltaMap = (rawMap) => {
-        const out = {};
-        Object.entries(rawMap || {}).forEach(([label, value]) => {
-            out[normalizeDeltaLabel(label)] = value;
-        });
-        return out;
-    };
-    const timeDeltaMapNorm = buildNormalizedDeltaMap(timeDeltaMap);
-    const dayDeltaMapNorm = buildNormalizedDeltaMap(dayDeltaMap);
-    const formatDrillDelta = (delta) => {
-        const n = Number(delta);
-        if (!Number.isFinite(n)) return 'No data';
-        if (Math.abs(n) < 0.000001) return '—';
-        return `${formatOverviewSignedInt(n)}%`;
-    };
-    const drillDeltaColor = (delta) => {
-        const n = Number(delta);
-        if (!Number.isFinite(n) || Math.abs(n) < 0.000001) return '#64748b';
-        return n > 0 ? '#16a34a' : '#dc2626';
-    };
-    const getBucketDelta = (map, normMap, label) => {
-        const raw = map?.[label]?.[deltaKey];
-        if (raw != null && Number.isFinite(Number(raw))) return raw;
-        const normRaw = normMap?.[normalizeDeltaLabel(label)]?.[deltaKey];
-        if (normRaw != null && Number.isFinite(Number(normRaw))) return normRaw;
-        return null;
-    };
 
     const setActiveDrillTab = (tabName) => {
         const allTabs = drillTabsContainer.querySelectorAll('.star-performance-drill-tab');
@@ -12456,17 +12302,17 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         btn.addEventListener('click', () => {
             const byTime = data.by_time || {};
             const rows = Object.entries(byTime)
-                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket), delta: getBucketDelta(timeDeltaMap, timeDeltaMapNorm, label) }))
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
                 .filter(r => r.pct != null && !isNaN(r.pct))
                 .sort((a, b) => (b.pct || 0) - (a.pct || 0));
             let bodyRows = rows.map(r =>
-                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
             ).join('');
             const tableHtml = `
                 <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by time period</h4>
                 <table style="${tableStyle}">
-                    <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
-                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
+                    <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
                 </table>
             `;
             createOrUpdateDrillSubtab('by-time', 'By Time', tableHtml);
@@ -12482,17 +12328,17 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
         btn.addEventListener('click', () => {
             const byDay = data.by_day_of_week || {};
             const rows = Object.entries(byDay)
-                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket), delta: getBucketDelta(dayDeltaMap, dayDeltaMapNorm, label) }))
+                .map(([label, bucket]) => ({ label, pct: computeCategoryPercent(bucket) }))
                 .filter(r => r.pct != null && !isNaN(r.pct))
                 .sort((a, b) => (b.pct || 0) - (a.pct || 0));
             let bodyRows = rows.map(r =>
-                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
+                `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td></tr>`
             ).join('');
             const tableHtml = `
                 <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by day of week</h4>
                 <table style="${tableStyle}">
-                    <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
-                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
+                    <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th></tr></thead>
+                    <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="2">No data</td></tr>'}</tbody>
                 </table>
             `;
             createOrUpdateDrillSubtab('by-day', 'By Day', tableHtml);
@@ -14272,6 +14118,5374 @@ window.showPdfTableSelectionModal = showPdfTableSelectionModal;
 window.closePdfTableSelectionModal = closePdfTableSelectionModal;
 window.generatePdfFromModal = generatePdfFromModal;
 
+
+function loadNotifications() {
+    fetch('/api/notifications').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+        var unread = list.filter(function (n) { return !n.read_at; });
+        var badge = document.getElementById('notifications-badge');
+        if (badge) {
+            badge.style.display = unread.length ? 'inline-flex' : 'none';
+            badge.textContent = unread.length > 99 ? '99+' : unread.length;
+        }
+        var listEl = document.getElementById('notifications-list');
+        if (!listEl) return;
+        listEl.innerHTML = list.slice(0, 30).map(function (n) {
+            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
+                '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
+                '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+                '</div>';
+        }).join('');
+        listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
+            el.addEventListener('click', function () {
+                var id = parseInt(el.getAttribute('data-notification-id'), 10);
+                fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
+            });
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var bell = document.getElementById('notifications-bell-btn');
+    var wrap = document.getElementById('notifications-bell-wrap');
+    var dropdown = document.getElementById('notifications-dropdown');
+    if (bell && dropdown) {
+        bell.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var show = dropdown.style.display === 'block';
+            dropdown.style.display = show ? 'none' : 'block';
+            if (!show) loadNotifications();
+        });
+    }
+    document.addEventListener('click', function (e) {
+        var d = document.getElementById('notifications-dropdown');
+        var w = document.getElementById('notifications-bell-wrap');
+        if (d && w && !w.contains(e.target)) d.style.display = 'none';
+    });
+    var markAll = document.getElementById('notifications-mark-all-read');
+    if (markAll) markAll.addEventListener('click', function () {
+        fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications(); });
+    });
+});
+
+// ==================== BANK ACCOUNT FUNCTIONALITY ====================
+
+let allMarketplaceItems = [];
+let currentPurchaseItem = null;
+
+// Load bank account data
+async function loadBankAccount(studentId) {
+    if (!studentId) {
+        // Still show UI with default values
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+        
+        const transactionsList = document.getElementById('transactions-list');
+        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/bank-account/${studentId}`);
+        if (!response.ok) {
+            // If account doesn't exist, show default UI
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) {
+            // Try to get student name
+            const student = allStudents.find(s => s.id === studentId);
+            if (student) studentName.textContent = student.name;
+            else studentName.textContent = window.currentUser.name || 'Student';
+        }
+            
+            const transactionsList = document.getElementById('transactions-list');
+            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+            return;
+        }
+        
+        const data = await response.json();
+        
+        // Update balance display
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = `$${data.balance.toFixed(2)}`;
+        if (studentName) {
+            const student = allStudents.find(s => s.id === studentId);
+            if (student) studentName.textContent = student.name;
+            else studentName.textContent = window.currentUser.name || 'Student';
+        }
+        
+        // Ensure balance section is visible
+        const balanceSection = document.getElementById('bank-balance-section');
+        if (balanceSection) balanceSection.style.display = 'block';
+        
+        // Load transactions (include Starbucks as a synthetic deposit line item if present)
+        const starbucksTotal = typeof data.starbucks_total === 'number'
+            ? data.starbucks_total
+            : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
+        const baseTransactions = data.transactions || [];
+        let transactionsWithStarbucks = baseTransactions.slice();
+
+        if (starbucksTotal > 0) {
+            const starbucksDollarValue = starbucksTotal * 0.10;
+            const nowIso = new Date().toISOString();
+            const lastBalanceAfter = baseTransactions.length
+                ? Number(baseTransactions[0].balance_after || baseTransactions[baseTransactions.length - 1].balance_after || 0)
+                : Number(data.balance || 0);
+
+            transactionsWithStarbucks.push({
+                id: 'starbucks',
+                type: 'deposit',
+                amount: starbucksDollarValue,
+                balance_after: lastBalanceAfter + starbucksDollarValue,
+                description: `Starbucks (${starbucksTotal} × $0.10)`,
+                created_at: nowIso,
+            });
+        }
+
+        renderTransactions(transactionsWithStarbucks);
+        
+        // Load paychecks
+        await loadPaychecks(studentId);
+        
+        currentBankStudentId = studentId;
+    } catch (error) {
+        console.error('Error loading bank account:', error);
+        // Still show UI with default values
+        const balanceAmount = document.getElementById('bank-balance-amount');
+        const studentName = document.getElementById('bank-student-name');
+        if (balanceAmount) balanceAmount.textContent = '$0.00';
+        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+        
+        const transactionsList = document.getElementById('transactions-list');
+        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+    }
+}
+
+// Bank account refresh button
+document.addEventListener('DOMContentLoaded', () => {
+    const refreshBtn = document.getElementById('bank-refresh-btn');
+    if (refreshBtn && !refreshBtn._bankBound) {
+        refreshBtn._bankBound = true;
+        refreshBtn.addEventListener('click', () => {
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
+                loadBankAccount(currentBankStudentId);
+            }
+        });
+    }
+});
+
+// Load paychecks
+async function loadPaychecks(studentId) {
+    if (!studentId) {
+        window.paychecksData = [];
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/paychecks/${studentId}`);
+        if (!response.ok) {
+            window.paychecksData = [];
+            return;
+        }
+        
+        const paychecks = await response.json();
+        
+        // Do not auto-show worksheet: worksheet is only shown when the student
+        // selects a paycheck from the Undeposited modal.
+        const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+        if (worksheetDiv) worksheetDiv.style.display = 'none';
+        
+        // Store paychecks for modal
+        window.paychecksData = paychecks || [];
+        
+        // Highlight Undeposited button when there are one or more undeposited paychecks
+        updateUndepositedButtonHighlight();
+    } catch (error) {
+        console.error('Error loading paychecks:', error);
+        window.paychecksData = [];
+    }
+}
+
+// Currency helpers for paycheck worksheet
+function parseCurrency(str) {
+    if (str == null || str === '') return NaN;
+    const cleaned = String(str).replace(/[$,]/g, '').trim();
+    return cleaned === '' ? NaN : parseFloat(cleaned);
+}
+function formatCurrency(num) {
+    if (num === '' || num == null || isNaN(parseFloat(num))) return '';
+    const n = parseFloat(num);
+    return '$' + n.toFixed(2);
+}
+
+// Render paycheck worksheet
+function renderPaycheckWorksheet(paycheck) {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (!worksheetDiv) return;
+    
+    worksheetDiv.style.display = 'block';
+    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(2);
+    
+    // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
+    const citationListEl = document.getElementById('worksheet-citation-list');
+    if (citationListEl) {
+        const list = paycheck.citation_list || [];
+        if (!list.length) {
+            citationListEl.textContent = '(none this week)';
+        } else {
+            const counts = {};
+            list.forEach(function (type) {
+                counts[type] = (counts[type] || 0) + 1;
+            });
+            const lines = Object.keys(counts)
+                .sort(function (a, b) {
+                    const diff = counts[b] - counts[a];
+                    return diff !== 0 ? diff : (a < b ? -1 : a > b ? 1 : 0);
+                })
+                .map(function (type) {
+                    return counts[type] + 'x ' + type;
+                });
+            citationListEl.textContent = lines.join('\n');
+        }
+    }
+    
+    // Store paycheck ID
+    worksheetDiv.dataset.paycheckId = paycheck.id;
+    
+    // Pre-fill inputs if this is a retry (worksheet was completed but not verified)
+    if (paycheck.worksheet_completed && !paycheck.is_verified && paycheck.student_calculated_pay) {
+        document.getElementById('worksheet-calculated-pay').value = formatCurrency(paycheck.student_calculated_pay);
+        document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
+        document.getElementById('worksheet-calculated-deduction').value = formatCurrency(paycheck.student_calculated_deduction);
+        document.getElementById('worksheet-calculated-final').value = formatCurrency(paycheck.student_calculated_final);
+    } else {
+        // Clear inputs for new worksheet
+        document.getElementById('worksheet-calculated-pay').value = '';
+        document.getElementById('worksheet-calculated-citations').value = '';
+        document.getElementById('worksheet-calculated-deduction').value = '';
+        document.getElementById('worksheet-calculated-final').value = '';
+    }
+    
+    // Clear error/success messages
+    document.getElementById('worksheet-error').style.display = 'none';
+    document.getElementById('worksheet-success').style.display = 'none';
+}
+
+// Submit paycheck worksheet
+async function submitPaycheckWorksheet() {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (!worksheetDiv) return;
+    
+    const paycheckId = worksheetDiv.dataset.paycheckId;
+    if (!paycheckId) return;
+    
+    const calculatedPay = parseCurrency(document.getElementById('worksheet-calculated-pay').value);
+    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value, 10);
+    const calculatedDeduction = parseCurrency(document.getElementById('worksheet-calculated-deduction').value);
+    const calculatedFinal = parseCurrency(document.getElementById('worksheet-calculated-final').value);
+    
+    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal)) {
+        document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
+        document.getElementById('worksheet-error').style.display = 'block';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/paycheck/${paycheckId}/complete-worksheet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                calculated_pay: calculatedPay,
+                calculated_citations: calculatedCitations,
+                calculated_deduction: calculatedDeduction,
+                calculated_final: calculatedFinal
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.verified) {
+            document.getElementById('worksheet-success').textContent = data.message;
+            document.getElementById('worksheet-success').style.display = 'block';
+            document.getElementById('worksheet-error').style.display = 'none';
+            
+            // Reload paychecks so Undeposited button highlight updates
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) loadPaychecks(currentBankStudentId);
+            // Reload bank account
+            setTimeout(() => {
+                loadBankAccount(currentBankStudentId);
+            }, 1000);
+        } else {
+            document.getElementById('worksheet-error').textContent = data.message || 'Some calculations are incorrect';
+            document.getElementById('worksheet-error').style.display = 'block';
+            if (data.errors) {
+                document.getElementById('worksheet-error').innerHTML = data.errors.join('<br>');
+            }
+            // Don't hide the worksheet - allow unlimited retries
+            // Clear success message if it was showing
+            document.getElementById('worksheet-success').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error submitting worksheet:', error);
+        document.getElementById('worksheet-error').textContent = 'Error submitting worksheet';
+        document.getElementById('worksheet-error').style.display = 'block';
+    }
+}
+
+// Highlight Undeposited button when student has one or more undeposited paychecks
+function updateUndepositedButtonHighlight() {
+    const btn = document.getElementById('view-undeposited-paychecks-btn');
+    if (!btn) return;
+    const hasUndeposited = window.paychecksData && window.paychecksData.some(
+        p => !p.worksheet_completed || !p.is_verified
+    );
+    if (hasUndeposited) {
+        btn.classList.add('undeposited-highlight');
+    } else {
+        btn.classList.remove('undeposited-highlight');
+    }
+}
+
+// Open worksheet for a specific paycheck (called when student selects from Undeposited modal).
+// Fetches fresh paycheck data so citation_list and amounts reflect current infractions.
+async function openWorksheetForPaycheck(paycheckId) {
+    try {
+        const response = await fetch(`/api/paycheck/${paycheckId}`);
+        if (!response.ok) return;
+        const paycheck = await response.json();
+        renderPaycheckWorksheet(paycheck);
+        closePaychecksModal();
+    } catch (error) {
+        console.error('Error loading paycheck for worksheet:', error);
+    }
+}
+
+// View paychecks modal - filtered by deposited/undeposited
+function viewPaychecksModal(filterType) {
+    const modal = document.getElementById('paychecks-modal');
+    const content = document.getElementById('paychecks-modal-content');
+    
+    if (!window.paychecksData || window.paychecksData.length === 0) {
+        content.innerHTML = '<p>No paychecks found.</p>';
+        modal.style.display = 'block';
+        return;
+    }
+    
+    // Filter paychecks based on type
+    let filteredPaychecks = [];
+    if (filterType === 'deposited') {
+        // Deposited: worksheet completed AND verified
+        filteredPaychecks = window.paychecksData.filter(p => p.is_verified === true);
+    } else if (filterType === 'undeposited') {
+        // Undeposited: worksheet not completed OR not verified
+        filteredPaychecks = window.paychecksData.filter(p => !p.worksheet_completed || !p.is_verified);
+    } else {
+        // Show all if no filter
+        filteredPaychecks = window.paychecksData;
+    }
+    
+    if (filteredPaychecks.length === 0) {
+        const message = filterType === 'deposited' ? 'No deposited paychecks found.' : 'No undeposited paychecks found.';
+        content.innerHTML = `<p>${message}</p>`;
+        modal.style.display = 'block';
+        return;
+    }
+    
+    const isUndeposited = filterType === 'undeposited';
+    let html = `<h3 style="margin-bottom: 15px;">${filterType === 'deposited' ? 'Deposited' : 'Undeposited'} Paychecks</h3>`;
+    if (isUndeposited) {
+        html += '<p style="margin-bottom: 15px; color: #64748b;">Select a paycheck to complete its worksheet.</p>';
+    }
+    html += '<table style="width: 100%; border-collapse: collapse;"><thead><tr>';
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">Period</th>';
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">STAR %</th>';
+    if (!isUndeposited) {
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Base Pay</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Citations</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Deduction</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Final Pay</th>';
+    }
+    html += '<th style="padding: 10px; border: 1px solid var(--border);">Status</th>';
+    if (isUndeposited) {
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Action</th>';
+    }
+    html += '</tr></thead><tbody>';
+    
+    filteredPaychecks.forEach(p => {
+        html += '<tr>';
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.pay_period_start} - ${p.pay_period_end}</td>`;
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${Number(p.average_star_percent).toFixed(2)}%</td>`;
+        if (!isUndeposited) {
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.base_pay.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.citation_count}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.citation_deduction.toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.final_pay.toFixed(2)}</td>`;
+        }
+        let status = 'Incomplete';
+        if (p.is_verified) {
+            status = 'Deposited';
+        } else if (p.worksheet_completed) {
+            status = 'Pending Verification';
+        }
+        html += `<td style="padding: 10px; border: 1px solid var(--border);">${status}</td>`;
+        if (isUndeposited) {
+            html += `<td style="padding: 10px; border: 1px solid var(--border);"><button type="button" class="btn-primary" style="background: #10b981; border-color: #10b981; padding: 6px 12px; font-size: 13px;" onclick="openWorksheetForPaycheck(${p.id})">Complete worksheet</button></td>`;
+        }
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    content.innerHTML = html;
+    modal.style.display = 'block';
+}
+
+function closePaychecksModal() {
+    document.getElementById('paychecks-modal').style.display = 'none';
+}
+
+// Load marketplace items
+async function loadMarketplaceItems() {
+    try {
+        const response = await fetch('/api/marketplace-items');
+        if (!response.ok) throw new Error('Failed to load marketplace items');
+        
+        allMarketplaceItems = await response.json();
+        renderMarketplaceItems();
+    } catch (error) {
+        console.error('Error loading marketplace items:', error);
+    }
+}
+
+// Render marketplace items
+function renderMarketplaceItems() {
+    const grid = document.getElementById('marketplace-grid');
+    if (!grid) return;
+    
+    const filter = document.getElementById('marketplace-filter')?.value || 'all';
+    
+    let items = allMarketplaceItems;
+    if (filter === 'global') {
+        items = items.filter(i => i.is_global || i.is_approved_for_global);
+    } else if (filter === 'case-manager') {
+        items = items.filter(i => !i.is_global && !i.is_approved_for_global);
+    }
+    
+    if (items.length === 0) {
+        grid.innerHTML = '<p>No items available.</p>';
+        return;
+    }
+    
+    grid.innerHTML = items.map(item => `
+        <div class="marketplace-item-card" style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <h4 style="margin: 0 0 10px 0;">${item.name}</h4>
+            <p style="color: var(--text-secondary); margin: 0 0 15px 0;">${item.description || 'No description'}</p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 1.5em; font-weight: bold; color: var(--accent);">$${item.price.toFixed(2)}</span>
+                ${window.currentUser.role === 'student' ? `<button onclick="openPurchaseModal(${item.id})" class="btn-primary" style="background: #10b981; border-color: #10b981;">Purchase</button>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Open purchase modal
+async function openPurchaseModal(itemId) {
+    const item = allMarketplaceItems.find(i => i.id === itemId);
+    if (!item) return;
+    
+    currentPurchaseItem = item;
+    
+    const modal = document.getElementById('purchase-modal');
+    const content = document.getElementById('purchase-modal-content');
+    
+    // Get current balance
+    const balanceResponse = await fetch(`/api/bank-account/${currentBankStudentId}`);
+    const balanceData = await balanceResponse.json();
+    const currentBalance = balanceData.balance;
+    const newBalance = currentBalance - item.price;
+    
+    content.innerHTML = `
+        <div style="margin-bottom: 20px;">
+            <h3>${item.name}</h3>
+            <p>${item.description || 'No description'}</p>
+            <p style="font-size: 1.2em; margin: 15px 0;"><strong>Price: $${item.price.toFixed(2)}</strong></p>
+        </div>
+        <div style="margin-bottom: 20px;">
+            <p>Current Balance: <strong>$${currentBalance.toFixed(2)}</strong></p>
+            <p>Balance After Purchase: <strong>$${newBalance.toFixed(2)}</strong></p>
+        </div>
+        <div class="form-group">
+            <label>Enter calculated balance after purchase:</label>
+            <input type="number" id="purchase-calculated-balance" step="0.01" placeholder="Enter calculated balance" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+        </div>
+        <div id="purchase-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
+        <div style="margin-top: 20px; display: flex; gap: 10px;">
+            <button onclick="submitPurchase()" class="btn-primary" style="background: #10b981; border-color: #10b981;">Submit Purchase</button>
+            <button onclick="closePurchaseModal()" class="btn-secondary">Cancel</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+}
+
+function closePurchaseModal() {
+    document.getElementById('purchase-modal').style.display = 'none';
+    currentPurchaseItem = null;
+}
+
+// Submit purchase
+async function submitPurchase() {
+    if (!currentPurchaseItem || !currentBankStudentId) return;
+    
+    const calculatedBalance = parseFloat(document.getElementById('purchase-calculated-balance').value);
+    
+    if (isNaN(calculatedBalance)) {
+        document.getElementById('purchase-error').textContent = 'Please enter calculated balance';
+        document.getElementById('purchase-error').style.display = 'block';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/purchase-orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                item_id: currentPurchaseItem.id,
+                calculated_balance_after: calculatedBalance
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage('Purchase order created successfully!', 'success');
+            closePurchaseModal();
+            loadBankAccount(currentBankStudentId);
+        } else {
+            document.getElementById('purchase-error').textContent = data.error || 'Error creating purchase order';
+            document.getElementById('purchase-error').style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error submitting purchase:', error);
+        document.getElementById('purchase-error').textContent = 'Error submitting purchase';
+        document.getElementById('purchase-error').style.display = 'block';
+    }
+}
+
+// Load purchase orders
+async function loadPurchaseOrders() {
+    try {
+        const response = await fetch('/api/purchase-orders');
+        if (!response.ok) throw new Error('Failed to load purchase orders');
+        
+        const orders = await response.json();
+        renderPurchaseOrders(orders);
+    } catch (error) {
+        console.error('Error loading purchase orders:', error);
+    }
+}
+
+// Render purchase orders
+function renderPurchaseOrders(orders) {
+    const list = document.getElementById('purchase-orders-list');
+    if (!list) return;
+    
+    const pendingOrders = orders.filter(o => o.status === 'pending');
+    
+    if (pendingOrders.length === 0) {
+        list.innerHTML = '<p>No pending purchase orders.</p>';
+        return;
+    }
+    
+    list.innerHTML = pendingOrders.map(order => `
+        <div class="purchase-order-card" style="background: var(--bg-elevated); padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid var(--border);">
+            <h4 style="margin: 0 0 10px 0;">${order.item_name}</h4>
+            <p style="margin: 5px 0;"><strong>Student:</strong> ${order.student_name}</p>
+            <p style="margin: 5px 0;"><strong>Price:</strong> $${order.item_price.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Student's Calculation:</strong> $${order.student_calculated_balance_after.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Actual Balance:</strong> $${order.actual_balance_after.toFixed(2)}</p>
+            <p style="margin: 5px 0;"><strong>Correct:</strong> ${order.is_calculation_correct ? 'Yes' : 'No'}</p>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button onclick="updatePurchaseOrderStatus(${order.id}, 'approved')" class="btn-primary" style="background: #10b981; border-color: #10b981;">Fulfill</button>
+                <button onclick="updatePurchaseOrderStatus(${order.id}, 'denied')" class="btn-secondary" style="background: #dc2626; border-color: #dc2626; color: white;">Deny</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Update purchase order status
+async function updatePurchaseOrderStatus(orderId, status) {
+    try {
+        const response = await fetch(`/api/purchase-orders/${orderId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        
+        if (response.ok) {
+            showMessage(`Purchase order ${status}`, 'success');
+            if (currentBankStudentId) {
+                await loadBankAccount(currentBankStudentId);
+            }
+        } else {
+            const data = await response.json();
+            showMessage(data.error || 'Error updating order', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating purchase order:', error);
+        showMessage('Error updating purchase order', 'error');
+    }
+}
+
+// Render transactions
+function renderTransactions(transactions) {
+    const list = document.getElementById('transactions-list');
+    if (!list) return;
+
+    if (!transactions || transactions.length === 0) {
+        list.innerHTML = '<p style="margin:0; color:#94a3b8;">No transactions yet.</p>';
+        return;
+    }
+
+    // Render in a compact, table-like list similar to Accounts UI
+    const rows = transactions
+        .slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .map(t => {
+            const isDeposit = t.type === 'deposit';
+            const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
+            const amountStr = (isDeposit ? '+' : '−') + '$' + Math.abs(t.amount).toFixed(2);
+            const amtColor = isDeposit ? '#059669' : '#dc2626';
+            return `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; color:#0f172a;">${new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        <div style="font-size:13px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.description || ''}</div>
+                    </div>
+                    <div style="width:110px; text-align:right; font-size:13px; color:#64748b;">
+                        ${typeLabel}
+                    </div>
+                    <div style="width:120px; text-align:right; font-weight:600; font-size:13px; color:${amtColor};">
+                        ${amountStr}
+                    </div>
+                    <div style="width:120px; text-align:right; font-size:13px; color:#0f172a;">
+                        $${t.balance_after.toFixed(2)}
+                    </div>
+                </div>
+            `;
+        })
+        .join('');
+
+    list.innerHTML = rows;
+}
+
+// Create marketplace item
+function openCreateItemModal() {
+    document.getElementById('create-item-modal').style.display = 'block';
+    document.getElementById('item-name').value = '';
+    document.getElementById('item-description').value = '';
+    document.getElementById('item-price').value = '';
+}
+
+function closeCreateItemModal() {
+    document.getElementById('create-item-modal').style.display = 'none';
+}
+
+async function saveMarketplaceItem() {
+    const name = document.getElementById('item-name').value.trim();
+    const description = document.getElementById('item-description').value.trim();
+    const price = parseFloat(document.getElementById('item-price').value);
+    
+    if (!name || !price || price <= 0) {
+        showMessage('Please fill in all fields with valid values', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/marketplace-items', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, price })
+        });
+        
+        if (response.ok) {
+            showMessage('Item created successfully', 'success');
+            closeCreateItemModal();
+            await loadMarketplaceItems();
+        } else {
+            const data = await response.json();
+            showMessage(data.error || 'Error creating item', 'error');
+        }
+    } catch (error) {
+        console.error('Error creating item:', error);
+        showMessage('Error creating item', 'error');
+    }
+}
+
+// Bank account search (similar to daily entry)
+function setupBankAccountSearch() {
+    const searchInput = document.getElementById('bank-search-input');
+    if (!searchInput) return;
+    
+    const wrapper = searchInput.closest('.bank-search-autocomplete-wrapper');
+    const dropdown = wrapper ? wrapper.querySelector('.bank-search-autocomplete-dropdown') : null;
+    if (!dropdown) return;
+    
+    let isDropdownVisible = false;
+    
+    const getAllOptions = () => {
+        const options = [];
+        allStudents.forEach(student => {
+            if (student && student.name) {
+                options.push({
+                    type: 'student',
+                    name: student.name,
+                    displayText: `Student: ${student.name}`
+                });
+            }
+        });
+        allStaffMembers.forEach(staff => {
+            const staffName = staff.name || staff.username || '';
+            if (staffName) {
+                options.push({
+                    type: 'staff',
+                    name: staffName,
+                    displayText: `Staff: ${staffName}`
+                });
+            }
+        });
+        return options;
+    };
+    
+    const filterOptions = (query) => {
+        if (!query || !query.trim()) return [];
+        const lowerQuery = query.trim().toLowerCase();
+        return getAllOptions().filter(option => 
+            option.name.toLowerCase().includes(lowerQuery)
+        );
+    };
+    
+    const showDropdown = (options) => {
+        if (!options || options.length === 0) {
+            dropdown.style.display = 'none';
+            isDropdownVisible = false;
+            return;
+        }
+        
+        dropdown.innerHTML = '';
+        options.forEach((option) => {
+            const item = document.createElement('div');
+            item.className = 'bank-search-autocomplete-item';
+            item.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;';
+            item.innerHTML = `<span style="font-weight: 600;">${option.type === 'student' ? 'Student:' : 'Staff:'}</span> ${option.name}`;
+            
+            item.addEventListener('click', () => {
+                searchInput.value = option.name;
+                hideDropdown();
+                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            
+            dropdown.appendChild(item);
+        });
+        
+        dropdown.style.display = 'block';
+        isDropdownVisible = true;
+    };
+    
+    const hideDropdown = () => {
+        dropdown.style.display = 'none';
+        isDropdownVisible = false;
+    };
+    
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value;
+        const options = filterOptions(query);
+        showDropdown(options);
+    });
+    
+    searchInput.addEventListener('blur', () => {
+        setTimeout(() => hideDropdown(), 200);
+    });
+}
+
+// Switch view handler for bank account
+function handleBankAccountView() {
+    if (window.currentUser.role === 'student') {
+        // Student view - load their own account
+        currentBankStudentId = window.currentUser.studentId;
+        
+        // Always show all sections for students, even if no data yet
+        const balanceSection = document.getElementById('bank-balance-section');
+        const paycheckSection = document.getElementById('bank-paycheck-section');
+        const transactionsSection = document.getElementById('bank-transactions-section');
+        
+        if (balanceSection) balanceSection.style.display = 'block';
+        if (paycheckSection) paycheckSection.style.display = 'block';
+        if (transactionsSection) transactionsSection.style.display = 'block';
+        
+        // Set default student name if available
+        if (currentBankStudentId) {
+            loadBankAccount(currentBankStudentId);
+        } else {
+            // Still show UI even if studentId is not set
+            const balanceAmount = document.getElementById('bank-balance-amount');
+            const studentName = document.getElementById('bank-student-name');
+            if (balanceAmount) balanceAmount.textContent = '$0.00';
+            if (studentName) studentName.textContent = window.currentUser.name || 'Student';
+            const transactionsList = document.getElementById('transactions-list');
+            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        }
+    } else {
+        // Staff/Admin view - simple selector; autocomplete handled by setupBankStudentSearch
+        const wrap = document.getElementById('bank-student-select-wrap');
+        const noMsg = document.getElementById('bank-no-student-msg');
+        const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
+        if (wrap) wrap.style.display = 'block';
+        if (noMsg) noMsg.style.display = 'block';
+        if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
+
+        setupBankStudentSearch();
+        initStarbucksManagement();
+    }
+    
+    // Setup event listeners
+    const submitWorksheetBtn = document.getElementById('submit-worksheet-btn');
+    if (submitWorksheetBtn) {
+        submitWorksheetBtn.addEventListener('click', submitPaycheckWorksheet);
+    }
+    
+    // Currency format on blur for worksheet inputs
+    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('blur', function () {
+                const parsed = parseCurrency(this.value);
+                if (!isNaN(parsed)) this.value = formatCurrency(parsed);
+            });
+        }
+    });
+    
+    // Enter = Tab in worksheet (move to next field)
+    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'submit-worksheet-btn'];
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (worksheetDiv) {
+        worksheetDiv.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            const id = e.target.id;
+            const idx = worksheetFocusOrder.indexOf(id);
+            if (idx === -1) return;
+            e.preventDefault();
+            const nextId = worksheetFocusOrder[idx + 1];
+            if (nextId) {
+                const nextEl = document.getElementById(nextId);
+                if (nextEl) nextEl.focus();
+            }
+        });
+    }
+    
+    const viewDepositedBtn = document.getElementById('view-deposited-paychecks-btn');
+    if (viewDepositedBtn) {
+        viewDepositedBtn.addEventListener('click', () => viewPaychecksModal('deposited'));
+    }
+    
+    const viewUndepositedBtn = document.getElementById('view-undeposited-paychecks-btn');
+    if (viewUndepositedBtn) {
+        viewUndepositedBtn.addEventListener('click', () => viewPaychecksModal('undeposited'));
+    }
+    
+    const marketplaceFilter = document.getElementById('marketplace-filter');
+    if (marketplaceFilter) {
+        marketplaceFilter.addEventListener('change', renderMarketplaceItems);
+    }
+    
+    const createItemBtn = document.getElementById('create-item-btn');
+    if (createItemBtn) {
+        createItemBtn.addEventListener('click', openCreateItemModal);
+    }
+    
+    // Admin paycheck generation
+    const generatePaychecksBtn = document.getElementById('generate-paychecks-btn');
+    if (generatePaychecksBtn) {
+        generatePaychecksBtn.addEventListener('click', generatePaychecksForAll);
+    }
+}
+
+// Generate paychecks for all students (Admin only)
+async function generatePaychecksForAll() {
+    if (window.currentUser.role !== 'admin') {
+        showMessage('Only admins can generate paychecks', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('generate-paychecks-btn');
+    const resultDiv = document.getElementById('paycheck-generation-result');
+    
+    if (btn) btn.disabled = true;
+    if (resultDiv) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<p>Generating paychecks...</p>';
+    }
+    
+    try {
+        const response = await fetch('/api/paycheck/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<p style="color: #10b981;">${data.message}</p>`;
+            }
+            showMessage(data.message, 'success');
+            // Refresh paycheck list for currently selected student so updated paychecks are visible
+            if (currentStudentId) {
+                await loadPaychecks(currentStudentId);
+            }
+        } else {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<p style="color: #dc2626;">${data.error || 'Error generating paychecks'}</p>`;
+            }
+            showMessage(data.error || 'Error generating paychecks', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating paychecks:', error);
+        if (resultDiv) {
+            resultDiv.innerHTML = '<p style="color: #dc2626;">Error generating paychecks</p>';
+        }
+        showMessage('Error generating paychecks', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Make functions globally accessible
+window.submitPaycheckWorksheet = submitPaycheckWorksheet;
+window.viewPaychecksModal = viewPaychecksModal;
+window.openWorksheetForPaycheck = openWorksheetForPaycheck;
+window.closePaychecksModal = closePaychecksModal;
+window.openPurchaseModal = openPurchaseModal;
+window.closePurchaseModal = closePurchaseModal;
+window.submitPurchase = submitPurchase;
+window.updatePurchaseOrderStatus = updatePurchaseOrderStatus;
+window.openCreateItemModal = openCreateItemModal;
+window.closeCreateItemModal = closeCreateItemModal;
+window.saveMarketplaceItem = saveMarketplaceItem;
+window.generatePaychecksForAll = generatePaychecksForAll;
+
+// ==================== Parent Portal Functions ====================
+
+// Load parent's verified children
+async function loadParentChildren() {
+    console.log('loadParentChildren called');
+    const container = document.getElementById('parent-children-container');
+    const noChildrenDiv = document.getElementById('parent-no-children');
+    
+    if (!container) {
+        console.error('parent-children-container not found');
+        return;
+    }
+    
+    try {
+        console.log('Fetching children from /api/students');
+        const response = await fetch('/api/students');
+        if (!response.ok) {
+            throw new Error(`Failed to load children: ${response.status} ${response.statusText}`);
+        }
+        
+        const children = await response.json();
+        console.log('Received children data:', children);
+        
+        if (!children || children.length === 0) {
+            console.log('No children found');
+            container.style.display = 'none';
+            if (noChildrenDiv) noChildrenDiv.style.display = 'block';
+            return;
+        }
+        
+        if (noChildrenDiv) noChildrenDiv.style.display = 'none';
+        container.style.display = 'block';
+        
+        // Format attendance status
+        const formatAttendance = (status) => {
+            if (!status) return '-';
+            const statusMap = {
+                'present': 'Present',
+                'excused': 'Excused',
+                'unexcused': 'Unexcused'
+            };
+            return statusMap[status] || status;
+        };
+        
+        // Format STAR points
+        const formatStarPoints = (starPoints) => {
+            if (!starPoints || Object.values(starPoints).every(v => v === null)) {
+                return '-';
+            }
+            const parts = [];
+            if (starPoints.s !== null) parts.push(`S: ${starPoints.s}%`);
+            if (starPoints.t !== null) parts.push(`T: ${starPoints.t}%`);
+            if (starPoints.a !== null) parts.push(`A: ${starPoints.a}%`);
+            if (starPoints.r !== null) parts.push(`R: ${starPoints.r}%`);
+            return parts.length > 0 ? parts.join(', ') : '-';
+        };
+        
+        // Build table HTML
+        let tableHTML = `
+            <table class="parent-children-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Grade</th>
+                        <th>Verification Status</th>
+                        <th>Attendance</th>
+                        <th>STAR Points</th>
+                        <th>Infractions</th>
+                        <th>Frenzy Events</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        children.forEach(child => {
+            const verificationBadge = child.verified 
+                ? '<span class="verification-badge verified">Verified</span>'
+                : '<span class="verification-badge unverified">Not Verified</span>';
+            
+            tableHTML += `
+                <tr>
+                    <td>${child.name || 'Unknown'}</td>
+                    <td>${child.grade || '-'}</td>
+                    <td>${verificationBadge}</td>
+                    <td>${formatAttendance(child.attendance)}</td>
+                    <td>${formatStarPoints(child.star_points)}</td>
+                    <td>${child.infractions_count || 0}</td>
+                    <td>${child.frenzy_count || 0}</td>
+                    <td class="actions-cell">
+                        <button onclick="viewChildRecords(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">View Records</button>
+                        <button onclick="openAmendmentRequestModal(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">Request Amendment</button>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        tableHTML += `
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = tableHTML;
+        console.log('Parent children table rendered successfully');
+    } catch (error) {
+        console.error('Error loading children:', error);
+        container.innerHTML = '<p style="color: #dc2626;">Error loading children. Please try again.</p>';
+    }
+}
+
+// View child's records (switch to summary view)
+function viewChildRecords(studentId) {
+    if (document.getElementById('summary-student-select')) {
+        document.getElementById('summary-student-select').value = studentId;
+    }
+    const student = (allStudents || []).find(s => s.id === studentId);
+    if (student && dashboardState) {
+        dashboardState.summary.studentId = studentId;
+        dashboardState.summary.studentName = student.name;
+        updateContextBanner('summary');
+    }
+    switchView('summary');
+    setTimeout(() => triggerDashboardLoad('summary'), 100);
+}
+
+// Open amendment request modal
+function openAmendmentRequestModal(studentId = null) {
+    const modal = document.getElementById('amendment-request-modal');
+    if (!modal) return;
+    
+    // Clear previous values
+    document.getElementById('amendment-request-error').style.display = 'none';
+    document.getElementById('amendment-request-success').style.display = 'none';
+    document.getElementById('amendment-student-select').value = studentId || '';
+    document.getElementById('amendment-record-type').value = '';
+    document.getElementById('amendment-record-id').value = '';
+    document.getElementById('amendment-current-value').value = '';
+    document.getElementById('amendment-requested-change').value = '';
+    document.getElementById('amendment-reason').value = '';
+    
+    // Load students into dropdown
+    loadAmendmentStudents();
+    
+    modal.style.display = 'block';
+}
+
+function closeAmendmentRequestModal() {
+    const modal = document.getElementById('amendment-request-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// Load students for amendment request dropdown
+async function loadAmendmentStudents() {
+    const select = document.getElementById('amendment-student-select');
+    if (!select) return;
+    
+    try {
+        const response = await fetch('/api/students');
+        if (!response.ok) return;
+        
+        const students = await response.json();
+        select.innerHTML = '<option value="">Select Student</option>' +
+            students.map(s => `<option value="${s.id}">${s.name || 'Unknown'}</option>`).join('');
+    } catch (error) {
+        console.error('Error loading students:', error);
+    }
+}
+
+// Submit amendment request
+async function submitAmendmentRequest() {
+    const studentId = parseInt(document.getElementById('amendment-student-select').value);
+    const recordType = document.getElementById('amendment-record-type').value;
+    const recordId = document.getElementById('amendment-record-id').value;
+    const currentValue = document.getElementById('amendment-current-value').value.trim();
+    const requestedChange = document.getElementById('amendment-requested-change').value.trim();
+    const reason = document.getElementById('amendment-reason').value.trim();
+    
+    const errorDiv = document.getElementById('amendment-request-error');
+    const successDiv = document.getElementById('amendment-request-success');
+    
+    // Validation
+    if (!studentId || !recordType || !currentValue || !requestedChange || !reason) {
+        errorDiv.textContent = 'Please fill in all required fields';
+        errorDiv.style.display = 'block';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/amendment-requests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: studentId,
+                record_type: recordType,
+                record_id: recordId || null,
+                current_value: currentValue,
+                requested_change: requestedChange,
+                reason: reason
+            })
+        });
+        
+        if (response.ok) {
+            successDiv.textContent = 'Amendment request submitted successfully. The school will review your request.';
+            successDiv.style.display = 'block';
+            errorDiv.style.display = 'none';
+            
+            // Clear form
+            setTimeout(() => {
+                closeAmendmentRequestModal();
+            }, 2000);
+        } else {
+            const data = await response.json();
+            errorDiv.textContent = data.error || 'Error submitting request';
+            errorDiv.style.display = 'block';
+            successDiv.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error submitting amendment request:', error);
+        errorDiv.textContent = 'Error submitting request. Please try again.';
+        errorDiv.style.display = 'block';
+        successDiv.style.display = 'none';
+    }
+}
+
+// Toggle directory information opt-out
+async function toggleDirectoryOptOut(studentId, optOut) {
+    try {
+        const method = optOut ? 'POST' : 'DELETE';
+        const response = await fetch(`/api/students/${studentId}/directory-opt-out`, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showMessage(data.message || `Directory information opt-${optOut ? 'out' : 'in'} successful`, 'success');
+        } else {
+            const data = await response.json();
+            showMessage(data.error || 'Error updating directory information preference', 'error');
+            // Revert checkbox
+            const checkbox = document.getElementById(`directory-opt-out-${studentId}`);
+            if (checkbox) checkbox.checked = !optOut;
+        }
+    } catch (error) {
+        console.error('Error toggling directory opt-out:', error);
+        showMessage('Error updating directory information preference', 'error');
+        // Revert checkbox
+        const checkbox = document.getElementById(`directory-opt-out-${studentId}`);
+        if (checkbox) checkbox.checked = !optOut;
+    }
+}
+
+// Export child's data
+async function exportChildData(studentId) {
+    try {
+        const response = await fetch(`/api/export-student-data/${studentId}`);
+        if (!response.ok) {
+            throw new Error('Failed to export data');
+        }
+        
+        const data = await response.json();
+        
+        // Create download
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `student-data-${studentId}-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showMessage('Data exported successfully', 'success');
+    } catch (error) {
+        console.error('Error exporting data:', error);
+        showMessage('Error exporting data. Please try again.', 'error');
+    }
+}
+
+// ============================================================
+//  DASHBOARD — Search, Filters, Card Rendering
+// ============================================================
+
+const DASHBOARD_COLORS = {
+    // STAR Performance bar colors (modern palette, same base: red, blue, green, yellow)
+    safety: '#EF4444',         // red
+    teamwork: '#3B82F6',       // blue
+    accountability: '#10B981', // green (emerald)
+    relationships: '#FACC15',  // yellow (reverted from warm gold)
+    palette: ['#EF4444', '#3B82F6', '#10B981', '#FACC15', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
+};
+
+// Translucent bar colors for STAR Performance chart (same hues, less bold)
+const STAR_CHART_BAR_COLORS = [
+    'rgba(239, 68, 68, 0.65)',   // safety red
+    'rgba(59, 130, 246, 0.65)',  // teamwork blue
+    'rgba(16, 185, 129, 0.65)',  // accountability green
+    'rgba(250, 204, 21, 0.65)'   // relationships yellow
+];
+
+// ---- State ----
+let dashboardState = {
+    summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null },
+    frenzy:  { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null }
+};
+
+let summaryChartInstance = null;
+let frenzyChartInstance = null;
+
+// ---- Input hardening to resist password managers on search fields ----
+function hardenSearchInput(input) {
+    if (!input) return;
+    try {
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('spellcheck', 'false');
+
+        if (!input.hasAttribute('readonly')) {
+            input.setAttribute('readonly', '');
+        }
+
+        input.addEventListener('focus', () => {
+            if (input.hasAttribute('readonly')) {
+                input.removeAttribute('readonly');
+            }
+        });
+
+        let userInteracted = false;
+        ['keydown', 'mousedown', 'touchstart'].forEach(evt => {
+            input.addEventListener(evt, () => {
+                userInteracted = true;
+            }, { once: true });
+        });
+
+        const clearIfInjected = () => {
+            if (!userInteracted && input.value && !input.dataset.allowPrefill) {
+                input.value = '';
+            }
+        };
+
+        setTimeout(clearIfInjected, 600);
+        input.addEventListener('blur', clearIfInjected);
+    } catch (e) {
+        console.error('Error hardening search input:', e);
+    }
+}
+
+// ---- Autocomplete Search ----
+function setupDashboardSearch(prefix, type) {
+    const input = document.getElementById(`${prefix}-${type}-search`);
+    const dropdown = document.getElementById(`${prefix}-${type}-dropdown`);
+    if (!input || !dropdown) return;
+
+    // Extra protection against browser/password‑manager autofill on dashboard searches
+    hardenSearchInput(input);
+
+    let debounceTimer = null;
+    let attemptedLoadData = false;
+
+    input.addEventListener('input', async () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            const q = input.value.trim().toLowerCase();
+            if (q.length < 1) { dropdown.classList.remove('active'); return; }
+            let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+
+            // Fallback: if we have no data yet, try to load it once
+            if (list.length === 0 && !attemptedLoadData) {
+                attemptedLoadData = true;
+                try {
+                    if (type === 'student' && typeof loadStudents === 'function') {
+                        await loadStudents();
+                        list = allStudents || [];
+                    } else if (type === 'staff' && typeof loadUsers === 'function') {
+                        await loadUsers();
+                        list = allStaffMembers || [];
+                    }
+                } catch (e) {
+                    console.error('Error loading data for dashboard search:', e);
+                }
+            }
+
+            const matches = list.filter(item => {
+                const name = (item.name || '').toLowerCase();
+                const uname = (item.username || '').toLowerCase();
+                return name.includes(q) || uname.includes(q);
+            }).slice(0, 12);
+            if (matches.length === 0) { dropdown.classList.remove('active'); return; }
+            dropdown.innerHTML = matches.map(item => {
+                const label = item.name || item.username;
+                const meta = type === 'staff' ? (item.designation || item.role || '') : '';
+                return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
+                    <span class="search-label">${escapeHtml(label)}</span>
+                    ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
+                </div>`;
+            }).join('');
+            dropdown.classList.add('active');
+        }, 150);
+    });
+
+    dropdown.addEventListener('click', (e) => {
+        const opt = e.target.closest('.dashboard-search-option');
+        if (!opt) return;
+        const id = parseInt(opt.dataset.id);
+        const name = opt.dataset.name;
+        input.value = name;
+        dropdown.classList.remove('active');
+        const page = prefix.replace('-student', '').replace('-staff', '');
+        const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+        if (type === 'student') {
+            dashboardState[pageKey].studentId = id;
+            dashboardState[pageKey].studentName = name;
+            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+            if (hiddenSelect) hiddenSelect.value = id;
+            // When selecting a student, clear any existing staff filter so the context
+            // represents the latest selection (student-only).
+            dashboardState[pageKey].staffId = null;
+            dashboardState[pageKey].staffName = null;
+            const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
+            if (staffSearchInput) staffSearchInput.value = '';
+        } else {
+            dashboardState[pageKey].staffId = id;
+            dashboardState[pageKey].staffName = name;
+            // When selecting a staff member, clear any existing student filter so the context
+            // represents the latest selection (staff's students).
+            dashboardState[pageKey].studentId = null;
+            dashboardState[pageKey].studentName = null;
+            const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
+            if (studentSearchInput) studentSearchInput.value = '';
+            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+            if (hiddenSelect) hiddenSelect.value = '';
+        }
+        updateContextBanner(pageKey);
+        // When a dashboard (summary/frenzy) search is committed, clear "managed by me" so it does not persist across searches.
+        const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
+        if (managedCheckbox && managedCheckbox.checked) {
+            managedCheckbox.checked = false;
+        }
+        triggerDashboardLoad(pageKey);
+    });
+
+    input.addEventListener('focus', () => {
+        if (dropdown.children.length > 0 && input.value.trim().length > 0) {
+            dropdown.classList.add('active');
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest(`#${prefix}-${type}-search-wrap`)) {
+            dropdown.classList.remove('active');
+        }
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            dropdown.classList.remove('active');
+            return;
+        }
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const q = input.value.trim().toLowerCase();
+            if (!q) return;
+            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            const matches = list.filter(item => {
+                const name = (item.name || '').toLowerCase();
+                const uname = (item.username || '').toLowerCase();
+                return name.includes(q) || uname.includes(q);
+            }).slice(0, 12);
+            if (matches.length === 0) return;
+
+            const match = matches[0];
+            const id = parseInt(match.id);
+            const name = match.name || match.username;
+            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+
+            input.value = name;
+            dropdown.classList.remove('active');
+
+            if (type === 'student') {
+                dashboardState[pageKey].studentId = id;
+                dashboardState[pageKey].studentName = name;
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = id;
+                // Enter-based student search should also clear any existing staff context.
+                dashboardState[pageKey].staffId = null;
+                dashboardState[pageKey].staffName = null;
+                const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
+                if (staffSearchInput) staffSearchInput.value = '';
+            } else {
+                dashboardState[pageKey].staffId = id;
+                dashboardState[pageKey].staffName = name;
+                // Enter-based staff search should clear any existing student context.
+                dashboardState[pageKey].studentId = null;
+                dashboardState[pageKey].studentName = null;
+                const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
+                if (studentSearchInput) studentSearchInput.value = '';
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = '';
+            }
+            updateContextBanner(pageKey);
+            // When a dashboard (summary/frenzy) search is committed via Enter, clear "managed by me" so it does not persist across searches.
+            const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
+            if (managedCheckbox && managedCheckbox.checked) {
+                managedCheckbox.checked = false;
+            }
+            triggerDashboardLoad(pageKey);
+            return;
+        }
+
+        if (e.key === 'Backspace' && input.value.length <= 1) {
+            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+            if (type === 'student') {
+                dashboardState[pageKey].studentId = null;
+                dashboardState[pageKey].studentName = null;
+                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                if (hiddenSelect) hiddenSelect.value = '';
+            } else {
+                dashboardState[pageKey].staffId = null;
+                dashboardState[pageKey].staffName = null;
+            }
+            updateContextBanner(pageKey);
+        }
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function updateContextBanner(pageKey) {
+    const banner = document.getElementById(`${pageKey}-context-banner`);
+    const label = document.getElementById(`${pageKey}-context-label`);
+    if (!banner || !label) return;
+    const st = dashboardState[pageKey];
+    if (st.studentName || st.staffName) {
+        let text = '';
+        if (st.staffName) text = `${st.staffName}'s Students`;
+        if (st.studentName) text = st.studentName;
+        if (st.staffName && st.studentName) text = `${st.studentName} (via ${st.staffName})`;
+        label.textContent = text;
+        banner.classList.add('active');
+    } else {
+        banner.classList.remove('active');
+    }
+}
+
+// ---- Filter controls (dropdown for Summary + Frenzy reports; pills elsewhere) ----
+function setupFilterPills(pageKey) {
+    const container = document.getElementById(`${pageKey}-filter-pills`);
+    if (!container) return;
+
+    const dropdown = container.querySelector('.dashboard-period-select');
+
+    // Dropdown-based timeframe (Point Card + Frenzy reports)
+    if (dropdown && (pageKey === 'summary' || pageKey === 'frenzy')) {
+        const customWrap = pageKey === 'summary' ? document.getElementById('summary-custom-range') : null;
+        const startInput = pageKey === 'summary' ? document.getElementById('summary-custom-start') : null;
+        const endInput = pageKey === 'summary' ? document.getElementById('summary-custom-end') : null;
+
+        const resetCompare = () => {
+            dashboardState[pageKey].compareMode = false;
+            const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
+            if (compareToggle) compareToggle.classList.remove('active');
+            const compareControls = document.getElementById(`${pageKey}-compare-controls`);
+            if (compareControls) compareControls.classList.remove('active');
+        };
+
+        const maybeTriggerCustomLoad = () => {
+            if (!startInput || !endInput) return;
+            const start = startInput.value;
+            const end = endInput.value;
+            if (!start || !end) return;
+            if (start > end) return;
+            dashboardState[pageKey].period = 'custom_range';
+            dashboardState[pageKey].customStart = start;
+            dashboardState[pageKey].customEnd = end;
+            resetCompare();
+            triggerDashboardLoad(pageKey);
+        };
+
+        dropdown.addEventListener('change', () => {
+            const value = dropdown.value;
+            if (value === 'custom_range') {
+                if (customWrap) customWrap.style.display = 'flex';
+                // Defer load until user selects both dates
+                dashboardState[pageKey].period = null;
+                dashboardState[pageKey].customStart = null;
+                dashboardState[pageKey].customEnd = null;
+                resetCompare();
+                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+                if (legacyHidden) legacyHidden.value = '';
+            } else {
+                if (customWrap) customWrap.style.display = 'none';
+                dashboardState[pageKey].period = value;
+                dashboardState[pageKey].customStart = null;
+                dashboardState[pageKey].customEnd = null;
+                resetCompare();
+                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+                if (legacyHidden && value !== 'custom_range') legacyHidden.value = value;
+                triggerDashboardLoad(pageKey);
+            }
+        });
+
+        if (startInput && endInput) {
+            startInput.addEventListener('change', maybeTriggerCustomLoad);
+            endInput.addEventListener('change', maybeTriggerCustomLoad);
+        }
+
+        // Initialize state from default dropdown value
+        if (dropdown.value && dropdown.value !== 'custom_range') {
+            dashboardState[pageKey].period = dropdown.value;
+            const legacyHidden = document.getElementById(`${pageKey}-period-select`);
+            if (legacyHidden) legacyHidden.value = dropdown.value;
+        }
+        return;
+    }
+
+    // Existing pill-based filters (legacy / other views)
+    container.addEventListener('click', (e) => {
+        const pill = e.target.closest('.dashboard-pill');
+        if (!pill) return;
+        container.querySelectorAll('.dashboard-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        dashboardState[pageKey].period = pill.dataset.period;
+        dashboardState[pageKey].compareMode = false;
+        const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
+        if (compareToggle) compareToggle.classList.remove('active');
+        const compareControls = document.getElementById(`${pageKey}-compare-controls`);
+        if (compareControls) compareControls.classList.remove('active');
+        triggerDashboardLoad(pageKey);
+    });
+}
+
+function setupCompareToggle(pageKey) {
+    const toggle = document.getElementById(`${pageKey}-compare-toggle`);
+    const controls = document.getElementById(`${pageKey}-compare-controls`);
+    if (!toggle || !controls) return;
+    toggle.addEventListener('click', () => {
+        const isActive = toggle.classList.toggle('active');
+        controls.classList.toggle('active', isActive);
+        dashboardState[pageKey].compareMode = isActive;
+        if (!isActive) {
+            triggerDashboardLoad(pageKey);
+        }
+    });
+    const select = controls.querySelector('select');
+    const customRangeContainer = document.getElementById(`${pageKey}-custom-range-controls`);
+    const customStartInput = controls.querySelector('input[data-role="custom-start"]');
+    const customEndInput = controls.querySelector('input[data-role="custom-end"]');
+    const customError = controls.querySelector('.dashboard-custom-error');
+
+    const handleCustomRangeVisibility = () => {
+        if (!customRangeContainer) return;
+        const useCustom = select && select.value === 'custom_range';
+        customRangeContainer.style.display = useCustom ? 'flex' : 'none';
+        if (!useCustom && customError) customError.textContent = '';
+        if (!useCustom && dashboardState[pageKey]) {
+            dashboardState[pageKey].customStart = null;
+            dashboardState[pageKey].customEnd = null;
+        }
+    };
+
+    if (select) {
+        select.addEventListener('change', () => {
+            if (select.value === 'custom_range' && pageKey === 'summary') {
+                handleCustomRangeVisibility();
+                // Wait for both dates before triggering load
+                return;
+            }
+            handleCustomRangeVisibility();
+            if (select.value) triggerDashboardLoad(pageKey);
+        });
+    }
+
+    const maybeTriggerCustomRangeLoad = () => {
+        if (!select || select.value !== 'custom_range') return;
+        if (!customStartInput || !customEndInput) return;
+        const start = customStartInput.value;
+        const end = customEndInput.value;
+        if (!start || !end) return;
+        if (new Date(start) > new Date(end)) {
+            if (customError) customError.textContent = 'Start date must be on or before end date.';
+            return;
+        }
+        if (customError) customError.textContent = '';
+        if (dashboardState[pageKey]) {
+            dashboardState[pageKey].customStart = start;
+            dashboardState[pageKey].customEnd = end;
+        }
+        triggerDashboardLoad(pageKey);
+    };
+
+    if (customStartInput && customEndInput) {
+        customStartInput.addEventListener('change', maybeTriggerCustomRangeLoad);
+        customEndInput.addEventListener('change', maybeTriggerCustomRangeLoad);
+    }
+}
+
+// ---- Incentive Tracking Toggle (Summary / Point Card) ----
+function setupIncentiveToggle() {
+    const toggle = document.getElementById('summary-incentive-toggle');
+    const controls = document.getElementById('summary-incentive-controls');
+    if (!toggle || !controls) return;
+
+    const startInput = document.getElementById('incentive-start-date');
+    const endInput = document.getElementById('incentive-end-date');
+    const generateBtn = document.getElementById('incentive-generate-btn');
+    const errorEl = document.getElementById('incentive-error');
+
+    const clearError = () => {
+        if (errorEl) errorEl.textContent = '';
+    };
+
+    const disableCompareMode = () => {
+        const compareToggle = document.getElementById('summary-compare-toggle');
+        const compareControls = document.getElementById('summary-compare-controls');
+        if (compareToggle) compareToggle.classList.remove('active');
+        if (compareControls) compareControls.classList.remove('active');
+        if (dashboardState && dashboardState.summary) {
+            dashboardState.summary.compareMode = false;
+        }
+    };
+
+    toggle.addEventListener('click', () => {
+        const isActive = toggle.classList.toggle('active');
+        controls.classList.toggle('active', isActive);
+        clearError();
+
+        if (isActive) {
+            disableCompareMode();
+        } else {
+            // When leaving Incentive mode, return to normal summary view
+            triggerDashboardLoad('summary');
+        }
+    });
+
+    const validateDates = () => {
+        if (!startInput || !endInput) return null;
+        const start = startInput.value;
+        const end = endInput.value;
+        if (!start || !end) {
+            if (errorEl) errorEl.textContent = 'Please select both start and end dates.';
+            return null;
+        }
+        if (new Date(start) > new Date(end)) {
+            if (errorEl) errorEl.textContent = 'Start date must be on or before end date.';
+            return null;
+        }
+        clearError();
+        return { start, end };
+    };
+
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async () => {
+            const range = validateDates();
+            if (!range) return;
+            await loadIncentiveTracking(range.start, range.end);
+        });
+    }
+}
+
+async function loadIncentiveTracking(startDate, endDate) {
+    const container = document.getElementById('summary-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading incentive tracking...</p></div>';
+
+    try {
+        const st = dashboardState.summary || {};
+        const params = [];
+        if (startDate) params.push(`start_date=${encodeURIComponent(startDate)}`);
+        if (endDate) params.push(`end_date=${encodeURIComponent(endDate)}`);
+        if (st.studentId) params.push(`student_id=${st.studentId}`);
+        if (st.staffId) params.push(`staff_id=${st.staffId}`);
+        const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+        if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+
+        const url = '/api/incentive-tracking?' + params.join('&');
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!response.ok) {
+            const msg = data && data.error ? data.error : 'Error loading incentive tracking data.';
+            container.innerHTML = `<div class="dashboard-empty"><p>${msg}</p></div>`;
+            return;
+        }
+
+        const formatRangeLabel = () => {
+            if (!startDate || !endDate) return 'All available data';
+            return `${startDate} to ${endDate}`;
+        };
+
+        const buildTable = (rows, title, description) => {
+            if (!rows || rows.length === 0) {
+                return `
+                    <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                        <h3>${title}</h3>
+                        <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">No students met this threshold in the selected range.</p>
+                    </div>
+                `;
+            }
+            const bodyRows = rows.map(s => `
+                <tr>
+                    <td>${s.name}</td>
+                    <td style="text-transform: capitalize;">${s.card_color || ''}</td>
+                    <td style="text-align:right;">${s.average_percent.toFixed(1)}%</td>
+                </tr>
+            `).join('');
+            return `
+                <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                    <h3>${title}</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
+                    <div style="overflow-x:auto; margin-top: 10px; display:inline-block;">
+                        <table style="width:auto; min-width:0; table-layout:auto; display:inline-table;">
+                            <thead>
+                                <tr>
+                                    <th style="white-space:nowrap;">Student</th>
+                                    <th style="white-space:nowrap;">Card</th>
+                                    <th style="text-align:right; white-space:nowrap;">Average %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bodyRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        };
+
+        const rangeLabel = formatRangeLabel();
+        const headerCard = `
+            <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
+                <h3>Incentive Tracking (${rangeLabel})</h3>
+                <p style="margin-top: 6px; color: var(--text-secondary); font-size: 0.9rem;">
+                    Shows students who meet incentive thresholds based on their overall point card averages
+                    within the selected date range.
+                </p>
+            </div>
+        `;
+
+        const yellowCardBlock = buildTable(
+            data.yellow_students || [],
+            'Yellow Card (≥ 85%)',
+            'Students with a yellow card whose overall point card average is at least 85% in this date range.'
+        );
+        const greenCardBlock = buildTable(
+            data.green_students || [],
+            'Green Card (≥ 90%)',
+            'Students with a green card whose overall point card average is at least 90% in this date range.'
+        );
+        const blueCardBlock = buildTable(
+            data.blue_students || [],
+            'Blue Card (≥ 90%)',
+            'Students with a blue card whose overall point card average is at least 90% in this date range.'
+        );
+
+        container.innerHTML = headerCard + yellowCardBlock + greenCardBlock + blueCardBlock;
+
+        // Hide raw point card data cards if visible
+        const pcContainer = document.getElementById('point-card-data-container');
+        if (pcContainer) pcContainer.style.display = 'none';
+    } catch (err) {
+        console.error('Error loading incentive tracking:', err);
+        const container = document.getElementById('summary-results');
+        if (container) {
+            container.innerHTML = `<div class="dashboard-empty"><p>Error loading incentive tracking: ${err.message}</p></div>`;
+        }
+    }
+}
+
+function setupContextClear(pageKey) {
+    const clearBtn = document.getElementById(`${pageKey}-context-clear`);
+    if (!clearBtn) return;
+    clearBtn.addEventListener('click', () => {
+        dashboardState[pageKey].studentId = null;
+        dashboardState[pageKey].studentName = null;
+        dashboardState[pageKey].staffId = null;
+        dashboardState[pageKey].staffName = null;
+        const studentSearch = document.getElementById(`${pageKey}-student-search`);
+        const staffSearch = document.getElementById(`${pageKey}-staff-search`);
+        if (studentSearch) studentSearch.value = '';
+        if (staffSearch) staffSearch.value = '';
+        const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+        if (hiddenSelect) hiddenSelect.value = '';
+        updateContextBanner(pageKey);
+        triggerDashboardLoad(pageKey);
+    });
+}
+
+// ---- Load Trigger ----
+function syncSummaryPointCardButton() {
+    const btn = document.getElementById('show-point-card-btn');
+    if (!btn || typeof dashboardState === 'undefined' || !dashboardState.summary) return;
+    const st = dashboardState.summary;
+    const pc = document.getElementById('point-card-data-container');
+    if (st.studentId) {
+        btn.classList.remove('is-inactive');
+        btn.dataset.studentId = String(st.studentId);
+        const tf = st.compareMode
+            ? ((document.getElementById('quarter-select') || {}).value || 'alltime')
+            : (st.period === 'all_time' ? 'alltime' : (st.period || '30day'));
+        btn.dataset.timeframe = tf;
+    } else {
+        btn.classList.add('is-inactive');
+        delete btn.dataset.studentId;
+        delete btn.dataset.timeframe;
+        btn.textContent = 'View Past Point Cards';
+        if (pc) pc.style.display = 'none';
+    }
+}
+
+function triggerDashboardLoad(pageKey) {
+    if (pageKey === 'summary') loadSummaryDashboard();
+    else loadFrenzyDashboard();
+}
+
+// ---- Summary Dashboard ----
+async function loadSummaryDashboard() {
+    const st = dashboardState.summary;
+    const container = document.getElementById('summary-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading summary...</p></div>';
+
+    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
+    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
+    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
+    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
+
+    const params = [];
+    if (st.compareMode) {
+        const selectEl = document.getElementById('quarter-select');
+        const tf = selectEl ? selectEl.value : '';
+        if (tf) {
+            params.push(`timeframe=${tf}`);
+            if (tf === 'month') {
+                const sySelect = document.getElementById('summary-school-year-select');
+                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+            } else if (tf === 'custom_range') {
+                const start = st.customStart;
+                const end = st.customEnd;
+                if (start && end) {
+                    params.push(`start_date=${encodeURIComponent(start)}`);
+                    params.push(`end_date=${encodeURIComponent(end)}`);
+                }
+            }
+        }
+    } else {
+        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
+    }
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+
+    const url = '/api/summary?' + params.join('&');
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        window.currentSummaryData = data;
+
+        const printBtn = document.getElementById('print-summary-btn');
+        if (printBtn) printBtn.disabled = false;
+
+        if (data.comparison_mode && data.periods) {
+            renderSummaryComparison(container, data);
+        } else {
+            renderSummarySingle(container, data);
+        }
+        syncSummaryPointCardButton();
+    } catch (err) {
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
+        syncSummaryPointCardButton();
+    }
+}
+
+function bucketInfractionsOverview(infractions) {
+    const raw = infractions || {};
+    const out = { Safety: 0, Task: 0, Attention: 0, Social: 0 };
+    for (const [type, count] of Object.entries(raw)) {
+        const n = Number(count) || 0;
+        const label = String(type || '');
+        let bucket = 'Social';
+        if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) bucket = 'Safety';
+        else if (/disrespect/i.test(label)) bucket = 'Safety';
+        else if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) bucket = 'Attention';
+        else if (/nfd|self\s*control|^task/i.test(label)) bucket = 'Task';
+        else if (/lang|volume|myob|personal/i.test(label)) bucket = 'Social';
+        out[bucket] += n;
+    }
+    return out;
+}
+
+function formatOverviewSignedInt(n) {
+    if (n == null || Number.isNaN(Number(n))) return '';
+    const v = Number(n);
+    if (v > 0) return `+${v}`;
+    return String(v);
+}
+
+function overviewTrendDeltaClass(metric, delta) {
+    if (delta == null || Number.isNaN(Number(delta))) return 'overview-trend-line-neutral';
+    const v = Number(delta);
+    if (metric === 'infractions' || metric === 'reminders' || metric === 'resets') {
+        if (v < 0) return 'overview-trend-line-pos';
+        if (v > 0) return 'overview-trend-line-neg';
+    }
+    return 'overview-trend-line-neutral';
+}
+
+function collectOverviewTimeSlots(byTimeByDay) {
+    const hints = ['AM Bus', '9:00', '10:30', '12:00', '1:30', 'PM Bus'];
+    const pool = new Set();
+    Object.values(byTimeByDay || {}).forEach(tm => {
+        Object.keys(tm || {}).forEach(k => pool.add(k));
+    });
+    let arr = [...pool];
+    const ordered = [];
+    hints.forEach(h => {
+        const idx = arr.findIndex(k =>
+            k === h || k.includes(h) || (h.length <= 4 && k.startsWith(h)));
+        if (idx >= 0) {
+            ordered.push(arr[idx]);
+            arr = arr.filter((_, i) => i !== idx);
+        }
+    });
+    arr.sort((a, b) => a.localeCompare(b));
+    return ordered.concat(arr);
+}
+
+function overviewHeatmapMeta(byTimeByDay) {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const timeSlots = collectOverviewTimeSlots(byTimeByDay);
+    let maxInf = 0;
+    let worst = null;
+    let bestOv = -1;
+    let best = null;
+    days.forEach(day => {
+        const tm = (byTimeByDay || {})[day] || {};
+        timeSlots.forEach(timeLabel => {
+            const cell = tm[timeLabel];
+            if (!cell) return;
+            const inf = cell.total_infractions || 0;
+            const ov = typeof cell.percentages?.overall === 'number' ? cell.percentages.overall : null;
+            if (inf > maxInf) {
+                maxInf = inf;
+                worst = { day, timeLabel };
+            }
+            if (ov != null && ov > bestOv) {
+                bestOv = ov;
+                best = { day, timeLabel };
+            }
+        });
+    });
+    return { days, timeSlots, maxInf: maxInf || 1, worst, best };
+}
+
+function overviewHeatColor(cell, maxInf) {
+    const inf = cell?.total_infractions || 0;
+    const ov = typeof cell?.percentages?.overall === 'number' ? cell.percentages.overall : null;
+    let t = 0;
+    if (maxInf > 0) t = Math.min(1, inf / maxInf);
+    else if (ov != null) t = Math.min(1, (100 - ov) / 100);
+    const r = Math.round(34 + t * (239 - 34));
+    const g = Math.round(197 + t * (68 - 197));
+    const b = Math.round(94 + t * (68 - 94));
+    return `rgb(${r},${g},${b})`;
+}
+
+function overviewDayInitial(day) {
+    const m = { Monday: 'M', Tuesday: 'T', Wednesday: 'W', Thursday: 'Th', Friday: 'F' };
+    return m[day] || (day || '').slice(0, 2);
+}
+
+function buildBehaviorTrendCardHtml() {
+    return `
+        <div class="dashboard-card behavior-trend-card reports-trend-card" data-summary-card="behavior-trend">
+            <div class="behavior-trend-controls">
+                <div class="behavior-trend-title-line">
+                    <select id="summary-trend-metric" aria-label="Trend metric">
+                        <option value="overall" selected>STAR Performance</option>
+                        <option value="safety">Safety</option>
+                        <option value="teamwork">Teamwork</option>
+                        <option value="accountability">Accountability</option>
+                        <option value="relationships">Relationships</option>
+                    </select>
+                    <select id="summary-trend-aggregation" aria-label="Trend aggregation">
+                        <option value="average" selected>Average</option>
+                    </select>
+                    <span>trend over</span>
+                    <select id="summary-trend-window" aria-label="Trend window">
+                        <option value="30day" selected>30 School Days</option>
+                    </select>
+                    <button type="button" class="behavior-trend-compare-btn" id="summary-trend-compare-btn">Compare</button>
+                </div>
+            </div>
+            <div class="behavior-trend-timeline" id="summary-behavior-trend-body">
+                <div class="behavior-trend-empty">Loading trend data...</div>
+            </div>
+        </div>`;
+}
+
+function getSummaryTrendFetchRange() {
+    const st = dashboardState.summary || {};
+    const period = st.period || '30day';
+    if (period === 'custom_range' && st.customStart && st.customEnd) {
+        return { start: st.customStart, end: st.customEnd };
+    }
+
+    const today = new Date();
+    const end = today.toISOString().split('T')[0];
+    let lookbackDays = 120;
+    if (period === 'weekly') lookbackDays = 21;
+    else if (period === 'current_year') lookbackDays = 330;
+    else if (/^quarter[1-4]$/.test(period)) lookbackDays = 150;
+    else if (period === 'all_time') return {};
+
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - lookbackDays);
+    return { start: startDate.toISOString().split('T')[0], end };
+}
+
+async function fetchSummaryTrendRecords() {
+    const st = dashboardState.summary || {};
+    const params = new URLSearchParams();
+    if (st.studentId) params.set('student_id', String(st.studentId));
+    if (st.staffId) params.set('staff_id', String(st.staffId));
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
+
+    const range = getSummaryTrendFetchRange();
+    if (range.start) params.set('start_date', range.start);
+    if (range.end) params.set('end_date', range.end);
+
+    const url = `/api/daily-records${params.toString() ? `?${params.toString()}` : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Unable to load trend records (${response.status})`);
+    }
+    return response.json();
+}
+
+function parseIsoDateLocal(isoDate) {
+    const [year, month, day] = String(isoDate || '').split('-').map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+}
+
+function formatTrendDateLabel(isoDate) {
+    const d = parseIsoDateLocal(isoDate);
+    if (!d) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function calculateTrendPercent(records, metric) {
+    let safety = 0;
+    let teamwork = 0;
+    let accountability = 0;
+    let relationships = 0;
+    let possible = 0;
+
+    records.forEach(record => {
+        if (record.attendance_status === 'excused') return;
+        (record.periods || []).forEach(period => {
+            safety += Number(period.safety_points) || 0;
+            teamwork += Number(period.teamwork_points) || 0;
+            accountability += Number(period.accountability_points) || 0;
+            relationships += Number(period.relationships_points) || 0;
+            possible += Number(period.points_possible) || 4;
+        });
+    });
+
+    const numPeriods = possible > 0 ? possible / 4 : 0;
+    const maxPerCategory = numPeriods > 0 ? numPeriods * 2 : 0;
+    if (!maxPerCategory) return null;
+
+    const pct = {
+        safety: (safety / maxPerCategory) * 100,
+        teamwork: (teamwork / maxPerCategory) * 100,
+        accountability: (accountability / maxPerCategory) * 100,
+        relationships: (relationships / maxPerCategory) * 100
+    };
+    pct.overall = (pct.safety + pct.teamwork + pct.accountability + pct.relationships) / 4;
+    return Math.max(0, Math.min(100, pct[metric] ?? pct.overall));
+}
+
+function buildSummaryTrendPoints(records, metric) {
+    const recordsByDate = new Map();
+    (records || []).forEach(record => {
+        if (!record || !record.date) return;
+        if (!recordsByDate.has(record.date)) recordsByDate.set(record.date, []);
+        recordsByDate.get(record.date).push(record);
+    });
+
+    const dateKeys = Array.from(recordsByDate.keys()).sort();
+    const selectedDates = dateKeys.slice(-30);
+    if (!selectedDates.length) return [];
+
+    const bucketCount = Math.min(5, Math.ceil(selectedDates.length / 4));
+    const bucketSize = Math.ceil(selectedDates.length / bucketCount);
+    const points = [];
+
+    for (let i = 0; i < selectedDates.length; i += bucketSize) {
+        const bucketDates = selectedDates.slice(i, i + bucketSize);
+        const bucketRecords = bucketDates.flatMap(date => recordsByDate.get(date) || []);
+        const value = calculateTrendPercent(bucketRecords, metric);
+        if (value == null) continue;
+        points.push({
+            label: formatTrendDateLabel(bucketDates[bucketDates.length - 1]),
+            value: Math.round(value)
+        });
+    }
+
+    return points;
+}
+
+function renderSummaryTrendSvg(points) {
+    if (!points || points.length < 2) {
+        return `
+            <div class="behavior-trend-empty">
+                Not enough point-card data to build a 30-school-day trend yet.
+            </div>`;
+    }
+
+    const width = 1000;
+    const height = 216;
+    const left = 54;
+    const right = 32;
+    const top = 26;
+    const bottom = 44;
+    const chartW = width - left - right;
+    const chartH = height - top - bottom;
+    const xStep = points.length > 1 ? chartW / (points.length - 1) : chartW;
+    const toX = i => left + (i * xStep);
+    const toY = value => top + ((100 - Math.max(0, Math.min(100, value))) / 100) * chartH;
+    const plotted = points.map((p, i) => ({ ...p, x: toX(i), y: toY(p.value) }));
+    const gridValues = [100, 75, 50, 25, 0];
+
+    let grid = '';
+    gridValues.forEach(v => {
+        const y = toY(v);
+        grid += `<line class="behavior-trend-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>`;
+        grid += `<text class="behavior-trend-axis-label" x="${left - 16}" y="${y + 4}" text-anchor="end">${v}%</text>`;
+    });
+
+    let segments = '';
+    for (let i = 0; i < plotted.length - 1; i++) {
+        const a = plotted[i];
+        const b = plotted[i + 1];
+        const color = b.value > a.value ? '#22c55e' : b.value < a.value ? '#ef4444' : '#64748b';
+        segments += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="3" stroke-linecap="round"></line>`;
+    }
+
+    const markers = plotted.map((p) => `
+        <g class="behavior-trend-point-group">
+            <circle class="behavior-trend-marker" cx="${p.x}" cy="${p.y}" r="5" fill="#ffffff" stroke="#64748b" stroke-width="2"></circle>
+            <text class="behavior-trend-point-value" x="${p.x}" y="${p.y - 11}" text-anchor="middle" fill="#64748b">${p.value}%</text>
+            <text class="behavior-trend-point-label" x="${p.x}" y="${height - 12}" text-anchor="middle">${escapeHtml(p.label)}</text>
+        </g>
+    `).join('');
+
+    return `
+        <div class="behavior-trend-chart-wrap">
+            <svg class="behavior-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="STAR performance trend">
+                ${grid}
+                ${segments}
+                ${markers}
+            </svg>
+        </div>`;
+}
+
+function populateSummaryBehaviorTrendCard(records) {
+    const body = document.getElementById('summary-behavior-trend-body');
+    if (!body) return;
+    const metricSelect = document.getElementById('summary-trend-metric');
+    const metric = metricSelect ? metricSelect.value : 'overall';
+    const points = buildSummaryTrendPoints(records || [], metric);
+    body.innerHTML = renderSummaryTrendSvg(points);
+    const grid = body.closest('.dashboard-card-grid');
+    if (grid) scheduleMasonryLayoutAfterResize(grid);
+}
+
+async function loadSummaryBehaviorTrendCard() {
+    const body = document.getElementById('summary-behavior-trend-body');
+    if (!body) return;
+    try {
+        const records = await fetchSummaryTrendRecords();
+        window.currentSummaryTrendRecords = Array.isArray(records) ? records : [];
+        populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords);
+    } catch (err) {
+        body.innerHTML = `<div class="behavior-trend-empty">Unable to load trend data: ${escapeHtml(err.message || 'Unknown error')}</div>`;
+    }
+}
+
+function wireSummaryBehaviorTrendCard() {
+    const metricSelect = document.getElementById('summary-trend-metric');
+    if (metricSelect && !metricSelect.dataset.bound) {
+        metricSelect.dataset.bound = 'true';
+        metricSelect.addEventListener('change', () => {
+            populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords || []);
+        });
+    }
+
+    const compareBtn = document.getElementById('summary-trend-compare-btn');
+    if (compareBtn && !compareBtn.dataset.bound) {
+        compareBtn.dataset.bound = 'true';
+        compareBtn.addEventListener('click', () => {
+            const compareToggle = document.getElementById('summary-compare-toggle');
+            if (compareToggle) compareToggle.click();
+        });
+    }
+
+    loadSummaryBehaviorTrendCard();
+}
+
+function buildDefaultTriggerTimesCardHtml(data) {
+    const byClass = data.by_class || {};
+    const byTime = data.by_time || {};
+    const timeKeys = Object.keys(byTime);
+    const classNames = Object.keys(byClass);
+    const useByTime = timeKeys.length > 0;
+    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+
+    const sortedTriggerKeys = triggerEntries.sort((a, b) => {
+        const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+        const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+        const aPct = typeof aData.percentages?.overall === 'number' ? Math.round(aData.percentages.overall) : Number.POSITIVE_INFINITY;
+        const bPct = typeof bData.percentages?.overall === 'number' ? Math.round(bData.percentages.overall) : Number.POSITIVE_INFINITY;
+        if (aPct !== bPct) return aPct - bPct;
+        const aInfra = typeof aData.total_infractions === 'number' ? aData.total_infractions : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+        const bInfra = typeof bData.total_infractions === 'number' ? bData.total_infractions : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+        return bInfra - aInfra;
+    });
+
+    let rows = '';
+    sortedTriggerKeys.slice(0, 6).forEach(key => {
+        const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
+        const pctOverall = rowData.percentages?.overall;
+        const infractionsCount = typeof rowData.total_infractions === 'number'
+            ? rowData.total_infractions
+            : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
+        const topClass = useByTime ? (rowData.top_class || '') : '';
+        rows += `<tr>
+            <td>${escapeHtml(key)}${topClass ? `<div class="trigger-times-sub">${escapeHtml(topClass)}</div>` : ''}</td>
+            <td>${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</td>
+            <td>${infractionsCount}</td>
+        </tr>`;
+    });
+
+    const empty = `<p class="trigger-times-empty">No trigger time data for this period.</p>`;
+    return `
+        <div class="dashboard-card trigger-times-card summary-default-trigger-card" data-summary-card="trigger-times">
+            <div class="dashboard-card-header">
+                <h3 class="dashboard-card-title">Trigger Times</h3>
+                <button type="button" class="trigger-times-mode-btn active">Table</button>
+            </div>
+            <div class="trigger-times-table-wrap">
+                ${rows ? `
+                    <table class="trigger-times-table">
+                        <thead>
+                            <tr><th>Time</th><th>Average</th><th>Infractions</th></tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>` : empty}
+            </div>
+        </div>`;
+}
+
+function buildOverviewDashboardCardHtml(data) {
+    const avgs = data.averages || {};
+    const totalDays = data.total_days || 0;
+    const infractions = data.infractions || data.additional_info?.infractions || {};
+    const totalInfractions = Object.values(infractions).reduce((s, c) => s + Number(c) || 0, 0);
+    const reminders = data.additional_info?.total_reminders || 0;
+    const resets = data.additional_info?.total_resets || 0;
+    const attendance = data.attendance_summary || {};
+    const presentPct = typeof attendance.present_pct === 'number'
+        ? attendance.present_pct
+        : 0;
+    const byClass = data.by_class || {};
+    const byTime = data.by_time || {};
+    const byTimeByDay = data.by_time_by_day || {};
+    const trends = data.overview_trends || null;
+
+    const timeKeys = Object.keys(byTime);
+    const classNames = Object.keys(byClass);
+    const useByTime = timeKeys.length > 0;
+    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+    let hardestTriggerLabel = '';
+    let hardestTriggerSubtitle = '';
+    if (triggerEntries.length > 0) {
+        const sortedTriggerKeys = triggerEntries.sort((a, b) => {
+            const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+            const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+            const aPct = typeof aData.percentages?.overall === 'number'
+                ? Math.round(aData.percentages.overall)
+                : Number.POSITIVE_INFINITY;
+            const bPct = typeof bData.percentages?.overall === 'number'
+                ? Math.round(bData.percentages.overall)
+                : Number.POSITIVE_INFINITY;
+            if (aPct !== bPct) return aPct - bPct;
+            const aInfra = typeof aData.total_infractions === 'number'
+                ? aData.total_infractions
+                : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+            const bInfra = typeof bData.total_infractions === 'number'
+                ? bData.total_infractions
+                : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+            return bInfra - aInfra;
+        });
+        const hardestKey = sortedTriggerKeys[0];
+        const hardestData = useByTime ? (byTime[hardestKey] || {}) : (byClass[hardestKey] || {});
+        const hardestPctOverall = hardestData.percentages?.overall;
+        const hardestInfractionsCount = typeof hardestData.total_infractions === 'number'
+            ? hardestData.total_infractions
+            : (typeof hardestData.infractions === 'number' ? hardestData.infractions : 0);
+        hardestTriggerSubtitle = typeof hardestPctOverall === 'number'
+            ? `${Math.round(hardestPctOverall)}% avg • ${hardestInfractionsCount} infractions`
+            : `${hardestInfractionsCount} infractions`;
+        hardestTriggerLabel = hardestKey;
+    }
+
+    const hm = overviewHeatmapMeta(byTimeByDay);
+    let headlineTime = '';
+    let headlineDay = '';
+    if (hm.worst) {
+        headlineTime = hm.worst.timeLabel;
+        headlineDay = hm.worst.day || '';
+    } else if (hardestTriggerLabel) {
+        headlineTime = hardestTriggerLabel;
+        headlineDay = '';
+    }
+
+    const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
+    const overallPct = Math.round(avgs.overall || 0);
+    const toRoundedPct = (value) => Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+    const safetyP = toRoundedPct(avgs.safety);
+    const teamworkP = toRoundedPct(avgs.teamwork);
+    const accountabilityP = toRoundedPct(avgs.accountability);
+    const relationshipsP = toRoundedPct(avgs.relationships);
+
+    const presentDelta = trends?.present_pct_delta;
+    const starDelta = trends?.star_overall_delta;
+    const infDelta = trends?.infractions_delta;
+    const remDelta = trends?.reminders_delta;
+    const rstDelta = trends?.resets_delta;
+
+    let attendanceSub = '';
+    if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
+        const abs = Math.abs(Number(presentDelta));
+        attendanceSub = abs < 0.05 ? 'No change' : `${formatOverviewSignedInt(presentDelta)}%`;
+    } else {
+        attendanceSub = totalDays > 0 ? '' : '—';
+    }
+
+    let starSub = '';
+    let starSubClass = 'is-muted';
+    if (starDelta != null && !Number.isNaN(Number(starDelta))) {
+        const starDeltaNum = Number(starDelta);
+        if (Math.abs(starDeltaNum) < 0.05) {
+            starSub = 'No change';
+            starSubClass = 'is-muted';
+        } else {
+            starSub = `${formatOverviewSignedInt(starDelta)}%`;
+            starSubClass = starDeltaNum < 0 ? 'is-neg' : 'is-pos';
+        }
+    } else {
+        starSub = 'No change';
+        starSubClass = 'is-muted';
+    }
+
+    const buckets = bucketInfractionsOverview(infractions);
+    const bSocial = buckets.Social;
+    const bTask = buckets.Task;
+    const bAttention = buckets.Attention;
+    const bSafety = buckets.Safety;
+    const bucketTotal = bSocial + bTask + bAttention + bSafety;
+    const pct = v => (bucketTotal <= 0 ? 0 : Math.round((v / bucketTotal) * 100));
+    const donutColors = ['#9333ea', '#2563eb', '#22c55e', '#dc2626'];
+    let donutGradient = '';
+    if (bucketTotal > 0) {
+        let acc = 0;
+        const segs = [
+            { v: bSocial, c: donutColors[0] },
+            { v: bTask, c: donutColors[1] },
+            { v: bAttention, c: donutColors[2] },
+            { v: bSafety, c: donutColors[3] }
+        ];
+        const parts = [];
+        segs.forEach(s => {
+            const p = (s.v / bucketTotal) * 100;
+            if (p <= 0) return;
+            const start = acc;
+            acc += p;
+            parts.push(`${s.c} ${start}% ${acc}%`);
+        });
+        donutGradient = parts.length ? `conic-gradient(${parts.join(', ')})` : '#e5e7eb';
+    } else {
+        donutGradient = '#e5e7eb';
+    }
+
+    const incidentMax = Math.max(1, reminders, resets);
+    const remH = Math.round((reminders / incidentMax) * 100);
+    const rstH = Math.round((resets / incidentMax) * 100);
+
+    let heatRows = '';
+    hm.timeSlots.forEach(tlabel => {
+        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(tlabel)}</div>`;
+        hm.days.forEach(day => {
+            const cell = (byTimeByDay[day] || {})[tlabel];
+            const bg = overviewHeatColor(cell, hm.maxInf);
+            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && (cell?.total_infractions || 0) > 0;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && cell
+                && typeof cell.percentages?.overall === 'number';
+            let cls = 'overview-heatmap-cell';
+            if (isWorst) cls += ' overview-heatmap-cell--worst';
+            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
+            const title = cell
+                ? `${Math.round(cell.percentages?.overall || 0)}% • ${cell.total_infractions || 0} infractions`
+                : 'No data';
+            row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
+        });
+        row += '</div>';
+        heatRows += row;
+    });
+
+    if (!heatRows) {
+        heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
+    }
+
+    const overviewDeltaMetrics = [
+        { key: 'present_pct', label: 'Attendance', delta: presentDelta, isPercent: true, lowerIsBetter: false },
+        { key: 'star_overall', label: 'STAR %', delta: starDelta, isPercent: true, lowerIsBetter: false },
+        { key: 'infractions', label: 'Infractions', delta: infDelta, isPercent: false, lowerIsBetter: true },
+        { key: 'reminders', label: 'Reminders', delta: remDelta, isPercent: false, lowerIsBetter: true },
+        { key: 'resets', label: 'Resets', delta: rstDelta, isPercent: false, lowerIsBetter: true }
+    ].filter(m => m.delta != null && !Number.isNaN(Number(m.delta)));
+
+    const scoredOverviewDeltas = overviewDeltaMetrics.map((m) => {
+        const raw = Number(m.delta);
+        return {
+            ...m,
+            delta: raw,
+            goodnessDelta: m.lowerIsBetter ? -raw : raw
+        };
+    });
+
+    const positiveOverviewDeltas = scoredOverviewDeltas
+        .filter(m => m.goodnessDelta > 0)
+        .sort((a, b) => b.goodnessDelta - a.goodnessDelta);
+    const negativeOverviewDeltas = scoredOverviewDeltas
+        .filter(m => m.goodnessDelta < 0)
+        .sort((a, b) => a.goodnessDelta - b.goodnessDelta);
+
+    const topOverviewIncrease = positiveOverviewDeltas.length ? positiveOverviewDeltas[0] : null;
+    const topOverviewDecrease = negativeOverviewDeltas.length ? negativeOverviewDeltas[0] : null;
+
+    const formatOverviewDeltaParts = (metric) => {
+        if (!metric) return { metric: '—', delta: '' };
+        const formatted = formatOverviewSignedInt(metric.delta);
+        return {
+            metric: metric.label,
+            delta: `${formatted}${metric.isPercent ? '%' : ''}`
+        };
+    };
+
+    const positiveParts = formatOverviewDeltaParts(topOverviewIncrease);
+    const negativeParts = formatOverviewDeltaParts(topOverviewDecrease);
+
+    const trendInf = trends && formatOverviewSignedInt(infDelta);
+    const trendRem = trends && formatOverviewSignedInt(remDelta);
+
+    const trendsBlock = `
+        <div class="overview-trends-card" aria-label="Trends vs prior window">
+            <div class="overview-trends-title">Trends</div>
+            <div class="overview-trend-line ${topOverviewIncrease ? 'overview-trend-line-pos' : 'overview-trend-line-neutral'}">
+                <svg class="overview-spark overview-spark--up" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,12 14,8 26,10 40,4"/></svg>
+                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(positiveParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(positiveParts.delta)}</span></span>
+            </div>
+            <div class="overview-trend-line ${topOverviewDecrease ? 'overview-trend-line-neg' : 'overview-trend-line-neutral'}">
+                <svg class="overview-spark overview-spark--down" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,4 12,10 24,6 40,12"/></svg>
+                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(negativeParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(negativeParts.delta)}</span></span>
+            </div>
+        </div>`;
+
+    const headlineRight = headlineDay
+        ? `${escapeHtml(headlineTime)} on ${escapeHtml(headlineDay)}`
+        : escapeHtml(headlineTime || '—');
+
+    const triggerMetaLines = headlineTime ? `
+            <div class="overview-trigger-meta">
+                <div><span class="overview-trigger-meta-k">Trigger Time</span> ${escapeHtml(headlineTime)}</div>
+                <div><span class="overview-trigger-meta-k">Trigger Day</span> ${escapeHtml(headlineDay || '—')}</div>
+            </div>` : '';
+
+    const dashLen = 100;
+    const attOff = dashLen - Math.min(100, Math.max(0, roundedPresentPct));
+    const arcOff = pctVal => dashLen - Math.min(100, Math.max(0, pctVal));
+    /** STAR arc only: first p% of semicircle colored (same angle for every ring when p matches). */
+    const starArcDash = pctVal => {
+        const p = Math.min(100, Math.max(0, Number(pctVal) || 0));
+        return `${p} ${100 - p}`;
+    };
+    const starLeftLeg = (x, color, p) =>
+        p > 0
+            ? `<path d="M ${x} 61 L ${x} 46" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" />`
+            : '';
+    /** Hides round linecaps at arc right endpoints (they read as stray dots in the grey half). */
+    const starArcCapMaskId = `star-arc-cap-${Math.random().toString(36).slice(2, 11)}`;
+
+    return `<div class="dashboard-card overview-card overview-card--rich">
+        <div class="overview-rich-header">
+            <h3 class="dashboard-card-title">Overview</h3>
+            ${trendsBlock}
+        </div>
+
+        <div class="overview-rich-row overview-rich-gauges">
+            <div class="overview-beige-panel overview-stat overview-gauge-attendance" data-overview-key="days_present">
+                <div class="overview-panel-kicker">Attendance</div>
+                <div class="overview-gauge-wrap overview-gauge-wrap--attendance-donut">
+                    <svg class="overview-gauge-svg overview-gauge-svg--attendance-donut" viewBox="0 0 100 100" aria-hidden="true">
+                        <circle class="overview-gauge-track overview-gauge-track--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#e3e8ef" stroke-width="10" pathLength="100" />
+                        <circle class="overview-gauge-fill overview-gauge-fill--green overview-gauge-fill--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#16a34a" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${attOff}" />
+                    </svg>
+                    <div class="overview-gauge-center overview-gauge-center--attendance-donut">
+                        <div class="overview-gauge-big">${totalDays > 0 ? `${roundedPresentPct}%` : '—'}</div>
+                        <div class="overview-gauge-small ${presentDelta != null && Number(presentDelta) < 0 ? 'is-neg' : presentDelta != null && Number(presentDelta) > 0 ? 'is-pos' : ''}">${escapeHtml(attendanceSub)}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-stat overview-gauge-star" data-overview-key="star_percent">
+                <div class="overview-panel-kicker">Star Percent</div>
+                <div class="overview-gauge-wrap overview-gauge-wrap--multi">
+                    <svg class="overview-gauge-svg overview-gauge-svg--star-rainbow" viewBox="0 0 100 76" preserveAspectRatio="xMidYMin meet" aria-hidden="true">
+                        <defs>
+                            <mask id="${starArcCapMaskId}">
+                                <rect x="0" y="0" width="100" height="76" fill="white" />
+                                <circle cx="89" cy="46" r="4" fill="black" />
+                                <circle cx="85.5" cy="46" r="4" fill="black" />
+                                <circle cx="82" cy="46" r="4" fill="black" />
+                                <circle cx="78.5" cy="46" r="4" fill="black" />
+                            </mask>
+                        </defs>
+                        <!-- Ring radii step 3.5: with 4px strokes this yields ~0.5px overlap. -->
+                        <path d="M 89 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 85.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 82 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 78.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 11 61 L 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 14.5 61 L 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 18 61 L 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 21.5 61 L 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        ${starLeftLeg(11, '#ff3b30', safetyP)}
+                        ${starLeftLeg(14.5, '#007aff', teamworkP)}
+                        ${starLeftLeg(18, '#34c759', accountabilityP)}
+                        ${starLeftLeg(21.5, '#ffcc00', relationshipsP)}
+                        <g mask="url(#${starArcCapMaskId})">
+                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ff3b30" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(safetyP)}" stroke-dashoffset="0" />
+                        <path d="M 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#007aff" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(teamworkP)}" stroke-dashoffset="0" />
+                        <path d="M 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#34c759" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(accountabilityP)}" stroke-dashoffset="0" />
+                        <path d="M 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ffcc00" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(relationshipsP)}" stroke-dashoffset="0" />
+                        </g>
+                    </svg>
+                    <div class="overview-gauge-center overview-gauge-center--attendance-donut overview-gauge-star-values">
+                        <div class="overview-gauge-big">${overallPct}%</div>
+                        <div class="overview-gauge-small ${starSubClass}">${escapeHtml(starSub)}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
+            <div class="overview-trigger-head">
+                <div class="overview-panel-kicker">Trigger Time</div>
+                ${triggerMetaLines}
+            </div>
+            <div class="overview-trigger-hero">${headlineRight}</div>
+            ${hardestTriggerSubtitle ? `<div class="overview-trigger-sub">${escapeHtml(hardestTriggerSubtitle)}</div>` : ''}
+            <div class="overview-heatmap">
+                <div class="overview-heatmap-cols">
+                    <div></div>
+                    ${hm.days.map(d => `<div class="overview-heatmap-colhead">${overviewDayInitial(d)}</div>`).join('')}
+                </div>
+                ${heatRows}
+                <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
+            </div>
+        </div>
+
+        <div class="overview-rich-row overview-rich-bottom">
+            <div class="overview-beige-panel overview-stat overview-infractions-panel" data-overview-key="infractions">
+                <div class="overview-panel-kicker">Infractions</div>
+                <div class="overview-infractions-body">
+                    <ul class="overview-infractions-legend">
+                        <li><span class="dot" style="background:#9333ea"></span>Social ${pct(bSocial)}%</li>
+                        <li><span class="dot" style="background:#2563eb"></span>Task ${pct(bTask)}%</li>
+                        <li><span class="dot" style="background:#22c55e"></span>Attention ${pct(bAttention)}%</li>
+                        <li><span class="dot" style="background:#dc2626"></span>Safety ${pct(bSafety)}%</li>
+                    </ul>
+                    <div class="overview-donut-wrap">
+                        <div class="overview-donut" style="background:${donutGradient}"></div>
+                        <div class="overview-donut-center">
+                            <div class="overview-donut-total">${totalInfractions}</div>
+                            <div class="overview-donut-delta ${overviewTrendDeltaClass('infractions', infDelta)}">${trendInf ? escapeHtml(trendInf) : ''}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-incidents-panel">
+                <div class="overview-panel-kicker">Incidents</div>
+                <div class="overview-incidents-bars">
+                    <div class="overview-stat overview-incident-bar-col" data-overview-key="reminders">
+                        <div class="overview-incident-delta ${overviewTrendDeltaClass('reminders', remDelta)}">${trendRem ? escapeHtml(trendRem) : ''}</div>
+                        <div class="overview-incident-bar-track">
+                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reminder" style="height:${remH}%"></div>
+                        </div>
+                        <div class="overview-incident-label">Reminder</div>
+                    </div>
+                    <div class="overview-stat overview-incident-bar-col" data-overview-key="resets">
+                        <div class="overview-incident-delta ${overviewTrendDeltaClass('resets', rstDelta)}">${trends ? escapeHtml(formatOverviewSignedInt(rstDelta)) : ''}</div>
+                        <div class="overview-incident-bar-track">
+                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reset" style="height:${rstH}%"></div>
+                        </div>
+                        <div class="overview-incident-label">Reset</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+function renderSummarySingle(container, data) {
+    let html = `<div class="dashboard-card-grid">`;
+
+    html += buildBehaviorTrendCardHtml(data);
+    html += buildOverviewDashboardCardHtml(data);
+    html += buildDefaultTriggerTimesCardHtml(data);
+
+    html += `</div>`;
+    container.innerHTML = html;
+    window.currentSummaryTrendRecords = [];
+    wireSummaryBehaviorTrendCard();
+
+    // Attach interactive behavior for Overview card selections
+    try {
+        attachOverviewCardInteractions(container, data);
+    } catch (e) {
+        console.error('Error wiring overview card interactions:', e);
+    }
+
+    // Initial masonry-like layout for the summary dashboard cards
+    const gridEl = container.querySelector('.dashboard-card-grid');
+    if (gridEl) {
+        applySummaryMasonryLayout(gridEl);
+    }
+}
+
+// Masonry-style layout for summary dashboard cards:
+// - Keeps the Overview card fixed in the right column.
+// - Places all other dashboard cards (including extra overview cards)
+//   into equal-width columns, always choosing the column with the
+//   current smallest height so new cards "wrap" directly beneath
+//   the shortest column (typically the Overview card in the first
+//   row). This avoids the large blank gap under the Overview card
+//   without equalizing card heights.
+// - On small screens we skip this and allow the default flex layout.
+function applySummaryMasonryLayout(grid) {
+    if (!grid) return;
+
+    const cards = Array.from(grid.querySelectorAll('.dashboard-card'));
+    if (!cards.length) return;
+
+    // Reset positioning so measurements are correct.
+    // Keep existing grid/container heights during recalculation to avoid
+    // temporary document shrink that can clamp scroll and cause jump-to-top.
+    grid.style.position = '';
+    const summaryContainer = grid.parentElement;
+    cards.forEach(card => {
+        card.style.position = '';
+        card.style.top = '';
+        card.style.left = '';
+        card.style.width = '';
+    });
+
+    // On narrow/medium screens, rely on the normal flex layout so
+    // overview can stack above trend content instead of being clipped.
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
+    if (viewportWidth <= 1200) {
+        grid.style.height = '';
+        if (summaryContainer && summaryContainer.id === 'summary-results') {
+            summaryContainer.style.minHeight = '';
+        }
+        return;
+    }
+
+    const gap = 20; // match CSS .dashboard-card-grid gap
+    const containerWidth = grid.clientWidth || grid.offsetWidth;
+    if (!containerWidth) return;
+
+    // Use up to 3 equal-width columns on desktop
+    const maxColumns = 3;
+    const minCardWidth = 260;
+    const possibleColumns = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)));
+    const columnCount = Math.min(maxColumns, possibleColumns);
+    const totalGapWidth = gap * (columnCount - 1);
+    const columnWidth = (containerWidth - totalGapWidth);
+    const perColWidth = columnWidth / columnCount;
+
+    const trendCard = grid.querySelector('.reports-trend-card');
+    const defaultTriggerCard = grid.querySelector('.summary-default-trigger-card');
+    const overviewCard = grid.querySelector('.overview-card');
+    const useRestoredReportsLayout = trendCard && defaultTriggerCard && overviewCard && columnCount >= 3;
+
+    if (useRestoredReportsLayout) {
+        const leftWidth = (perColWidth * 2) + gap;
+        const rightWidth = perColWidth;
+        const leftCards = [trendCard, defaultTriggerCard].filter(Boolean);
+        const rightLeft = leftWidth + gap;
+
+        grid.style.position = 'relative';
+        trendCard.style.width = leftWidth + 'px';
+        defaultTriggerCard.style.width = leftWidth + 'px';
+        overviewCard.style.width = rightWidth + 'px';
+
+        [...leftCards, overviewCard].forEach(card => {
+            card.style.position = 'static';
+        });
+
+        void grid.offsetHeight;
+
+        let leftTop = 0;
+        leftCards.forEach(card => {
+            card.style.position = 'absolute';
+            card.style.left = '0px';
+            card.style.top = leftTop + 'px';
+            card.style.width = leftWidth + 'px';
+            leftTop += card.offsetHeight + gap;
+        });
+
+        let overviewTopOffset = 0;
+        const formSection = grid.closest('.form-section');
+        const sectionTitle = formSection ? formSection.querySelector('h2') : null;
+        if (sectionTitle) {
+            const gridRect = grid.getBoundingClientRect();
+            const titleRect = sectionTitle.getBoundingClientRect();
+            overviewTopOffset = Math.round(titleRect.top - gridRect.top);
+        }
+
+        overviewCard.style.position = 'absolute';
+        overviewCard.style.left = rightLeft + 'px';
+        overviewCard.style.top = overviewTopOffset + 'px';
+        overviewCard.style.width = rightWidth + 'px';
+
+        let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
+        const handled = new Set([trendCard, defaultTriggerCard, overviewCard]);
+        const extraCards = cards.filter(card => !handled.has(card));
+        extraCards.forEach(card => {
+            card.style.position = 'absolute';
+            card.style.width = perColWidth + 'px';
+            if (rightTop <= leftTop) {
+                card.style.left = rightLeft + 'px';
+                card.style.top = rightTop + 'px';
+                rightTop += card.offsetHeight + gap;
+            } else {
+                card.style.left = '0px';
+                card.style.top = leftTop + 'px';
+                card.style.width = leftWidth + 'px';
+                leftTop += card.offsetHeight + gap;
+            }
+        });
+
+        const maxHeight = Math.max(leftTop, rightTop, overviewCard.offsetHeight + Math.max(0, overviewTopOffset));
+        grid.style.height = maxHeight + 'px';
+        if (summaryContainer && summaryContainer.id === 'summary-results') {
+            summaryContainer.style.minHeight = maxHeight + 'px';
+        }
+        return;
+    }
+
+    // Normalise widths and measure heights with static positioning
+    grid.style.position = 'relative';
+    cards.forEach(card => {
+        card.style.position = 'static';
+        card.style.width = perColWidth + 'px';
+    });
+
+    // Force reflow so expanded content (tabs, drilldowns) is laid out before we measure
+    void grid.offsetHeight;
+    const measuredHeights = new Map();
+    cards.forEach(card => {
+        measuredHeights.set(card, card.offsetHeight);
+    });
+
+    const columnHeights = new Array(columnCount).fill(0);
+
+    // Keep Overview anchored at the far-right desktop column.
+    const overviewColumnIndex = Math.max(0, columnCount - 1);
+    let overviewTopOffset = 0;
+    const formSection = grid.closest('.form-section');
+    const sectionTitle = formSection ? formSection.querySelector('h2') : null;
+    if (sectionTitle) {
+        const gridRect = grid.getBoundingClientRect();
+        const titleRect = sectionTitle.getBoundingClientRect();
+        // Lift Overview so its top aligns with the Summary & Reports title row.
+        overviewTopOffset = Math.round(titleRect.top - gridRect.top);
+    }
+
+    // Layout cards in selection / DOM order into the shortest column,
+    // while pinning the overview card to the rightmost column.
+    cards.forEach(card => {
+        let colIndex;
+        let topOverride = null;
+        if (card.classList.contains('overview-card')) {
+            colIndex = overviewColumnIndex;
+            topOverride = overviewTopOffset;
+        } else {
+            // Keep the first generated overview detail card out of the
+            // overview column so the top row fills left-to-right.
+            if (card.classList.contains('overview-extra-card') && columnCount > 1) {
+                const fallbackCol = overviewColumnIndex === 0 ? 1 : 0;
+                if (columnHeights[fallbackCol] === 0) {
+                    colIndex = fallbackCol;
+                }
+            }
+
+            // If no preferred placement was selected, use shortest column.
+            if (colIndex == null) {
+                let minHeight = columnHeights[0];
+                colIndex = 0;
+                for (let i = 1; i < columnCount; i++) {
+                    if (columnHeights[i] < minHeight) {
+                        minHeight = columnHeights[i];
+                        colIndex = i;
+                    }
+                }
+            }
+        }
+
+        const top = topOverride != null ? topOverride : columnHeights[colIndex];
+        const left = colIndex * (perColWidth + gap);
+        const h = measuredHeights.get(card) || card.offsetHeight;
+
+        card.style.position = 'absolute';
+        card.style.top = top + 'px';
+        card.style.left = left + 'px';
+        card.style.width = perColWidth + 'px';
+
+        columnHeights[colIndex] = top + h + gap;
+    });
+
+    let maxHeight = Math.max.apply(null, columnHeights);
+    grid.style.height = maxHeight + 'px';
+    if (summaryContainer && summaryContainer.id === 'summary-results') {
+        summaryContainer.style.minHeight = maxHeight + 'px';
+    }
+
+    // Ensure grid and container are at least the actual bottom of the lowest card
+    requestAnimationFrame(() => {
+        const gridRect = grid.getBoundingClientRect();
+        let maxBottom = 0;
+        cards.forEach(card => {
+            const rect = card.getBoundingClientRect();
+            const cardBottomRelativeToGrid = rect.bottom - gridRect.top;
+            if (cardBottomRelativeToGrid > maxBottom) maxBottom = cardBottomRelativeToGrid;
+        });
+        const needed = Math.ceil(maxBottom) + gap;
+        if (needed > maxHeight) {
+            maxHeight = needed;
+            grid.style.height = maxHeight + 'px';
+            if (summaryContainer && summaryContainer.id === 'summary-results') {
+                summaryContainer.style.minHeight = maxHeight + 'px';
+            }
+        }
+    });
+}
+
+/**
+ * Run masonry layout after card content has grown, so the grid height expands and
+ * the page can scroll. Uses two animation frames so the browser has laid out new
+ * DOM before we measure, plus several delayed runs to catch late layout (fonts,
+ * async content). Call this whenever a card's content is expanded (tabs, drilldowns, etc.).
+ */
+function scheduleMasonryLayoutAfterResize(grid) {
+    if (!grid || typeof applySummaryMasonryLayout !== 'function') return;
+    const run = () => {
+        if (grid.isConnected) applySummaryMasonryLayout(grid);
+    };
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            run();
+            setTimeout(run, 100);
+            setTimeout(run, 250);
+            setTimeout(run, 450);
+        });
+    });
+}
+
+function attachOverviewCardInteractions(container, data) {
+    const overviewCard = container.querySelector('.overview-card');
+    if (!overviewCard) return;
+
+    const statBoxes = overviewCard.querySelectorAll('.overview-stat');
+    if (!statBoxes.length) return;
+
+    const grid = overviewCard.closest('.dashboard-card-grid') || container;
+
+    // Map overview stat keys to the data-overview-card keys used on the
+    // corresponding detail cards. Only stats in this map create cards.
+    const STAT_KEY_TO_CARD_KEY = {
+        days_present: 'days_present',
+        star_percent: 'star_performance',
+        infractions: 'infractions_card',
+        reminders: 'reminders',
+        resets: 'resets',
+        trigger_times: 'trigger_times'
+    };
+
+    const STORAGE_KEY = 'summary_overview_selected_stats_v1';
+
+    let selectionOrder = [];
+
+    const persistSelectionOrder = () => {
+        try {
+            const toStore = selectionOrder.slice();
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+        } catch (e) {
+            console.warn('Unable to persist overview selection order:', e);
+        }
+    };
+
+    const loadSelectionOrder = () => {
+        try {
+            const raw = window.localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            // Only keep known stat keys that actually create cards
+            return parsed.filter(k => Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, k));
+        } catch {
+            return [];
+        }
+    };
+
+    const getExtraCard = (cardKey) =>
+        grid.querySelector(`.overview-extra-card[data-overview-card="${cardKey}"]`);
+
+    const removeExtraCard = (cardKey) => {
+        const existing = getExtraCard(cardKey);
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
+        }
+    };
+
+    // After selection changes, move existing extra cards so their DOM order
+    // matches the selection order. This makes cards appear left-to-right,
+    // top-to-bottom in the order they were selected, with wrapping handled
+    // purely by CSS flexbox.
+    const reorderExtraCards = () => {
+        const fragment = document.createDocumentFragment();
+        selectionOrder.forEach(statKey => {
+            const cardKey = STAT_KEY_TO_CARD_KEY[statKey];
+            if (!cardKey) return;
+            const card = getExtraCard(cardKey);
+            if (card) {
+                fragment.appendChild(card);
+            }
+        });
+        // Remove any extra cards that no longer have a corresponding stat key
+        const existingCards = Array.from(grid.querySelectorAll('.overview-extra-card'));
+        existingCards.forEach(card => {
+            const cardKey = card.dataset.overviewCard;
+            const statKey = Object.keys(STAT_KEY_TO_CARD_KEY).find(
+                sk => STAT_KEY_TO_CARD_KEY[sk] === cardKey
+            );
+            if (!statKey || !selectionOrder.includes(statKey)) {
+                card.parentNode && card.parentNode.removeChild(card);
+            }
+        });
+        grid.appendChild(fragment);
+    };
+
+    const toggleExtraCard = (cardKey, buildFn) => {
+        const existing = getExtraCard(cardKey);
+        if (existing) {
+            removeExtraCard(cardKey);
+            return false;
+        }
+        buildFn();
+        return true;
+    };
+
+    const buildDaysPresentCard = () => {
+        // Recompute attendance summary here so this helper does not rely on
+        // locals from renderSummarySingle's scope (which are not visible in
+        // this function's lexical scope).
+        const attendance = data.attendance_summary || {};
+        const presentPct = typeof attendance.present_pct === 'number'
+            ? attendance.present_pct
+            : 0;
+        const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
+        const totalDays = data.total_days || 0;
+
+        const byDay = data.attendance_by_day_of_week || {};
+        const dayEntries = Object.entries(byDay);
+        if (!dayEntries.length) {
+            const card = document.createElement('div');
+            card.className = 'dashboard-card full-width overview-extra-card';
+            card.dataset.overviewCard = 'days_present';
+            card.innerHTML = `
+                <div class="dashboard-card-header">
+                    <h3 class="dashboard-card-title">Attendance</h3>
+                </div>
+                <div class="dashboard-card-body">
+                    <p style="color:var(--text-secondary);font-size:0.85rem;">
+                        Attendance by day of week is not available for this timeframe.
+                    </p>
+                </div>
+            `;
+            grid.appendChild(card);
+            return;
+        }
+        let maxAbsent = -1;
+        let maxAbsentDays = [];
+        let totalAbsences = 0;
+        let totalUnexcusedAbsences = 0;
+        dayEntries.forEach(([day, counts]) => {
+            const absent = (counts.excused || 0) + (counts.unexcused || 0);
+            totalAbsences += absent;
+            totalUnexcusedAbsences += (counts.unexcused || 0);
+            if (absent > maxAbsent) {
+                maxAbsent = absent;
+                maxAbsentDays = [day];
+            } else if (absent === maxAbsent && absent > 0) {
+                maxAbsentDays.push(day);
+            }
+        });
+        const formatDays = (days) => days.join(', ');
+        const mostAbsentText = maxAbsent > 0
+            ? `${formatDays(maxAbsentDays)} (${maxAbsent} absence${maxAbsent !== 1 ? 's' : ''})`
+            : 'No absences recorded';
+
+        let rows = '';
+        const sortedDayEntries = dayEntries.slice().sort(([, aCounts], [, bCounts]) => {
+            const aTotalAbsent = (aCounts.excused || 0) + (aCounts.unexcused || 0);
+            const bTotalAbsent = (bCounts.excused || 0) + (bCounts.unexcused || 0);
+            return bTotalAbsent - aTotalAbsent;
+        });
+        sortedDayEntries.forEach(([day, counts]) => {
+            const absentExcused = counts.excused || 0;
+            const absentUnexcused = counts.unexcused || 0;
+            const totalForDay = absentExcused + absentUnexcused;
+            rows += `<tr>
+                <td>${day}</td>
+                <td>${absentUnexcused}</td>
+                <td>${absentExcused}</td>
+                <td>${totalForDay}</td>
+            </tr>`;
+        });
+
+        const chartCanvasId = `days-present-donut-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const drilldownCanvasId = `days-present-drilldown-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const attendancePresent = Number(attendance.present || 0);
+        const attendanceExcused = Number(attendance.excused || 0);
+        const attendanceUnexcused = Number(attendance.unexcused || 0);
+        const topAbsenceDay = maxAbsent > 0 && maxAbsentDays.length
+            ? maxAbsentDays[0]
+            : 'No absences';
+        const presentDelta = data.overview_trends?.present_pct_delta;
+        const presentCountDelta = data.overview_trends?.present_count_delta;
+        const excusedDelta = data.overview_trends?.excused_delta;
+        const unexcusedDelta = data.overview_trends?.unexcused_delta;
+        let deltaText = '—';
+        let deltaClass = 'delta-neutral';
+        if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
+            const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
+            if (roundedTenths === 0) {
+                deltaText = '—';
+            } else {
+                const sign = roundedTenths > 0 ? '+' : '';
+                deltaText = `${sign}${roundedTenths.toFixed(1)}%`;
+                deltaClass = roundedTenths > 0 ? 'delta-positive' : 'delta-negative';
+            }
+        }
+        const card = document.createElement('div');
+        card.className = 'dashboard-card overview-extra-card days-present-card';
+        card.dataset.overviewCard = 'days_present';
+        card.innerHTML = `
+            <div class="dashboard-card-header">
+                <h3 class="dashboard-card-title">Attendance</h3>
+                <div class="view-mode-toggle" role="tablist" aria-label="Days Present view mode">
+                    <button type="button" class="view-mode-toggle-btn active" data-days-present-view="graph" role="tab" aria-selected="true">Graph</button>
+                    <button type="button" class="view-mode-toggle-btn" data-days-present-view="table" role="tab" aria-selected="false">Table</button>
+                </div>
+            </div>
+            <div class="dashboard-card-body overview-detail-container">
+                <div class="overview-metrics">
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>% of days present:</strong></span>
+                        <span class="overview-metrics-value">${roundedPresentPct}%</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total absences:</strong></span>
+                        <span class="overview-metrics-value">${totalAbsences}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total unexcused absences:</strong></span>
+                        <span class="overview-metrics-value">${totalUnexcusedAbsences}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Total expected days:</strong></span>
+                        <span class="overview-metrics-value">${totalDays}</span>
+                    </div>
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Most absences:</strong></span>
+                        <span class="overview-metrics-value">${mostAbsentText}</span>
+                    </div>
+                </div>
+                <div class="view-mode-chart-wrap days-present-chart-wrap" data-days-present-panel="graph">
+                    <div class="days-present-tabs" role="tablist">
+                        <button class="days-present-tab active" data-days-present-tab="overview" role="tab" aria-selected="true">
+                            <span class="days-present-tab-label">Overview</span>
+                        </button>
+                    </div>
+                    <div class="days-present-tab-panels">
+                        <div class="days-present-tab-panel is-active" data-days-present-tab-panel="overview">
+                            <div class="days-present-donut-main">
+                                <div class="days-present-donut-shell">
+                                    <canvas id="${chartCanvasId}" aria-label="Attendance breakdown by status" role="img"></canvas>
+                                    <div class="days-present-donut-center">
+                                        <div class="days-present-donut-center-pct">${roundedPresentPct}%</div>
+                                        <div class="days-present-donut-center-delta ${deltaClass}">${deltaText}</div>
+                                        <div class="days-present-donut-center-day">${escapeHtml(topAbsenceDay)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div data-days-present-panel="table" hidden>
+                    <table class="days-present-table">
+                        <thead>
+                            <tr>
+                                <th>Day</th>
+                                <th>Unexcused</th>
+                                <th>Excused</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+
+        const graphPanel = card.querySelector('[data-days-present-panel="graph"]');
+        const tablePanel = card.querySelector('[data-days-present-panel="table"]');
+        const metricsPanel = card.querySelector('.overview-metrics');
+        const modeButtons = card.querySelectorAll('[data-days-present-view]');
+        const daysTabsContainer = card.querySelector('.days-present-tabs');
+        const daysPanelsContainer = card.querySelector('.days-present-tab-panels');
+        const setActiveDaysTab = (tabName) => {
+            const allTabs = card.querySelectorAll('.days-present-tab');
+            const allPanels = card.querySelectorAll('.days-present-tab-panel');
+            allTabs.forEach((tab) => {
+                const isActive = tab.dataset.daysPresentTab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach((panel) => {
+                panel.classList.toggle('is-active', panel.dataset.daysPresentTabPanel === tabName);
+            });
+        };
+        const wireDaysTabClicks = () => {
+            const allTabs = card.querySelectorAll('.days-present-tab');
+            allTabs.forEach((tab) => {
+                if (tab._daysPresentWired) return;
+                tab._daysPresentWired = true;
+                tab.addEventListener('click', (evt) => {
+                    const closeBtn = evt.target.closest('.days-present-tab-close');
+                    if (closeBtn) {
+                        evt.stopPropagation();
+                        const tabName = tab.dataset.daysPresentTab;
+                        if (tabName === 'overview') return;
+                        const panel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
+                        if (panel) panel.remove();
+                        tab.remove();
+                        setActiveDaysTab('overview');
+                        relayoutDaysPresent();
+                        return;
+                    }
+                    const tabName = tab.dataset.daysPresentTab;
+                    if (!tabName || tab.disabled) return;
+                    setActiveDaysTab(tabName);
+                });
+            });
+        };
+        const relayoutDaysPresent = () => {
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+        const setDaysPresentView = (mode) => {
+            const isGraph = mode === 'graph';
+            if (graphPanel) graphPanel.hidden = !isGraph;
+            if (tablePanel) tablePanel.hidden = isGraph;
+            if (metricsPanel) metricsPanel.hidden = isGraph;
+            if (isGraph) setActiveDaysTab('overview');
+            modeButtons.forEach((btn) => {
+                const active = btn.dataset.daysPresentView === mode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+        };
+        modeButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                setDaysPresentView(btn.dataset.daysPresentView || 'graph');
+                relayoutDaysPresent();
+            });
+        });
+        wireDaysTabClicks();
+        setDaysPresentView('graph');
+
+        const donutCanvas = card.querySelector(`#${chartCanvasId}`);
+        const donutLabels = ['Present', 'Excused', 'Unexcused'];
+        const donutValues = [attendancePresent, attendanceExcused, attendanceUnexcused];
+        const donutColors = ['#16A34A', '#F59E0B', '#FB6F5A'];
+        const hasDonutData = donutValues.some((value) => value > 0);
+        const dayOfWeekDeltas = data.overview_trends?.day_of_week_absence_deltas || {};
+        const normalizedDayOfWeekDeltas = Object.entries(dayOfWeekDeltas).reduce((acc, [label, value]) => {
+            acc[String(label || '').toLowerCase()] = Number(value);
+            return acc;
+        }, {});
+        const drilldownLabels = sortedDayEntries.map(([day]) => day);
+        const drilldownValues = sortedDayEntries.map(([, counts]) => (counts.excused || 0) + (counts.unexcused || 0));
+        const hasDrilldownData = drilldownValues.some((value) => value > 0);
+        if (donutCanvas && hasDonutData && typeof Chart !== 'undefined') {
+            const legendDeltaForLabel = (label) => {
+                if (label === 'Present') {
+                    if (presentCountDelta == null || Number.isNaN(Number(presentCountDelta))) {
+                        return { text: '—', cls: 'delta-neutral' };
+                    }
+                    const n = Math.round(Number(presentCountDelta));
+                    if (n === 0) return { text: '0', cls: 'delta-neutral' };
+                    const sign = n > 0 ? '+' : '';
+                    return {
+                        text: `${sign}${n}`,
+                        cls: n > 0 ? 'delta-positive' : 'delta-negative'
+                    };
+                }
+                const raw = label === 'Excused' ? excusedDelta : unexcusedDelta;
+                if (raw == null || Number.isNaN(Number(raw))) {
+                    return { text: '—', cls: 'delta-neutral' };
+                }
+                const n = Math.round(Number(raw));
+                if (n === 0) return { text: '0', cls: 'delta-neutral' };
+                const sign = n > 0 ? '+' : '';
+                return {
+                    text: `${sign}${n}`,
+                    cls: n > 0 ? 'delta-negative' : 'delta-positive'
+                };
+            };
+            const legendRows = donutLabels.map((label, idx) => {
+                const value = Number(donutValues[idx] || 0);
+                const delta = legendDeltaForLabel(label);
+                return `
+                    <div class="days-present-legend-item">
+                        <div class="days-present-legend-label">
+                            <span class="days-present-legend-dot" style="background:${donutColors[idx]};"></span>
+                            <span>${escapeHtml(label)}</span>
+                        </div>
+                        <div class="days-present-legend-value">
+                            ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            const overviewPanel = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-main');
+            if (overviewPanel) {
+                overviewPanel.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${legendRows}</div>`);
+            }
+            new Chart(donutCanvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: donutLabels,
+                    datasets: [{
+                        data: donutValues,
+                        backgroundColor: donutLabels.map((_, idx) => donutColors[idx % donutColors.length]),
+                        borderColor: '#ffffff',
+                        borderWidth: 2,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    rotation: 180,
+                    cutout: '62%',
+                    layout: {
+                        padding: { top: 22, right: 28, bottom: 34, left: 28 }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        datalabels: {
+                            color: '#ffffff',
+                            font: { size: 12, weight: '700' },
+                            anchor: 'end',
+                            align: 'end',
+                            offset: 6,
+                            clamp: true,
+                            clip: false,
+                            backgroundColor: (context) => {
+                                const idx = context.dataIndex || 0;
+                                return donutColors[idx % donutColors.length];
+                            },
+                            borderRadius: 8,
+                            padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                            formatter: (value, context) => {
+                                const values = context.chart.data.datasets[0].data || [];
+                                const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
+                                if (!total || !value) return '';
+                                const pct = Math.round((Number(value) / total) * 100);
+                                return pct > 0 ? `${pct}%` : '';
+                            }
+                        }
+                    }
+                }
+            });
+            const openDrilldownFromDonut = () => {
+                const tabName = 'day-of-week';
+                let dayTab = card.querySelector(`.days-present-tab[data-days-present-tab="${tabName}"]`);
+                let dayPanel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
+                if (!dayTab && daysTabsContainer && daysPanelsContainer) {
+                    dayTab = document.createElement('button');
+                    dayTab.className = 'days-present-tab';
+                    dayTab.dataset.daysPresentTab = tabName;
+                    dayTab.setAttribute('role', 'tab');
+                    dayTab.setAttribute('aria-selected', 'false');
+                    dayTab.innerHTML = `
+                        <span class="days-present-tab-label">Day of Week</span>
+                        <span class="days-present-tab-close" aria-label="Close" role="button">&times;</span>
+                    `;
+                    daysTabsContainer.appendChild(dayTab);
+                    dayPanel = document.createElement('div');
+                    dayPanel.className = 'days-present-tab-panel';
+                    dayPanel.dataset.daysPresentTabPanel = tabName;
+                    dayPanel.innerHTML = `
+                        <div class="days-present-pie-heading">Absences by Day of Week</div>
+                        <div class="days-present-donut-main">
+                            <div class="days-present-donut-shell days-present-donut-shell--day-of-week">
+                                <canvas id="${drilldownCanvasId}" aria-label="Absence totals by day of week" role="img"></canvas>
+                            </div>
+                        </div>
+                    `;
+                    daysPanelsContainer.appendChild(dayPanel);
+                    wireDaysTabClicks();
+                }
+                const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
+                if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
+                    const drillPalette = ['#2563EB', '#7C3AED', '#0D9488', '#059669', '#EA580C', '#DC2626', '#475569'];
+                    const dayLegendRows = drilldownLabels.map((label, idx) => {
+                        const value = Number(drilldownValues[idx] || 0);
+                        const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
+                        const hasDelta = Number.isFinite(rawDelta);
+                        let delta = { text: '—', cls: 'delta-neutral' };
+                        if (hasDelta) {
+                            if (rawDelta === 0) {
+                                delta = { text: '0', cls: 'delta-neutral' };
+                            } else {
+                                delta = {
+                                    text: `${rawDelta > 0 ? '+' : ''}${rawDelta}`,
+                                    cls: rawDelta > 0 ? 'delta-positive' : 'delta-negative'
+                                };
+                            }
+                        }
+                        return `
+                            <div class="days-present-legend-item">
+                                <div class="days-present-legend-label">
+                                    <span class="days-present-legend-dot" style="background:${drillPalette[idx % drillPalette.length]};"></span>
+                                    <span>${escapeHtml(label)}</span>
+                                </div>
+                                <div class="days-present-legend-value">
+                                    ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    const dayPanelMain = dayPanel.querySelector('.days-present-donut-main');
+                    if (dayPanelMain) {
+                        dayPanelMain.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${dayLegendRows}</div>`);
+                    }
+                    new Chart(drilldownCanvas.getContext('2d'), {
+                        type: 'doughnut',
+                        data: {
+                            labels: drilldownLabels,
+                            datasets: [{
+                                data: drilldownValues,
+                                backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
+                                radius: '90%',
+                                borderColor: '#ffffff',
+                                borderWidth: 2,
+                                hoverOffset: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            rotation: 180,
+                            cutout: '62%',
+                            layout: {
+                                padding: { top: 26, right: 36, bottom: 38, left: 36 }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                datalabels: {
+                                    color: '#ffffff',
+                                    font: { size: 12, weight: '700' },
+                                    anchor: 'end',
+                                    align: 'end',
+                                    offset: 8,
+                                    clamp: true,
+                                    clip: false,
+                                    backgroundColor: (context) => {
+                                        const idx = context.dataIndex || 0;
+                                        return drillPalette[idx % drillPalette.length];
+                                    },
+                                    borderRadius: 8,
+                                    padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                                    formatter: (value, context) => {
+                                        const values = context.chart.data.datasets[0].data || [];
+                                        const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
+                                        if (!total || !value) return '';
+                                        const pct = Math.round((Number(value) / total) * 100);
+                                        return pct > 0 ? `${pct}%` : '';
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    drilldownCanvas.dataset.chartBuilt = '1';
+                } else if (dayPanel && !hasDrilldownData) {
+                    dayPanel.innerHTML = `
+                        <p style="color:var(--text-secondary);font-size:0.85rem;">
+                            No day-of-week absence totals are available for this timeframe.
+                        </p>
+                    `;
+                }
+                setActiveDaysTab(tabName);
+                relayoutDaysPresent();
+            };
+            donutCanvas.style.cursor = 'pointer';
+            donutCanvas.addEventListener('click', openDrilldownFromDonut);
+            const donutShell = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-shell');
+            if (donutShell) {
+                donutShell.style.cursor = 'pointer';
+                donutShell.addEventListener('click', (evt) => {
+                    if (evt.target === donutCanvas) return;
+                    openDrilldownFromDonut();
+                });
+            }
+        } else if (graphPanel) {
+            graphPanel.innerHTML = `
+                <p style="color:var(--text-secondary);font-size:0.85rem;">
+                    No attendance totals are available to graph for this timeframe.
+                </p>
+            `;
+        }
+    };
+
+    const renderInfractionTypeBreakdown = (type, targetOverride) => {
+        const infractionsByType = data.infractions_by_type || {};
+        const entry = infractionsByType[type];
+        const target = targetOverride;
+        if (!target) return;
+
+        if (!entry) {
+            target.innerHTML = `<p style="color:var(--text-secondary);font-size:0.85rem;">No detailed data for ${escapeHtml(type)}.</p>`;
+            return;
+        }
+
+        const byTime = entry.by_time || {};
+        const byDay = entry.by_day_of_week || {};
+
+        // Build the inner "subtabs" for this infraction's details. The default
+        // subtab is an Overview that shows the by-time/by-day tables. Additional
+        // subtabs contain separate cards focused on a selected time or day.
+        let timeRows = '';
+        Object.entries(byTime)
+            .sort(([, a], [, b]) => (b || 0) - (a || 0))
+            .forEach(([label, count]) => {
+                const overallByTime = (data.by_time || {})[label] || {};
+                const topClass =
+                    overallByTime.top_class ||
+                    overallByTime.topClass ||
+                    overallByTime.primary_class ||
+                    '';
+                const classSubheader = topClass
+                    ? `<div style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(topClass)}</div>`
+                    : '';
+                timeRows += `
+                    <tr data-time-label="${label}">
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${escapeHtml(label)}${classSubheader}
+                        </td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${count}
+                        </td>
+                    </tr>
+                `;
+            });
+
+        let dayRows = '';
+        Object.entries(byDay)
+            .sort(([, a], [, b]) => (b || 0) - (a || 0))
+            .forEach(([label, count]) => {
+                dayRows += `
+                    <tr data-day-label="${label}">
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${escapeHtml(label)}
+                        </td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                            ${count}
+                        </td>
+                    </tr>
+                `;
+            });
+
+        const DETAILS_HINT_KEY = 'infractions_details_click_hint_seen';
+        const detailsHintSeen = localStorage.getItem(DETAILS_HINT_KEY);
+        const detailsHintMsg = 'Click a time row to see STAR metrics and infractions for that time; click a day row to see the time breakdown for that day.';
+        const detailsHintMsgAttr = detailsHintMsg.replace(/"/g, '&quot;');
+        const detailsTitleHintBlock = `
+            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${DETAILS_HINT_KEY}" data-hint-message="${detailsHintMsgAttr}">
+                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+            </div>`;
+        const detailsFirstTimeText = detailsHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${DETAILS_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(detailsHintMsg)}</p>`;
+
+        target.innerHTML = `
+            <div class="infractions-drilldown-tabs" role="tablist">
+                <button class="infractions-drill-tab active" data-drill-tab="overview" role="tab" aria-selected="true">
+                    <span class="infractions-drill-tab-label">Overview</span>
+                </button>
+            </div>
+            <div class="infractions-drilldown-panels">
+                <div class="infractions-drill-tab-panel is-active" data-drill-tab-panel="overview">
+                    <div class="infractions-details-section-header">
+                        <h4 style="margin:0;">${escapeHtml(type)} — When It Occurs</h4>
+                        ${detailsTitleHintBlock}
+                    </div>
+                    ${detailsFirstTimeText}
+                    <div class="overview-two-col">
+                        <div>
+                            <h4>By Time of Day</h4>
+                            ${timeRows ? `
+                                <table class="infractions-time-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Time</th>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${timeRows}
+                                    </tbody>
+                                </table>` :
+                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No time-of-day data.</p>`}
+                        </div>
+                        <div>
+                            <h4>By Day of Week</h4>
+                            ${dayRows ? `
+                                <table class="infractions-day-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                    <thead>
+                                        <tr>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Day</th>
+                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${dayRows}
+                                    </tbody>
+                                </table>` :
+                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data.</p>`}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Wire subtab interactions scoped to this details panel
+        const detailsPanel = target.closest('.infractions-tab-panel');
+        if (!detailsPanel) return;
+        const drillTabsContainer = target.querySelector('.infractions-drilldown-tabs');
+        const drillPanelsContainer = target.querySelector('.infractions-drilldown-panels');
+        if (!drillTabsContainer || !drillPanelsContainer) return;
+
+        const setActiveDrillTab = (tabName) => {
+            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
+            const allPanels = drillPanelsContainer.querySelectorAll('.infractions-drill-tab-panel');
+            allTabs.forEach(tab => {
+                const isActive = tab.dataset.drillTab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach(panel => {
+                panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
+            });
+        };
+
+        const wireDrillTabClicks = () => {
+            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
+            allTabs.forEach(tab => {
+                if (tab._infractionsDrillWired) return;
+                tab._infractionsDrillWired = true;
+                tab.addEventListener('click', (e) => {
+                    const closeBtn = e.target.closest('.infractions-drill-tab-close');
+                    if (closeBtn) {
+                        e.stopPropagation();
+                        const name = tab.dataset.drillTab;
+                        // Prevent closing the Overview subtab
+                        if (name === 'overview') return;
+                        const panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${name}"]`);
+                        if (panel) {
+                            panel.remove();
+                        }
+                        tab.remove();
+                        if (!drillTabsContainer.querySelector('.infractions-drill-tab.active')) {
+                            setActiveDrillTab('overview');
+                        }
+                        return;
+                    }
+                    const tabName = tab.dataset.drillTab;
+                    if (!tabName) return;
+                    setActiveDrillTab(tabName);
+                });
+            });
+        };
+
+        wireDrillTabClicks();
+
+        const createOrUpdateDrillSubtab = (tabName, label, innerCardHtml) => {
+            let tab = drillTabsContainer.querySelector(`.infractions-drill-tab[data-drill-tab="${tabName}"]`);
+            let panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+
+            if (!tab) {
+                tab = document.createElement('button');
+                tab.className = 'infractions-drill-tab';
+                tab.dataset.drillTab = tabName;
+                tab.setAttribute('role', 'tab');
+                tab.setAttribute('aria-selected', 'false');
+                const safeLabel = label || tabName;
+                tab.innerHTML = `
+                    <span class="infractions-drill-tab-label">${escapeHtml(safeLabel)}</span>
+                    <span class="infractions-drill-tab-close" aria-label="Close" role="button">&times;</span>
+                `;
+                drillTabsContainer.appendChild(tab);
+            }
+
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.className = 'infractions-drill-tab-panel';
+                panel.dataset.drillTabPanel = tabName;
+                drillPanelsContainer.appendChild(panel);
+            }
+
+            panel.innerHTML = `
+                <div class="dashboard-card" style="margin-top:8px;">
+                    ${innerCardHtml}
+                </div>
+            `;
+
+            wireDrillTabClicks();
+            setActiveDrillTab(tabName);
+        };
+
+        // Time-of-day row clicks: show average percent and lowest STAR category for that time bucket
+        const timeRowsEls = target.querySelectorAll('.infractions-time-table tbody tr[data-time-label]');
+        timeRowsEls.forEach(row => {
+            if (row._infractionsTimeWired) return;
+            row._infractionsTimeWired = true;
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', () => {
+                const timeLabel = row.dataset.timeLabel;
+                if (!timeLabel) return;
+                localStorage.setItem(DETAILS_HINT_KEY, '1');
+                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
+                if (detailsTextEl) detailsTextEl.remove();
+                const bucket = (data.by_time || {})[timeLabel] || {};
+                const pct = bucket.percentages || {};
+                const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
+
+                const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
+                let lowestKey = null;
+                let lowestVal = null;
+                categories.forEach(k => {
+                    const v = typeof pct[k] === 'number' ? pct[k] : null;
+                    if (v == null) return;
+                    if (lowestVal == null || v < lowestVal) {
+                        lowestVal = v;
+                        lowestKey = k;
+                    }
+                });
+
+                // Build infractions table for this time bucket
+                const infractionsMap = bucket.infractions || {};
+                let infraRows = '';
+                const infraEntries = Object.entries(infractionsMap);
+                if (infraEntries.length) {
+                    infraEntries
+                        .sort(([, a], [, b]) => (Number(b) || 0) - (Number(a) || 0))
+                        .forEach(([infType, count]) => {
+                            infraRows += `
+                                <tr>
+                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
+                                        ${escapeHtml(infType)}
+                                    </td>
+                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                        ${count}
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                }
+
+                const lowestLabel = lowestKey
+                    ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
+                    : 'N/A';
+
+                const contentHtml = `
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — ${escapeHtml(timeLabel)} Focus</h4>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
+                        Based on all data for this time period in the selected summary range.
+                    </p>
+                    <table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                        <thead>
+                            <tr>
+                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Metric</th>
+                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Average STAR %</td>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                    ${overallPct != null ? `${overallPct}%` : 'Not available'}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Lowest STAR Category</td>
+                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                    ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <h5 style="margin:12px 0 6px 0;font-size:0.9rem;">Infractions during this time</h5>
+                    ${
+                        infraRows
+                            ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:2px;">
+                                   <thead>
+                                       <tr>
+                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Infractions</th>
+                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">Count</th>
+                                       </tr>
+                                   </thead>
+                                   <tbody>
+                                       ${infraRows}
+                                   </tbody>
+                               </table>`
+                            : `<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">
+                                   No infractions recorded for this time period.
+                               </p>`
+                    }
+                `;
+
+                const tabName = `time-${timeLabel}`;
+                createOrUpdateDrillSubtab(tabName, timeLabel, contentHtml);
+                scheduleMasonryLayoutAfterResize(grid);
+            });
+        });
+
+        // Day-of-week row clicks: show a Time-of-day breakdown for that day
+        const dayRowsEls = target.querySelectorAll('.infractions-day-table tbody tr[data-day-label]');
+        dayRowsEls.forEach(row => {
+            if (row._infractionsDayWired) return;
+            row._infractionsDayWired = true;
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', () => {
+                const dayLabel = row.dataset.dayLabel;
+                if (!dayLabel) return;
+                localStorage.setItem(DETAILS_HINT_KEY, '1');
+                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
+                if (detailsTextEl) detailsTextEl.remove();
+
+                const byTimeByDay = data.by_time_by_day || {};
+                const timesForDay = byTimeByDay[dayLabel] || {};
+
+                let rowsHtml = '';
+                const entries = Object.entries(timesForDay)
+                    .map(([timeLabel, bucket]) => {
+                        const infra = bucket.infractions || {};
+                        const count = typeof infra[type] === 'number' ? infra[type] : 0;
+                        return { timeLabel, bucket, count };
+                    })
+                    .filter(e => e.count > 0);
+
+                if (entries.length) {
+                    entries
+                        .sort((a, b) => b.count - a.count)
+                        .forEach(({ timeLabel, bucket, count }) => {
+                            const pct = bucket.percentages || {};
+                            const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
+                            const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
+                            let lowestKey = null;
+                            let lowestVal = null;
+                            categories.forEach(k => {
+                                const v = typeof pct[k] === 'number' ? pct[k] : null;
+                                if (v == null) return;
+                                if (lowestVal == null || v < lowestVal) {
+                                    lowestVal = v;
+                                    lowestKey = k;
+                                }
+                            });
+                            const lowestLabel = lowestKey
+                                ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
+                                : 'N/A';
+                            rowsHtml += `
+                                <tr>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">${escapeHtml(timeLabel)}</td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${overallPct != null ? `${overallPct}%` : 'Not available'}
+                                    </td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
+                                    </td>
+                                    <td style="padding:4px 8px;border:1px solid var(--border);">
+                                        ${count}
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                }
+
+                const contentHtml = `
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — Time of Day on ${escapeHtml(dayLabel)}</h4>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
+                        Time-of-day STAR performance for ${escapeHtml(dayLabel)} in this summary range.
+                    </p>
+                    ${rowsHtml
+                        ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Time</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Average STAR %</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Lowest STAR Category</th>
+                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Infractions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rowsHtml}
+                                </tbody>
+                           </table>`
+                        : `<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:4px;">
+                               No time-of-day data available for ${escapeHtml(dayLabel)}.
+                           </p>`
+                    }
+                `;
+
+                const tabName = `day-${dayLabel}`;
+                createOrUpdateDrillSubtab(tabName, dayLabel, contentHtml);
+                scheduleMasonryLayoutAfterResize(grid);
+            });
+        });
+    };
+
+    const renderReminderOrResetDetails = (mode) => {
+        const label = mode === 'reminders' ? 'Reminders' : 'Resets';
+        const assocKey = mode === 'reminders' ? 'infractions_for_reminders' : 'infractions_for_resets';
+        const assocMap = data.additional_info?.[assocKey] || {};
+        const entries = Object.entries(assocMap).sort((a, b) => b[1] - a[1]);
+        const byTime = data.by_time || {};
+        const byDay = data.by_day_of_week || {};
+
+        let timeRows = '';
+        Object.entries(byTime)
+            .map(([labelTime, tdata]) => {
+                const count = mode === 'reminders'
+                    ? (tdata.total_reminders || 0)
+                    : (tdata.total_resets || 0);
+                return { labelTime, count };
+            })
+            .filter(r => r.count)
+            .sort((a, b) => b.count - a.count)
+            .forEach(({ labelTime, count }) => {
+                timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td></tr>`;
+            });
+
+        let dayRows = '';
+        Object.entries(byDay)
+            .map(([dayLabel, ddata]) => {
+                const count = mode === 'reminders'
+                    ? (ddata.total_reminders || 0)
+                    : (ddata.total_resets || 0);
+                return { dayLabel, count };
+            })
+            .filter(r => r.count)
+            .sort((a, b) => b.count - a.count)
+            .forEach(({ dayLabel, count }) => {
+                dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td></tr>`;
+            });
+
+        let infraRows = '';
+        entries.forEach(([t, count]) => {
+            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td></tr>`;
+        });
+
+        const key = mode === 'reminders' ? 'reminders' : 'resets';
+        removeExtraCard(key);
+        const card = document.createElement('div');
+        card.className = 'dashboard-card full-width overview-extra-card';
+        card.dataset.overviewCard = key;
+        card.innerHTML = `
+        <div class="dashboard-card-header">
+        <h3 class="dashboard-card-title">${label} — When & What</h3>
+        </div>
+        <div class="dashboard-card-body overview-detail-container">
+        <div class="overview-two-col" style="margin-bottom:12px;">
+                    <div>
+                        <h4>By Time of Day</h4>
+                        ${timeRows ? `
+                            <table>
+                                <thead><tr><th>Time</th><th>Count</th></tr></thead>
+                                <tbody>${timeRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`}
+                    </div>
+                    <div>
+                        <h4>By Day of Week</h4>
+                        ${dayRows ? `
+                            <table>
+                                <thead><tr><th>Day</th><th>Count</th></tr></thead>
+                                <tbody>${dayRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`}
+                    </div>
+                    <div>
+                        <h4>${label} — Connected Infractions</h4>
+                        ${infraRows ? `
+                            <table>
+                                <thead><tr><th>Infraction</th><th>Count</th></tr></thead>
+                                <tbody>${infraRows}</tbody>
+                            </table>` :
+                            `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`}
+                    </div>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+    };
+
+    const toggleTriggerTimesDayTable = () => {
+        const triggerCard = container.querySelector('.trigger-times-card');
+        if (!triggerCard) return;
+        const target = triggerCard.querySelector('.trigger-times-day-of-week');
+        if (!target) return;
+
+        // If already visible, hide and clear on repeat click
+        if (target.style.display !== 'none' && target.innerHTML) {
+            target.style.display = 'none';
+            target.innerHTML = '';
+            return;
+        }
+
+        const byDayData = data.by_day_of_week || {};
+        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        const rows = [];
+        weekdays.forEach(d => {
+            const dd = byDayData[d];
+            if (!dd) return;
+            const pct = typeof dd.percentages?.overall === 'number'
+                ? dd.percentages.overall
+                : 0;
+            const infractionsCount = typeof dd.total_infractions === 'number'
+                ? dd.total_infractions
+                : 0;
+            rows.push({
+                label: d.substring(0, 3),
+                pct,
+                infractions: infractionsCount
+            });
+        });
+
+        if (!rows.length) {
+            target.innerHTML = `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data for this period.</p>`;
+            target.style.display = 'block';
+            return;
+        }
+
+        rows.sort((a, b) => {
+            if (b.infractions !== a.infractions) return b.infractions - a.infractions;
+            return (b.pct || 0) - (a.pct || 0);
+        });
+        let bodyRows = '';
+        rows.forEach(r => {
+            bodyRows += `<tr>
+                <td>${r.label}</td>
+                <td>${Math.round(r.pct)}%</td>
+                <td>${r.infractions}</td>
+            </tr>`;
+        });
+
+        target.innerHTML = `
+            <h4>Day of Week Breakdown</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>Overall %</th>
+                        <th>Infractions</th>
+                    </tr>
+                </thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        `;
+        target.style.display = 'block';
+        scheduleMasonryLayoutAfterResize(grid);
+    };
+
+    const buildStarPerformanceCard = () => {
+        const avgs = data.averages || {};
+        const totalDays = data.total_days || 0;
+        const card = document.createElement('div');
+        card.className = 'dashboard-card star-performance-card overview-extra-card';
+        card.dataset.overviewCard = 'star_performance';
+
+        const STAR_OVERVIEW_HINT_KEY = 'star_performance_click_hint_seen';
+        const starHintSeen = localStorage.getItem(STAR_OVERVIEW_HINT_KEY);
+        const starHintMsg = 'Click a STAR bar to see highest and lowest time of day and day of week for that category.';
+        const starHintMsgAttr = starHintMsg.replace(/"/g, '&quot;');
+        const starTitleHintBlock = `
+            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" data-hint-message="${starHintMsgAttr}">
+                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+            </div>`;
+        const starFirstTimeText = starHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(starHintMsg)}</p>`;
+
+        const overviewContent = starFirstTimeText + `
+            <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 260px; min-height:220px;">
+                    <canvas id="overview-star-chart"></canvas>
+                </div>
+                <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
+            </div>
+        `;
+        card.innerHTML = `
+            <div class="dashboard-breakdown-card-inner">
+                <div class="dashboard-card-header star-performance-card-header">
+                    <div>
+                        <h3 class="dashboard-card-title">STAR Performance</h3>
+                        <div class="dashboard-card-subtitle">${totalDays} school day${totalDays !== 1 ? 's' : ''}</div>
+                    </div>
+                    ${starTitleHintBlock}
+                </div>
+                <div class="star-performance-tabs" role="tablist">
+                    <button class="star-performance-tab active" data-tab="overview" role="tab" aria-selected="true">
+                        <span class="star-performance-tab-label">Overview</span>
+                    </button>
+                </div>
+                <div class="star-performance-tab-panels">
+                    <div class="star-performance-tab-panel star-performance-tab-overview is-active" data-tab-panel="overview">
+                        ${overviewContent}
+                    </div>
+                </div>
+            </div>
+        `;
+        grid.appendChild(card);
+
+        const tabsContainer = card.querySelector('.star-performance-tabs');
+        const panelsContainer = card.querySelector('.star-performance-tab-panels');
+        const setActiveTab = (tabName) => {
+            const allTabs = card.querySelectorAll('.star-performance-tab');
+            const allPanels = card.querySelectorAll('.star-performance-tab-panel');
+            allTabs.forEach(tab => {
+                const isActive = tab.dataset.tab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach(panel => {
+                panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
+            });
+        };
+
+        const wireTabClicks = () => {
+            const allTabs = card.querySelectorAll('.star-performance-tab');
+            allTabs.forEach(tab => {
+                if (tab._starPerformanceWired) return;
+                tab._starPerformanceWired = true;
+                tab.addEventListener('click', (e) => {
+                    const closeBtn = e.target.closest('.star-performance-tab-close');
+                    if (closeBtn) {
+                        e.stopPropagation();
+                        const name = tab.dataset.tab;
+                        if (name === 'overview') return;
+                        const panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${name}"]`);
+                        if (panel) panel.remove();
+                        tab.remove();
+                        if (!card.querySelector('.star-performance-tab.active')) {
+                            setActiveTab('overview');
+                        }
+                        return;
+                    }
+                    const tabName = tab.dataset.tab;
+                    if (!tabName || tab.disabled) return;
+                    setActiveTab(tabName);
+                });
+            });
+        };
+        wireTabClicks();
+
+        // (i) icon: click shows hint in popover (same text as first-time reminder)
+        card.addEventListener('click', (e) => {
+            const icon = e.target.closest('.infractions-hint-icon');
+            if (icon) {
+                e.preventDefault();
+                const hintDiv = icon.closest('.infractions-click-hint');
+                if (!hintDiv) return;
+                const popover = hintDiv.querySelector('.infractions-hint-popover');
+                if (!popover) return;
+                const msg = hintDiv.getAttribute('data-hint-message');
+                if (msg != null) popover.textContent = msg;
+                const isOpen = popover.getAttribute('aria-hidden') === 'false';
+                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+                if (!isOpen) {
+                    const cardEl = hintDiv.closest('.star-performance-card') || card;
+                    const cardRect = cardEl.getBoundingClientRect();
+                    const hintRect = hintDiv.getBoundingClientRect();
+                    const padding = 16;
+                    const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
+                    popover.style.maxWidth = maxW + 'px';
+                    popover.style.display = 'block';
+                    popover.setAttribute('aria-hidden', 'false');
+                }
+                return;
+            }
+            if (!e.target.closest('.infractions-hint-popover')) {
+                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+            }
+        });
+        if (!window._starHintPopoverBound) {
+            window._starHintPopoverBound = true;
+            document.addEventListener('click', (e) => {
+                if (e.target.closest('.star-performance-card')) return;
+                document.querySelectorAll('.star-performance-card .infractions-hint-popover').forEach(p => {
+                    p.style.display = 'none';
+                    p.setAttribute('aria-hidden', 'true');
+                });
+            }, true);
+        }
+
+        const starCanvas = card.querySelector('#overview-star-chart');
+        if (starCanvas && typeof Chart !== 'undefined') {
+            if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
+            summaryChartInstance = new Chart(starCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['Safety', 'Teamwork', 'Accountability', 'Relationships'],
+                    datasets: [{
+                        label: 'Average %',
+                        data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
+                        backgroundColor: STAR_CHART_BAR_COLORS,
+                        borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
+                        borderSkipped: false,
+                        maxBarThickness: 40
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            offset: 4,
+                            color: '#64748b',
+                            font: { weight: 400, size: 12 },
+                            formatter: (value) => `${Math.round(value)}%`
+                        }
+                    },
+                    layout: {
+                        padding: { top: 20, right: 20, bottom: 12, left: 12 }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            barPercentage: 0.7,
+                            categoryPercentage: 0.85,
+                            ticks: {
+                                maxRotation: 0,
+                                minRotation: 0,
+                                autoSkip: false,
+                                font: { size: 12 },
+                                color: '#64748b',
+                                padding: 10
+                            },
+                            border: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { display: false },
+                            ticks: {
+                                callback: v => v + '%',
+                                font: { size: 11 },
+                                color: '#64748b',
+                                padding: 8,
+                                maxTicksLimit: 6
+                            },
+                            border: { display: false }
+                        }
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements || !elements.length) return;
+                        const index = elements[0].index;
+                        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
+                        const labels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
+                        const catKey = catKeys[index];
+                        if (!catKey) return;
+                        const tabName = `star-${catKey}`;
+                        let catTab = Array.from(card.querySelectorAll('.star-performance-tab')).find(t => t.dataset.tab === tabName);
+                        let panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${tabName}"]`);
+
+                        if (!catTab) {
+                            catTab = document.createElement('button');
+                            catTab.className = 'star-performance-tab';
+                            catTab.dataset.tab = tabName;
+                            catTab.setAttribute('role', 'tab');
+                            catTab.setAttribute('aria-selected', 'false');
+                            const shortLabel = labels[index] || catKey;
+                            catTab.innerHTML = `
+                                <span class="star-performance-tab-label">${escapeHtml(shortLabel)}</span>
+                                <span class="star-performance-tab-close" aria-label="Close" role="button">&times;</span>
+                            `;
+                            tabsContainer.appendChild(catTab);
+
+                            panel = document.createElement('div');
+                            panel.className = 'star-performance-tab-panel';
+                            panel.dataset.tabPanel = tabName;
+                            panelsContainer.appendChild(panel);
+                            wireTabClicks();
+                        }
+
+                        try {
+                            localStorage.setItem(STAR_OVERVIEW_HINT_KEY, '1');
+                            const starHintTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + STAR_OVERVIEW_HINT_KEY + '"]');
+                            if (starHintTextEl) starHintTextEl.remove();
+                            const html = showStarCategoryDetails(catKey, labels[index] || catKey, data);
+                            if (html) {
+                                panel.innerHTML = html;
+                                if (typeof wireStarCategoryDrilldown === 'function') {
+                                    wireStarCategoryDrilldown(panel, data, catKey);
+                                }
+                                setActiveTab(tabName);
+                                scheduleMasonryLayoutAfterResize(grid);
+                            } else {
+                                setActiveTab(tabName);
+                            }
+                        } catch (e) {
+                            console.error('Error showing STAR category details from overview STAR chart:', e);
+                            setActiveTab(tabName);
+                        }
+                    }
+                }
+            });
+        }
+    };
+
+    const buildTriggerTimesCard = () => {
+        const byClass = data.by_class || {};
+        const byTime = data.by_time || {};
+
+        const timeKeys = Object.keys(byTime);
+        const classNames = Object.keys(byClass);
+        const useByTime = timeKeys.length > 0;
+        const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
+        let sortedTriggerKeys = [];
+
+        if (triggerEntries.length > 0) {
+            sortedTriggerKeys = triggerEntries.sort((a, b) => {
+                const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
+                const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
+
+                const aPct = typeof aData.percentages?.overall === 'number'
+                    ? Math.round(aData.percentages.overall)
+                    : Number.POSITIVE_INFINITY;
+                const bPct = typeof bData.percentages?.overall === 'number'
+                    ? Math.round(bData.percentages.overall)
+                    : Number.POSITIVE_INFINITY;
+                if (aPct !== bPct) {
+                    return aPct - bPct;
+                }
+
+                const aInfra = typeof aData.total_infractions === 'number'
+                    ? aData.total_infractions
+                    : (typeof aData.infractions === 'number' ? aData.infractions : 0);
+                const bInfra = typeof bData.total_infractions === 'number'
+                    ? bData.total_infractions
+                    : (typeof bData.infractions === 'number' ? bData.infractions : 0);
+
+                return bInfra - aInfra;
+            });
+        }
+
+        const card = document.createElement('div');
+        card.className = 'dashboard-card trigger-times-card overview-extra-card';
+        card.dataset.overviewCard = 'trigger_times';
+
+        let innerHtml = `
+            <div class="dashboard-breakdown-card-inner">
+                <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>
+                <div class="overview-two-col">`;
+
+        // Left column: trigger time/class breakdown list
+        innerHtml += `<div>`;
+        if (sortedTriggerKeys.length > 0) {
+            innerHtml += `<ul class="dashboard-breakdown-list">`;
+            sortedTriggerKeys.forEach((key) => {
+                const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
+                const pctOverall = rowData.percentages?.overall ?? '';
+
+                const infractionsCount = typeof rowData.total_infractions === 'number'
+                    ? rowData.total_infractions
+                    : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
+
+                const displayLabel = key;
+                const topClass = useByTime ? (rowData.top_class || null) : null;
+
+                innerHtml += `<li class="dashboard-breakdown-item">
+                    <span class="dashboard-breakdown-name">
+                        <span>
+                            <div>${escapeHtml(displayLabel)}</div>
+                            ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
+                        </span>
+                    </span>
+                    <span>
+                        <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
+                    </span>
+                </li>`;
+            });
+            innerHtml += `</ul>`;
+        } else {
+            innerHtml += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
+        }
+        innerHtml += `</div>`;
+
+        // Right column: day-of-week breakdown table (initially hidden until populated)
+        innerHtml += `<div class="overview-detail-container trigger-times-day-of-week" style="margin-top:10px; display:none;"></div>`;
+
+        innerHtml += `</div></div>`;
+
+        card.innerHTML = innerHtml;
+        grid.appendChild(card);
+    };
+
+    const applySelectionChange = (box, key, { restore = false } = {}) => {
+        if (!key) return;
+
+        // Handle each selection type with toggle behavior
+        if (key === 'days_present') {
+            const opened = toggleExtraCard('days_present', buildDaysPresentCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
+                selectionOrder.push('days_present');
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
+            }
+        } else if (key === 'star_percent') {
+            // Toggle STAR Performance card
+            const opened = toggleExtraCard('star_performance', buildStarPerformanceCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
+                selectionOrder.push('star_percent');
+                if (!restore) {
+                    const starCard = container.querySelector('.star-performance-card');
+                    if (starCard && typeof starCard.scrollIntoView === 'function') {
+                        starCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
+            }
+        } else if (key === 'starbucks') {
+            // Starbucks: only visual selection, no extra card
+            box.classList.toggle('overview-stat-selected');
+        } else if (key === 'frenzies') {
+            // Frenzy reports view has been removed.
+            return;
+        } else if (key === 'infractions') {
+            // Toggle Infractions card; details are shown when a row is selected
+            const opened = toggleExtraCard('infractions_card', () => {
+                    const card = document.createElement('div');
+                    card.className = 'dashboard-card infractions-card overview-extra-card';
+                    card.dataset.overviewCard = 'infractions_card';
+
+                    const infractions = data.infractions || data.additional_info?.infractions || {};
+                    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
+
+                    const OVERVIEW_HINT_KEY = 'infractions_overview_click_hint_seen';
+                    const overviewHintSeen = localStorage.getItem(OVERVIEW_HINT_KEY);
+                    const overviewHintMsg = 'Click an infraction to see breakdowns by time of day and day of week.';
+                    const overviewHintMsgAttr = overviewHintMsg.replace(/"/g, '&quot;');
+                    const overviewTitleHintBlock = `
+                            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
+                                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+                                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+                            </div>`;
+                    const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
+
+                    let overviewContent = overviewFirstTimeText;
+
+                    if (infractionKeys.length > 0) {
+                        overviewContent += `
+                            <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Infraction</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
+                            overviewContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
+                                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${infractions[k]}</span></td>
+                            </tr>`;
+                        });
+                        overviewContent += `</tbody></table>`;
+                    } else {
+                        overviewContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                    }
+
+                    const innerHtml = `
+                        <div class="dashboard-breakdown-card-inner">
+                            <div class="dashboard-card-header infractions-card-header">
+                                <h3 class="dashboard-card-title">Infractions</h3>
+                                ${overviewTitleHintBlock}
+                            </div>
+                            <div class="infractions-tabs" role="tablist">
+                                <button class="infractions-tab active" data-tab="overview" role="tab" aria-selected="true">
+                                    <span class="infractions-tab-label">Overview</span>
+                                </button>
+                            </div>
+                            <div class="infractions-tab-panels">
+                                <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
+                                    ${overviewContent}
+                                </div>
+                            </div>
+                        </div>`;
+
+                    card.innerHTML = innerHtml;
+                    grid.appendChild(card);
+
+                    // Tab behavior within the Infractions card
+                    const tabsContainer = card.querySelector('.infractions-tabs');
+                    const panelsContainer = card.querySelector('.infractions-tab-panels');
+
+                    const setActiveTab = (tabName) => {
+                        const allTabs = card.querySelectorAll('.infractions-tab');
+                        const allPanels = card.querySelectorAll('.infractions-tab-panel');
+                        allTabs.forEach(tab => {
+                            const isActive = tab.dataset.tab === tabName;
+                            tab.classList.toggle('active', isActive);
+                            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                        });
+                        allPanels.forEach(panel => {
+                            panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
+                        });
+                    };
+
+                    const wireTabClicks = () => {
+                        const allTabs = card.querySelectorAll('.infractions-tab');
+                        allTabs.forEach(tab => {
+                            if (tab._infractionsWired) return;
+                            tab._infractionsWired = true;
+                            tab.addEventListener('click', (e) => {
+                                const closeBtn = e.target.closest('.infractions-tab-close');
+                                if (closeBtn) {
+                                    e.stopPropagation();
+                                    const name = tab.dataset.tab;
+                                    // Prevent closing the primary Overview tab
+                                    if (name === 'overview') return;
+                                    const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${name}"]`);
+                                    if (panel) {
+                                        panel.remove();
+                                    }
+                                    tab.remove();
+                                    // If the closed tab was active, fall back to Overview
+                                    if (!card.querySelector('.infractions-tab.active')) {
+                                        setActiveTab('overview');
+                                    }
+                                    return;
+                                }
+
+                                const tabName = tab.dataset.tab;
+                                if (!tabName || tab.disabled) return;
+                                setActiveTab(tabName);
+                            });
+                        });
+                    };
+
+                    wireTabClicks();
+
+                    // (i) icon: click shows hint in popover (same text as first-time reminder)
+                    card.addEventListener('click', (e) => {
+                        const icon = e.target.closest('.infractions-hint-icon');
+                        if (icon) {
+                            e.preventDefault();
+                            const hintDiv = icon.closest('.infractions-click-hint');
+                            if (!hintDiv) return;
+                            const popover = hintDiv.querySelector('.infractions-hint-popover');
+                            if (!popover) return;
+                            const msg = hintDiv.getAttribute('data-hint-message');
+                            if (msg != null) popover.textContent = msg;
+                            const isOpen = popover.getAttribute('aria-hidden') === 'false';
+                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                            if (!isOpen) {
+                                const cardEl = hintDiv.closest('.infractions-card') || card;
+                                const cardRect = cardEl.getBoundingClientRect();
+                                const hintRect = hintDiv.getBoundingClientRect();
+                                const padding = 16;
+                                const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
+                                popover.style.maxWidth = maxW + 'px';
+                                popover.style.display = 'block';
+                                popover.setAttribute('aria-hidden', 'false');
+                            }
+                            return;
+                        }
+                        const inPopover = e.target.closest('.infractions-hint-popover');
+                        if (!inPopover) {
+                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                        }
+                    });
+                    if (!window._infractionsHintPopoverBound) {
+                        window._infractionsHintPopoverBound = true;
+                        document.addEventListener('click', (e) => {
+                            if (e.target.closest('.infractions-card')) return;
+                            document.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                                p.style.display = 'none';
+                                p.setAttribute('aria-hidden', 'true');
+                            });
+                        }, true);
+                    }
+
+                    // Wire row clicks inside this newly created card
+                    const infractionRows = card.querySelectorAll('.dashboard-breakdown-item[data-infraction-type]');
+                    infractionRows.forEach(row => {
+                        row.style.cursor = 'pointer';
+                        row.addEventListener('click', () => {
+                            const type = row.getAttribute('data-infraction-type');
+                            if (!type) return;
+                            localStorage.setItem(OVERVIEW_HINT_KEY, '1');
+                            const overviewTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + OVERVIEW_HINT_KEY + '"]');
+                            if (overviewTextEl) overviewTextEl.remove();
+                            const labelText = (row.querySelector('.dashboard-breakdown-name')?.textContent || type).trim();
+                            const shortLabel = labelText.length > 28 ? `${labelText.slice(0, 25)}…` : labelText;
+                            const tabName = `inf-${type}`;
+
+                            // Look for an existing tab for this infraction
+                            let infTab = Array.from(card.querySelectorAll('.infractions-tab'))
+                                .find(t => t.dataset.tab === tabName);
+                            let targetContainer = null;
+
+                            if (!infTab) {
+                                // Create a new tab
+                                infTab = document.createElement('button');
+                                infTab.className = 'infractions-tab';
+                                infTab.dataset.tab = tabName;
+                                infTab.setAttribute('role', 'tab');
+                                infTab.setAttribute('aria-selected', 'false');
+                                const safeLabel = shortLabel || type;
+                                infTab.innerHTML = `
+                                    <span class="infractions-tab-label">${escapeHtml(safeLabel)}</span>
+                                    <span class="infractions-tab-close" aria-label="Close" role="button">&times;</span>
+                                `;
+                                tabsContainer.appendChild(infTab);
+
+                                // Create its panel
+                                const panel = document.createElement('div');
+                                panel.className = 'infractions-tab-panel';
+                                panel.dataset.tabPanel = tabName;
+
+                                targetContainer = document.createElement('div');
+                                targetContainer.className = 'overview-detail-container infractions-by-time-day';
+                                targetContainer.style.marginTop = '10px';
+
+                                panel.appendChild(targetContainer);
+                                panelsContainer.appendChild(panel);
+
+                                // (Re)wire click handlers now that a new tab exists
+                                wireTabClicks();
+                            } else {
+                                // Reuse existing panel for this infraction
+                                const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${tabName}"]`);
+                                if (panel) {
+                                    targetContainer = panel.querySelector('.infractions-by-time-day');
+                                }
+                            }
+
+                            if (targetContainer) {
+                                renderInfractionTypeBreakdown(type, targetContainer);
+                            }
+
+                            // Activate this infraction's tab
+                            setActiveTab(tabName);
+                            scheduleMasonryLayoutAfterResize(grid);
+                        });
+                    });
+                });
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
+                selectionOrder.push('infractions');
+                if (!restore) {
+                    const infractionsCard = container.querySelector('.infractions-card');
+                    if (infractionsCard && typeof infractionsCard.scrollIntoView === 'function') {
+                        infractionsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
+            }
+        } else if (key === 'reminders') {
+            const opened = !getExtraCard('reminders');
+            if (opened) {
+                renderReminderOrResetDetails('reminders');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+                selectionOrder.push('reminders');
+            } else {
+                removeExtraCard('reminders');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+            }
+            box.classList.toggle('overview-stat-selected', opened);
+        } else if (key === 'resets') {
+            const opened = !getExtraCard('resets');
+            if (opened) {
+                renderReminderOrResetDetails('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'resets');
+                selectionOrder.push('resets');
+            } else {
+                removeExtraCard('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'resets');
+            }
+            box.classList.toggle('overview-stat-selected', opened);
+        } else if (key === 'trigger_times') {
+            // Trigger Times: create/toggle the Trigger Times card and show day-of-week breakdown
+            const opened = toggleExtraCard('trigger_times', buildTriggerTimesCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
+                selectionOrder.push('trigger_times');
+                if (!restore) {
+                    const triggerCard = container.querySelector('.trigger-times-card');
+                    if (triggerCard && typeof triggerCard.scrollIntoView === 'function') {
+                        triggerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                    toggleTriggerTimesDayTable();
+                } else {
+                    // On restore, still populate the day-of-week table once
+                    toggleTriggerTimesDayTable();
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
+            }
+        }
+
+        // After any change that affects cards, normalize DOM order so cards
+        // appear in selection sequence and store updated order.
+        if (Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, key)) {
+            reorderExtraCards();
+            persistSelectionOrder();
+            // Re-apply masonry layout so newly added/removed cards
+            // are positioned into columns immediately after any
+            // selection change (including the very first one).
+            applySummaryMasonryLayout(grid);
+        }
+    };
+
+    statBoxes.forEach(box => {
+        box.addEventListener('click', () => {
+            const key = box.dataset.overviewKey;
+            applySelectionChange(box, key, { restore: false });
+        });
+    });
+
+    // Restore previously selected overview stats (if any) so that cards
+    // re-appear in the same order as last time the user viewed this page.
+    const storedOrder = loadSelectionOrder();
+    if (storedOrder.length) {
+        selectionOrder = [];
+        storedOrder.forEach(statKey => {
+            const box = overviewCard.querySelector(`.overview-stat[data-overview-key="${statKey}"]`);
+            if (!box) return;
+            applySelectionChange(box, statKey, { restore: true });
+        });
+        reorderExtraCards();
+    }
+
+    // Apply layout whenever overview interactions are (re)wired
+    applySummaryMasonryLayout(grid);
+
+}
+
+function renderSummaryComparison(container, data) {
+    const periods = Object.keys(data.periods || {});
+    if (periods.length === 0) {
+        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
+        return;
+    }
+
+    const trendMetrics = [
+        { label: 'Total Days', get: p => Number(p?.total_days || 0) },
+        { label: 'Safety %', get: p => Number(p?.percentages?.safety || p?.averages?.safety || 0) },
+        { label: 'Teamwork %', get: p => Number(p?.percentages?.teamwork || p?.averages?.teamwork || 0) },
+        { label: 'Accountability %', get: p => Number(p?.percentages?.accountability || p?.averages?.accountability || 0) },
+        { label: 'Relationships %', get: p => Number(p?.percentages?.relationships || p?.averages?.relationships || 0) },
+        { label: 'Overall %', get: p => Number(p?.percentages?.overall || p?.averages?.overall || 0) },
+        { label: 'Infractions', get: p => Number(Object.values(p?.infractions || {}).reduce((s, c) => s + c, 0)) },
+        { label: 'Reminders', get: p => Number(p?.additional_info?.total_reminders || 0) },
+        { label: 'Resets', get: p => Number(p?.additional_info?.total_resets || 0) }
+    ];
+
+    let topIncrease = null;
+    let topDecrease = null;
+    if (periods.length >= 2) {
+        const newestKey = periods.includes('Most Recent 30 Days') ? 'Most Recent 30 Days' : periods[periods.length - 1];
+        const oldestKey = periods.includes('Previous 30 Days') ? 'Previous 30 Days' : periods[0];
+        const newest = data.periods?.[newestKey] || {};
+        const oldest = data.periods?.[oldestKey] || {};
+
+        const deltas = trendMetrics
+            .map(m => ({ label: m.label, delta: m.get(newest) - m.get(oldest) }))
+            .filter(d => Number.isFinite(d.delta));
+
+        const positives = deltas.filter(d => d.delta > 0).sort((a, b) => b.delta - a.delta);
+        const negatives = deltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta);
+
+        topIncrease = positives.length ? positives[0] : null;
+        topDecrease = negatives.length ? negatives[0] : null;
+    }
+
+    const formatDelta = (value) => {
+        if (!Number.isFinite(value)) return 'n/a';
+        const rounded = Math.round(value * 10) / 10;
+        const sign = rounded > 0 ? '+' : '';
+        return `${sign}${rounded}`;
+    };
+
+    let html = `<div class="dashboard-card-grid">`;
+    // Comparison chart card – matches dashboard card style
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Comparison</h3>
+                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
+            </div>
+            <div style="margin-left:auto; min-width:230px; max-width:320px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--bg-elevated);">
+                <div style="font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-secondary); margin-bottom:6px;">Trends</div>
+                <div style="display:flex; flex-direction:column; gap:4px; font-size:12px;">
+                    <div>
+                        <strong style="color:${topIncrease ? '#16a34a' : 'var(--text-secondary)'};">Top increase:</strong>
+                        ${topIncrease ? `${escapeHtml(topIncrease.label)} (${formatDelta(topIncrease.delta)})` : 'n/a'}
+                    </div>
+                    <div>
+                        <strong style="color:${topDecrease ? '#dc2626' : 'var(--text-secondary)'};">Top decrease:</strong>
+                        ${topDecrease ? `${escapeHtml(topDecrease.label)} (${formatDelta(topDecrease.delta)})` : 'n/a'}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap summary-compare-chart-wrap" style="height:260px"><canvas id="summary-compare-chart"></canvas></div>
+    </div>`;
+
+    // Comparison table card – use dashboard card header + shared table styling
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header">
+            <h3 class="dashboard-card-title">Comparison breakdown</h3>
+        </div>
+        <div class="dashboard-compare-table-wrap">
+        <table class="dashboard-compare-table">
+        <thead><tr>
+            <th>Metric</th>`;
+    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
+    html += `</tr></thead><tbody>`;
+    const rows = [
+        { label: 'Total Days', get: p => p.total_days || 0 },
+        { label: 'Safety %', get: p => Math.round(p.percentages?.safety || p.averages?.safety || 0) + '%' },
+        { label: 'Teamwork %', get: p => Math.round(p.percentages?.teamwork || p.averages?.teamwork || 0) + '%' },
+        { label: 'Accountability %', get: p => Math.round(p.percentages?.accountability || p.averages?.accountability || 0) + '%' },
+        { label: 'Relationships %', get: p => Math.round(p.percentages?.relationships || p.averages?.relationships || 0) + '%' },
+        { label: 'Overall %', get: p => Math.round(p.percentages?.overall || p.averages?.overall || 0) + '%' },
+        { label: 'Infractions', get: p => Object.values(p.infractions || {}).reduce((s, c) => s + c, 0) },
+        { label: 'Reminders', get: p => p.additional_info?.total_reminders || 0 },
+        { label: 'Resets', get: p => p.additional_info?.total_resets || 0 }
+    ];
+    rows.forEach(r => {
+        html += `<tr><td>${r.label}</td>`;
+        periods.forEach(p => {
+            html += `<td>${r.get(data.periods[p])}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render comparison chart
+    const canvas = document.getElementById('summary-compare-chart');
+    if (canvas && typeof Chart !== 'undefined') {
+        if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
+        // Show one chart with STAR categories on the x-axis and
+        // the selected periods rendered as side-by-side bars
+        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
+        const catLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
+        const periodColors = [
+            '#1D4ED8', // blue
+            '#F97316', // orange
+            '#059669', // green
+            '#7C3AED'  // purple
+        ];
+        summaryChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                // X-axis is STAR categories
+                labels: catLabels,
+                // Each compared period becomes its own dataset;
+                // bars for that period sit next to each other per category
+                datasets: periods.map((p, periodIndex) => {
+                    const pd = data.periods[p] || {};
+                    return {
+                        label: p,
+                        data: catKeys.map(key => {
+                            return pd.percentages?.[key] || pd.averages?.[key] || 0;
+                        }),
+                        backgroundColor: periodColors[periodIndex % periodColors.length],
+                        // Match non-comparison STAR chart style (4 rounded corners)
+                        borderRadius: 8,
+                        borderSkipped: false,
+                        // Make each bar relatively thick so grouped bars visually fill the category
+                        barThickness: 32,
+                        maxBarThickness: 48
+                    };
+                })
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' },
+                    datalabels: {
+                        anchor: 'end',
+                        align: 'end',
+                        offset: -4,
+                        color: '#111827',
+                        clip: false,
+                        font: {
+                            weight: '600',
+                            size: 10
+                        },
+                        formatter: (value) => `${Math.round(value)}%`
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: {
+                        grid: { display: false },
+                        stacked: false,
+                        // Keep bars within a category tight, but add more
+                        // whitespace between the STAR categories themselves.
+                        categoryPercentage: 0.7,
+                        barPercentage: 0.95,
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: false
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// ---- Frenzy Dashboard ----
+async function loadFrenzyDashboard() {
+    const st = dashboardState.frenzy;
+    const container = document.getElementById('frenzy-results');
+    if (!container) return;
+
+    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading frenzy stats...</p></div>';
+
+    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
+    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
+    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
+    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
+
+    const params = [];
+    if (st.compareMode) {
+        const selectEl = document.getElementById('frenzy-timeframe-select');
+        const tf = selectEl ? selectEl.value : '';
+        if (tf) {
+            params.push(`timeframe=${tf}`);
+            if (tf === 'month') {
+                const sySelect = document.getElementById('frenzy-school-year-select');
+                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
+                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
+            } else if (tf === 'custom_range') {
+                const start = st.customStart;
+                const end = st.customEnd;
+                if (start && end) {
+                    params.push(`start_date=${encodeURIComponent(start)}`);
+                    params.push(`end_date=${encodeURIComponent(end)}`);
+                }
+            }
+        }
+    } else {
+        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
+    }
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
+    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+
+    const url = '/api/frenzy-stats?' + params.join('&');
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        window.currentFrenzyStatsData = data;
+
+        const printBtn = document.getElementById('print-frenzy-btn');
+        if (printBtn) printBtn.disabled = false;
+
+        if (data.comparison_mode && data.periods) {
+            renderFrenzyComparison(container, data);
+        } else {
+            renderFrenzySingle(container, data);
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading frenzy stats: ${err.message}</p></div>`;
+    }
+}
+
+function renderFrenzySingle(container, data) {
+    const totalCount = data.total_count || 0;
+    const totalDuration = data.total_duration || 0;
+    const avgDuration = data.avg_duration || 0;
+    const byDay = data.by_day || {};
+    const byLocation = data.by_location || {};
+    const byPurpose = data.by_purpose || {};
+    const allPurposes = data.all_purposes || [];
+    const allResults = data.all_results || [];
+
+    let html = `<div class="dashboard-card-grid">`;
+
+    // Frenzy Frequency Chart
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const hasDayData = dayOrder.some(d => byDay[d]);
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Frenzy Frequency</h3>
+                <div class="dashboard-card-subtitle">${totalCount} total frenzy event${totalCount !== 1 ? 's' : ''}</div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap"><canvas id="frenzy-freq-chart"></canvas></div>
+    </div>`;
+
+    // Duration Stats Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Duration Breakdown</h3></div>
+        <div class="dashboard-stat-row">
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalCount}</div><div class="dashboard-stat-label">Frenzies</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDuration}</div><div class="dashboard-stat-label">Minutes</div></div>
+            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0'}</div><div class="dashboard-stat-label">Avg Min</div></div>
+        </div>`;
+
+    // By-location breakdown
+    const locKeys = Object.keys(byLocation);
+    if (locKeys.length > 0) {
+        html += `<ul class="dashboard-breakdown-list" style="margin-top:12px;">`;
+        locKeys.sort((a, b) => (byLocation[b].count || 0) - (byLocation[a].count || 0)).forEach((loc, i) => {
+            const ld = byLocation[loc];
+            const dotColor = DASHBOARD_COLORS.palette[i % DASHBOARD_COLORS.palette.length];
+            html += `<li class="dashboard-breakdown-item">
+                <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${dotColor}"></span>${escapeHtml(loc)}</span>
+                <span><span class="dashboard-breakdown-value">${ld.count || 0}</span><span class="dashboard-breakdown-meta">${ld.duration || 0} min</span></span>
+            </li>`;
+        });
+        html += `</ul>`;
+    }
+    html += `</div>`;
+
+    // Purpose & Results Card
+    html += `<div class="dashboard-card">
+        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Purpose</h3></div>`;
+    const purposeKeys = Object.keys(byPurpose);
+    if (purposeKeys.length > 0) {
+        html += `<div class="dashboard-log-list">`;
+        purposeKeys.sort((a, b) => (byPurpose[b].count || 0) - (byPurpose[a].count || 0)).forEach(p => {
+            html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-blue">${escapeHtml(p)}</span></span><span class="log-count">${byPurpose[p].count || 0}</span></div>`;
+        });
+        html += `</div>`;
+    } else {
+        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No purpose data recorded.</p>`;
+    }
+    if (allResults.length > 0) {
+        html += `<div style="margin-top:16px;"><div class="dashboard-card-subtitle" style="margin-bottom:8px;">Results</div>`;
+        html += `<div class="dashboard-tag-cloud">`;
+        const resultCounts = {};
+        allResults.forEach(r => { resultCounts[r] = (resultCounts[r] || 0) + 1; });
+        Object.keys(resultCounts).sort((a, b) => resultCounts[b] - resultCounts[a]).forEach(r => {
+            html += `<span class="dashboard-tag">${escapeHtml(r)}<span class="tag-count">${resultCounts[r]}</span></span>`;
+        });
+        html += `</div></div>`;
+    }
+    html += `</div>`;
+
+    // Day-of-week detail card
+    if (hasDayData) {
+        html += `<div class="dashboard-card">
+            <div class="dashboard-card-header"><h3 class="dashboard-card-title">By Day of Week</h3></div>
+            <ul class="dashboard-breakdown-list">`;
+        dayOrder.forEach((d, i) => {
+            const dd = byDay[d];
+            if (dd) {
+                html += `<li class="dashboard-breakdown-item">
+                    <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${DASHBOARD_COLORS.palette[i]}"></span>${d.substring(0, 3)}</span>
+                    <span><span class="dashboard-breakdown-value">${dd.count || 0}</span><span class="dashboard-breakdown-meta">${dd.duration || 0} min</span></span>
+                </li>`;
+            }
+        });
+        html += `</ul></div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render Frenzy Frequency Chart
+    const freqCanvas = document.getElementById('frenzy-freq-chart');
+    if (freqCanvas && typeof Chart !== 'undefined') {
+        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
+        const labels = dayOrder;
+        const counts = labels.map(d => byDay[d]?.count || 0);
+        frenzyChartInstance = new Chart(freqCanvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: labels.map(d => d.substring(0, 3)),
+                datasets: [{
+                    label: 'Frenzies',
+                    data: counts,
+                    backgroundColor: '#F97316',
+                    borderRadius: 8,
+                    maxBarThickness: 48
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+function renderFrenzyComparison(container, data) {
+    const periods = Object.keys(data.periods || {});
+    if (periods.length === 0) {
+        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
+        return;
+    }
+    let html = `<div class="dashboard-card-grid">`;
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header">
+            <div>
+                <h3 class="dashboard-card-title">Frenzy Comparison</h3>
+                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
+            </div>
+        </div>
+        <div class="dashboard-chart-wrap" style="height:260px"><canvas id="frenzy-compare-chart"></canvas></div>
+    </div>`;
+    html += `<div class="dashboard-card full-width">
+        <div class="dashboard-card-header">
+            <h3 class="dashboard-card-title">Comparison breakdown</h3>
+        </div>
+        <div style="overflow-x:auto;">
+        <table class="dashboard-compare-table">
+        <thead><tr>
+            <th>Metric</th>`;
+    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
+    html += `</tr></thead><tbody>`;
+    const rows = [
+        { label: 'Total Frenzies', get: p => p.total_count || 0 },
+        { label: 'Total Duration (min)', get: p => p.total_duration || 0 },
+        { label: 'Avg Duration (min)', get: p => typeof p.avg_duration === 'number' ? p.avg_duration.toFixed(1) : '0' }
+    ];
+    rows.forEach(r => {
+        html += `<tr><td>${r.label}</td>`;
+        periods.forEach(p => {
+            html += `<td>${r.get(data.periods[p])}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table></div></div></div>`;
+    container.innerHTML = html;
+
+    const canvas = document.getElementById('frenzy-compare-chart');
+    if (canvas && typeof Chart !== 'undefined') {
+        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
+        frenzyChartInstance = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: periods,
+                datasets: [
+                    { label: 'Total Frenzies', data: periods.map(p => data.periods[p].total_count || 0), backgroundColor: '#F97316', borderRadius: 6, maxBarThickness: 32 },
+                    { label: 'Avg Duration (min)', data: periods.map(p => data.periods[p].avg_duration || 0), backgroundColor: '#60A5FA', borderRadius: 6, maxBarThickness: 32 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+// Ensure numeric values in Reports tab tables are right-aligned
+function setupReportsNumberAlignment() {
+    const summaryContainer = document.getElementById('summary-results');
+    const frenzyContainer = document.getElementById('frenzy-results');
+    const pointCardContainer = document.getElementById('point-card-data-container');
+
+    const targets = [summaryContainer, frenzyContainer, pointCardContainer].filter(Boolean);
+    if (!targets.length || typeof MutationObserver === 'undefined') {
+        return;
+    }
+
+    const numericRegex = /^[^A-Za-z]*\d[^A-Za-z]*$/;
+
+    function alignNumericCells(root) {
+        if (!root) return;
+        const cells = root.querySelectorAll('table th, table td');
+        cells.forEach(cell => {
+            // First column (times/labels) stays left-aligned — do not treat as numeric
+            if (cell.cellIndex === 0) {
+                cell.classList.remove('numeric-cell');
+                return;
+            }
+            const text = (cell.textContent || '').trim();
+            if (text && numericRegex.test(text)) {
+                cell.classList.add('numeric-cell');
+            } else {
+                cell.classList.remove('numeric-cell');
+            }
+        });
+    }
+
+    targets.forEach(target => {
+        let scheduled = false;
+        const raf = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); };
+
+        function scheduleAlign() {
+            if (scheduled) return;
+            scheduled = true;
+            raf(() => {
+                scheduled = false;
+                alignNumericCells(target);
+            });
+        }
+
+        // Initial pass in case content is already present
+        alignNumericCells(target);
+
+        const observer = new MutationObserver((mutations) => {
+            for (let i = 0; i < mutations.length; i++) {
+                const m = mutations[i];
+                if (m.type === 'childList' || m.type === 'characterData') {
+                    scheduleAlign();
+                    break;
+                }
+            }
+        });
+
+        observer.observe(target, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+    });
+}
+
+// ---- Initialize Dashboard ----
+function initDashboard() {
+    removeLegacyReportsToggleButtons();
+
+    ['summary', 'frenzy'].forEach(pageKey => {
+        setupDashboardSearch(`${pageKey}`, 'student');
+        setupDashboardSearch(`${pageKey}`, 'staff');
+        setupFilterPills(pageKey);
+        setupCompareToggle(pageKey);
+        setupContextClear(pageKey);
+    });
+
+    // Incentive Tracking is specific to the Summary (Point Card) view
+    setupIncentiveToggle();
+
+    // Right-align numeric values in Reports tab tables
+    setupReportsNumberAlignment();
+
+    // Wire managed-by-me checkboxes
+    const summaryManagedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (summaryManagedCheckbox) {
+        summaryManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('summary'));
+    }
+    // Wire Reports sub-toggle button(s) to switch views
+    const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
+    reportsToggleButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetView = btn.dataset.reportsView;
+            if (!targetView) return;
+            // Use normal view switching so all existing logic (managed by me, dashboard load, etc.) still runs
+            switchView(targetView);
+            if (typeof triggerDashboardLoad === 'function') {
+                if (targetView === 'summary') {
+                    setTimeout(() => triggerDashboardLoad('summary'), 100);
+                }
+            }
+        });
+    });
+
+    syncSummaryPointCardButton();
+}
+
+// Auto-load when switching to summary tab
+const origNavHandler = document.querySelectorAll('.nav-btn');
+origNavHandler.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const view = btn.dataset.view;
+        if (view === 'summary') {
+            setTimeout(() => triggerDashboardLoad('summary'), 100);
+        }
+    });
+});
+
+// Init when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    setTimeout(initDashboard, 0);
+}
+
+// Expose functions to window
+window.loadParentChildren = loadParentChildren;
+window.viewChildRecords = viewChildRecords;
+window.openAmendmentRequestModal = openAmendmentRequestModal;
+window.closeAmendmentRequestModal = closeAmendmentRequestModal;
+window.submitAmendmentRequest = submitAmendmentRequest;
+window.toggleDirectoryOptOut = toggleDirectoryOptOut;
+window.exportChildData = exportChildData;
+window.removeParentStudent = removeParentStudent;
+window.addParentStudent = addParentStudent;
+window.verifyParentStudent = verifyParentStudent;
+
 // ==================== MARKETPLACE TAB ====================
 
 var currentMarketplaceStudentId = null;
@@ -15949,5758 +21163,3 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 window.closeMarketplaceAnalytics = destroyMarketplaceAnalyticsCharts;
 window.closeMarketplaceAddItemModal = closeMarketplaceAddItemModal;
-
-function loadNotifications() {
-    fetch('/api/notifications').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
-        var unread = list.filter(function (n) { return !n.read_at; });
-        var badge = document.getElementById('notifications-badge');
-        if (badge) {
-            badge.style.display = unread.length ? 'inline-flex' : 'none';
-            badge.textContent = unread.length > 99 ? '99+' : unread.length;
-        }
-        var listEl = document.getElementById('notifications-list');
-        if (!listEl) return;
-        listEl.innerHTML = list.slice(0, 30).map(function (n) {
-            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
-                '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
-                '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
-                '</div>';
-        }).join('');
-        listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
-            el.addEventListener('click', function () {
-                var id = parseInt(el.getAttribute('data-notification-id'), 10);
-                fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
-            });
-        });
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    var bell = document.getElementById('notifications-bell-btn');
-    var wrap = document.getElementById('notifications-bell-wrap');
-    var dropdown = document.getElementById('notifications-dropdown');
-    if (bell && dropdown) {
-        bell.addEventListener('click', function (e) {
-            e.stopPropagation();
-            var show = dropdown.style.display === 'block';
-            dropdown.style.display = show ? 'none' : 'block';
-            if (!show) loadNotifications();
-        });
-    }
-    document.addEventListener('click', function (e) {
-        var d = document.getElementById('notifications-dropdown');
-        var w = document.getElementById('notifications-bell-wrap');
-        if (d && w && !w.contains(e.target)) d.style.display = 'none';
-    });
-    var markAll = document.getElementById('notifications-mark-all-read');
-    if (markAll) markAll.addEventListener('click', function () {
-        fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications(); });
-    });
-});
-
-// ==================== BANK ACCOUNT FUNCTIONALITY ====================
-
-let allMarketplaceItems = [];
-let currentPurchaseItem = null;
-
-// Load bank account data
-async function loadBankAccount(studentId) {
-    if (!studentId) {
-        // Still show UI with default values
-        const balanceAmount = document.getElementById('bank-balance-amount');
-        const studentName = document.getElementById('bank-student-name');
-        if (balanceAmount) balanceAmount.textContent = '$0.00';
-        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-        
-        const transactionsList = document.getElementById('transactions-list');
-        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/bank-account/${studentId}`);
-        if (!response.ok) {
-            // If account doesn't exist, show default UI
-        const balanceAmount = document.getElementById('bank-balance-amount');
-        const studentName = document.getElementById('bank-student-name');
-        if (balanceAmount) balanceAmount.textContent = '$0.00';
-        if (studentName) {
-            // Try to get student name
-            const student = allStudents.find(s => s.id === studentId);
-            if (student) studentName.textContent = student.name;
-            else studentName.textContent = window.currentUser.name || 'Student';
-        }
-            
-            const transactionsList = document.getElementById('transactions-list');
-            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-            return;
-        }
-        
-        const data = await response.json();
-        
-        // Update balance display
-        const balanceAmount = document.getElementById('bank-balance-amount');
-        const studentName = document.getElementById('bank-student-name');
-        if (balanceAmount) balanceAmount.textContent = `$${data.balance.toFixed(2)}`;
-        if (studentName) {
-            const student = allStudents.find(s => s.id === studentId);
-            if (student) studentName.textContent = student.name;
-            else studentName.textContent = window.currentUser.name || 'Student';
-        }
-        
-        // Ensure balance section is visible
-        const balanceSection = document.getElementById('bank-balance-section');
-        if (balanceSection) balanceSection.style.display = 'block';
-        
-        // Load transactions (include Starbucks as a synthetic deposit line item if present)
-        const starbucksTotal = typeof data.starbucks_total === 'number'
-            ? data.starbucks_total
-            : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
-        const baseTransactions = data.transactions || [];
-        let transactionsWithStarbucks = baseTransactions.slice();
-
-        if (starbucksTotal > 0) {
-            const starbucksDollarValue = starbucksTotal * 0.10;
-            const nowIso = new Date().toISOString();
-            const lastBalanceAfter = baseTransactions.length
-                ? Number(baseTransactions[0].balance_after || baseTransactions[baseTransactions.length - 1].balance_after || 0)
-                : Number(data.balance || 0);
-
-            transactionsWithStarbucks.push({
-                id: 'starbucks',
-                type: 'deposit',
-                amount: starbucksDollarValue,
-                balance_after: lastBalanceAfter + starbucksDollarValue,
-                description: `Starbucks (${starbucksTotal} × $0.10)`,
-                created_at: nowIso,
-            });
-        }
-
-        renderTransactions(transactionsWithStarbucks);
-        
-        // Load paychecks
-        await loadPaychecks(studentId);
-        
-        currentBankStudentId = studentId;
-    } catch (error) {
-        console.error('Error loading bank account:', error);
-        // Still show UI with default values
-        const balanceAmount = document.getElementById('bank-balance-amount');
-        const studentName = document.getElementById('bank-student-name');
-        if (balanceAmount) balanceAmount.textContent = '$0.00';
-        if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-        
-        const transactionsList = document.getElementById('transactions-list');
-        if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-    }
-}
-
-// Bank account refresh button
-document.addEventListener('DOMContentLoaded', () => {
-    const refreshBtn = document.getElementById('bank-refresh-btn');
-    if (refreshBtn && !refreshBtn._bankBound) {
-        refreshBtn._bankBound = true;
-        refreshBtn.addEventListener('click', () => {
-            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
-                loadBankAccount(currentBankStudentId);
-            }
-        });
-    }
-});
-
-// Load paychecks
-async function loadPaychecks(studentId) {
-    if (!studentId) {
-        window.paychecksData = [];
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/paychecks/${studentId}`);
-        if (!response.ok) {
-            window.paychecksData = [];
-            return;
-        }
-        
-        const paychecks = await response.json();
-        
-        // Do not auto-show worksheet: worksheet is only shown when the student
-        // selects a paycheck from the Undeposited modal.
-        const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-        if (worksheetDiv) worksheetDiv.style.display = 'none';
-        
-        // Store paychecks for modal
-        window.paychecksData = paychecks || [];
-        
-        // Highlight Undeposited button when there are one or more undeposited paychecks
-        updateUndepositedButtonHighlight();
-    } catch (error) {
-        console.error('Error loading paychecks:', error);
-        window.paychecksData = [];
-    }
-}
-
-// Currency helpers for paycheck worksheet
-function parseCurrency(str) {
-    if (str == null || str === '') return NaN;
-    const cleaned = String(str).replace(/[$,]/g, '').trim();
-    return cleaned === '' ? NaN : parseFloat(cleaned);
-}
-function formatCurrency(num) {
-    if (num === '' || num == null || isNaN(parseFloat(num))) return '';
-    const n = parseFloat(num);
-    return '$' + n.toFixed(2);
-}
-
-// Render paycheck worksheet
-function renderPaycheckWorksheet(paycheck) {
-    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-    if (!worksheetDiv) return;
-    
-    worksheetDiv.style.display = 'block';
-    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(2);
-    
-    // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
-    const citationListEl = document.getElementById('worksheet-citation-list');
-    if (citationListEl) {
-        const list = paycheck.citation_list || [];
-        if (!list.length) {
-            citationListEl.textContent = '(none this week)';
-        } else {
-            const counts = {};
-            list.forEach(function (type) {
-                counts[type] = (counts[type] || 0) + 1;
-            });
-            const lines = Object.keys(counts)
-                .sort(function (a, b) {
-                    const diff = counts[b] - counts[a];
-                    return diff !== 0 ? diff : (a < b ? -1 : a > b ? 1 : 0);
-                })
-                .map(function (type) {
-                    return counts[type] + 'x ' + type;
-                });
-            citationListEl.textContent = lines.join('\n');
-        }
-    }
-    
-    // Store paycheck ID
-    worksheetDiv.dataset.paycheckId = paycheck.id;
-    
-    // Pre-fill inputs if this is a retry (worksheet was completed but not verified)
-    if (paycheck.worksheet_completed && !paycheck.is_verified && paycheck.student_calculated_pay) {
-        document.getElementById('worksheet-calculated-pay').value = formatCurrency(paycheck.student_calculated_pay);
-        document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
-        document.getElementById('worksheet-calculated-deduction').value = formatCurrency(paycheck.student_calculated_deduction);
-        document.getElementById('worksheet-calculated-final').value = formatCurrency(paycheck.student_calculated_final);
-    } else {
-        // Clear inputs for new worksheet
-        document.getElementById('worksheet-calculated-pay').value = '';
-        document.getElementById('worksheet-calculated-citations').value = '';
-        document.getElementById('worksheet-calculated-deduction').value = '';
-        document.getElementById('worksheet-calculated-final').value = '';
-    }
-    
-    // Clear error/success messages
-    document.getElementById('worksheet-error').style.display = 'none';
-    document.getElementById('worksheet-success').style.display = 'none';
-}
-
-// Submit paycheck worksheet
-async function submitPaycheckWorksheet() {
-    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-    if (!worksheetDiv) return;
-    
-    const paycheckId = worksheetDiv.dataset.paycheckId;
-    if (!paycheckId) return;
-    
-    const calculatedPay = parseCurrency(document.getElementById('worksheet-calculated-pay').value);
-    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value, 10);
-    const calculatedDeduction = parseCurrency(document.getElementById('worksheet-calculated-deduction').value);
-    const calculatedFinal = parseCurrency(document.getElementById('worksheet-calculated-final').value);
-    
-    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal)) {
-        document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
-        document.getElementById('worksheet-error').style.display = 'block';
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/paycheck/${paycheckId}/complete-worksheet`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                calculated_pay: calculatedPay,
-                calculated_citations: calculatedCitations,
-                calculated_deduction: calculatedDeduction,
-                calculated_final: calculatedFinal
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.verified) {
-            document.getElementById('worksheet-success').textContent = data.message;
-            document.getElementById('worksheet-success').style.display = 'block';
-            document.getElementById('worksheet-error').style.display = 'none';
-            
-            // Reload paychecks so Undeposited button highlight updates
-            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) loadPaychecks(currentBankStudentId);
-            // Reload bank account
-            setTimeout(() => {
-                loadBankAccount(currentBankStudentId);
-            }, 1000);
-        } else {
-            document.getElementById('worksheet-error').textContent = data.message || 'Some calculations are incorrect';
-            document.getElementById('worksheet-error').style.display = 'block';
-            if (data.errors) {
-                document.getElementById('worksheet-error').innerHTML = data.errors.join('<br>');
-            }
-            // Don't hide the worksheet - allow unlimited retries
-            // Clear success message if it was showing
-            document.getElementById('worksheet-success').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error submitting worksheet:', error);
-        document.getElementById('worksheet-error').textContent = 'Error submitting worksheet';
-        document.getElementById('worksheet-error').style.display = 'block';
-    }
-}
-
-// Highlight Undeposited button when student has one or more undeposited paychecks
-function updateUndepositedButtonHighlight() {
-    const btn = document.getElementById('view-undeposited-paychecks-btn');
-    if (!btn) return;
-    const hasUndeposited = window.paychecksData && window.paychecksData.some(
-        p => !p.worksheet_completed || !p.is_verified
-    );
-    if (hasUndeposited) {
-        btn.classList.add('undeposited-highlight');
-    } else {
-        btn.classList.remove('undeposited-highlight');
-    }
-}
-
-// Open worksheet for a specific paycheck (called when student selects from Undeposited modal).
-// Fetches fresh paycheck data so citation_list and amounts reflect current infractions.
-async function openWorksheetForPaycheck(paycheckId) {
-    try {
-        const response = await fetch(`/api/paycheck/${paycheckId}`);
-        if (!response.ok) return;
-        const paycheck = await response.json();
-        renderPaycheckWorksheet(paycheck);
-        closePaychecksModal();
-    } catch (error) {
-        console.error('Error loading paycheck for worksheet:', error);
-    }
-}
-
-// View paychecks modal - filtered by deposited/undeposited
-function viewPaychecksModal(filterType) {
-    const modal = document.getElementById('paychecks-modal');
-    const content = document.getElementById('paychecks-modal-content');
-    
-    if (!window.paychecksData || window.paychecksData.length === 0) {
-        content.innerHTML = '<p>No paychecks found.</p>';
-        modal.style.display = 'block';
-        return;
-    }
-    
-    // Filter paychecks based on type
-    let filteredPaychecks = [];
-    if (filterType === 'deposited') {
-        // Deposited: worksheet completed AND verified
-        filteredPaychecks = window.paychecksData.filter(p => p.is_verified === true);
-    } else if (filterType === 'undeposited') {
-        // Undeposited: worksheet not completed OR not verified
-        filteredPaychecks = window.paychecksData.filter(p => !p.worksheet_completed || !p.is_verified);
-    } else {
-        // Show all if no filter
-        filteredPaychecks = window.paychecksData;
-    }
-    
-    if (filteredPaychecks.length === 0) {
-        const message = filterType === 'deposited' ? 'No deposited paychecks found.' : 'No undeposited paychecks found.';
-        content.innerHTML = `<p>${message}</p>`;
-        modal.style.display = 'block';
-        return;
-    }
-    
-    const isUndeposited = filterType === 'undeposited';
-    let html = `<h3 style="margin-bottom: 15px;">${filterType === 'deposited' ? 'Deposited' : 'Undeposited'} Paychecks</h3>`;
-    if (isUndeposited) {
-        html += '<p style="margin-bottom: 15px; color: #64748b;">Select a paycheck to complete its worksheet.</p>';
-    }
-    html += '<table style="width: 100%; border-collapse: collapse;"><thead><tr>';
-    html += '<th style="padding: 10px; border: 1px solid var(--border);">Period</th>';
-    html += '<th style="padding: 10px; border: 1px solid var(--border);">STAR %</th>';
-    if (!isUndeposited) {
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Base Pay</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Citations</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Deduction</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Final Pay</th>';
-    }
-    html += '<th style="padding: 10px; border: 1px solid var(--border);">Status</th>';
-    if (isUndeposited) {
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Action</th>';
-    }
-    html += '</tr></thead><tbody>';
-    
-    filteredPaychecks.forEach(p => {
-        html += '<tr>';
-        html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.pay_period_start} - ${p.pay_period_end}</td>`;
-        html += `<td style="padding: 10px; border: 1px solid var(--border);">${Number(p.average_star_percent).toFixed(2)}%</td>`;
-        if (!isUndeposited) {
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.base_pay.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.citation_count}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.citation_deduction.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.final_pay.toFixed(2)}</td>`;
-        }
-        let status = 'Incomplete';
-        if (p.is_verified) {
-            status = 'Deposited';
-        } else if (p.worksheet_completed) {
-            status = 'Pending Verification';
-        }
-        html += `<td style="padding: 10px; border: 1px solid var(--border);">${status}</td>`;
-        if (isUndeposited) {
-            html += `<td style="padding: 10px; border: 1px solid var(--border);"><button type="button" class="btn-primary" style="background: #10b981; border-color: #10b981; padding: 6px 12px; font-size: 13px;" onclick="openWorksheetForPaycheck(${p.id})">Complete worksheet</button></td>`;
-        }
-        html += '</tr>';
-    });
-    
-    html += '</tbody></table>';
-    content.innerHTML = html;
-    modal.style.display = 'block';
-}
-
-function closePaychecksModal() {
-    document.getElementById('paychecks-modal').style.display = 'none';
-}
-
-// Load marketplace items
-async function loadMarketplaceItems() {
-    try {
-        const response = await fetch('/api/marketplace-items');
-        if (!response.ok) throw new Error('Failed to load marketplace items');
-        
-        allMarketplaceItems = await response.json();
-        renderMarketplaceItems();
-    } catch (error) {
-        console.error('Error loading marketplace items:', error);
-    }
-}
-
-// Render marketplace items
-function renderMarketplaceItems() {
-    const grid = document.getElementById('marketplace-grid');
-    if (!grid) return;
-    
-    const filter = document.getElementById('marketplace-filter')?.value || 'all';
-    
-    let items = allMarketplaceItems;
-    if (filter === 'global') {
-        items = items.filter(i => i.is_global || i.is_approved_for_global);
-    } else if (filter === 'case-manager') {
-        items = items.filter(i => !i.is_global && !i.is_approved_for_global);
-    }
-    
-    if (items.length === 0) {
-        grid.innerHTML = '<p>No items available.</p>';
-        return;
-    }
-    
-    grid.innerHTML = items.map(item => `
-        <div class="marketplace-item-card" style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <h4 style="margin: 0 0 10px 0;">${item.name}</h4>
-            <p style="color: var(--text-secondary); margin: 0 0 15px 0;">${item.description || 'No description'}</p>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 1.5em; font-weight: bold; color: var(--accent);">$${item.price.toFixed(2)}</span>
-                ${window.currentUser.role === 'student' ? `<button onclick="openPurchaseModal(${item.id})" class="btn-primary" style="background: #10b981; border-color: #10b981;">Purchase</button>` : ''}
-            </div>
-        </div>
-    `).join('');
-}
-
-// Open purchase modal
-async function openPurchaseModal(itemId) {
-    const item = allMarketplaceItems.find(i => i.id === itemId);
-    if (!item) return;
-    
-    currentPurchaseItem = item;
-    
-    const modal = document.getElementById('purchase-modal');
-    const content = document.getElementById('purchase-modal-content');
-    
-    // Get current balance
-    const balanceResponse = await fetch(`/api/bank-account/${currentBankStudentId}`);
-    const balanceData = await balanceResponse.json();
-    const currentBalance = balanceData.balance;
-    const newBalance = currentBalance - item.price;
-    
-    content.innerHTML = `
-        <div style="margin-bottom: 20px;">
-            <h3>${item.name}</h3>
-            <p>${item.description || 'No description'}</p>
-            <p style="font-size: 1.2em; margin: 15px 0;"><strong>Price: $${item.price.toFixed(2)}</strong></p>
-        </div>
-        <div style="margin-bottom: 20px;">
-            <p>Current Balance: <strong>$${currentBalance.toFixed(2)}</strong></p>
-            <p>Balance After Purchase: <strong>$${newBalance.toFixed(2)}</strong></p>
-        </div>
-        <div class="form-group">
-            <label>Enter calculated balance after purchase:</label>
-            <input type="number" id="purchase-calculated-balance" step="0.01" placeholder="Enter calculated balance" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
-        </div>
-        <div id="purchase-error" style="color: #dc2626; margin-top: 10px; display: none;"></div>
-        <div style="margin-top: 20px; display: flex; gap: 10px;">
-            <button onclick="submitPurchase()" class="btn-primary" style="background: #10b981; border-color: #10b981;">Submit Purchase</button>
-            <button onclick="closePurchaseModal()" class="btn-secondary">Cancel</button>
-        </div>
-    `;
-    
-    modal.style.display = 'block';
-}
-
-function closePurchaseModal() {
-    document.getElementById('purchase-modal').style.display = 'none';
-    currentPurchaseItem = null;
-}
-
-// Submit purchase
-async function submitPurchase() {
-    if (!currentPurchaseItem || !currentBankStudentId) return;
-    
-    const calculatedBalance = parseFloat(document.getElementById('purchase-calculated-balance').value);
-    
-    if (isNaN(calculatedBalance)) {
-        document.getElementById('purchase-error').textContent = 'Please enter calculated balance';
-        document.getElementById('purchase-error').style.display = 'block';
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/purchase-orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                item_id: currentPurchaseItem.id,
-                calculated_balance_after: calculatedBalance
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            showMessage('Purchase order created successfully!', 'success');
-            closePurchaseModal();
-            loadBankAccount(currentBankStudentId);
-        } else {
-            document.getElementById('purchase-error').textContent = data.error || 'Error creating purchase order';
-            document.getElementById('purchase-error').style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Error submitting purchase:', error);
-        document.getElementById('purchase-error').textContent = 'Error submitting purchase';
-        document.getElementById('purchase-error').style.display = 'block';
-    }
-}
-
-// Load purchase orders
-async function loadPurchaseOrders() {
-    try {
-        const response = await fetch('/api/purchase-orders');
-        if (!response.ok) throw new Error('Failed to load purchase orders');
-        
-        const orders = await response.json();
-        renderPurchaseOrders(orders);
-    } catch (error) {
-        console.error('Error loading purchase orders:', error);
-    }
-}
-
-// Render purchase orders
-function renderPurchaseOrders(orders) {
-    const list = document.getElementById('purchase-orders-list');
-    if (!list) return;
-    
-    const pendingOrders = orders.filter(o => o.status === 'pending');
-    
-    if (pendingOrders.length === 0) {
-        list.innerHTML = '<p>No pending purchase orders.</p>';
-        return;
-    }
-    
-    list.innerHTML = pendingOrders.map(order => `
-        <div class="purchase-order-card" style="background: var(--bg-elevated); padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid var(--border);">
-            <h4 style="margin: 0 0 10px 0;">${order.item_name}</h4>
-            <p style="margin: 5px 0;"><strong>Student:</strong> ${order.student_name}</p>
-            <p style="margin: 5px 0;"><strong>Price:</strong> $${order.item_price.toFixed(2)}</p>
-            <p style="margin: 5px 0;"><strong>Student's Calculation:</strong> $${order.student_calculated_balance_after.toFixed(2)}</p>
-            <p style="margin: 5px 0;"><strong>Actual Balance:</strong> $${order.actual_balance_after.toFixed(2)}</p>
-            <p style="margin: 5px 0;"><strong>Correct:</strong> ${order.is_calculation_correct ? 'Yes' : 'No'}</p>
-            <div style="margin-top: 15px; display: flex; gap: 10px;">
-                <button onclick="updatePurchaseOrderStatus(${order.id}, 'approved')" class="btn-primary" style="background: #10b981; border-color: #10b981;">Fulfill</button>
-                <button onclick="updatePurchaseOrderStatus(${order.id}, 'denied')" class="btn-secondary" style="background: #dc2626; border-color: #dc2626; color: white;">Deny</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-// Update purchase order status
-async function updatePurchaseOrderStatus(orderId, status) {
-    try {
-        const response = await fetch(`/api/purchase-orders/${orderId}/status`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status })
-        });
-        
-        if (response.ok) {
-            showMessage(`Purchase order ${status}`, 'success');
-            if (currentBankStudentId) {
-                await loadBankAccount(currentBankStudentId);
-            }
-        } else {
-            const data = await response.json();
-            showMessage(data.error || 'Error updating order', 'error');
-        }
-    } catch (error) {
-        console.error('Error updating purchase order:', error);
-        showMessage('Error updating purchase order', 'error');
-    }
-}
-
-// Render transactions
-function renderTransactions(transactions) {
-    const list = document.getElementById('transactions-list');
-    if (!list) return;
-
-    if (!transactions || transactions.length === 0) {
-        list.innerHTML = '<p style="margin:0; color:#94a3b8;">No transactions yet.</p>';
-        return;
-    }
-
-    // Render in a compact, table-like list similar to Accounts UI
-    const rows = transactions
-        .slice()
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-        .map(t => {
-            const isDeposit = t.type === 'deposit';
-            const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
-            const amountStr = (isDeposit ? '+' : '−') + '$' + Math.abs(t.amount).toFixed(2);
-            const amtColor = isDeposit ? '#059669' : '#dc2626';
-            return `
-                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
-                    <div style="flex:1; min-width:0;">
-                        <div style="font-size:13px; color:#0f172a;">${new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                        <div style="font-size:13px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.description || ''}</div>
-                    </div>
-                    <div style="width:110px; text-align:right; font-size:13px; color:#64748b;">
-                        ${typeLabel}
-                    </div>
-                    <div style="width:120px; text-align:right; font-weight:600; font-size:13px; color:${amtColor};">
-                        ${amountStr}
-                    </div>
-                    <div style="width:120px; text-align:right; font-size:13px; color:#0f172a;">
-                        $${t.balance_after.toFixed(2)}
-                    </div>
-                </div>
-            `;
-        })
-        .join('');
-
-    list.innerHTML = rows;
-}
-
-// Create marketplace item
-function openCreateItemModal() {
-    document.getElementById('create-item-modal').style.display = 'block';
-    document.getElementById('item-name').value = '';
-    document.getElementById('item-description').value = '';
-    document.getElementById('item-price').value = '';
-}
-
-function closeCreateItemModal() {
-    document.getElementById('create-item-modal').style.display = 'none';
-}
-
-async function saveMarketplaceItem() {
-    const name = document.getElementById('item-name').value.trim();
-    const description = document.getElementById('item-description').value.trim();
-    const price = parseFloat(document.getElementById('item-price').value);
-    
-    if (!name || !price || price <= 0) {
-        showMessage('Please fill in all fields with valid values', 'error');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/marketplace-items', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, price })
-        });
-        
-        if (response.ok) {
-            showMessage('Item created successfully', 'success');
-            closeCreateItemModal();
-            await loadMarketplaceItems();
-        } else {
-            const data = await response.json();
-            showMessage(data.error || 'Error creating item', 'error');
-        }
-    } catch (error) {
-        console.error('Error creating item:', error);
-        showMessage('Error creating item', 'error');
-    }
-}
-
-// Bank account search (similar to daily entry)
-function setupBankAccountSearch() {
-    const searchInput = document.getElementById('bank-search-input');
-    if (!searchInput) return;
-    
-    const wrapper = searchInput.closest('.bank-search-autocomplete-wrapper');
-    const dropdown = wrapper ? wrapper.querySelector('.bank-search-autocomplete-dropdown') : null;
-    if (!dropdown) return;
-    
-    let isDropdownVisible = false;
-    
-    const getAllOptions = () => {
-        const options = [];
-        allStudents.forEach(student => {
-            if (student && student.name) {
-                options.push({
-                    type: 'student',
-                    name: student.name,
-                    displayText: `Student: ${student.name}`
-                });
-            }
-        });
-        allStaffMembers.forEach(staff => {
-            const staffName = staff.name || staff.username || '';
-            if (staffName) {
-                options.push({
-                    type: 'staff',
-                    name: staffName,
-                    displayText: `Staff: ${staffName}`
-                });
-            }
-        });
-        return options;
-    };
-    
-    const filterOptions = (query) => {
-        if (!query || !query.trim()) return [];
-        const lowerQuery = query.trim().toLowerCase();
-        return getAllOptions().filter(option => 
-            option.name.toLowerCase().includes(lowerQuery)
-        );
-    };
-    
-    const showDropdown = (options) => {
-        if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
-            isDropdownVisible = false;
-            return;
-        }
-        
-        dropdown.innerHTML = '';
-        options.forEach((option) => {
-            const item = document.createElement('div');
-            item.className = 'bank-search-autocomplete-item';
-            item.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;';
-            item.innerHTML = `<span style="font-weight: 600;">${option.type === 'student' ? 'Student:' : 'Staff:'}</span> ${option.name}`;
-            
-            item.addEventListener('click', () => {
-                searchInput.value = option.name;
-                hideDropdown();
-                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-            
-            dropdown.appendChild(item);
-        });
-        
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
-    };
-    
-    const hideDropdown = () => {
-        dropdown.style.display = 'none';
-        isDropdownVisible = false;
-    };
-    
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value;
-        const options = filterOptions(query);
-        showDropdown(options);
-    });
-    
-    searchInput.addEventListener('blur', () => {
-        setTimeout(() => hideDropdown(), 200);
-    });
-}
-
-// Switch view handler for bank account
-function handleBankAccountView() {
-    if (window.currentUser.role === 'student') {
-        // Student view - load their own account
-        currentBankStudentId = window.currentUser.studentId;
-        
-        // Always show all sections for students, even if no data yet
-        const balanceSection = document.getElementById('bank-balance-section');
-        const paycheckSection = document.getElementById('bank-paycheck-section');
-        const transactionsSection = document.getElementById('bank-transactions-section');
-        
-        if (balanceSection) balanceSection.style.display = 'block';
-        if (paycheckSection) paycheckSection.style.display = 'block';
-        if (transactionsSection) transactionsSection.style.display = 'block';
-        
-        // Set default student name if available
-        if (currentBankStudentId) {
-            loadBankAccount(currentBankStudentId);
-        } else {
-            // Still show UI even if studentId is not set
-            const balanceAmount = document.getElementById('bank-balance-amount');
-            const studentName = document.getElementById('bank-student-name');
-            if (balanceAmount) balanceAmount.textContent = '$0.00';
-            if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-            const transactionsList = document.getElementById('transactions-list');
-            if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
-        }
-    } else {
-        // Staff/Admin view - simple selector; autocomplete handled by setupBankStudentSearch
-        const wrap = document.getElementById('bank-student-select-wrap');
-        const noMsg = document.getElementById('bank-no-student-msg');
-        const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
-        if (wrap) wrap.style.display = 'block';
-        if (noMsg) noMsg.style.display = 'block';
-        if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
-
-        setupBankStudentSearch();
-        initStarbucksManagement();
-    }
-    
-    // Setup event listeners
-    const submitWorksheetBtn = document.getElementById('submit-worksheet-btn');
-    if (submitWorksheetBtn) {
-        submitWorksheetBtn.addEventListener('click', submitPaycheckWorksheet);
-    }
-    
-    // Currency format on blur for worksheet inputs
-    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final'].forEach(function (id) {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('blur', function () {
-                const parsed = parseCurrency(this.value);
-                if (!isNaN(parsed)) this.value = formatCurrency(parsed);
-            });
-        }
-    });
-    
-    // Enter = Tab in worksheet (move to next field)
-    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'submit-worksheet-btn'];
-    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-    if (worksheetDiv) {
-        worksheetDiv.addEventListener('keydown', function (e) {
-            if (e.key !== 'Enter') return;
-            const id = e.target.id;
-            const idx = worksheetFocusOrder.indexOf(id);
-            if (idx === -1) return;
-            e.preventDefault();
-            const nextId = worksheetFocusOrder[idx + 1];
-            if (nextId) {
-                const nextEl = document.getElementById(nextId);
-                if (nextEl) nextEl.focus();
-            }
-        });
-    }
-    
-    const viewDepositedBtn = document.getElementById('view-deposited-paychecks-btn');
-    if (viewDepositedBtn) {
-        viewDepositedBtn.addEventListener('click', () => viewPaychecksModal('deposited'));
-    }
-    
-    const viewUndepositedBtn = document.getElementById('view-undeposited-paychecks-btn');
-    if (viewUndepositedBtn) {
-        viewUndepositedBtn.addEventListener('click', () => viewPaychecksModal('undeposited'));
-    }
-    
-    const marketplaceFilter = document.getElementById('marketplace-filter');
-    if (marketplaceFilter) {
-        marketplaceFilter.addEventListener('change', renderMarketplaceItems);
-    }
-    
-    const createItemBtn = document.getElementById('create-item-btn');
-    if (createItemBtn) {
-        createItemBtn.addEventListener('click', openCreateItemModal);
-    }
-    
-    // Admin paycheck generation
-    const generatePaychecksBtn = document.getElementById('generate-paychecks-btn');
-    if (generatePaychecksBtn) {
-        generatePaychecksBtn.addEventListener('click', generatePaychecksForAll);
-    }
-}
-
-// Generate paychecks for all students (Admin only)
-async function generatePaychecksForAll() {
-    if (window.currentUser.role !== 'admin') {
-        showMessage('Only admins can generate paychecks', 'error');
-        return;
-    }
-    
-    const btn = document.getElementById('generate-paychecks-btn');
-    const resultDiv = document.getElementById('paycheck-generation-result');
-    
-    if (btn) btn.disabled = true;
-    if (resultDiv) {
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<p>Generating paychecks...</p>';
-    }
-    
-    try {
-        const response = await fetch('/api/paycheck/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            if (resultDiv) {
-                resultDiv.innerHTML = `<p style="color: #10b981;">${data.message}</p>`;
-            }
-            showMessage(data.message, 'success');
-            // Refresh paycheck list for currently selected student so updated paychecks are visible
-            if (currentStudentId) {
-                await loadPaychecks(currentStudentId);
-            }
-        } else {
-            if (resultDiv) {
-                resultDiv.innerHTML = `<p style="color: #dc2626;">${data.error || 'Error generating paychecks'}</p>`;
-            }
-            showMessage(data.error || 'Error generating paychecks', 'error');
-        }
-    } catch (error) {
-        console.error('Error generating paychecks:', error);
-        if (resultDiv) {
-            resultDiv.innerHTML = '<p style="color: #dc2626;">Error generating paychecks</p>';
-        }
-        showMessage('Error generating paychecks', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-}
-
-// Make functions globally accessible
-window.submitPaycheckWorksheet = submitPaycheckWorksheet;
-window.viewPaychecksModal = viewPaychecksModal;
-window.openWorksheetForPaycheck = openWorksheetForPaycheck;
-window.closePaychecksModal = closePaychecksModal;
-window.openPurchaseModal = openPurchaseModal;
-window.closePurchaseModal = closePurchaseModal;
-window.submitPurchase = submitPurchase;
-window.updatePurchaseOrderStatus = updatePurchaseOrderStatus;
-window.openCreateItemModal = openCreateItemModal;
-window.closeCreateItemModal = closeCreateItemModal;
-window.saveMarketplaceItem = saveMarketplaceItem;
-window.generatePaychecksForAll = generatePaychecksForAll;
-
-// ==================== Parent Portal Functions ====================
-
-// Load parent's verified children
-async function loadParentChildren() {
-    console.log('loadParentChildren called');
-    const container = document.getElementById('parent-children-container');
-    const noChildrenDiv = document.getElementById('parent-no-children');
-    
-    if (!container) {
-        console.error('parent-children-container not found');
-        return;
-    }
-    
-    try {
-        console.log('Fetching children from /api/students');
-        const response = await fetch('/api/students');
-        if (!response.ok) {
-            throw new Error(`Failed to load children: ${response.status} ${response.statusText}`);
-        }
-        
-        const children = await response.json();
-        console.log('Received children data:', children);
-        
-        if (!children || children.length === 0) {
-            console.log('No children found');
-            container.style.display = 'none';
-            if (noChildrenDiv) noChildrenDiv.style.display = 'block';
-            return;
-        }
-        
-        if (noChildrenDiv) noChildrenDiv.style.display = 'none';
-        container.style.display = 'block';
-        
-        // Format attendance status
-        const formatAttendance = (status) => {
-            if (!status) return '-';
-            const statusMap = {
-                'present': 'Present',
-                'excused': 'Excused',
-                'unexcused': 'Unexcused'
-            };
-            return statusMap[status] || status;
-        };
-        
-        // Format STAR points
-        const formatStarPoints = (starPoints) => {
-            if (!starPoints || Object.values(starPoints).every(v => v === null)) {
-                return '-';
-            }
-            const parts = [];
-            if (starPoints.s !== null) parts.push(`S: ${starPoints.s}%`);
-            if (starPoints.t !== null) parts.push(`T: ${starPoints.t}%`);
-            if (starPoints.a !== null) parts.push(`A: ${starPoints.a}%`);
-            if (starPoints.r !== null) parts.push(`R: ${starPoints.r}%`);
-            return parts.length > 0 ? parts.join(', ') : '-';
-        };
-        
-        // Build table HTML
-        let tableHTML = `
-            <table class="parent-children-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Grade</th>
-                        <th>Verification Status</th>
-                        <th>Attendance</th>
-                        <th>STAR Points</th>
-                        <th>Infractions</th>
-                        <th>Frenzy Events</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-        
-        children.forEach(child => {
-            const verificationBadge = child.verified 
-                ? '<span class="verification-badge verified">Verified</span>'
-                : '<span class="verification-badge unverified">Not Verified</span>';
-            
-            tableHTML += `
-                <tr>
-                    <td>${child.name || 'Unknown'}</td>
-                    <td>${child.grade || '-'}</td>
-                    <td>${verificationBadge}</td>
-                    <td>${formatAttendance(child.attendance)}</td>
-                    <td>${formatStarPoints(child.star_points)}</td>
-                    <td>${child.infractions_count || 0}</td>
-                    <td>${child.frenzy_count || 0}</td>
-                    <td class="actions-cell">
-                        <button onclick="viewChildRecords(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">View Records</button>
-                        <button onclick="openAmendmentRequestModal(${child.id})" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin: 2px;">Request Amendment</button>
-                    </td>
-                </tr>
-            `;
-        });
-        
-        tableHTML += `
-                </tbody>
-            </table>
-        `;
-        
-        container.innerHTML = tableHTML;
-        console.log('Parent children table rendered successfully');
-    } catch (error) {
-        console.error('Error loading children:', error);
-        container.innerHTML = '<p style="color: #dc2626;">Error loading children. Please try again.</p>';
-    }
-}
-
-// View child's records (switch to summary view)
-function viewChildRecords(studentId) {
-    if (document.getElementById('summary-student-select')) {
-        document.getElementById('summary-student-select').value = studentId;
-    }
-    const student = (allStudents || []).find(s => s.id === studentId);
-    if (student && dashboardState) {
-        dashboardState.summary.studentId = studentId;
-        dashboardState.summary.studentName = student.name;
-        updateContextBanner('summary');
-    }
-    switchView('summary');
-    setTimeout(() => triggerDashboardLoad('summary'), 100);
-}
-
-// Open amendment request modal
-function openAmendmentRequestModal(studentId = null) {
-    const modal = document.getElementById('amendment-request-modal');
-    if (!modal) return;
-    
-    // Clear previous values
-    document.getElementById('amendment-request-error').style.display = 'none';
-    document.getElementById('amendment-request-success').style.display = 'none';
-    document.getElementById('amendment-student-select').value = studentId || '';
-    document.getElementById('amendment-record-type').value = '';
-    document.getElementById('amendment-record-id').value = '';
-    document.getElementById('amendment-current-value').value = '';
-    document.getElementById('amendment-requested-change').value = '';
-    document.getElementById('amendment-reason').value = '';
-    
-    // Load students into dropdown
-    loadAmendmentStudents();
-    
-    modal.style.display = 'block';
-}
-
-function closeAmendmentRequestModal() {
-    const modal = document.getElementById('amendment-request-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-// Load students for amendment request dropdown
-async function loadAmendmentStudents() {
-    const select = document.getElementById('amendment-student-select');
-    if (!select) return;
-    
-    try {
-        const response = await fetch('/api/students');
-        if (!response.ok) return;
-        
-        const students = await response.json();
-        select.innerHTML = '<option value="">Select Student</option>' +
-            students.map(s => `<option value="${s.id}">${s.name || 'Unknown'}</option>`).join('');
-    } catch (error) {
-        console.error('Error loading students:', error);
-    }
-}
-
-// Submit amendment request
-async function submitAmendmentRequest() {
-    const studentId = parseInt(document.getElementById('amendment-student-select').value);
-    const recordType = document.getElementById('amendment-record-type').value;
-    const recordId = document.getElementById('amendment-record-id').value;
-    const currentValue = document.getElementById('amendment-current-value').value.trim();
-    const requestedChange = document.getElementById('amendment-requested-change').value.trim();
-    const reason = document.getElementById('amendment-reason').value.trim();
-    
-    const errorDiv = document.getElementById('amendment-request-error');
-    const successDiv = document.getElementById('amendment-request-success');
-    
-    // Validation
-    if (!studentId || !recordType || !currentValue || !requestedChange || !reason) {
-        errorDiv.textContent = 'Please fill in all required fields';
-        errorDiv.style.display = 'block';
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/amendment-requests', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                student_id: studentId,
-                record_type: recordType,
-                record_id: recordId || null,
-                current_value: currentValue,
-                requested_change: requestedChange,
-                reason: reason
-            })
-        });
-        
-        if (response.ok) {
-            successDiv.textContent = 'Amendment request submitted successfully. The school will review your request.';
-            successDiv.style.display = 'block';
-            errorDiv.style.display = 'none';
-            
-            // Clear form
-            setTimeout(() => {
-                closeAmendmentRequestModal();
-            }, 2000);
-        } else {
-            const data = await response.json();
-            errorDiv.textContent = data.error || 'Error submitting request';
-            errorDiv.style.display = 'block';
-            successDiv.style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error submitting amendment request:', error);
-        errorDiv.textContent = 'Error submitting request. Please try again.';
-        errorDiv.style.display = 'block';
-        successDiv.style.display = 'none';
-    }
-}
-
-// Toggle directory information opt-out
-async function toggleDirectoryOptOut(studentId, optOut) {
-    try {
-        const method = optOut ? 'POST' : 'DELETE';
-        const response = await fetch(`/api/students/${studentId}/directory-opt-out`, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            showMessage(data.message || `Directory information opt-${optOut ? 'out' : 'in'} successful`, 'success');
-        } else {
-            const data = await response.json();
-            showMessage(data.error || 'Error updating directory information preference', 'error');
-            // Revert checkbox
-            const checkbox = document.getElementById(`directory-opt-out-${studentId}`);
-            if (checkbox) checkbox.checked = !optOut;
-        }
-    } catch (error) {
-        console.error('Error toggling directory opt-out:', error);
-        showMessage('Error updating directory information preference', 'error');
-        // Revert checkbox
-        const checkbox = document.getElementById(`directory-opt-out-${studentId}`);
-        if (checkbox) checkbox.checked = !optOut;
-    }
-}
-
-// Export child's data
-async function exportChildData(studentId) {
-    try {
-        const response = await fetch(`/api/export-student-data/${studentId}`);
-        if (!response.ok) {
-            throw new Error('Failed to export data');
-        }
-        
-        const data = await response.json();
-        
-        // Create download
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `student-data-${studentId}-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        showMessage('Data exported successfully', 'success');
-    } catch (error) {
-        console.error('Error exporting data:', error);
-        showMessage('Error exporting data. Please try again.', 'error');
-    }
-}
-
-// ============================================================
-//  DASHBOARD — Search, Filters, Card Rendering
-// ============================================================
-
-const DASHBOARD_COLORS = {
-    // Keep STAR colors consistent with Overview STAR Percent gauge
-    safety: '#ff3b30',
-    teamwork: '#007aff',
-    accountability: '#34c759',
-    relationships: '#ffcc00',
-    palette: ['#ff3b30', '#007aff', '#34c759', '#ffcc00', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
-};
-
-// Use the exact same STAR colors as the Overview STAR Percent gauge
-const STAR_CHART_BAR_COLORS = [
-    '#ff3b30', // safety
-    '#007aff', // teamwork
-    '#34c759', // accountability
-    '#ffcc00'  // relationships
-];
-
-// ---- State ----
-let dashboardState = {
-    summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null },
-    frenzy:  { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null }
-};
-
-let summaryChartInstance = null;
-let frenzyChartInstance = null;
-
-// ---- Input hardening to resist password managers on search fields ----
-function hardenSearchInput(input) {
-    if (!input) return;
-    try {
-        input.setAttribute('autocomplete', 'off');
-        input.setAttribute('autocapitalize', 'off');
-        input.setAttribute('autocorrect', 'off');
-        input.setAttribute('spellcheck', 'false');
-
-        if (!input.hasAttribute('readonly')) {
-            input.setAttribute('readonly', '');
-        }
-
-        input.addEventListener('focus', () => {
-            if (input.hasAttribute('readonly')) {
-                input.removeAttribute('readonly');
-            }
-        });
-
-        let userInteracted = false;
-        ['keydown', 'mousedown', 'touchstart'].forEach(evt => {
-            input.addEventListener(evt, () => {
-                userInteracted = true;
-            }, { once: true });
-        });
-
-        const clearIfInjected = () => {
-            if (!userInteracted && input.value && !input.dataset.allowPrefill) {
-                input.value = '';
-            }
-        };
-
-        setTimeout(clearIfInjected, 600);
-        input.addEventListener('blur', clearIfInjected);
-    } catch (e) {
-        console.error('Error hardening search input:', e);
-    }
-}
-
-// ---- Autocomplete Search ----
-function setupDashboardSearch(prefix, type) {
-    const input = document.getElementById(`${prefix}-${type}-search`);
-    const dropdown = document.getElementById(`${prefix}-${type}-dropdown`);
-    if (!input || !dropdown) return;
-
-    // Extra protection against browser/password‑manager autofill on dashboard searches
-    hardenSearchInput(input);
-
-    let debounceTimer = null;
-    let attemptedLoadData = false;
-
-    input.addEventListener('input', async () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-            const q = input.value.trim().toLowerCase();
-            if (q.length < 1) { dropdown.classList.remove('active'); return; }
-            let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
-
-            // Fallback: if we have no data yet, try to load it once
-            if (list.length === 0 && !attemptedLoadData) {
-                attemptedLoadData = true;
-                try {
-                    if (type === 'student' && typeof loadStudents === 'function') {
-                        await loadStudents();
-                        list = allStudents || [];
-                    } else if (type === 'staff' && typeof loadUsers === 'function') {
-                        await loadUsers();
-                        list = allStaffMembers || [];
-                    }
-                } catch (e) {
-                    console.error('Error loading data for dashboard search:', e);
-                }
-            }
-
-            const matches = list.filter(item => {
-                const name = (item.name || '').toLowerCase();
-                const uname = (item.username || '').toLowerCase();
-                return name.includes(q) || uname.includes(q);
-            }).slice(0, 12);
-            if (matches.length === 0) { dropdown.classList.remove('active'); return; }
-            dropdown.innerHTML = matches.map(item => {
-                const label = item.name || item.username;
-                const meta = type === 'staff' ? (item.designation || item.role || '') : '';
-                return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
-                    <span class="search-label">${escapeHtml(label)}</span>
-                    ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
-                </div>`;
-            }).join('');
-            dropdown.classList.add('active');
-        }, 150);
-    });
-
-    dropdown.addEventListener('click', (e) => {
-        const opt = e.target.closest('.dashboard-search-option');
-        if (!opt) return;
-        const id = parseInt(opt.dataset.id);
-        const name = opt.dataset.name;
-        input.value = name;
-        dropdown.classList.remove('active');
-        const page = prefix.replace('-student', '').replace('-staff', '');
-        const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
-        if (type === 'student') {
-            dashboardState[pageKey].studentId = id;
-            dashboardState[pageKey].studentName = name;
-            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-            if (hiddenSelect) hiddenSelect.value = id;
-            // When selecting a student, clear any existing staff filter so the context
-            // represents the latest selection (student-only).
-            dashboardState[pageKey].staffId = null;
-            dashboardState[pageKey].staffName = null;
-            const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
-            if (staffSearchInput) staffSearchInput.value = '';
-        } else {
-            dashboardState[pageKey].staffId = id;
-            dashboardState[pageKey].staffName = name;
-            // When selecting a staff member, clear any existing student filter so the context
-            // represents the latest selection (staff's students).
-            dashboardState[pageKey].studentId = null;
-            dashboardState[pageKey].studentName = null;
-            const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
-            if (studentSearchInput) studentSearchInput.value = '';
-            const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-            if (hiddenSelect) hiddenSelect.value = '';
-        }
-        updateContextBanner(pageKey);
-        // When a dashboard (summary/frenzy) search is committed, clear "managed by me" so it does not persist across searches.
-        const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
-        if (managedCheckbox && managedCheckbox.checked) {
-            managedCheckbox.checked = false;
-        }
-        triggerDashboardLoad(pageKey);
-    });
-
-    input.addEventListener('focus', () => {
-        if (dropdown.children.length > 0 && input.value.trim().length > 0) {
-            dropdown.classList.add('active');
-        }
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest(`#${prefix}-${type}-search-wrap`)) {
-            dropdown.classList.remove('active');
-        }
-    });
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            dropdown.classList.remove('active');
-            return;
-        }
-
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const q = input.value.trim().toLowerCase();
-            if (!q) return;
-            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
-            const matches = list.filter(item => {
-                const name = (item.name || '').toLowerCase();
-                const uname = (item.username || '').toLowerCase();
-                return name.includes(q) || uname.includes(q);
-            }).slice(0, 12);
-            if (matches.length === 0) return;
-
-            const match = matches[0];
-            const id = parseInt(match.id);
-            const name = match.name || match.username;
-            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
-
-            input.value = name;
-            dropdown.classList.remove('active');
-
-            if (type === 'student') {
-                dashboardState[pageKey].studentId = id;
-                dashboardState[pageKey].studentName = name;
-                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-                if (hiddenSelect) hiddenSelect.value = id;
-                // Enter-based student search should also clear any existing staff context.
-                dashboardState[pageKey].staffId = null;
-                dashboardState[pageKey].staffName = null;
-                const staffSearchInput = document.getElementById(`${pageKey}-staff-search`);
-                if (staffSearchInput) staffSearchInput.value = '';
-            } else {
-                dashboardState[pageKey].staffId = id;
-                dashboardState[pageKey].staffName = name;
-                // Enter-based staff search should clear any existing student context.
-                dashboardState[pageKey].studentId = null;
-                dashboardState[pageKey].studentName = null;
-                const studentSearchInput = document.getElementById(`${pageKey}-student-search`);
-                if (studentSearchInput) studentSearchInput.value = '';
-                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-                if (hiddenSelect) hiddenSelect.value = '';
-            }
-            updateContextBanner(pageKey);
-            // When a dashboard (summary/frenzy) search is committed via Enter, clear "managed by me" so it does not persist across searches.
-            const managedCheckbox = document.getElementById(`${pageKey}-managed-by-me-checkbox`);
-            if (managedCheckbox && managedCheckbox.checked) {
-                managedCheckbox.checked = false;
-            }
-            triggerDashboardLoad(pageKey);
-            return;
-        }
-
-        if (e.key === 'Backspace' && input.value.length <= 1) {
-            const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
-            if (type === 'student') {
-                dashboardState[pageKey].studentId = null;
-                dashboardState[pageKey].studentName = null;
-                const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-                if (hiddenSelect) hiddenSelect.value = '';
-            } else {
-                dashboardState[pageKey].staffId = null;
-                dashboardState[pageKey].staffName = null;
-            }
-            updateContextBanner(pageKey);
-        }
-    });
-}
-
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
-function updateContextBanner(pageKey) {
-    const banner = document.getElementById(`${pageKey}-context-banner`);
-    const label = document.getElementById(`${pageKey}-context-label`);
-    if (!banner || !label) return;
-    const st = dashboardState[pageKey];
-    if (st.studentName || st.staffName) {
-        let text = '';
-        if (st.staffName) text = `${st.staffName}'s Students`;
-        if (st.studentName) text = st.studentName;
-        if (st.staffName && st.studentName) text = `${st.studentName} (via ${st.staffName})`;
-        label.textContent = text;
-        banner.classList.add('active');
-    } else {
-        banner.classList.remove('active');
-    }
-}
-
-// ---- Filter controls (dropdown for Summary + Frenzy reports; pills elsewhere) ----
-function setupFilterPills(pageKey) {
-    const container = document.getElementById(`${pageKey}-filter-pills`);
-    if (!container) return;
-
-    const dropdown = container.querySelector('.dashboard-period-select');
-
-    // Dropdown-based timeframe (Point Card + Frenzy reports)
-    if (dropdown && (pageKey === 'summary' || pageKey === 'frenzy')) {
-        const customWrap = pageKey === 'summary' ? document.getElementById('summary-custom-range') : null;
-        const startInput = pageKey === 'summary' ? document.getElementById('summary-custom-start') : null;
-        const endInput = pageKey === 'summary' ? document.getElementById('summary-custom-end') : null;
-
-        const resetCompare = () => {
-            dashboardState[pageKey].compareMode = false;
-            const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
-            if (compareToggle) compareToggle.classList.remove('active');
-            const compareControls = document.getElementById(`${pageKey}-compare-controls`);
-            if (compareControls) compareControls.classList.remove('active');
-        };
-
-        const maybeTriggerCustomLoad = () => {
-            if (!startInput || !endInput) return;
-            const start = startInput.value;
-            const end = endInput.value;
-            if (!start || !end) return;
-            if (start > end) return;
-            dashboardState[pageKey].period = 'custom_range';
-            dashboardState[pageKey].customStart = start;
-            dashboardState[pageKey].customEnd = end;
-            resetCompare();
-            triggerDashboardLoad(pageKey);
-        };
-
-        dropdown.addEventListener('change', () => {
-            const value = dropdown.value;
-            if (value === 'custom_range') {
-                if (customWrap) customWrap.style.display = 'flex';
-                // Defer load until user selects both dates
-                dashboardState[pageKey].period = null;
-                dashboardState[pageKey].customStart = null;
-                dashboardState[pageKey].customEnd = null;
-                resetCompare();
-                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
-                if (legacyHidden) legacyHidden.value = '';
-            } else {
-                if (customWrap) customWrap.style.display = 'none';
-                dashboardState[pageKey].period = value;
-                dashboardState[pageKey].customStart = null;
-                dashboardState[pageKey].customEnd = null;
-                resetCompare();
-                const legacyHidden = document.getElementById(`${pageKey}-period-select`);
-                if (legacyHidden && value !== 'custom_range') legacyHidden.value = value;
-                triggerDashboardLoad(pageKey);
-            }
-        });
-
-        if (startInput && endInput) {
-            startInput.addEventListener('change', maybeTriggerCustomLoad);
-            endInput.addEventListener('change', maybeTriggerCustomLoad);
-        }
-
-        // Initialize state from default dropdown value
-        if (dropdown.value && dropdown.value !== 'custom_range') {
-            dashboardState[pageKey].period = dropdown.value;
-            const legacyHidden = document.getElementById(`${pageKey}-period-select`);
-            if (legacyHidden) legacyHidden.value = dropdown.value;
-        }
-        return;
-    }
-
-    // Existing pill-based filters (legacy / other views)
-    container.addEventListener('click', (e) => {
-        const pill = e.target.closest('.dashboard-pill');
-        if (!pill) return;
-        container.querySelectorAll('.dashboard-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        dashboardState[pageKey].period = pill.dataset.period;
-        dashboardState[pageKey].compareMode = false;
-        const compareToggle = document.getElementById(`${pageKey}-compare-toggle`);
-        if (compareToggle) compareToggle.classList.remove('active');
-        const compareControls = document.getElementById(`${pageKey}-compare-controls`);
-        if (compareControls) compareControls.classList.remove('active');
-        triggerDashboardLoad(pageKey);
-    });
-}
-
-function setupCompareToggle(pageKey) {
-    const toggle = document.getElementById(`${pageKey}-compare-toggle`);
-    const controls = document.getElementById(`${pageKey}-compare-controls`);
-    if (!toggle || !controls) return;
-    toggle.addEventListener('click', () => {
-        const isActive = toggle.classList.toggle('active');
-        controls.classList.toggle('active', isActive);
-        dashboardState[pageKey].compareMode = isActive;
-        if (!isActive) {
-            triggerDashboardLoad(pageKey);
-        }
-    });
-    const select = controls.querySelector('select');
-    const customRangeContainer = document.getElementById(`${pageKey}-custom-range-controls`);
-    const customStartInput = controls.querySelector('input[data-role="custom-start"]');
-    const customEndInput = controls.querySelector('input[data-role="custom-end"]');
-    const customError = controls.querySelector('.dashboard-custom-error');
-
-    const handleCustomRangeVisibility = () => {
-        if (!customRangeContainer) return;
-        const useCustom = select && select.value === 'custom_range';
-        customRangeContainer.style.display = useCustom ? 'flex' : 'none';
-        if (!useCustom && customError) customError.textContent = '';
-        if (!useCustom && dashboardState[pageKey]) {
-            dashboardState[pageKey].customStart = null;
-            dashboardState[pageKey].customEnd = null;
-        }
-    };
-
-    if (select) {
-        select.addEventListener('change', () => {
-            if (select.value === 'custom_range' && pageKey === 'summary') {
-                handleCustomRangeVisibility();
-                // Wait for both dates before triggering load
-                return;
-            }
-            handleCustomRangeVisibility();
-            if (select.value) triggerDashboardLoad(pageKey);
-        });
-    }
-
-    const maybeTriggerCustomRangeLoad = () => {
-        if (!select || select.value !== 'custom_range') return;
-        if (!customStartInput || !customEndInput) return;
-        const start = customStartInput.value;
-        const end = customEndInput.value;
-        if (!start || !end) return;
-        if (new Date(start) > new Date(end)) {
-            if (customError) customError.textContent = 'Start date must be on or before end date.';
-            return;
-        }
-        if (customError) customError.textContent = '';
-        if (dashboardState[pageKey]) {
-            dashboardState[pageKey].customStart = start;
-            dashboardState[pageKey].customEnd = end;
-        }
-        triggerDashboardLoad(pageKey);
-    };
-
-    if (customStartInput && customEndInput) {
-        customStartInput.addEventListener('change', maybeTriggerCustomRangeLoad);
-        customEndInput.addEventListener('change', maybeTriggerCustomRangeLoad);
-    }
-}
-
-// ---- Incentive Tracking Toggle (Summary / Point Card) ----
-function setupIncentiveToggle() {
-    const toggle = document.getElementById('summary-incentive-toggle');
-    const controls = document.getElementById('summary-incentive-controls');
-    if (!toggle || !controls) return;
-
-    const startInput = document.getElementById('incentive-start-date');
-    const endInput = document.getElementById('incentive-end-date');
-    const generateBtn = document.getElementById('incentive-generate-btn');
-    const errorEl = document.getElementById('incentive-error');
-
-    const clearError = () => {
-        if (errorEl) errorEl.textContent = '';
-    };
-
-    const disableCompareMode = () => {
-        const compareToggle = document.getElementById('summary-compare-toggle');
-        const compareControls = document.getElementById('summary-compare-controls');
-        if (compareToggle) compareToggle.classList.remove('active');
-        if (compareControls) compareControls.classList.remove('active');
-        if (dashboardState && dashboardState.summary) {
-            dashboardState.summary.compareMode = false;
-        }
-    };
-
-    toggle.addEventListener('click', () => {
-        const isActive = toggle.classList.toggle('active');
-        controls.classList.toggle('active', isActive);
-        clearError();
-
-        if (isActive) {
-            disableCompareMode();
-        } else {
-            // When leaving Incentive mode, return to normal summary view
-            triggerDashboardLoad('summary');
-        }
-    });
-
-    const validateDates = () => {
-        if (!startInput || !endInput) return null;
-        const start = startInput.value;
-        const end = endInput.value;
-        if (!start || !end) {
-            if (errorEl) errorEl.textContent = 'Please select both start and end dates.';
-            return null;
-        }
-        if (new Date(start) > new Date(end)) {
-            if (errorEl) errorEl.textContent = 'Start date must be on or before end date.';
-            return null;
-        }
-        clearError();
-        return { start, end };
-    };
-
-    if (generateBtn) {
-        generateBtn.addEventListener('click', async () => {
-            const range = validateDates();
-            if (!range) return;
-            await loadIncentiveTracking(range.start, range.end);
-        });
-    }
-}
-
-async function loadIncentiveTracking(startDate, endDate) {
-    const container = document.getElementById('summary-results');
-    if (!container) return;
-
-    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading incentive tracking...</p></div>';
-
-    try {
-        const st = dashboardState.summary || {};
-        const params = [];
-        if (startDate) params.push(`start_date=${encodeURIComponent(startDate)}`);
-        if (endDate) params.push(`end_date=${encodeURIComponent(endDate)}`);
-        if (st.studentId) params.push(`student_id=${st.studentId}`);
-        if (st.staffId) params.push(`staff_id=${st.staffId}`);
-        const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-        if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
-
-        const url = '/api/incentive-tracking?' + params.join('&');
-        const response = await fetch(url);
-        const data = await response.json();
-        if (!response.ok) {
-            const msg = data && data.error ? data.error : 'Error loading incentive tracking data.';
-            container.innerHTML = `<div class="dashboard-empty"><p>${msg}</p></div>`;
-            return;
-        }
-
-        const formatRangeLabel = () => {
-            if (!startDate || !endDate) return 'All available data';
-            return `${startDate} to ${endDate}`;
-        };
-
-        const buildTable = (rows, title, description) => {
-            if (!rows || rows.length === 0) {
-                return `
-                    <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
-                        <h3>${title}</h3>
-                        <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
-                        <p style="color: var(--text-secondary); font-size: 0.9rem;">No students met this threshold in the selected range.</p>
-                    </div>
-                `;
-            }
-            const bodyRows = rows.map(s => `
-                <tr>
-                    <td>${s.name}</td>
-                    <td style="text-transform: capitalize;">${s.card_color || ''}</td>
-                    <td style="text-align:right;">${s.average_percent.toFixed(1)}%</td>
-                </tr>
-            `).join('');
-            return `
-                <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
-                    <h3>${title}</h3>
-                    <p style="margin-bottom: 10px; color: var(--text-secondary);">${description}</p>
-                    <div style="overflow-x:auto; margin-top: 10px; display:inline-block;">
-                        <table style="width:auto; min-width:0; table-layout:auto; display:inline-table;">
-                            <thead>
-                                <tr>
-                                    <th style="white-space:nowrap;">Student</th>
-                                    <th style="white-space:nowrap;">Card</th>
-                                    <th style="text-align:right; white-space:nowrap;">Average %</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${bodyRows}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        };
-
-        const rangeLabel = formatRangeLabel();
-        const headerCard = `
-            <div class="summary-card" style="display:inline-block; width:max-content; max-width:100%;">
-                <h3>Incentive Tracking (${rangeLabel})</h3>
-                <p style="margin-top: 6px; color: var(--text-secondary); font-size: 0.9rem;">
-                    Shows students who meet incentive thresholds based on their overall point card averages
-                    within the selected date range.
-                </p>
-            </div>
-        `;
-
-        const yellowCardBlock = buildTable(
-            data.yellow_students || [],
-            'Yellow Card (≥ 85%)',
-            'Students with a yellow card whose overall point card average is at least 85% in this date range.'
-        );
-        const greenCardBlock = buildTable(
-            data.green_students || [],
-            'Green Card (≥ 90%)',
-            'Students with a green card whose overall point card average is at least 90% in this date range.'
-        );
-        const blueCardBlock = buildTable(
-            data.blue_students || [],
-            'Blue Card (≥ 90%)',
-            'Students with a blue card whose overall point card average is at least 90% in this date range.'
-        );
-
-        container.innerHTML = headerCard + yellowCardBlock + greenCardBlock + blueCardBlock;
-
-        // Hide raw point card data cards if visible
-        const pcContainer = document.getElementById('point-card-data-container');
-        if (pcContainer) pcContainer.style.display = 'none';
-    } catch (err) {
-        console.error('Error loading incentive tracking:', err);
-        const container = document.getElementById('summary-results');
-        if (container) {
-            container.innerHTML = `<div class="dashboard-empty"><p>Error loading incentive tracking: ${err.message}</p></div>`;
-        }
-    }
-}
-
-function setupContextClear(pageKey) {
-    const clearBtn = document.getElementById(`${pageKey}-context-clear`);
-    if (!clearBtn) return;
-    clearBtn.addEventListener('click', () => {
-        dashboardState[pageKey].studentId = null;
-        dashboardState[pageKey].studentName = null;
-        dashboardState[pageKey].staffId = null;
-        dashboardState[pageKey].staffName = null;
-        const studentSearch = document.getElementById(`${pageKey}-student-search`);
-        const staffSearch = document.getElementById(`${pageKey}-staff-search`);
-        if (studentSearch) studentSearch.value = '';
-        if (staffSearch) staffSearch.value = '';
-        const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
-        if (hiddenSelect) hiddenSelect.value = '';
-        updateContextBanner(pageKey);
-        triggerDashboardLoad(pageKey);
-    });
-}
-
-// ---- Load Trigger ----
-function syncSummaryPointCardButton() {
-    const btn = document.getElementById('show-point-card-btn');
-    if (!btn || typeof dashboardState === 'undefined' || !dashboardState.summary) return;
-    const st = dashboardState.summary;
-    const pc = document.getElementById('point-card-data-container');
-    if (st.studentId) {
-        btn.classList.remove('is-inactive');
-        btn.dataset.studentId = String(st.studentId);
-        const tf = st.compareMode
-            ? ((document.getElementById('quarter-select') || {}).value || 'alltime')
-            : (st.period === 'all_time' ? 'alltime' : (st.period || '30day'));
-        btn.dataset.timeframe = tf;
-    } else {
-        btn.classList.add('is-inactive');
-        delete btn.dataset.studentId;
-        delete btn.dataset.timeframe;
-        btn.textContent = 'View Past Point Cards';
-        if (pc) pc.style.display = 'none';
-    }
-}
-
-function triggerDashboardLoad(pageKey) {
-    if (pageKey === 'summary') loadSummaryDashboard();
-    else loadFrenzyDashboard();
-}
-
-// ---- Summary Dashboard ----
-async function loadSummaryDashboard() {
-    const st = dashboardState.summary;
-    const container = document.getElementById('summary-results');
-    if (!container) return;
-
-    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading summary...</p></div>';
-
-    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
-    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
-    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
-    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
-
-    const params = [];
-    if (st.compareMode) {
-        const selectEl = document.getElementById('quarter-select');
-        const tf = selectEl ? selectEl.value : '';
-        if (tf) {
-            params.push(`timeframe=${tf}`);
-            if (tf === 'month') {
-                const sySelect = document.getElementById('summary-school-year-select');
-                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
-                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
-            } else if (tf === 'custom_range') {
-                const start = st.customStart;
-                const end = st.customEnd;
-                if (start && end) {
-                    params.push(`start_date=${encodeURIComponent(start)}`);
-                    params.push(`end_date=${encodeURIComponent(end)}`);
-                }
-            }
-        }
-    } else {
-        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
-    }
-    if (st.studentId) params.push(`student_id=${st.studentId}`);
-    if (st.staffId) params.push(`staff_id=${st.staffId}`);
-    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
-    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
-    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
-
-    const url = '/api/summary?' + params.join('&');
-
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        window.currentSummaryData = data;
-
-        const printBtn = document.getElementById('print-summary-btn');
-        if (printBtn) printBtn.disabled = false;
-
-        if (data.comparison_mode && data.periods) {
-            renderSummaryComparison(container, data);
-        } else {
-            renderSummarySingle(container, data);
-        }
-        syncSummaryPointCardButton();
-    } catch (err) {
-        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
-        syncSummaryPointCardButton();
-    }
-}
-
-function bucketInfractionsOverview(infractions) {
-    const raw = infractions || {};
-    const out = { Safety: 0, Task: 0, Attention: 0, Social: 0 };
-    for (const [type, count] of Object.entries(raw)) {
-        const n = Number(count) || 0;
-        const label = String(type || '');
-        let bucket = 'Social';
-        if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) bucket = 'Safety';
-        else if (/disrespect/i.test(label)) bucket = 'Safety';
-        else if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) bucket = 'Attention';
-        else if (/nfd|self\s*control|^task/i.test(label)) bucket = 'Task';
-        else if (/lang|volume|myob|personal/i.test(label)) bucket = 'Social';
-        out[bucket] += n;
-    }
-    return out;
-}
-
-function formatOverviewSignedInt(n) {
-    if (n == null || Number.isNaN(Number(n))) return '';
-    const v = Number(n);
-    if (v > 0) return `+${v}`;
-    return String(v);
-}
-
-function overviewTrendDeltaClass(metric, delta) {
-    if (delta == null || Number.isNaN(Number(delta))) return 'overview-trend-line-neutral';
-    const v = Number(delta);
-    if (metric === 'infractions' || metric === 'reminders' || metric === 'resets') {
-        if (v < 0) return 'overview-trend-line-pos';
-        if (v > 0) return 'overview-trend-line-neg';
-    }
-    return 'overview-trend-line-neutral';
-}
-
-function collectOverviewTimeSlots(byTimeByDay) {
-    const hints = ['AM Bus', '9:00', '10:30', '12:00', '1:30', 'PM Bus'];
-    const pool = new Set();
-    Object.values(byTimeByDay || {}).forEach(tm => {
-        Object.keys(tm || {}).forEach(k => pool.add(k));
-    });
-    let arr = [...pool];
-    const ordered = [];
-    hints.forEach(h => {
-        const idx = arr.findIndex(k =>
-            k === h || k.includes(h) || (h.length <= 4 && k.startsWith(h)));
-        if (idx >= 0) {
-            ordered.push(arr[idx]);
-            arr = arr.filter((_, i) => i !== idx);
-        }
-    });
-    arr.sort((a, b) => a.localeCompare(b));
-    return ordered.concat(arr);
-}
-
-function overviewHeatmapMeta(byTimeByDay) {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const timeSlots = collectOverviewTimeSlots(byTimeByDay);
-    let maxInf = 0;
-    let worst = null;
-    let bestOv = -1;
-    let best = null;
-    days.forEach(day => {
-        const tm = (byTimeByDay || {})[day] || {};
-        timeSlots.forEach(timeLabel => {
-            const cell = tm[timeLabel];
-            if (!cell) return;
-            const inf = cell.total_infractions || 0;
-            const ov = typeof cell.percentages?.overall === 'number' ? cell.percentages.overall : null;
-            if (inf > maxInf) {
-                maxInf = inf;
-                worst = { day, timeLabel };
-            }
-            if (ov != null && ov > bestOv) {
-                bestOv = ov;
-                best = { day, timeLabel };
-            }
-        });
-    });
-    return { days, timeSlots, maxInf: maxInf || 1, worst, best };
-}
-
-function overviewHeatColor(cell, maxInf) {
-    const inf = cell?.total_infractions || 0;
-    const ov = typeof cell?.percentages?.overall === 'number' ? cell.percentages.overall : null;
-    let t = 0;
-    if (maxInf > 0) t = Math.min(1, inf / maxInf);
-    else if (ov != null) t = Math.min(1, (100 - ov) / 100);
-    const r = Math.round(34 + t * (239 - 34));
-    const g = Math.round(197 + t * (68 - 197));
-    const b = Math.round(94 + t * (68 - 94));
-    return `rgb(${r},${g},${b})`;
-}
-
-function overviewDayInitial(day) {
-    const m = { Monday: 'M', Tuesday: 'T', Wednesday: 'W', Thursday: 'Th', Friday: 'F' };
-    return m[day] || (day || '').slice(0, 2);
-}
-
-let summaryTrendsChartInstance = null;
-let currentSummaryCheckpointData = [];
-let currentSummaryTrendStudentIds = [];
-
-const summaryCheckpointTypeLabels = {
-    intervention: 'Intervention',
-    transition: 'Transition',
-    life_event: 'Life Event',
-    card_change: 'Card Change'
-};
-
-function buildBehaviorTrendCardHtml() {
-    return `
-        <div class="dashboard-card behavior-trend-card reports-trend-card" data-summary-card="behavior-trend">
-            <div class="behavior-trend-controls">
-                <div class="behavior-trend-title-line trends-title-line">
-                    <div class="trends-heading-wrap">
-                        <h3 class="trends-title">Trends</h3>
-                    </div>
-                    <button type="button" class="behavior-trend-compare-btn" id="summary-add-checkpoint-btn" aria-label="Add checkpoint">Add Checkpoint</button>
-                </div>
-            </div>
-            <div class="behavior-trend-timeline" id="summary-behavior-trend-body">
-                <div class="behavior-trend-empty">Loading trend data...</div>
-            </div>
-            <div id="summary-trends-checkpoint-list" class="summary-trends-checkpoint-list"></div>
-            <div id="summary-checkpoint-modal" class="summary-checkpoint-modal-backdrop" style="display:none;">
-                <div class="summary-checkpoint-modal" role="dialog" aria-modal="true" aria-label="Add checkpoint">
-                    <div class="summary-checkpoint-modal-header">
-                        <h4 id="summary-checkpoint-modal-title">Add Checkpoint</h4>
-                        <button type="button" id="summary-checkpoint-close-btn" class="summary-checkpoint-close-btn" aria-label="Close checkpoint modal">&times;</button>
-                    </div>
-                    <div class="summary-checkpoint-modal-body">
-                        <label for="summary-checkpoint-type">Type</label>
-                        <select id="summary-checkpoint-type">
-                            <option value="intervention">Add Intervention</option>
-                            <option value="transition">Add Transition</option>
-                            <option value="life_event">Add Life Event</option>
-                            <option value="card_change">Add Card Change</option>
-                        </select>
-                        <label for="summary-checkpoint-color">Card Change Color</label>
-                        <select id="summary-checkpoint-color">
-                            <option value="yellow">Yellow</option>
-                            <option value="green">Green</option>
-                            <option value="blue">Blue</option>
-                        </select>
-                        <label for="summary-checkpoint-date">Date</label>
-                        <input type="date" id="summary-checkpoint-date">
-                        <label for="summary-checkpoint-label">Label</label>
-                        <input type="text" id="summary-checkpoint-label" maxlength="255" placeholder="Enter checkpoint label">
-                        <p id="summary-checkpoint-student-scope-note" class="summary-checkpoint-student-scope-note"></p>
-                    </div>
-                    <div class="summary-checkpoint-modal-actions">
-                        <button type="button" id="summary-checkpoint-cancel-btn" class="btn-secondary">Cancel</button>
-                        <button type="button" id="summary-checkpoint-save-btn" class="btn-primary">Save</button>
-                    </div>
-                </div>
-            </div>
-        </div>`;
-}
-
-function getSummaryTrendFetchRange() {
-    const st = dashboardState.summary || {};
-    const period = st.period || '30day';
-    if (period === 'custom_range' && st.customStart && st.customEnd) {
-        return { start: st.customStart, end: st.customEnd };
-    }
-
-    const toIso = (value) => {
-        if (!value) return null;
-        const raw = String(value).trim();
-        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) return null;
-        return parsed.toISOString().split('T')[0];
-    };
-
-    const today = new Date();
-    const endIso = today.toISOString().split('T')[0];
-    if (period === 'all_time') return {};
-    if (period === 'weekly') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - 6);
-        return { start: start.toISOString().split('T')[0], end: endIso };
-    }
-    if (period === '30day') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - 29);
-        return { start: start.toISOString().split('T')[0], end: endIso };
-    }
-    if (period === 'current_year') {
-        const schoolYearDates = loadSchoolYearDates();
-        const current = getCurrentSchoolYear();
-        const range = schoolYearDates?.[current];
-        const start = toIso(range?.start);
-        const end = toIso(range?.end);
-        if (start && end) return { start, end };
-    }
-    if (/^quarter[1-4]$/.test(period)) {
-        const quarterNum = period.replace('quarter', '');
-        const quarterDates = loadQuarterDates();
-        const q = quarterDates?.[quarterNum];
-        const start = toIso(q?.start);
-        const end = toIso(q?.end);
-        if (start && end) return { start, end };
-    }
-    const fallback = new Date(today);
-    fallback.setDate(fallback.getDate() - 89);
-    return { start: fallback.toISOString().split('T')[0], end: endIso };
-}
-
-async function fetchSummaryTrendRecords() {
-    const st = dashboardState.summary || {};
-    const params = new URLSearchParams();
-    if (st.studentId) params.set('student_id', String(st.studentId));
-    if (st.staffId) params.set('staff_id', String(st.staffId));
-    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-    if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
-
-    const range = getSummaryTrendFetchRange();
-    if (range.start) params.set('start_date', range.start);
-    if (range.end) params.set('end_date', range.end);
-
-    const url = `/api/trends${params.toString() ? `?${params.toString()}` : ''}`;
-    const response = await fetch(url);
-    if (response.ok) {
-        return response.json();
-    }
-    // Backward-compatible fallback: if backend hasn't loaded /api/trends yet, derive series from daily records.
-    if (response.status === 404) {
-        const fallbackParams = new URLSearchParams(params);
-        const legacyUrl = `/api/daily-records${fallbackParams.toString() ? `?${fallbackParams.toString()}` : ''}`;
-        const legacyResponse = await fetch(legacyUrl);
-        if (!legacyResponse.ok) {
-            throw new Error(`Unable to load trend records (${legacyResponse.status})`);
-        }
-        const records = await legacyResponse.json();
-        const byDate = new Map();
-        (Array.isArray(records) ? records : []).forEach((record) => {
-            if (!record || !record.date || record.attendance_status === 'excused') return;
-            if (!byDate.has(record.date)) {
-                byDate.set(record.date, {
-                    frenzy_count: 0,
-                    safety: 0,
-                    teamwork: 0,
-                    accountability: 0,
-                    relationships: 0,
-                    possible: 0
-                });
-            }
-            const row = byDate.get(record.date);
-            row.frenzy_count += Array.isArray(record.frenzies) ? record.frenzies.length : 0;
-            (record.periods || []).forEach((period) => {
-                row.safety += Number(period.safety_points) || 0;
-                row.teamwork += Number(period.teamwork_points) || 0;
-                row.accountability += Number(period.accountability_points) || 0;
-                row.relationships += Number(period.relationships_points) || 0;
-                row.possible += Number(period.points_possible) || 4;
-            });
-        });
-        const series = Array.from(byDate.keys()).sort().map((date) => {
-            const row = byDate.get(date);
-            let average_star_percent = null;
-            if (row.possible > 0) {
-                const numPeriods = row.possible / 4;
-                const maxPerCategory = numPeriods > 0 ? numPeriods * 2 : 0;
-                if (maxPerCategory > 0) {
-                    const safetyPct = (row.safety / maxPerCategory) * 100;
-                    const teamworkPct = (row.teamwork / maxPerCategory) * 100;
-                    const accountabilityPct = (row.accountability / maxPerCategory) * 100;
-                    const relationshipsPct = (row.relationships / maxPerCategory) * 100;
-                    average_star_percent = (safetyPct + teamworkPct + accountabilityPct + relationshipsPct) / 4;
-                }
-            }
-            return {
-                date,
-                frenzy_count: row.frenzy_count,
-                average_star_percent
-            };
-        });
-        return { series, student_ids: [] };
-    }
-    throw new Error(`Unable to load trend records (${response.status})`);
-}
-
-function parseIsoDateLocal(isoDate) {
-    const [year, month, day] = String(isoDate || '').split('-').map(Number);
-    if (!year || !month || !day) return null;
-    return new Date(year, month - 1, day);
-}
-
-function formatTrendDateLabel(isoDate) {
-    const d = parseIsoDateLocal(isoDate);
-    if (!d) return '';
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function calculateTrendPercent(records, metric) {
-    let safety = 0;
-    let teamwork = 0;
-    let accountability = 0;
-    let relationships = 0;
-    let possible = 0;
-
-    records.forEach(record => {
-        if (record.attendance_status === 'excused') return;
-        (record.periods || []).forEach(period => {
-            safety += Number(period.safety_points) || 0;
-            teamwork += Number(period.teamwork_points) || 0;
-            accountability += Number(period.accountability_points) || 0;
-            relationships += Number(period.relationships_points) || 0;
-            possible += Number(period.points_possible) || 4;
-        });
-    });
-
-    const numPeriods = possible > 0 ? possible / 4 : 0;
-    const maxPerCategory = numPeriods > 0 ? numPeriods * 2 : 0;
-    if (!maxPerCategory) return null;
-
-    const pct = {
-        safety: (safety / maxPerCategory) * 100,
-        teamwork: (teamwork / maxPerCategory) * 100,
-        accountability: (accountability / maxPerCategory) * 100,
-        relationships: (relationships / maxPerCategory) * 100
-    };
-    pct.overall = (pct.safety + pct.teamwork + pct.accountability + pct.relationships) / 4;
-    return Math.max(0, Math.min(100, pct[metric] ?? pct.overall));
-}
-
-async function fetchSummaryTrendCheckpoints() {
-    const st = dashboardState.summary || {};
-    const params = new URLSearchParams();
-    if (st.studentId) params.set('student_id', String(st.studentId));
-    if (st.staffId) params.set('staff_id', String(st.staffId));
-    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-    if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
-    const range = getSummaryTrendFetchRange();
-    if (range.start) params.set('start_date', range.start);
-    if (range.end) params.set('end_date', range.end);
-    const response = await fetch(`/api/checkpoints${params.toString() ? `?${params.toString()}` : ''}`);
-    if (response.status === 404) {
-        return [];
-    }
-    if (!response.ok) {
-        throw new Error(`Unable to load checkpoints (${response.status})`);
-    }
-    return response.json();
-}
-
-function renderSummaryCheckpointList(checkpoints) {
-    const listEl = document.getElementById('summary-trends-checkpoint-list');
-    if (!listEl) return;
-    if (!Array.isArray(checkpoints) || checkpoints.length === 0) {
-        listEl.innerHTML = '<div class="summary-trends-checkpoint-empty">No checkpoints in this timeframe.</div>';
-        return;
-    }
-    const sorted = checkpoints.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    listEl.innerHTML = sorted.map((cp) => `
-        <div class="summary-checkpoint-item">
-            <span class="summary-checkpoint-swatch" style="background:${escapeHtml(cp.color || '#64748b')}"></span>
-            <span class="summary-checkpoint-date">${escapeHtml(formatTrendDateLabel(cp.date))}</span>
-            <span class="summary-checkpoint-type">${escapeHtml(summaryCheckpointTypeLabels[cp.checkpoint_type] || cp.checkpoint_type || 'Checkpoint')}</span>
-            <span class="summary-checkpoint-label">${escapeHtml(cp.label || '')}</span>
-            <button type="button" class="btn-secondary summary-checkpoint-edit-btn" data-checkpoint-id="${cp.id}">Edit</button>
-            <button type="button" class="btn-secondary summary-checkpoint-delete-btn" data-checkpoint-id="${cp.id}">Delete</button>
-        </div>
-    `).join('');
-}
-
-function buildSummaryTrendPoints(trendPayload) {
-    const series = (trendPayload && Array.isArray(trendPayload.series)) ? trendPayload.series : [];
-    return series.map((row) => ({
-        date: row.date,
-        label: formatTrendDateLabel(row.date),
-        frenzyCount: Number(row.frenzy_count) || 0,
-        starPercent: row.average_star_percent == null ? null : Number(row.average_star_percent)
-    }));
-}
-
-function createCheckpointOverlayPlugin() {
-    return {
-        id: 'summaryCheckpointOverlay',
-        afterDatasetsDraw(chart, args, pluginOptions) {
-            const checkpoints = (pluginOptions && pluginOptions.checkpoints) ? pluginOptions.checkpoints : [];
-            if (!checkpoints.length) return;
-            const xScale = chart.scales.x;
-            const chartArea = chart.chartArea;
-            if (!xScale || !chartArea) return;
-            const ctx = chart.ctx;
-            const labels = chart.data.labels || [];
-            checkpoints.forEach((cp) => {
-                const dateLabel = formatTrendDateLabel(cp.date);
-                const idx = labels.indexOf(dateLabel);
-                if (idx < 0) return;
-                const x = xScale.getPixelForValue(idx);
-                const color = cp.color || '#64748b';
-                ctx.save();
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 4]);
-                ctx.beginPath();
-                ctx.moveTo(x, chartArea.top);
-                ctx.lineTo(x, chartArea.bottom);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(x, chartArea.top + 6, 3, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = '#374151';
-                ctx.font = '11px Inter, sans-serif';
-                ctx.textAlign = 'left';
-                ctx.fillText((cp.label || '').slice(0, 26), x + 5, chartArea.top + 12);
-                ctx.restore();
-            });
-        }
-    };
-}
-
-function renderSummaryTrendChart(points, checkpoints) {
-    const body = document.getElementById('summary-behavior-trend-body');
-    if (!body) return;
-    if (!points || points.length === 0) {
-        body.innerHTML = '<div class="behavior-trend-empty">No trend data in this timeframe.</div>';
-        return;
-    }
-    body.innerHTML = '<div class="behavior-trend-chart-wrap"><canvas id="summary-trends-chart-canvas" aria-label="Trends chart" role="img"></canvas></div>';
-    const canvas = document.getElementById('summary-trends-chart-canvas');
-    if (!canvas || typeof Chart === 'undefined') return;
-    if (summaryTrendsChartInstance) {
-        summaryTrendsChartInstance.destroy();
-        summaryTrendsChartInstance = null;
-    }
-    const labels = points.map(p => p.label);
-    const frenzyData = points.map(p => p.frenzyCount);
-    const starData = points.map(p => p.starPercent);
-    const checkpointPlugin = createCheckpointOverlayPlugin();
-    summaryTrendsChartInstance = new Chart(canvas, {
-        type: 'line',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: 'Number of Frenzies',
-                    data: frenzyData,
-                    yAxisID: 'yFrenzy',
-                    borderColor: '#1d4ed8',
-                    backgroundColor: 'rgba(29, 78, 216, 0.1)',
-                    borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
-                    pointRadius: 0,
-                    tension: 0.92
-                },
-                {
-                    label: 'Average STAR %',
-                    data: starData,
-                    yAxisID: 'yStar',
-                    borderColor: '#7e22ce',
-                    backgroundColor: 'rgba(126, 34, 206, 0.1)',
-                    borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
-                    pointRadius: 0,
-                    tension: 0.92
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                yFrenzy: {
-                    position: 'left',
-                    beginAtZero: true,
-                    title: { display: true, text: 'Number of Frenzies' },
-                    grid: { display: false }
-                },
-                yStar: {
-                    position: 'right',
-                    beginAtZero: true,
-                    max: 100,
-                    title: { display: true, text: 'Average STAR %' },
-                    grid: { display: false },
-                    ticks: {
-                        callback: (value) => `${value}%`
-                    }
-                },
-                x: {
-                    grid: { display: false }
-                }
-            },
-            plugins: {
-                legend: { position: 'top' },
-                summaryCheckpointOverlay: { checkpoints: checkpoints || [] },
-                datalabels: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: (context) => {
-                            const y = context.parsed.y;
-                            if (context.dataset.yAxisID === 'yStar') return `${context.dataset.label}: ${Math.round(y)}%`;
-                            return `${context.dataset.label}: ${y}`;
-                        }
-                    }
-                }
-            }
-        },
-        plugins: [checkpointPlugin]
-    });
-    const grid = body.closest('.dashboard-card-grid');
-    if (grid) scheduleMasonryLayoutAfterResize(grid);
-}
-
-async function loadSummaryBehaviorTrendCard() {
-    const body = document.getElementById('summary-behavior-trend-body');
-    if (!body) return;
-    try {
-        const [trendPayload, checkpoints] = await Promise.all([
-            fetchSummaryTrendRecords(),
-            fetchSummaryTrendCheckpoints()
-        ]);
-        window.currentSummaryTrendRecords = trendPayload || { series: [] };
-        currentSummaryTrendStudentIds = Array.isArray(trendPayload?.student_ids) ? trendPayload.student_ids : [];
-        currentSummaryCheckpointData = Array.isArray(checkpoints) ? checkpoints : [];
-        const points = buildSummaryTrendPoints(window.currentSummaryTrendRecords);
-        renderSummaryTrendChart(points, currentSummaryCheckpointData);
-        renderSummaryCheckpointList(currentSummaryCheckpointData);
-    } catch (err) {
-        body.innerHTML = `<div class="behavior-trend-empty">Unable to load trend data: ${escapeHtml(err.message || 'Unknown error')}</div>`;
-    }
-}
-
-function setSummaryCheckpointColorVisibility() {
-    const typeSelect = document.getElementById('summary-checkpoint-type');
-    const colorSelect = document.getElementById('summary-checkpoint-color');
-    if (!typeSelect || !colorSelect) return;
-    const isCardChange = typeSelect.value === 'card_change';
-    colorSelect.disabled = !isCardChange;
-    colorSelect.parentElement?.classList.toggle('is-disabled', !isCardChange);
-}
-
-function openSummaryCheckpointModal(checkpoint) {
-    const modal = document.getElementById('summary-checkpoint-modal');
-    const title = document.getElementById('summary-checkpoint-modal-title');
-    const typeSelect = document.getElementById('summary-checkpoint-type');
-    const colorSelect = document.getElementById('summary-checkpoint-color');
-    const dateInput = document.getElementById('summary-checkpoint-date');
-    const labelInput = document.getElementById('summary-checkpoint-label');
-    const scopeNote = document.getElementById('summary-checkpoint-student-scope-note');
-    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
-    if (!modal || !typeSelect || !colorSelect || !dateInput || !labelInput || !scopeNote || !saveBtn || !title) return;
-    const isEdit = !!checkpoint;
-    title.textContent = isEdit ? 'Edit Checkpoint' : 'Add Checkpoint';
-    saveBtn.dataset.mode = isEdit ? 'edit' : 'create';
-    saveBtn.dataset.checkpointId = isEdit ? String(checkpoint.id) : '';
-    typeSelect.value = isEdit ? (checkpoint.checkpoint_type || 'intervention') : 'intervention';
-    colorSelect.value = isEdit ? (checkpoint.color || 'yellow') : 'yellow';
-    dateInput.value = isEdit
-        ? (checkpoint.date || '')
-        : (new Date().toISOString().split('T')[0]);
-    labelInput.value = isEdit ? (checkpoint.label || '') : '';
-    const count = currentSummaryTrendStudentIds.length;
-    scopeNote.textContent = count <= 1
-        ? 'This checkpoint applies to the current student selection.'
-        : `This checkpoint applies to ${count} selected students.`;
-    setSummaryCheckpointColorVisibility();
-    modal.style.display = 'flex';
-}
-
-function closeSummaryCheckpointModal() {
-    const modal = document.getElementById('summary-checkpoint-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-async function saveSummaryCheckpointFromModal() {
-    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
-    const typeSelect = document.getElementById('summary-checkpoint-type');
-    const colorSelect = document.getElementById('summary-checkpoint-color');
-    const dateInput = document.getElementById('summary-checkpoint-date');
-    const labelInput = document.getElementById('summary-checkpoint-label');
-    if (!saveBtn || !typeSelect || !colorSelect || !dateInput || !labelInput) return;
-    const label = (labelInput.value || '').trim();
-    if (!label) {
-        showMessage('Please enter a checkpoint label.', 'error');
-        return;
-    }
-    if (!dateInput.value) {
-        showMessage('Please select a date.', 'error');
-        return;
-    }
-    if (!currentSummaryTrendStudentIds.length) {
-        showMessage('No students found in the current selection.', 'error');
-        return;
-    }
-    if (currentSummaryTrendStudentIds.length > 1 && saveBtn.dataset.mode !== 'edit') {
-        const ok = confirm(`You are creating a checkpoint for ${currentSummaryTrendStudentIds.length} students. Continue?`);
-        if (!ok) return;
-    }
-    const payload = {
-        checkpoint_type: typeSelect.value,
-        color: typeSelect.value === 'card_change' ? colorSelect.value : null,
-        date: dateInput.value,
-        label,
-        student_ids: currentSummaryTrendStudentIds
-    };
-    const isEdit = saveBtn.dataset.mode === 'edit' && saveBtn.dataset.checkpointId;
-    const url = isEdit ? `/api/checkpoints/${saveBtn.dataset.checkpointId}` : '/api/checkpoints';
-    const method = isEdit ? 'PUT' : 'POST';
-    const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(data.error || 'Failed to save checkpoint');
-    }
-    closeSummaryCheckpointModal();
-    await loadSummaryBehaviorTrendCard();
-    showMessage(isEdit ? 'Checkpoint updated.' : 'Checkpoint added.', 'success');
-}
-
-async function deleteSummaryCheckpoint(checkpointId) {
-    const ok = confirm('Delete this checkpoint?');
-    if (!ok) return;
-    const response = await fetch(`/api/checkpoints/${checkpointId}`, { method: 'DELETE' });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(data.error || 'Failed to delete checkpoint');
-    }
-    await loadSummaryBehaviorTrendCard();
-    showMessage('Checkpoint deleted.', 'success');
-}
-
-function wireSummaryBehaviorTrendCard() {
-    const addBtn = document.getElementById('summary-add-checkpoint-btn');
-    if (addBtn && !addBtn.dataset.bound) {
-        addBtn.dataset.bound = 'true';
-        addBtn.addEventListener('click', () => openSummaryCheckpointModal(null));
-    }
-    const closeBtn = document.getElementById('summary-checkpoint-close-btn');
-    if (closeBtn && !closeBtn.dataset.bound) {
-        closeBtn.dataset.bound = 'true';
-        closeBtn.addEventListener('click', closeSummaryCheckpointModal);
-    }
-    const cancelBtn = document.getElementById('summary-checkpoint-cancel-btn');
-    if (cancelBtn && !cancelBtn.dataset.bound) {
-        cancelBtn.dataset.bound = 'true';
-        cancelBtn.addEventListener('click', closeSummaryCheckpointModal);
-    }
-    const typeSelect = document.getElementById('summary-checkpoint-type');
-    if (typeSelect && !typeSelect.dataset.bound) {
-        typeSelect.dataset.bound = 'true';
-        typeSelect.addEventListener('change', setSummaryCheckpointColorVisibility);
-    }
-    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
-    if (saveBtn && !saveBtn.dataset.bound) {
-        saveBtn.dataset.bound = 'true';
-        saveBtn.addEventListener('click', async () => {
-            try {
-                await saveSummaryCheckpointFromModal();
-            } catch (err) {
-                showMessage(err.message || 'Unable to save checkpoint.', 'error');
-            }
-        });
-    }
-    const list = document.getElementById('summary-trends-checkpoint-list');
-    if (list && !list.dataset.bound) {
-        list.dataset.bound = 'true';
-        list.addEventListener('click', async (e) => {
-            const editBtn = e.target.closest('.summary-checkpoint-edit-btn');
-            if (editBtn) {
-                const id = Number(editBtn.dataset.checkpointId);
-                const checkpoint = currentSummaryCheckpointData.find((row) => Number(row.id) === id);
-                if (checkpoint) openSummaryCheckpointModal(checkpoint);
-                return;
-            }
-            const delBtn = e.target.closest('.summary-checkpoint-delete-btn');
-            if (delBtn) {
-                try {
-                    await deleteSummaryCheckpoint(Number(delBtn.dataset.checkpointId));
-                } catch (err) {
-                    showMessage(err.message || 'Unable to delete checkpoint.', 'error');
-                }
-            }
-        });
-    }
-    loadSummaryBehaviorTrendCard();
-}
-
-function buildDefaultTriggerTimesCardHtml(data) {
-    const byClass = data.by_class || {};
-    const byTime = data.by_time || {};
-    const timeKeys = Object.keys(byTime);
-    const classNames = Object.keys(byClass);
-    const useByTime = timeKeys.length > 0;
-    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-
-    const sortedTriggerKeys = triggerEntries.sort((a, b) => {
-        const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-        const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-        const aPct = typeof aData.percentages?.overall === 'number' ? Math.round(aData.percentages.overall) : Number.POSITIVE_INFINITY;
-        const bPct = typeof bData.percentages?.overall === 'number' ? Math.round(bData.percentages.overall) : Number.POSITIVE_INFINITY;
-        if (aPct !== bPct) return aPct - bPct;
-        const aInfra = typeof aData.total_infractions === 'number' ? aData.total_infractions : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-        const bInfra = typeof bData.total_infractions === 'number' ? bData.total_infractions : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-        return bInfra - aInfra;
-    });
-
-    let rows = '';
-    sortedTriggerKeys.slice(0, 6).forEach(key => {
-        const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
-        const pctOverall = rowData.percentages?.overall;
-        const infractionsCount = typeof rowData.total_infractions === 'number'
-            ? rowData.total_infractions
-            : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
-        const topClass = useByTime ? (rowData.top_class || '') : '';
-        rows += `<tr>
-            <td>${escapeHtml(key)}${topClass ? `<div class="trigger-times-sub">${escapeHtml(topClass)}</div>` : ''}</td>
-            <td>${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</td>
-            <td>${infractionsCount}</td>
-        </tr>`;
-    });
-
-    const empty = `<p class="trigger-times-empty">No trigger time data for this period.</p>`;
-    return `
-        <div class="dashboard-card trigger-times-card summary-default-trigger-card" data-summary-card="trigger-times">
-            <div class="dashboard-card-header">
-                <h3 class="dashboard-card-title">Trigger Times</h3>
-                <button type="button" class="trigger-times-mode-btn active">Table</button>
-            </div>
-            <div class="trigger-times-table-wrap">
-                ${rows ? `
-                    <table class="trigger-times-table">
-                        <thead>
-                            <tr><th>Time</th><th>Average</th><th>Infractions</th></tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>` : empty}
-            </div>
-        </div>`;
-}
-
-function buildOverviewDashboardCardHtml(data) {
-    const avgs = data.averages || {};
-    const totalDays = data.total_days || 0;
-    const infractions = data.infractions || data.additional_info?.infractions || {};
-    const totalInfractions = Object.values(infractions).reduce((s, c) => s + Number(c) || 0, 0);
-    const reminders = data.additional_info?.total_reminders || 0;
-    const resets = data.additional_info?.total_resets || 0;
-    const attendance = data.attendance_summary || {};
-    const presentPct = typeof attendance.present_pct === 'number'
-        ? attendance.present_pct
-        : 0;
-    const byClass = data.by_class || {};
-    const byTime = data.by_time || {};
-    const byTimeByDay = data.by_time_by_day || {};
-    const trends = data.overview_trends || null;
-
-    const timeKeys = Object.keys(byTime);
-    const classNames = Object.keys(byClass);
-    const useByTime = timeKeys.length > 0;
-    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-    let hardestTriggerLabel = '';
-    let hardestTriggerSubtitle = '';
-    if (triggerEntries.length > 0) {
-        const sortedTriggerKeys = triggerEntries.sort((a, b) => {
-            const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-            const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-            const aPct = typeof aData.percentages?.overall === 'number'
-                ? Math.round(aData.percentages.overall)
-                : Number.POSITIVE_INFINITY;
-            const bPct = typeof bData.percentages?.overall === 'number'
-                ? Math.round(bData.percentages.overall)
-                : Number.POSITIVE_INFINITY;
-            if (aPct !== bPct) return aPct - bPct;
-            const aInfra = typeof aData.total_infractions === 'number'
-                ? aData.total_infractions
-                : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-            const bInfra = typeof bData.total_infractions === 'number'
-                ? bData.total_infractions
-                : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-            return bInfra - aInfra;
-        });
-        const hardestKey = sortedTriggerKeys[0];
-        const hardestData = useByTime ? (byTime[hardestKey] || {}) : (byClass[hardestKey] || {});
-        const hardestPctOverall = hardestData.percentages?.overall;
-        const hardestInfractionsCount = typeof hardestData.total_infractions === 'number'
-            ? hardestData.total_infractions
-            : (typeof hardestData.infractions === 'number' ? hardestData.infractions : 0);
-        hardestTriggerSubtitle = typeof hardestPctOverall === 'number'
-            ? `${Math.round(hardestPctOverall)}% avg • ${hardestInfractionsCount} infractions`
-            : `${hardestInfractionsCount} infractions`;
-        hardestTriggerLabel = hardestKey;
-    }
-
-    const hm = overviewHeatmapMeta(byTimeByDay);
-    let headlineTime = '';
-    let headlineDay = '';
-    if (hm.worst) {
-        headlineTime = hm.worst.timeLabel;
-        headlineDay = hm.worst.day || '';
-    } else if (hardestTriggerLabel) {
-        headlineTime = hardestTriggerLabel;
-        headlineDay = '';
-    }
-
-    const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
-    const overallPct = Math.round(avgs.overall || 0);
-    const toRoundedPct = (value) => Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
-    const safetyP = toRoundedPct(avgs.safety);
-    const teamworkP = toRoundedPct(avgs.teamwork);
-    const accountabilityP = toRoundedPct(avgs.accountability);
-    const relationshipsP = toRoundedPct(avgs.relationships);
-
-    const presentDelta = trends?.present_pct_delta;
-    const starDelta = trends?.star_overall_delta;
-    const infDelta = trends?.infractions_delta;
-    const remDelta = trends?.reminders_delta;
-    const rstDelta = trends?.resets_delta;
-
-    let attendanceSub = '';
-    if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
-        const abs = Math.abs(Number(presentDelta));
-        attendanceSub = abs < 0.05 ? 'No change' : `${formatOverviewSignedInt(presentDelta)}%`;
-    } else {
-        attendanceSub = totalDays > 0 ? '' : '—';
-    }
-
-    let starSub = '';
-    let starSubClass = 'is-muted';
-    if (starDelta != null && !Number.isNaN(Number(starDelta))) {
-        const starDeltaNum = Number(starDelta);
-        if (Math.abs(starDeltaNum) < 0.05) {
-            starSub = 'No change';
-            starSubClass = 'is-muted';
-        } else {
-            starSub = `${formatOverviewSignedInt(starDelta)}%`;
-            starSubClass = starDeltaNum < 0 ? 'is-neg' : 'is-pos';
-        }
-    } else {
-        starSub = 'No change';
-        starSubClass = 'is-muted';
-    }
-
-    const buckets = bucketInfractionsOverview(infractions);
-    const bSocial = buckets.Social;
-    const bTask = buckets.Task;
-    const bAttention = buckets.Attention;
-    const bSafety = buckets.Safety;
-    const bucketTotal = bSocial + bTask + bAttention + bSafety;
-    const pct = v => (bucketTotal <= 0 ? 0 : Math.round((v / bucketTotal) * 100));
-    const donutColors = ['#9333ea', '#2563eb', '#22c55e', '#dc2626'];
-    let donutGradient = '';
-    if (bucketTotal > 0) {
-        let acc = 0;
-        const segs = [
-            { v: bSocial, c: donutColors[0] },
-            { v: bTask, c: donutColors[1] },
-            { v: bAttention, c: donutColors[2] },
-            { v: bSafety, c: donutColors[3] }
-        ];
-        const parts = [];
-        segs.forEach(s => {
-            const p = (s.v / bucketTotal) * 100;
-            if (p <= 0) return;
-            const start = acc;
-            acc += p;
-            parts.push(`${s.c} ${start}% ${acc}%`);
-        });
-        donutGradient = parts.length ? `conic-gradient(${parts.join(', ')})` : '#e5e7eb';
-    } else {
-        donutGradient = '#e5e7eb';
-    }
-
-    const incidentMax = Math.max(1, reminders, resets);
-    const remH = Math.round((reminders / incidentMax) * 100);
-    const rstH = Math.round((resets / incidentMax) * 100);
-
-    let heatRows = '';
-    hm.timeSlots.forEach(tlabel => {
-        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(tlabel)}</div>`;
-        hm.days.forEach(day => {
-            const cell = (byTimeByDay[day] || {})[tlabel];
-            const bg = overviewHeatColor(cell, hm.maxInf);
-            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && (cell?.total_infractions || 0) > 0;
-            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && cell
-                && typeof cell.percentages?.overall === 'number';
-            let cls = 'overview-heatmap-cell';
-            if (isWorst) cls += ' overview-heatmap-cell--worst';
-            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-            const title = cell
-                ? `${Math.round(cell.percentages?.overall || 0)}% • ${cell.total_infractions || 0} infractions`
-                : 'No data';
-            row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
-        });
-        row += '</div>';
-        heatRows += row;
-    });
-
-    if (!heatRows) {
-        heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
-    }
-
-    const overviewDeltaMetrics = [
-        { key: 'present_pct', label: 'Attendance', delta: presentDelta, isPercent: true, lowerIsBetter: false },
-        { key: 'star_overall', label: 'STAR %', delta: starDelta, isPercent: true, lowerIsBetter: false },
-        { key: 'infractions', label: 'Infractions', delta: infDelta, isPercent: false, lowerIsBetter: true },
-        { key: 'reminders', label: 'Reminders', delta: remDelta, isPercent: false, lowerIsBetter: true },
-        { key: 'resets', label: 'Resets', delta: rstDelta, isPercent: false, lowerIsBetter: true }
-    ].filter(m => m.delta != null && !Number.isNaN(Number(m.delta)));
-
-    const scoredOverviewDeltas = overviewDeltaMetrics.map((m) => {
-        const raw = Number(m.delta);
-        return {
-            ...m,
-            delta: raw,
-            goodnessDelta: m.lowerIsBetter ? -raw : raw
-        };
-    });
-
-    const positiveOverviewDeltas = scoredOverviewDeltas
-        .filter(m => m.goodnessDelta > 0)
-        .sort((a, b) => b.goodnessDelta - a.goodnessDelta);
-    const negativeOverviewDeltas = scoredOverviewDeltas
-        .filter(m => m.goodnessDelta < 0)
-        .sort((a, b) => a.goodnessDelta - b.goodnessDelta);
-
-    const topOverviewIncrease = positiveOverviewDeltas.length ? positiveOverviewDeltas[0] : null;
-    const topOverviewDecrease = negativeOverviewDeltas.length ? negativeOverviewDeltas[0] : null;
-
-    const formatOverviewDeltaParts = (metric) => {
-        if (!metric) return { metric: '—', delta: '' };
-        const formatted = formatOverviewSignedInt(metric.delta);
-        return {
-            metric: metric.label,
-            delta: `${formatted}${metric.isPercent ? '%' : ''}`
-        };
-    };
-
-    const positiveParts = formatOverviewDeltaParts(topOverviewIncrease);
-    const negativeParts = formatOverviewDeltaParts(topOverviewDecrease);
-
-    const trendInf = trends && formatOverviewSignedInt(infDelta);
-    const trendRem = trends && formatOverviewSignedInt(remDelta);
-
-    const trendsBlock = `
-        <div class="overview-trends-card" aria-label="Trends vs prior window">
-            <div class="overview-trends-title">Trends</div>
-            <div class="overview-trend-line ${topOverviewIncrease ? 'overview-trend-line-pos' : 'overview-trend-line-neutral'}">
-                <svg class="overview-spark overview-spark--up" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,12 14,8 26,10 40,4"/></svg>
-                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(positiveParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(positiveParts.delta)}</span></span>
-            </div>
-            <div class="overview-trend-line ${topOverviewDecrease ? 'overview-trend-line-neg' : 'overview-trend-line-neutral'}">
-                <svg class="overview-spark overview-spark--down" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,4 12,10 24,6 40,12"/></svg>
-                <span class="overview-trend-text"><span class="overview-trend-metric">${escapeHtml(negativeParts.metric)}</span><span class="overview-trend-delta">${escapeHtml(negativeParts.delta)}</span></span>
-            </div>
-        </div>`;
-
-    const headlineRight = headlineDay
-        ? `${escapeHtml(headlineTime)} on ${escapeHtml(headlineDay)}`
-        : escapeHtml(headlineTime || '—');
-
-    const triggerMetaLines = headlineTime ? `
-            <div class="overview-trigger-meta">
-                <div><span class="overview-trigger-meta-k">Trigger Time</span> ${escapeHtml(headlineTime)}</div>
-                <div><span class="overview-trigger-meta-k">Trigger Day</span> ${escapeHtml(headlineDay || '—')}</div>
-            </div>` : '';
-
-    const dashLen = 100;
-    const attOff = dashLen - Math.min(100, Math.max(0, roundedPresentPct));
-    /** STAR arc only: first p% of semicircle colored (same angle for every ring when p matches). */
-    const starArcDash = pctVal => {
-        const p = Math.min(100, Math.max(0, Number(pctVal) || 0));
-        return `${p} ${100 - p}`;
-    };
-    const starLeftLeg = (x, color, p) =>
-        p > 0
-            ? `<path d="M ${x} 61 L ${x} 46" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" />`
-            : '';
-    /** Hides round linecaps at arc right endpoints (they read as stray dots in the grey half). */
-    const starArcCapMaskId = `star-arc-cap-${Math.random().toString(36).slice(2, 11)}`;
-
-    return `<div class="dashboard-card overview-card overview-card--rich">
-        <div class="overview-rich-header">
-            <h3 class="dashboard-card-title">Overview</h3>
-            ${trendsBlock}
-        </div>
-
-        <div class="overview-rich-row overview-rich-gauges">
-            <div class="overview-beige-panel overview-stat overview-gauge-attendance" data-overview-key="days_present">
-                <div class="overview-panel-kicker">Attendance</div>
-                <div class="overview-gauge-wrap overview-gauge-wrap--attendance-donut">
-                    <svg class="overview-gauge-svg overview-gauge-svg--attendance-donut" viewBox="0 0 100 100" aria-hidden="true">
-                        <circle class="overview-gauge-track overview-gauge-track--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#e3e8ef" stroke-width="10" pathLength="100" />
-                        <circle class="overview-gauge-fill overview-gauge-fill--green overview-gauge-fill--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#16a34a" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${attOff}" />
-                    </svg>
-                    <div class="overview-gauge-center overview-gauge-center--attendance-donut">
-                        <div class="overview-gauge-big">${totalDays > 0 ? `${roundedPresentPct}%` : '—'}</div>
-                        <div class="overview-gauge-small ${presentDelta != null && Number(presentDelta) < 0 ? 'is-neg' : presentDelta != null && Number(presentDelta) > 0 ? 'is-pos' : ''}">${escapeHtml(attendanceSub)}</div>
-                    </div>
-                </div>
-            </div>
-            <div class="overview-beige-panel overview-stat overview-gauge-star" data-overview-key="star_percent">
-                <div class="overview-panel-kicker">Star Percent</div>
-                <div class="overview-gauge-wrap overview-gauge-wrap--multi">
-                    <svg class="overview-gauge-svg overview-gauge-svg--star-rainbow" viewBox="0 0 100 76" preserveAspectRatio="xMidYMin meet" aria-hidden="true">
-                        <defs>
-                            <mask id="${starArcCapMaskId}">
-                                <rect x="0" y="0" width="100" height="76" fill="white" />
-                                <circle cx="89" cy="46" r="4" fill="black" />
-                                <circle cx="85.5" cy="46" r="4" fill="black" />
-                                <circle cx="82" cy="46" r="4" fill="black" />
-                                <circle cx="78.5" cy="46" r="4" fill="black" />
-                            </mask>
-                        </defs>
-                        <!-- Ring radii step 3.5: with 4px strokes this yields ~0.5px overlap. -->
-                        <path d="M 89 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
-                        <path d="M 85.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
-                        <path d="M 82 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
-                        <path d="M 78.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
-                        <path d="M 11 61 L 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 14.5 61 L 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 18 61 L 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 21.5 61 L 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        ${starLeftLeg(11, '#ff3b30', safetyP)}
-                        ${starLeftLeg(14.5, '#007aff', teamworkP)}
-                        ${starLeftLeg(18, '#34c759', accountabilityP)}
-                        ${starLeftLeg(21.5, '#ffcc00', relationshipsP)}
-                        <g mask="url(#${starArcCapMaskId})">
-                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ff3b30" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(safetyP)}" stroke-dashoffset="0" />
-                        <path d="M 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#007aff" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(teamworkP)}" stroke-dashoffset="0" />
-                        <path d="M 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#34c759" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(accountabilityP)}" stroke-dashoffset="0" />
-                        <path d="M 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ffcc00" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(relationshipsP)}" stroke-dashoffset="0" />
-                        </g>
-                    </svg>
-                    <div class="overview-gauge-center overview-gauge-center--attendance-donut overview-gauge-star-values">
-                        <div class="overview-gauge-big">${overallPct}%</div>
-                        <div class="overview-gauge-small ${starSubClass}">${escapeHtml(starSub)}</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
-            <div class="overview-trigger-head">
-                <div class="overview-panel-kicker">Trigger Time</div>
-                ${triggerMetaLines}
-            </div>
-            <div class="overview-trigger-hero">${headlineRight}</div>
-            ${hardestTriggerSubtitle ? `<div class="overview-trigger-sub">${escapeHtml(hardestTriggerSubtitle)}</div>` : ''}
-            <div class="overview-heatmap">
-                <div class="overview-heatmap-cols">
-                    <div></div>
-                    ${hm.days.map(d => `<div class="overview-heatmap-colhead">${overviewDayInitial(d)}</div>`).join('')}
-                </div>
-                ${heatRows}
-                <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
-            </div>
-        </div>
-
-        <div class="overview-rich-row overview-rich-bottom">
-            <div class="overview-beige-panel overview-stat overview-infractions-panel" data-overview-key="infractions">
-                <div class="overview-panel-kicker">Infractions</div>
-                <div class="overview-infractions-body">
-                    <ul class="overview-infractions-legend">
-                        <li><span class="dot" style="background:#9333ea"></span>Social ${pct(bSocial)}%</li>
-                        <li><span class="dot" style="background:#2563eb"></span>Task ${pct(bTask)}%</li>
-                        <li><span class="dot" style="background:#22c55e"></span>Attention ${pct(bAttention)}%</li>
-                        <li><span class="dot" style="background:#dc2626"></span>Safety ${pct(bSafety)}%</li>
-                    </ul>
-                    <div class="overview-donut-wrap">
-                        <div class="overview-donut" style="background:${donutGradient}"></div>
-                        <div class="overview-donut-center">
-                            <div class="overview-donut-total">${totalInfractions}</div>
-                            <div class="overview-donut-delta ${overviewTrendDeltaClass('infractions', infDelta)}">${trendInf ? escapeHtml(trendInf) : ''}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="overview-beige-panel overview-incidents-panel">
-                <div class="overview-panel-kicker">Incidents</div>
-                <div class="overview-incidents-bars">
-                    <div class="overview-stat overview-incident-bar-col" data-overview-key="reminders">
-                        <div class="overview-incident-delta ${overviewTrendDeltaClass('reminders', remDelta)}">${trendRem ? escapeHtml(trendRem) : ''}</div>
-                        <div class="overview-incident-bar-track">
-                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reminder" style="height:${remH}%"></div>
-                        </div>
-                        <div class="overview-incident-label">Reminder</div>
-                    </div>
-                    <div class="overview-stat overview-incident-bar-col" data-overview-key="resets">
-                        <div class="overview-incident-delta ${overviewTrendDeltaClass('resets', rstDelta)}">${trends ? escapeHtml(formatOverviewSignedInt(rstDelta)) : ''}</div>
-                        <div class="overview-incident-bar-track">
-                            <div class="overview-incident-bar-fill overview-incident-bar-fill--reset" style="height:${rstH}%"></div>
-                        </div>
-                        <div class="overview-incident-label">Reset</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>`;
-}
-
-function renderSummarySingle(container, data) {
-    let html = `<div class="dashboard-card-grid">`;
-
-    html += buildBehaviorTrendCardHtml(data);
-    html += buildOverviewDashboardCardHtml(data);
-    html += buildDefaultTriggerTimesCardHtml(data);
-
-    html += `</div>`;
-    container.innerHTML = html;
-    window.currentSummaryTrendRecords = [];
-    wireSummaryBehaviorTrendCard();
-
-    // Attach interactive behavior for Overview card selections
-    try {
-        attachOverviewCardInteractions(container, data);
-    } catch (e) {
-        console.error('Error wiring overview card interactions:', e);
-    }
-
-    // Initial masonry-like layout for the summary dashboard cards
-    const gridEl = container.querySelector('.dashboard-card-grid');
-    if (gridEl) {
-        applySummaryMasonryLayout(gridEl);
-    }
-}
-
-// Masonry-style layout for summary dashboard cards:
-// - Keeps the Overview card fixed in the right column.
-// - Places all other dashboard cards (including extra overview cards)
-//   into equal-width columns, always choosing the column with the
-//   current smallest height so new cards "wrap" directly beneath
-//   the shortest column (typically the Overview card in the first
-//   row). This avoids the large blank gap under the Overview card
-//   without equalizing card heights.
-// - On small screens we skip this and allow the default flex layout.
-function applySummaryMasonryLayout(grid) {
-    if (!grid) return;
-
-    const cards = Array.from(grid.querySelectorAll('.dashboard-card'));
-    if (!cards.length) return;
-
-    // Reset positioning so measurements are correct.
-    // Keep existing grid/container heights during recalculation to avoid
-    // temporary document shrink that can clamp scroll and cause jump-to-top.
-    grid.style.position = '';
-    const summaryContainer = grid.parentElement;
-    cards.forEach(card => {
-        card.style.position = '';
-        card.style.top = '';
-        card.style.left = '';
-        card.style.width = '';
-    });
-
-    // On narrow/medium screens, rely on the normal flex layout so
-    // overview can stack above trend content instead of being clipped.
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
-    if (viewportWidth <= 1200) {
-        grid.style.height = '';
-        if (summaryContainer && summaryContainer.id === 'summary-results') {
-            summaryContainer.style.minHeight = '';
-        }
-        return;
-    }
-
-    const gap = 20; // match CSS .dashboard-card-grid gap
-    const containerWidth = grid.clientWidth || grid.offsetWidth;
-    if (!containerWidth) return;
-
-    // Use up to 3 equal-width columns on desktop
-    const maxColumns = 3;
-    const minCardWidth = 260;
-    const possibleColumns = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)));
-    const columnCount = Math.min(maxColumns, possibleColumns);
-    const totalGapWidth = gap * (columnCount - 1);
-    const columnWidth = (containerWidth - totalGapWidth);
-    const perColWidth = columnWidth / columnCount;
-
-    const trendCard = grid.querySelector('.reports-trend-card');
-    const defaultTriggerCard = grid.querySelector('.summary-default-trigger-card');
-    const overviewCard = grid.querySelector('.overview-card');
-    const useRestoredReportsLayout = trendCard && defaultTriggerCard && overviewCard && columnCount >= 3;
-
-    if (useRestoredReportsLayout) {
-        const leftWidth = (perColWidth * 2) + gap;
-        const rightWidth = perColWidth;
-        const leftCards = [trendCard, defaultTriggerCard].filter(Boolean);
-        const rightLeft = leftWidth + gap;
-
-        grid.style.position = 'relative';
-        trendCard.style.width = leftWidth + 'px';
-        defaultTriggerCard.style.width = leftWidth + 'px';
-        overviewCard.style.width = rightWidth + 'px';
-
-        [...leftCards, overviewCard].forEach(card => {
-            card.style.position = 'static';
-        });
-
-        void grid.offsetHeight;
-
-        let leftTop = 0;
-        leftCards.forEach(card => {
-            card.style.position = 'absolute';
-            card.style.left = '0px';
-            card.style.top = leftTop + 'px';
-            card.style.width = leftWidth + 'px';
-            leftTop += card.offsetHeight + gap;
-        });
-
-        let overviewTopOffset = 0;
-        const formSection = grid.closest('.form-section');
-        const sectionTitle = formSection ? formSection.querySelector('h2') : null;
-        if (sectionTitle) {
-            const gridRect = grid.getBoundingClientRect();
-            const titleRect = sectionTitle.getBoundingClientRect();
-            overviewTopOffset = Math.round(titleRect.top - gridRect.top);
-        }
-
-        overviewCard.style.position = 'absolute';
-        overviewCard.style.left = rightLeft + 'px';
-        overviewCard.style.top = overviewTopOffset + 'px';
-        overviewCard.style.width = rightWidth + 'px';
-
-        let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
-        const handled = new Set([trendCard, defaultTriggerCard, overviewCard]);
-        const extraCards = cards.filter(card => !handled.has(card));
-        extraCards.forEach(card => {
-            card.style.position = 'absolute';
-            card.style.width = perColWidth + 'px';
-            if (rightTop <= leftTop) {
-                card.style.left = rightLeft + 'px';
-                card.style.top = rightTop + 'px';
-                rightTop += card.offsetHeight + gap;
-            } else {
-                card.style.left = '0px';
-                card.style.top = leftTop + 'px';
-                card.style.width = leftWidth + 'px';
-                leftTop += card.offsetHeight + gap;
-            }
-        });
-
-        const maxHeight = Math.max(leftTop, rightTop, overviewCard.offsetHeight + Math.max(0, overviewTopOffset));
-        grid.style.height = maxHeight + 'px';
-        if (summaryContainer && summaryContainer.id === 'summary-results') {
-            summaryContainer.style.minHeight = maxHeight + 'px';
-        }
-        return;
-    }
-
-    // Normalise widths and measure heights with static positioning
-    grid.style.position = 'relative';
-    cards.forEach(card => {
-        card.style.position = 'static';
-        card.style.width = perColWidth + 'px';
-    });
-
-    // Force reflow so expanded content (tabs, drilldowns) is laid out before we measure
-    void grid.offsetHeight;
-    const measuredHeights = new Map();
-    cards.forEach(card => {
-        measuredHeights.set(card, card.offsetHeight);
-    });
-
-    const columnHeights = new Array(columnCount).fill(0);
-
-    // Keep Overview anchored at the far-right desktop column.
-    const overviewColumnIndex = Math.max(0, columnCount - 1);
-    let overviewTopOffset = 0;
-    const formSection = grid.closest('.form-section');
-    const sectionTitle = formSection ? formSection.querySelector('h2') : null;
-    if (sectionTitle) {
-        const gridRect = grid.getBoundingClientRect();
-        const titleRect = sectionTitle.getBoundingClientRect();
-        // Lift Overview so its top aligns with the Summary & Reports title row.
-        overviewTopOffset = Math.round(titleRect.top - gridRect.top);
-    }
-
-    // Layout cards in selection / DOM order into the shortest column,
-    // while pinning the overview card to the rightmost column.
-    cards.forEach(card => {
-        let colIndex;
-        let topOverride = null;
-        if (card.classList.contains('overview-card')) {
-            colIndex = overviewColumnIndex;
-            topOverride = overviewTopOffset;
-        } else {
-            // Keep the first generated overview detail card out of the
-            // overview column so the top row fills left-to-right.
-            if (card.classList.contains('overview-extra-card') && columnCount > 1) {
-                const fallbackCol = overviewColumnIndex === 0 ? 1 : 0;
-                if (columnHeights[fallbackCol] === 0) {
-                    colIndex = fallbackCol;
-                }
-            }
-
-            // If no preferred placement was selected, use shortest column.
-            if (colIndex == null) {
-                let minHeight = columnHeights[0];
-                colIndex = 0;
-                for (let i = 1; i < columnCount; i++) {
-                    if (columnHeights[i] < minHeight) {
-                        minHeight = columnHeights[i];
-                        colIndex = i;
-                    }
-                }
-            }
-        }
-
-        const top = topOverride != null ? topOverride : columnHeights[colIndex];
-        const left = colIndex * (perColWidth + gap);
-        const h = measuredHeights.get(card) || card.offsetHeight;
-
-        card.style.position = 'absolute';
-        card.style.top = top + 'px';
-        card.style.left = left + 'px';
-        card.style.width = perColWidth + 'px';
-
-        columnHeights[colIndex] = top + h + gap;
-    });
-
-    let maxHeight = Math.max.apply(null, columnHeights);
-    grid.style.height = maxHeight + 'px';
-    if (summaryContainer && summaryContainer.id === 'summary-results') {
-        summaryContainer.style.minHeight = maxHeight + 'px';
-    }
-
-    // Ensure grid and container are at least the actual bottom of the lowest card
-    requestAnimationFrame(() => {
-        const gridRect = grid.getBoundingClientRect();
-        let maxBottom = 0;
-        cards.forEach(card => {
-            const rect = card.getBoundingClientRect();
-            const cardBottomRelativeToGrid = rect.bottom - gridRect.top;
-            if (cardBottomRelativeToGrid > maxBottom) maxBottom = cardBottomRelativeToGrid;
-        });
-        const needed = Math.ceil(maxBottom) + gap;
-        if (needed > maxHeight) {
-            maxHeight = needed;
-            grid.style.height = maxHeight + 'px';
-            if (summaryContainer && summaryContainer.id === 'summary-results') {
-                summaryContainer.style.minHeight = maxHeight + 'px';
-            }
-        }
-    });
-}
-
-/**
- * Run masonry layout after card content has grown, so the grid height expands and
- * the page can scroll. Uses two animation frames so the browser has laid out new
- * DOM before we measure, plus several delayed runs to catch late layout (fonts,
- * async content). Call this whenever a card's content is expanded (tabs, drilldowns, etc.).
- */
-function scheduleMasonryLayoutAfterResize(grid) {
-    if (!grid || typeof applySummaryMasonryLayout !== 'function') return;
-    const run = () => {
-        if (grid.isConnected) applySummaryMasonryLayout(grid);
-    };
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            run();
-            setTimeout(run, 100);
-            setTimeout(run, 250);
-            setTimeout(run, 450);
-        });
-    });
-}
-
-function attachOverviewCardInteractions(container, data) {
-    const overviewCard = container.querySelector('.overview-card');
-    if (!overviewCard) return;
-
-    const statBoxes = overviewCard.querySelectorAll('.overview-stat');
-    if (!statBoxes.length) return;
-
-    const grid = overviewCard.closest('.dashboard-card-grid') || container;
-
-    // Map overview stat keys to the data-overview-card keys used on the
-    // corresponding detail cards. Only stats in this map create cards.
-    const STAT_KEY_TO_CARD_KEY = {
-        days_present: 'days_present',
-        star_percent: 'star_performance',
-        infractions: 'infractions_card',
-        reminders: 'reminders',
-        resets: 'resets',
-        trigger_times: 'trigger_times'
-    };
-
-    const STORAGE_KEY = 'summary_overview_selected_stats_v1';
-
-    let selectionOrder = [];
-
-    const persistSelectionOrder = () => {
-        try {
-            const toStore = selectionOrder.slice();
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
-        } catch (e) {
-            console.warn('Unable to persist overview selection order:', e);
-        }
-    };
-
-    const loadSelectionOrder = () => {
-        try {
-            const raw = window.localStorage.getItem(STORAGE_KEY);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            if (!Array.isArray(parsed)) return [];
-            // Only keep known stat keys that actually create cards
-            return parsed.filter(k => Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, k));
-        } catch {
-            return [];
-        }
-    };
-
-    const getExtraCard = (cardKey) =>
-        grid.querySelector(`.overview-extra-card[data-overview-card="${cardKey}"]`);
-
-    const removeExtraCard = (cardKey) => {
-        const existing = getExtraCard(cardKey);
-        if (existing && existing.parentNode) {
-            existing.parentNode.removeChild(existing);
-        }
-    };
-
-    // After selection changes, move existing extra cards so their DOM order
-    // matches the selection order. This makes cards appear left-to-right,
-    // top-to-bottom in the order they were selected, with wrapping handled
-    // purely by CSS flexbox.
-    const reorderExtraCards = () => {
-        const fragment = document.createDocumentFragment();
-        selectionOrder.forEach(statKey => {
-            const cardKey = STAT_KEY_TO_CARD_KEY[statKey];
-            if (!cardKey) return;
-            const card = getExtraCard(cardKey);
-            if (card) {
-                fragment.appendChild(card);
-            }
-        });
-        // Remove any extra cards that no longer have a corresponding stat key
-        const existingCards = Array.from(grid.querySelectorAll('.overview-extra-card'));
-        existingCards.forEach(card => {
-            const cardKey = card.dataset.overviewCard;
-            const statKey = Object.keys(STAT_KEY_TO_CARD_KEY).find(
-                sk => STAT_KEY_TO_CARD_KEY[sk] === cardKey
-            );
-            if (!statKey || !selectionOrder.includes(statKey)) {
-                card.parentNode && card.parentNode.removeChild(card);
-            }
-        });
-        grid.appendChild(fragment);
-    };
-
-    const toggleExtraCard = (cardKey, buildFn) => {
-        const existing = getExtraCard(cardKey);
-        if (existing) {
-            removeExtraCard(cardKey);
-            return false;
-        }
-        buildFn();
-        return true;
-    };
-
-    const buildDaysPresentCard = () => {
-        // Recompute attendance summary here so this helper does not rely on
-        // locals from renderSummarySingle's scope (which are not visible in
-        // this function's lexical scope).
-        const attendance = data.attendance_summary || {};
-        const presentPct = typeof attendance.present_pct === 'number'
-            ? attendance.present_pct
-            : 0;
-        const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
-        const totalDays = data.total_days || 0;
-
-        const byDay = data.attendance_by_day_of_week || {};
-        const dayEntries = Object.entries(byDay);
-        if (!dayEntries.length) {
-            const card = document.createElement('div');
-            card.className = 'dashboard-card full-width overview-extra-card';
-            card.dataset.overviewCard = 'days_present';
-            card.innerHTML = `
-                <div class="dashboard-card-header">
-                    <h3 class="dashboard-card-title">Attendance</h3>
-                </div>
-                <div class="dashboard-card-body">
-                    <p style="color:var(--text-secondary);font-size:0.85rem;">
-                        Attendance by day of week is not available for this timeframe.
-                    </p>
-                </div>
-            `;
-            grid.appendChild(card);
-            return;
-        }
-        let maxAbsent = -1;
-        let maxAbsentDays = [];
-        let totalAbsences = 0;
-        let totalUnexcusedAbsences = 0;
-        dayEntries.forEach(([day, counts]) => {
-            const absent = (counts.excused || 0) + (counts.unexcused || 0);
-            totalAbsences += absent;
-            totalUnexcusedAbsences += (counts.unexcused || 0);
-            if (absent > maxAbsent) {
-                maxAbsent = absent;
-                maxAbsentDays = [day];
-            } else if (absent === maxAbsent && absent > 0) {
-                maxAbsentDays.push(day);
-            }
-        });
-        const formatDays = (days) => days.join(', ');
-        const mostAbsentText = maxAbsent > 0
-            ? `${formatDays(maxAbsentDays)} (${maxAbsent} absence${maxAbsent !== 1 ? 's' : ''})`
-            : 'No absences recorded';
-
-        let rows = '';
-        const sortedDayEntries = dayEntries.slice().sort(([, aCounts], [, bCounts]) => {
-            const aTotalAbsent = (aCounts.excused || 0) + (aCounts.unexcused || 0);
-            const bTotalAbsent = (bCounts.excused || 0) + (bCounts.unexcused || 0);
-            return bTotalAbsent - aTotalAbsent;
-        });
-        sortedDayEntries.forEach(([day, counts]) => {
-            const absentExcused = counts.excused || 0;
-            const absentUnexcused = counts.unexcused || 0;
-            const totalForDay = absentExcused + absentUnexcused;
-            rows += `<tr>
-                <td>${day}</td>
-                <td>${absentUnexcused}</td>
-                <td>${absentExcused}</td>
-                <td>${totalForDay}</td>
-            </tr>`;
-        });
-
-        const chartCanvasId = `days-present-donut-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        const drilldownCanvasId = `days-present-drilldown-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        const attendancePresent = Number(attendance.present || 0);
-        const attendanceExcused = Number(attendance.excused || 0);
-        const attendanceUnexcused = Number(attendance.unexcused || 0);
-        const topAbsenceDay = maxAbsent > 0 && maxAbsentDays.length
-            ? maxAbsentDays[0]
-            : 'No absences';
-        const presentDelta = data.overview_trends?.present_pct_delta;
-        const presentCountDelta = data.overview_trends?.present_count_delta;
-        const excusedDelta = data.overview_trends?.excused_delta;
-        const unexcusedDelta = data.overview_trends?.unexcused_delta;
-        let deltaText = '—';
-        let deltaClass = 'delta-neutral';
-        if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
-            const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
-            if (roundedTenths === 0) {
-                deltaText = '—';
-            } else {
-                const sign = roundedTenths > 0 ? '+' : '';
-                deltaText = `${sign}${roundedTenths.toFixed(1)}%`;
-                deltaClass = roundedTenths > 0 ? 'delta-positive' : 'delta-negative';
-            }
-        }
-        const card = document.createElement('div');
-        card.className = 'dashboard-card overview-extra-card days-present-card';
-        card.dataset.overviewCard = 'days_present';
-        card.innerHTML = `
-            <div class="dashboard-card-header">
-                <h3 class="dashboard-card-title">Attendance</h3>
-                <div class="view-mode-toggle" role="tablist" aria-label="Days Present view mode">
-                    <button type="button" class="view-mode-toggle-btn active" data-days-present-view="graph" role="tab" aria-selected="true">Graph</button>
-                    <button type="button" class="view-mode-toggle-btn" data-days-present-view="table" role="tab" aria-selected="false">Table</button>
-                </div>
-            </div>
-            <div class="dashboard-card-body overview-detail-container">
-                <div class="overview-metrics">
-                    <div class="overview-metrics-row">
-                        <span class="overview-metrics-label"><strong>% of days present:</strong></span>
-                        <span class="overview-metrics-value">${roundedPresentPct}%</span>
-                    </div>
-                    <div class="overview-metrics-row">
-                        <span class="overview-metrics-label"><strong>Total absences:</strong></span>
-                        <span class="overview-metrics-value">${totalAbsences}</span>
-                    </div>
-                    <div class="overview-metrics-row">
-                        <span class="overview-metrics-label"><strong>Total unexcused absences:</strong></span>
-                        <span class="overview-metrics-value">${totalUnexcusedAbsences}</span>
-                    </div>
-                    <div class="overview-metrics-row">
-                        <span class="overview-metrics-label"><strong>Total expected days:</strong></span>
-                        <span class="overview-metrics-value">${totalDays}</span>
-                    </div>
-                    <div class="overview-metrics-row">
-                        <span class="overview-metrics-label"><strong>Most absences:</strong></span>
-                        <span class="overview-metrics-value">${mostAbsentText}</span>
-                    </div>
-                </div>
-                <div class="view-mode-chart-wrap days-present-chart-wrap" data-days-present-panel="graph">
-                    <div class="days-present-tabs" role="tablist">
-                        <button class="days-present-tab active" data-days-present-tab="overview" role="tab" aria-selected="true">
-                            <span class="days-present-tab-label">Overview</span>
-                        </button>
-                    </div>
-                    <div class="days-present-tab-panels">
-                        <div class="days-present-tab-panel is-active" data-days-present-tab-panel="overview">
-                            <div class="days-present-donut-main">
-                                <div class="days-present-donut-shell">
-                                    <canvas id="${chartCanvasId}" aria-label="Attendance breakdown by status" role="img"></canvas>
-                                    <div class="days-present-donut-center">
-                                        <div class="days-present-donut-center-pct">${roundedPresentPct}%</div>
-                                        <div class="days-present-donut-center-delta ${deltaClass}">${deltaText}</div>
-                                        <div class="days-present-donut-center-day">${escapeHtml(topAbsenceDay)}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div data-days-present-panel="table" hidden>
-                    <table class="days-present-table">
-                        <thead>
-                            <tr>
-                                <th>Day</th>
-                                <th>Unexcused</th>
-                                <th>Excused</th>
-                                <th>Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-        grid.appendChild(card);
-
-        const graphPanel = card.querySelector('[data-days-present-panel="graph"]');
-        const tablePanel = card.querySelector('[data-days-present-panel="table"]');
-        const metricsPanel = card.querySelector('.overview-metrics');
-        const modeButtons = card.querySelectorAll('[data-days-present-view]');
-        const daysTabsContainer = card.querySelector('.days-present-tabs');
-        const daysPanelsContainer = card.querySelector('.days-present-tab-panels');
-        const setActiveDaysTab = (tabName) => {
-            const allTabs = card.querySelectorAll('.days-present-tab');
-            const allPanels = card.querySelectorAll('.days-present-tab-panel');
-            allTabs.forEach((tab) => {
-                const isActive = tab.dataset.daysPresentTab === tabName;
-                tab.classList.toggle('active', isActive);
-                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            });
-            allPanels.forEach((panel) => {
-                panel.classList.toggle('is-active', panel.dataset.daysPresentTabPanel === tabName);
-            });
-        };
-        const wireDaysTabClicks = () => {
-            const allTabs = card.querySelectorAll('.days-present-tab');
-            allTabs.forEach((tab) => {
-                if (tab._daysPresentWired) return;
-                tab._daysPresentWired = true;
-                tab.addEventListener('click', (evt) => {
-                    const closeBtn = evt.target.closest('.days-present-tab-close');
-                    if (closeBtn) {
-                        evt.stopPropagation();
-                        const tabName = tab.dataset.daysPresentTab;
-                        if (tabName === 'overview') return;
-                        const panel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
-                        if (panel) panel.remove();
-                        tab.remove();
-                        setActiveDaysTab('overview');
-                        relayoutDaysPresent();
-                        return;
-                    }
-                    const tabName = tab.dataset.daysPresentTab;
-                    if (!tabName || tab.disabled) return;
-                    setActiveDaysTab(tabName);
-                });
-            });
-        };
-        const relayoutDaysPresent = () => {
-            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
-                scheduleMasonryLayoutAfterResize(grid);
-            }
-        };
-        const setDaysPresentView = (mode) => {
-            const isGraph = mode === 'graph';
-            if (graphPanel) graphPanel.hidden = !isGraph;
-            if (tablePanel) tablePanel.hidden = isGraph;
-            if (metricsPanel) metricsPanel.hidden = isGraph;
-            if (isGraph) setActiveDaysTab('overview');
-            modeButtons.forEach((btn) => {
-                const active = btn.dataset.daysPresentView === mode;
-                btn.classList.toggle('active', active);
-                btn.setAttribute('aria-selected', active ? 'true' : 'false');
-            });
-        };
-        modeButtons.forEach((btn) => {
-            btn.addEventListener('click', () => {
-                setDaysPresentView(btn.dataset.daysPresentView || 'graph');
-                relayoutDaysPresent();
-            });
-        });
-        wireDaysTabClicks();
-        setDaysPresentView('graph');
-
-        const donutCanvas = card.querySelector(`#${chartCanvasId}`);
-        const donutLabels = ['Present', 'Excused', 'Unexcused'];
-        const donutValues = [attendancePresent, attendanceExcused, attendanceUnexcused];
-        const donutColors = ['#16A34A', '#F59E0B', '#FB6F5A'];
-        const hasDonutData = donutValues.some((value) => value > 0);
-        const dayOfWeekDeltas = data.overview_trends?.day_of_week_absence_deltas || {};
-        const normalizedDayOfWeekDeltas = Object.entries(dayOfWeekDeltas).reduce((acc, [label, value]) => {
-            acc[String(label || '').toLowerCase()] = Number(value);
-            return acc;
-        }, {});
-        const drilldownLabels = sortedDayEntries.map(([day]) => day);
-        const drilldownValues = sortedDayEntries.map(([, counts]) => (counts.excused || 0) + (counts.unexcused || 0));
-        const hasDrilldownData = drilldownValues.some((value) => value > 0);
-        if (donutCanvas && hasDonutData && typeof Chart !== 'undefined') {
-            const legendDeltaForLabel = (label) => {
-                if (label === 'Present') {
-                    if (presentCountDelta == null || Number.isNaN(Number(presentCountDelta))) {
-                        return { text: '—', cls: 'delta-neutral' };
-                    }
-                    const n = Math.round(Number(presentCountDelta));
-                    if (n === 0) return { text: '0', cls: 'delta-neutral' };
-                    const sign = n > 0 ? '+' : '';
-                    return {
-                        text: `${sign}${n}`,
-                        cls: n > 0 ? 'delta-positive' : 'delta-negative'
-                    };
-                }
-                const raw = label === 'Excused' ? excusedDelta : unexcusedDelta;
-                if (raw == null || Number.isNaN(Number(raw))) {
-                    return { text: '—', cls: 'delta-neutral' };
-                }
-                const n = Math.round(Number(raw));
-                if (n === 0) return { text: '0', cls: 'delta-neutral' };
-                const sign = n > 0 ? '+' : '';
-                return {
-                    text: `${sign}${n}`,
-                    cls: n > 0 ? 'delta-negative' : 'delta-positive'
-                };
-            };
-            const legendRows = donutLabels.map((label, idx) => {
-                const value = Number(donutValues[idx] || 0);
-                const delta = legendDeltaForLabel(label);
-                return `
-                    <div class="days-present-legend-item">
-                        <div class="days-present-legend-label">
-                            <span class="days-present-legend-dot" style="background:${donutColors[idx]};"></span>
-                            <span>${escapeHtml(label)}</span>
-                        </div>
-                        <div class="days-present-legend-value">
-                            ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-            const overviewPanel = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-main');
-            if (overviewPanel) {
-                overviewPanel.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${legendRows}</div>`);
-            }
-            new Chart(donutCanvas.getContext('2d'), {
-                type: 'doughnut',
-                data: {
-                    labels: donutLabels,
-                    datasets: [{
-                        data: donutValues,
-                        backgroundColor: donutLabels.map((_, idx) => donutColors[idx % donutColors.length]),
-                        borderColor: '#ffffff',
-                        borderWidth: 2,
-                        hoverOffset: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    rotation: 180,
-                    cutout: '62%',
-                    layout: {
-                        padding: { top: 22, right: 28, bottom: 34, left: 28 }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        datalabels: {
-                            color: '#ffffff',
-                            font: { size: 12, weight: '700' },
-                            anchor: 'end',
-                            align: 'end',
-                            offset: 6,
-                            clamp: true,
-                            clip: false,
-                            backgroundColor: (context) => {
-                                const idx = context.dataIndex || 0;
-                                return donutColors[idx % donutColors.length];
-                            },
-                            borderRadius: 8,
-                            padding: { top: 6, right: 10, bottom: 6, left: 10 },
-                            formatter: (value, context) => {
-                                const values = context.chart.data.datasets[0].data || [];
-                                const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
-                                if (!total || !value) return '';
-                                const pct = Math.round((Number(value) / total) * 100);
-                                return pct > 0 ? `${pct}%` : '';
-                            }
-                        }
-                    }
-                }
-            });
-            const openDrilldownFromDonut = () => {
-                const tabName = 'day-of-week';
-                let dayTab = card.querySelector(`.days-present-tab[data-days-present-tab="${tabName}"]`);
-                let dayPanel = card.querySelector(`.days-present-tab-panel[data-days-present-tab-panel="${tabName}"]`);
-                if (!dayTab && daysTabsContainer && daysPanelsContainer) {
-                    dayTab = document.createElement('button');
-                    dayTab.className = 'days-present-tab';
-                    dayTab.dataset.daysPresentTab = tabName;
-                    dayTab.setAttribute('role', 'tab');
-                    dayTab.setAttribute('aria-selected', 'false');
-                    dayTab.innerHTML = `
-                        <span class="days-present-tab-label">Day of Week</span>
-                        <span class="days-present-tab-close" aria-label="Close" role="button">&times;</span>
-                    `;
-                    daysTabsContainer.appendChild(dayTab);
-                    dayPanel = document.createElement('div');
-                    dayPanel.className = 'days-present-tab-panel';
-                    dayPanel.dataset.daysPresentTabPanel = tabName;
-                    dayPanel.innerHTML = `
-                        <div class="days-present-pie-heading">Absences by Day of Week</div>
-                        <div class="days-present-donut-main">
-                            <div class="days-present-donut-shell days-present-donut-shell--day-of-week">
-                                <canvas id="${drilldownCanvasId}" aria-label="Absence totals by day of week" role="img"></canvas>
-                            </div>
-                        </div>
-                    `;
-                    daysPanelsContainer.appendChild(dayPanel);
-                    wireDaysTabClicks();
-                }
-                const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
-                if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
-                    const drillPalette = ['#2563EB', '#7C3AED', '#0D9488', '#059669', '#EA580C', '#DC2626', '#475569'];
-                    const dayLegendRows = drilldownLabels.map((label, idx) => {
-                        const value = Number(drilldownValues[idx] || 0);
-                        const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
-                        const hasDelta = Number.isFinite(rawDelta);
-                        let delta = { text: '—', cls: 'delta-neutral' };
-                        if (hasDelta) {
-                            if (rawDelta === 0) {
-                                delta = { text: '0', cls: 'delta-neutral' };
-                            } else {
-                                delta = {
-                                    text: `${rawDelta > 0 ? '+' : ''}${rawDelta}`,
-                                    cls: rawDelta > 0 ? 'delta-positive' : 'delta-negative'
-                                };
-                            }
-                        }
-                        return `
-                            <div class="days-present-legend-item">
-                                <div class="days-present-legend-label">
-                                    <span class="days-present-legend-dot" style="background:${drillPalette[idx % drillPalette.length]};"></span>
-                                    <span>${escapeHtml(label)}</span>
-                                </div>
-                                <div class="days-present-legend-value">
-                                    ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                    const dayPanelMain = dayPanel.querySelector('.days-present-donut-main');
-                    if (dayPanelMain) {
-                        dayPanelMain.insertAdjacentHTML('beforeend', `<div class="days-present-legend">${dayLegendRows}</div>`);
-                    }
-                    new Chart(drilldownCanvas.getContext('2d'), {
-                        type: 'doughnut',
-                        data: {
-                            labels: drilldownLabels,
-                            datasets: [{
-                                data: drilldownValues,
-                                backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
-                                radius: '90%',
-                                borderColor: '#ffffff',
-                                borderWidth: 2,
-                                hoverOffset: 4
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            rotation: 180,
-                            cutout: '62%',
-                            layout: {
-                                padding: { top: 26, right: 36, bottom: 38, left: 36 }
-                            },
-                            plugins: {
-                                legend: {
-                                    display: false
-                                },
-                                datalabels: {
-                                    color: '#ffffff',
-                                    font: { size: 12, weight: '700' },
-                                    anchor: 'end',
-                                    align: 'end',
-                                    offset: 8,
-                                    clamp: true,
-                                    clip: false,
-                                    backgroundColor: (context) => {
-                                        const idx = context.dataIndex || 0;
-                                        return drillPalette[idx % drillPalette.length];
-                                    },
-                                    borderRadius: 8,
-                                    padding: { top: 6, right: 10, bottom: 6, left: 10 },
-                                    formatter: (value, context) => {
-                                        const values = context.chart.data.datasets[0].data || [];
-                                        const total = values.reduce((sum, n) => sum + (Number(n) || 0), 0);
-                                        if (!total || !value) return '';
-                                        const pct = Math.round((Number(value) / total) * 100);
-                                        return pct > 0 ? `${pct}%` : '';
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    drilldownCanvas.dataset.chartBuilt = '1';
-                } else if (dayPanel && !hasDrilldownData) {
-                    dayPanel.innerHTML = `
-                        <p style="color:var(--text-secondary);font-size:0.85rem;">
-                            No day-of-week absence totals are available for this timeframe.
-                        </p>
-                    `;
-                }
-                setActiveDaysTab(tabName);
-                relayoutDaysPresent();
-            };
-            donutCanvas.style.cursor = 'pointer';
-            donutCanvas.addEventListener('click', openDrilldownFromDonut);
-            const donutShell = card.querySelector('.days-present-tab-panel[data-days-present-tab-panel="overview"] .days-present-donut-shell');
-            if (donutShell) {
-                donutShell.style.cursor = 'pointer';
-                donutShell.addEventListener('click', (evt) => {
-                    if (evt.target === donutCanvas) return;
-                    openDrilldownFromDonut();
-                });
-            }
-        } else if (graphPanel) {
-            graphPanel.innerHTML = `
-                <p style="color:var(--text-secondary);font-size:0.85rem;">
-                    No attendance totals are available to graph for this timeframe.
-                </p>
-            `;
-        }
-    };
-
-    const renderInfractionTypeBreakdown = (type, targetOverride) => {
-        const infractionsByType = data.infractions_by_type || {};
-        const entry = infractionsByType[type];
-        const target = targetOverride;
-        if (!target) return;
-
-        if (!entry) {
-            target.innerHTML = `<p style="color:var(--text-secondary);font-size:0.85rem;">No detailed data for ${escapeHtml(type)}.</p>`;
-            return;
-        }
-
-        const byTime = entry.by_time || {};
-        const byDay = entry.by_day_of_week || {};
-
-        // Build the inner "subtabs" for this infraction's details. The default
-        // subtab is an Overview that shows the by-time/by-day tables. Additional
-        // subtabs contain separate cards focused on a selected time or day.
-        let timeRows = '';
-        Object.entries(byTime)
-            .sort(([, a], [, b]) => (b || 0) - (a || 0))
-            .forEach(([label, count]) => {
-                const overallByTime = (data.by_time || {})[label] || {};
-                const topClass =
-                    overallByTime.top_class ||
-                    overallByTime.topClass ||
-                    overallByTime.primary_class ||
-                    '';
-                const classSubheader = topClass
-                    ? `<div style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(topClass)}</div>`
-                    : '';
-                timeRows += `
-                    <tr data-time-label="${label}">
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
-                            ${escapeHtml(label)}${classSubheader}
-                        </td>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
-                            ${count}
-                        </td>
-                    </tr>
-                `;
-            });
-
-        let dayRows = '';
-        Object.entries(byDay)
-            .sort(([, a], [, b]) => (b || 0) - (a || 0))
-            .forEach(([label, count]) => {
-                dayRows += `
-                    <tr data-day-label="${label}">
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
-                            ${escapeHtml(label)}
-                        </td>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
-                            ${count}
-                        </td>
-                    </tr>
-                `;
-            });
-
-        const DETAILS_HINT_KEY = 'infractions_details_click_hint_seen';
-        const detailsHintSeen = localStorage.getItem(DETAILS_HINT_KEY);
-        const detailsHintMsg = 'Click a time row to see STAR metrics and infractions for that time; click a day row to see the time breakdown for that day.';
-        const detailsHintMsgAttr = detailsHintMsg.replace(/"/g, '&quot;');
-        const detailsTitleHintBlock = `
-            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${DETAILS_HINT_KEY}" data-hint-message="${detailsHintMsgAttr}">
-                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
-                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
-            </div>`;
-        const detailsFirstTimeText = detailsHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${DETAILS_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(detailsHintMsg)}</p>`;
-
-        target.innerHTML = `
-            <div class="infractions-drilldown-tabs" role="tablist">
-                <button class="infractions-drill-tab active" data-drill-tab="overview" role="tab" aria-selected="true">
-                    <span class="infractions-drill-tab-label">Overview</span>
-                </button>
-            </div>
-            <div class="infractions-drilldown-panels">
-                <div class="infractions-drill-tab-panel is-active" data-drill-tab-panel="overview">
-                    <div class="infractions-details-section-header">
-                        <h4 style="margin:0;">${escapeHtml(type)} — When It Occurs</h4>
-                        ${detailsTitleHintBlock}
-                    </div>
-                    ${detailsFirstTimeText}
-                    <div class="overview-two-col">
-                        <div>
-                            <h4>By Time of Day</h4>
-                            ${timeRows ? `
-                                <table class="infractions-time-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-                                    <thead>
-                                        <tr>
-                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Time</th>
-                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${timeRows}
-                                    </tbody>
-                                </table>` :
-                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No time-of-day data.</p>`}
-                        </div>
-                        <div>
-                            <h4>By Day of Week</h4>
-                            ${dayRows ? `
-                                <table class="infractions-day-table" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-                                    <thead>
-                                        <tr>
-                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Day</th>
-                                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Count</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${dayRows}
-                                    </tbody>
-                                </table>` :
-                                `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data.</p>`}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Wire subtab interactions scoped to this details panel
-        const detailsPanel = target.closest('.infractions-tab-panel');
-        if (!detailsPanel) return;
-        const drillTabsContainer = target.querySelector('.infractions-drilldown-tabs');
-        const drillPanelsContainer = target.querySelector('.infractions-drilldown-panels');
-        if (!drillTabsContainer || !drillPanelsContainer) return;
-
-        const setActiveDrillTab = (tabName) => {
-            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
-            const allPanels = drillPanelsContainer.querySelectorAll('.infractions-drill-tab-panel');
-            allTabs.forEach(tab => {
-                const isActive = tab.dataset.drillTab === tabName;
-                tab.classList.toggle('active', isActive);
-                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            });
-            allPanels.forEach(panel => {
-                panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
-            });
-        };
-
-        const wireDrillTabClicks = () => {
-            const allTabs = drillTabsContainer.querySelectorAll('.infractions-drill-tab');
-            allTabs.forEach(tab => {
-                if (tab._infractionsDrillWired) return;
-                tab._infractionsDrillWired = true;
-                tab.addEventListener('click', (e) => {
-                    const closeBtn = e.target.closest('.infractions-drill-tab-close');
-                    if (closeBtn) {
-                        e.stopPropagation();
-                        const name = tab.dataset.drillTab;
-                        // Prevent closing the Overview subtab
-                        if (name === 'overview') return;
-                        const panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${name}"]`);
-                        if (panel) {
-                            panel.remove();
-                        }
-                        tab.remove();
-                        if (!drillTabsContainer.querySelector('.infractions-drill-tab.active')) {
-                            setActiveDrillTab('overview');
-                        }
-                        return;
-                    }
-                    const tabName = tab.dataset.drillTab;
-                    if (!tabName) return;
-                    setActiveDrillTab(tabName);
-                });
-            });
-        };
-
-        wireDrillTabClicks();
-
-        const createOrUpdateDrillSubtab = (tabName, label, innerCardHtml) => {
-            let tab = drillTabsContainer.querySelector(`.infractions-drill-tab[data-drill-tab="${tabName}"]`);
-            let panel = drillPanelsContainer.querySelector(`.infractions-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
-
-            if (!tab) {
-                tab = document.createElement('button');
-                tab.className = 'infractions-drill-tab';
-                tab.dataset.drillTab = tabName;
-                tab.setAttribute('role', 'tab');
-                tab.setAttribute('aria-selected', 'false');
-                const safeLabel = label || tabName;
-                tab.innerHTML = `
-                    <span class="infractions-drill-tab-label">${escapeHtml(safeLabel)}</span>
-                    <span class="infractions-drill-tab-close" aria-label="Close" role="button">&times;</span>
-                `;
-                drillTabsContainer.appendChild(tab);
-            }
-
-            if (!panel) {
-                panel = document.createElement('div');
-                panel.className = 'infractions-drill-tab-panel';
-                panel.dataset.drillTabPanel = tabName;
-                drillPanelsContainer.appendChild(panel);
-            }
-
-            panel.innerHTML = `
-                <div class="dashboard-card" style="margin-top:8px;">
-                    ${innerCardHtml}
-                </div>
-            `;
-
-            wireDrillTabClicks();
-            setActiveDrillTab(tabName);
-        };
-
-        // Time-of-day row clicks: show average percent and lowest STAR category for that time bucket
-        const timeRowsEls = target.querySelectorAll('.infractions-time-table tbody tr[data-time-label]');
-        timeRowsEls.forEach(row => {
-            if (row._infractionsTimeWired) return;
-            row._infractionsTimeWired = true;
-            row.style.cursor = 'pointer';
-            row.addEventListener('click', () => {
-                const timeLabel = row.dataset.timeLabel;
-                if (!timeLabel) return;
-                localStorage.setItem(DETAILS_HINT_KEY, '1');
-                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
-                if (detailsTextEl) detailsTextEl.remove();
-                const bucket = (data.by_time || {})[timeLabel] || {};
-                const pct = bucket.percentages || {};
-                const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
-
-                const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
-                let lowestKey = null;
-                let lowestVal = null;
-                categories.forEach(k => {
-                    const v = typeof pct[k] === 'number' ? pct[k] : null;
-                    if (v == null) return;
-                    if (lowestVal == null || v < lowestVal) {
-                        lowestVal = v;
-                        lowestKey = k;
-                    }
-                });
-
-                // Build infractions table for this time bucket
-                const infractionsMap = bucket.infractions || {};
-                let infraRows = '';
-                const infraEntries = Object.entries(infractionsMap);
-                if (infraEntries.length) {
-                    infraEntries
-                        .sort(([, a], [, b]) => (Number(b) || 0) - (Number(a) || 0))
-                        .forEach(([infType, count]) => {
-                            infraRows += `
-                                <tr>
-                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);">
-                                        ${escapeHtml(infType)}
-                                    </td>
-                                    <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
-                                        ${count}
-                                    </td>
-                                </tr>
-                            `;
-                        });
-                }
-
-                const lowestLabel = lowestKey
-                    ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
-                    : 'N/A';
-
-                const contentHtml = `
-                    <h4 style="margin:8px 0;">${escapeHtml(type)} — ${escapeHtml(timeLabel)} Focus</h4>
-                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
-                        Based on all data for this time period in the selected summary range.
-                    </p>
-                    <table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-                        <thead>
-                            <tr>
-                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Metric</th>
-                                <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Value</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Average STAR %</td>
-                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
-                                    ${overallPct != null ? `${overallPct}%` : 'Not available'}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);">Lowest STAR Category</td>
-                                <td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">
-                                    ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <h5 style="margin:12px 0 6px 0;font-size:0.9rem;">Infractions during this time</h5>
-                    ${
-                        infraRows
-                            ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:2px;">
-                                   <thead>
-                                       <tr>
-                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:left;">Infractions</th>
-                                           <th style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;">Count</th>
-                                       </tr>
-                                   </thead>
-                                   <tbody>
-                                       ${infraRows}
-                                   </tbody>
-                               </table>`
-                            : `<p style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">
-                                   No infractions recorded for this time period.
-                               </p>`
-                    }
-                `;
-
-                const tabName = `time-${timeLabel}`;
-                createOrUpdateDrillSubtab(tabName, timeLabel, contentHtml);
-                scheduleMasonryLayoutAfterResize(grid);
-            });
-        });
-
-        // Day-of-week row clicks: show a Time-of-day breakdown for that day
-        const dayRowsEls = target.querySelectorAll('.infractions-day-table tbody tr[data-day-label]');
-        dayRowsEls.forEach(row => {
-            if (row._infractionsDayWired) return;
-            row._infractionsDayWired = true;
-            row.style.cursor = 'pointer';
-            row.addEventListener('click', () => {
-                const dayLabel = row.dataset.dayLabel;
-                if (!dayLabel) return;
-                localStorage.setItem(DETAILS_HINT_KEY, '1');
-                const detailsTextEl = target.querySelector('.infractions-click-hint-text[data-hint-key="' + DETAILS_HINT_KEY + '"]');
-                if (detailsTextEl) detailsTextEl.remove();
-
-                const byTimeByDay = data.by_time_by_day || {};
-                const timesForDay = byTimeByDay[dayLabel] || {};
-
-                let rowsHtml = '';
-                const entries = Object.entries(timesForDay)
-                    .map(([timeLabel, bucket]) => {
-                        const infra = bucket.infractions || {};
-                        const count = typeof infra[type] === 'number' ? infra[type] : 0;
-                        return { timeLabel, bucket, count };
-                    })
-                    .filter(e => e.count > 0);
-
-                if (entries.length) {
-                    entries
-                        .sort((a, b) => b.count - a.count)
-                        .forEach(({ timeLabel, bucket, count }) => {
-                            const pct = bucket.percentages || {};
-                            const overallPct = typeof pct.overall === 'number' ? pct.overall : null;
-                            const categories = ['safety', 'teamwork', 'accountability', 'relationships'];
-                            let lowestKey = null;
-                            let lowestVal = null;
-                            categories.forEach(k => {
-                                const v = typeof pct[k] === 'number' ? pct[k] : null;
-                                if (v == null) return;
-                                if (lowestVal == null || v < lowestVal) {
-                                    lowestVal = v;
-                                    lowestKey = k;
-                                }
-                            });
-                            const lowestLabel = lowestKey
-                                ? lowestKey.charAt(0).toUpperCase() + lowestKey.slice(1)
-                                : 'N/A';
-                            rowsHtml += `
-                                <tr>
-                                    <td style="padding:4px 8px;border:1px solid var(--border);">${escapeHtml(timeLabel)}</td>
-                                    <td style="padding:4px 8px;border:1px solid var(--border);">
-                                        ${overallPct != null ? `${overallPct}%` : 'Not available'}
-                                    </td>
-                                    <td style="padding:4px 8px;border:1px solid var(--border);">
-                                        ${lowestKey ? `${lowestLabel} (${lowestVal}%)` : 'Not available'}
-                                    </td>
-                                    <td style="padding:4px 8px;border:1px solid var(--border);">
-                                        ${count}
-                                    </td>
-                                </tr>
-                            `;
-                        });
-                }
-
-                const contentHtml = `
-                    <h4 style="margin:8px 0;">${escapeHtml(type)} — Time of Day on ${escapeHtml(dayLabel)}</h4>
-                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
-                        Time-of-day STAR performance for ${escapeHtml(dayLabel)} in this summary range.
-                    </p>
-                    ${rowsHtml
-                        ? `<table style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-                                <thead>
-                                    <tr>
-                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Time</th>
-                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Average STAR %</th>
-                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Lowest STAR Category</th>
-                                        <th style="padding:4px 8px;border:1px solid var(--border);text-align:left;">Infractions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${rowsHtml}
-                                </tbody>
-                           </table>`
-                        : `<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:4px;">
-                               No time-of-day data available for ${escapeHtml(dayLabel)}.
-                           </p>`
-                    }
-                `;
-
-                const tabName = `day-${dayLabel}`;
-                createOrUpdateDrillSubtab(tabName, dayLabel, contentHtml);
-                scheduleMasonryLayoutAfterResize(grid);
-            });
-        });
-    };
-
-    const renderReminderOrResetDetails = (mode) => {
-        const label = mode === 'reminders' ? 'Reminders' : 'Resets';
-        const assocKey = mode === 'reminders' ? 'infractions_for_reminders' : 'infractions_for_resets';
-        const assocMap = data.additional_info?.[assocKey] || {};
-        const entries = Object.entries(assocMap).sort((a, b) => b[1] - a[1]);
-        const byTime = data.by_time || {};
-        const byDay = data.by_day_of_week || {};
-
-        let timeRows = '';
-        Object.entries(byTime)
-            .map(([labelTime, tdata]) => {
-                const count = mode === 'reminders'
-                    ? (tdata.total_reminders || 0)
-                    : (tdata.total_resets || 0);
-                return { labelTime, count };
-            })
-            .filter(r => r.count)
-            .sort((a, b) => b.count - a.count)
-            .forEach(({ labelTime, count }) => {
-                timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td></tr>`;
-            });
-
-        let dayRows = '';
-        Object.entries(byDay)
-            .map(([dayLabel, ddata]) => {
-                const count = mode === 'reminders'
-                    ? (ddata.total_reminders || 0)
-                    : (ddata.total_resets || 0);
-                return { dayLabel, count };
-            })
-            .filter(r => r.count)
-            .sort((a, b) => b.count - a.count)
-            .forEach(({ dayLabel, count }) => {
-                dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td></tr>`;
-            });
-
-        let infraRows = '';
-        entries.forEach(([t, count]) => {
-            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td></tr>`;
-        });
-
-        const key = mode === 'reminders' ? 'reminders' : 'resets';
-        removeExtraCard(key);
-        const card = document.createElement('div');
-        card.className = 'dashboard-card full-width overview-extra-card';
-        card.dataset.overviewCard = key;
-        card.innerHTML = `
-        <div class="dashboard-card-header">
-        <h3 class="dashboard-card-title">${label} — When & What</h3>
-        </div>
-        <div class="dashboard-card-body overview-detail-container">
-        <div class="overview-two-col" style="margin-bottom:12px;">
-                    <div>
-                        <h4>By Time of Day</h4>
-                        ${timeRows ? `
-                            <table>
-                                <thead><tr><th>Time</th><th>Count</th></tr></thead>
-                                <tbody>${timeRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`}
-                    </div>
-                    <div>
-                        <h4>By Day of Week</h4>
-                        ${dayRows ? `
-                            <table>
-                                <thead><tr><th>Day</th><th>Count</th></tr></thead>
-                                <tbody>${dayRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`}
-                    </div>
-                    <div>
-                        <h4>${label} — Connected Infractions</h4>
-                        ${infraRows ? `
-                            <table>
-                                <thead><tr><th>Infraction</th><th>Count</th></tr></thead>
-                                <tbody>${infraRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`}
-                    </div>
-                </div>
-            </div>
-        `;
-        grid.appendChild(card);
-    };
-
-    const toggleTriggerTimesDayTable = () => {
-        const triggerCard = container.querySelector('.trigger-times-card');
-        if (!triggerCard) return;
-        const target = triggerCard.querySelector('.trigger-times-day-of-week');
-        if (!target) return;
-
-        // If already visible, hide and clear on repeat click
-        if (target.style.display !== 'none' && target.innerHTML) {
-            target.style.display = 'none';
-            target.innerHTML = '';
-            return;
-        }
-
-        const byDayData = data.by_day_of_week || {};
-        const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-        const rows = [];
-        weekdays.forEach(d => {
-            const dd = byDayData[d];
-            if (!dd) return;
-            const pct = typeof dd.percentages?.overall === 'number'
-                ? dd.percentages.overall
-                : 0;
-            const infractionsCount = typeof dd.total_infractions === 'number'
-                ? dd.total_infractions
-                : 0;
-            rows.push({
-                label: d.substring(0, 3),
-                pct,
-                infractions: infractionsCount
-            });
-        });
-
-        if (!rows.length) {
-            target.innerHTML = `<p style="font-size:0.8rem;color:var(--text-secondary);">No day-of-week data for this period.</p>`;
-            target.style.display = 'block';
-            return;
-        }
-
-        rows.sort((a, b) => {
-            if (b.infractions !== a.infractions) return b.infractions - a.infractions;
-            return (b.pct || 0) - (a.pct || 0);
-        });
-        let bodyRows = '';
-        rows.forEach(r => {
-            bodyRows += `<tr>
-                <td>${r.label}</td>
-                <td>${Math.round(r.pct)}%</td>
-                <td>${r.infractions}</td>
-            </tr>`;
-        });
-
-        target.innerHTML = `
-            <h4>Day of Week Breakdown</h4>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Day</th>
-                        <th>Overall %</th>
-                        <th>Infractions</th>
-                    </tr>
-                </thead>
-                <tbody>${bodyRows}</tbody>
-            </table>
-        `;
-        target.style.display = 'block';
-        scheduleMasonryLayoutAfterResize(grid);
-    };
-
-    const buildStarPerformanceCard = () => {
-        const avgs = data.averages || {};
-        const totalDays = data.total_days || 0;
-        const schoolDays = Number.isFinite(Number(data.available_data_points))
-            ? Number(data.available_data_points)
-            : totalDays;
-        const starTrendDeltas = [
-            data.overview_trends?.star_safety_delta ?? data.overview_trends?.safety_delta,
-            data.overview_trends?.star_teamwork_delta ?? data.overview_trends?.teamwork_delta,
-            data.overview_trends?.star_accountability_delta ?? data.overview_trends?.accountability_delta,
-            data.overview_trends?.star_relationships_delta ?? data.overview_trends?.relationships_delta
-        ];
-        const formatDeltaPercent = (delta) => {
-            const n = Number(delta);
-            if (!Number.isFinite(n)) return 'No data';
-            if (Math.abs(n) < 0.05) return '—';
-            return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
-        };
-        const deltaColor = (delta) => {
-            const n = Number(delta);
-            if (!Number.isFinite(n)) return '#64748b';
-            if (Math.abs(n) < 0.05) return '#64748b';
-            return n > 0 ? '#16a34a' : '#dc2626';
-        };
-        const card = document.createElement('div');
-        card.className = 'dashboard-card star-performance-card overview-extra-card';
-        card.dataset.overviewCard = 'star_performance';
-
-        const STAR_OVERVIEW_HINT_KEY = 'star_performance_click_hint_seen';
-        const starHintSeen = localStorage.getItem(STAR_OVERVIEW_HINT_KEY);
-        const starHintMsg = 'Click a STAR bar to see highest and lowest time of day and day of week for that category.';
-        const starHintMsgAttr = starHintMsg.replace(/"/g, '&quot;');
-        const starTitleHintBlock = `
-            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" data-hint-message="${starHintMsgAttr}">
-                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
-                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
-            </div>`;
-        const starFirstTimeText = starHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${STAR_OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(starHintMsg)}</p>`;
-
-        const overviewContent = starFirstTimeText + `
-            <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
-                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 100%; width:100%; max-width:100%; min-height:320px; margin:0;">
-                    <canvas id="overview-star-chart"></canvas>
-                </div>
-                <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
-            </div>
-        `;
-        card.innerHTML = `
-            <div class="dashboard-breakdown-card-inner">
-                <div class="dashboard-card-header star-performance-card-header">
-                    <div>
-                        <h3 class="dashboard-card-title">STAR Performance</h3>
-                        <div class="dashboard-card-subtitle">${schoolDays} school day${schoolDays !== 1 ? 's' : ''}</div>
-                    </div>
-                    ${starTitleHintBlock}
-                </div>
-                <div class="star-performance-tabs" role="tablist">
-                    <button class="star-performance-tab active" data-tab="overview" role="tab" aria-selected="true">
-                        <span class="star-performance-tab-label">Overview</span>
-                    </button>
-                </div>
-                <div class="star-performance-tab-panels">
-                    <div class="star-performance-tab-panel star-performance-tab-overview is-active" data-tab-panel="overview">
-                        ${overviewContent}
-                    </div>
-                </div>
-            </div>
-        `;
-        grid.appendChild(card);
-
-        const tabsContainer = card.querySelector('.star-performance-tabs');
-        const panelsContainer = card.querySelector('.star-performance-tab-panels');
-        const setActiveTab = (tabName) => {
-            const allTabs = card.querySelectorAll('.star-performance-tab');
-            const allPanels = card.querySelectorAll('.star-performance-tab-panel');
-            allTabs.forEach(tab => {
-                const isActive = tab.dataset.tab === tabName;
-                tab.classList.toggle('active', isActive);
-                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            });
-            allPanels.forEach(panel => {
-                panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
-            });
-        };
-
-        const wireTabClicks = () => {
-            const allTabs = card.querySelectorAll('.star-performance-tab');
-            allTabs.forEach(tab => {
-                if (tab._starPerformanceWired) return;
-                tab._starPerformanceWired = true;
-                tab.addEventListener('click', (e) => {
-                    const closeBtn = e.target.closest('.star-performance-tab-close');
-                    if (closeBtn) {
-                        e.stopPropagation();
-                        const name = tab.dataset.tab;
-                        if (name === 'overview') return;
-                        const panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${name}"]`);
-                        if (panel) panel.remove();
-                        tab.remove();
-                        if (!card.querySelector('.star-performance-tab.active')) {
-                            setActiveTab('overview');
-                        }
-                        return;
-                    }
-                    const tabName = tab.dataset.tab;
-                    if (!tabName || tab.disabled) return;
-                    setActiveTab(tabName);
-                });
-            });
-        };
-        wireTabClicks();
-
-        // (i) icon: click shows hint in popover (same text as first-time reminder)
-        card.addEventListener('click', (e) => {
-            const icon = e.target.closest('.infractions-hint-icon');
-            if (icon) {
-                e.preventDefault();
-                const hintDiv = icon.closest('.infractions-click-hint');
-                if (!hintDiv) return;
-                const popover = hintDiv.querySelector('.infractions-hint-popover');
-                if (!popover) return;
-                const msg = hintDiv.getAttribute('data-hint-message');
-                if (msg != null) popover.textContent = msg;
-                const isOpen = popover.getAttribute('aria-hidden') === 'false';
-                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
-                    p.style.display = 'none';
-                    p.setAttribute('aria-hidden', 'true');
-                });
-                if (!isOpen) {
-                    const cardEl = hintDiv.closest('.star-performance-card') || card;
-                    const cardRect = cardEl.getBoundingClientRect();
-                    const hintRect = hintDiv.getBoundingClientRect();
-                    const padding = 16;
-                    const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
-                    popover.style.maxWidth = maxW + 'px';
-                    popover.style.display = 'block';
-                    popover.setAttribute('aria-hidden', 'false');
-                }
-                return;
-            }
-            if (!e.target.closest('.infractions-hint-popover')) {
-                card.querySelectorAll('.infractions-hint-popover').forEach(p => {
-                    p.style.display = 'none';
-                    p.setAttribute('aria-hidden', 'true');
-                });
-            }
-        });
-        if (!window._starHintPopoverBound) {
-            window._starHintPopoverBound = true;
-            document.addEventListener('click', (e) => {
-                if (e.target.closest('.star-performance-card')) return;
-                document.querySelectorAll('.star-performance-card .infractions-hint-popover').forEach(p => {
-                    p.style.display = 'none';
-                    p.setAttribute('aria-hidden', 'true');
-                });
-            }, true);
-        }
-
-        const starCanvas = card.querySelector('#overview-star-chart');
-        if (starCanvas && typeof Chart !== 'undefined') {
-            if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
-            summaryChartInstance = new Chart(starCanvas.getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: ['Safety', 'Teamwork', 'Accountability', 'Relationships'],
-                    datasets: [{
-                        label: 'Average %',
-                        data: [avgs.safety || 0, avgs.teamwork || 0, avgs.accountability || 0, avgs.relationships || 0],
-                        backgroundColor: STAR_CHART_BAR_COLORS,
-                        borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
-                        borderSkipped: false,
-                        barThickness: 53,
-                        maxBarThickness: 53
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        datalabels: {
-                            labels: {
-                                value: {
-                                    anchor: 'end',
-                                    align: 'top',
-                                    offset: 18,
-                                    color: '#64748b',
-                                    font: { weight: 400, size: 12 },
-                                    formatter: (value) => `${Math.round(value)}%`
-                                },
-                                delta: {
-                                    anchor: 'end',
-                                    align: 'top',
-                                    offset: 2,
-                                    color: (context) => {
-                                        const idx = context?.dataIndex ?? 0;
-                                        return deltaColor(starTrendDeltas[idx]);
-                                    },
-                                    font: { weight: 600, size: 9 },
-                                    formatter: (_value, context) => {
-                                        const idx = context?.dataIndex ?? 0;
-                                        return formatDeltaPercent(starTrendDeltas[idx]);
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    layout: {
-                        padding: { top: 12, right: 8, bottom: 4, left: 8 }
-                    },
-                    scales: {
-                        x: {
-                            grid: { display: false },
-                            barPercentage: 1.0,
-                            categoryPercentage: 1.0,
-                            // Keep edge bars fully inside the chart area (prevents clipping)
-                            offset: true,
-                            ticks: {
-                                maxRotation: 35,
-                                minRotation: 35,
-                                autoSkip: false,
-                                font: { size: 12 },
-                                color: '#64748b',
-                                padding: 4
-                            },
-                            border: { display: false }
-                        },
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: { display: false },
-                            ticks: {
-                                callback: v => v + '%',
-                                font: { size: 11 },
-                                color: '#64748b',
-                                padding: 8,
-                                maxTicksLimit: 6
-                            },
-                            border: { display: false }
-                        }
-                    },
-                    onClick: (evt, elements) => {
-                        if (!elements || !elements.length) return;
-                        const index = elements[0].index;
-                        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
-                        const labels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
-                        const catKey = catKeys[index];
-                        if (!catKey) return;
-                        const tabName = `star-${catKey}`;
-                        let catTab = Array.from(card.querySelectorAll('.star-performance-tab')).find(t => t.dataset.tab === tabName);
-                        let panel = card.querySelector(`.star-performance-tab-panel[data-tab-panel="${tabName}"]`);
-
-                        if (!catTab) {
-                            catTab = document.createElement('button');
-                            catTab.className = 'star-performance-tab';
-                            catTab.dataset.tab = tabName;
-                            catTab.setAttribute('role', 'tab');
-                            catTab.setAttribute('aria-selected', 'false');
-                            const shortLabel = labels[index] || catKey;
-                            catTab.innerHTML = `
-                                <span class="star-performance-tab-label">${escapeHtml(shortLabel)}</span>
-                                <span class="star-performance-tab-close" aria-label="Close" role="button">&times;</span>
-                            `;
-                            tabsContainer.appendChild(catTab);
-
-                            panel = document.createElement('div');
-                            panel.className = 'star-performance-tab-panel';
-                            panel.dataset.tabPanel = tabName;
-                            panelsContainer.appendChild(panel);
-                            wireTabClicks();
-                        }
-
-                        try {
-                            localStorage.setItem(STAR_OVERVIEW_HINT_KEY, '1');
-                            const starHintTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + STAR_OVERVIEW_HINT_KEY + '"]');
-                            if (starHintTextEl) starHintTextEl.remove();
-                            const html = showStarCategoryDetails(catKey, labels[index] || catKey, data);
-                            if (html) {
-                                panel.innerHTML = html;
-                                if (typeof wireStarCategoryDrilldown === 'function') {
-                                    wireStarCategoryDrilldown(panel, data, catKey);
-                                }
-                                setActiveTab(tabName);
-                                scheduleMasonryLayoutAfterResize(grid);
-                            } else {
-                                setActiveTab(tabName);
-                            }
-                        } catch (e) {
-                            console.error('Error showing STAR category details from overview STAR chart:', e);
-                            setActiveTab(tabName);
-                        }
-                    }
-                }
-            });
-        }
-    };
-
-    const buildTriggerTimesCard = () => {
-        const byClass = data.by_class || {};
-        const byTime = data.by_time || {};
-
-        const timeKeys = Object.keys(byTime);
-        const classNames = Object.keys(byClass);
-        const useByTime = timeKeys.length > 0;
-        const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-        let sortedTriggerKeys = [];
-
-        if (triggerEntries.length > 0) {
-            sortedTriggerKeys = triggerEntries.sort((a, b) => {
-                const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-                const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-
-                const aPct = typeof aData.percentages?.overall === 'number'
-                    ? Math.round(aData.percentages.overall)
-                    : Number.POSITIVE_INFINITY;
-                const bPct = typeof bData.percentages?.overall === 'number'
-                    ? Math.round(bData.percentages.overall)
-                    : Number.POSITIVE_INFINITY;
-                if (aPct !== bPct) {
-                    return aPct - bPct;
-                }
-
-                const aInfra = typeof aData.total_infractions === 'number'
-                    ? aData.total_infractions
-                    : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-                const bInfra = typeof bData.total_infractions === 'number'
-                    ? bData.total_infractions
-                    : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-
-                return bInfra - aInfra;
-            });
-        }
-
-        const card = document.createElement('div');
-        card.className = 'dashboard-card trigger-times-card overview-extra-card';
-        card.dataset.overviewCard = 'trigger_times';
-
-        let innerHtml = `
-            <div class="dashboard-breakdown-card-inner">
-                <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>
-                <div class="overview-two-col">`;
-
-        // Left column: trigger time/class breakdown list
-        innerHtml += `<div>`;
-        if (sortedTriggerKeys.length > 0) {
-            innerHtml += `<ul class="dashboard-breakdown-list">`;
-            sortedTriggerKeys.forEach((key) => {
-                const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
-                const pctOverall = rowData.percentages?.overall ?? '';
-
-                const infractionsCount = typeof rowData.total_infractions === 'number'
-                    ? rowData.total_infractions
-                    : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
-
-                const displayLabel = key;
-                const topClass = useByTime ? (rowData.top_class || null) : null;
-
-                innerHtml += `<li class="dashboard-breakdown-item">
-                    <span class="dashboard-breakdown-name">
-                        <span>
-                            <div>${escapeHtml(displayLabel)}</div>
-                            ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
-                        </span>
-                    </span>
-                    <span>
-                        <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
-                    </span>
-                </li>`;
-            });
-            innerHtml += `</ul>`;
-        } else {
-            innerHtml += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
-        }
-        innerHtml += `</div>`;
-
-        // Right column: day-of-week breakdown table (initially hidden until populated)
-        innerHtml += `<div class="overview-detail-container trigger-times-day-of-week" style="margin-top:10px; display:none;"></div>`;
-
-        innerHtml += `</div></div>`;
-
-        card.innerHTML = innerHtml;
-        grid.appendChild(card);
-    };
-
-    const applySelectionChange = (box, key, { restore = false } = {}) => {
-        if (!key) return;
-
-        // Handle each selection type with toggle behavior
-        if (key === 'days_present') {
-            const opened = toggleExtraCard('days_present', buildDaysPresentCard);
-            box.classList.toggle('overview-stat-selected', opened);
-            if (opened) {
-                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
-                selectionOrder.push('days_present');
-            } else {
-                selectionOrder = selectionOrder.filter(k => k !== 'days_present');
-            }
-        } else if (key === 'star_percent') {
-            // Toggle STAR Performance card
-            const opened = toggleExtraCard('star_performance', buildStarPerformanceCard);
-            box.classList.toggle('overview-stat-selected', opened);
-            if (opened) {
-                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
-                selectionOrder.push('star_percent');
-                if (!restore) {
-                    const starCard = container.querySelector('.star-performance-card');
-                    if (starCard && typeof starCard.scrollIntoView === 'function') {
-                        starCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                }
-            } else {
-                selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
-            }
-        } else if (key === 'starbucks') {
-            // Starbucks: only visual selection, no extra card
-            box.classList.toggle('overview-stat-selected');
-        } else if (key === 'frenzies') {
-            // Frenzy reports view has been removed.
-            return;
-        } else if (key === 'infractions') {
-            // Toggle Infractions card; details are shown when a row is selected
-            const opened = toggleExtraCard('infractions_card', () => {
-                    const card = document.createElement('div');
-                    card.className = 'dashboard-card infractions-card overview-extra-card';
-                    card.dataset.overviewCard = 'infractions_card';
-
-                    const infractions = data.infractions || data.additional_info?.infractions || {};
-                    const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
-
-                    const OVERVIEW_HINT_KEY = 'infractions_overview_click_hint_seen';
-                    const overviewHintSeen = localStorage.getItem(OVERVIEW_HINT_KEY);
-                    const overviewHintMsg = 'Click an infraction to see breakdowns by time of day and day of week.';
-                    const overviewHintMsgAttr = overviewHintMsg.replace(/"/g, '&quot;');
-                    const overviewTitleHintBlock = `
-                            <div class="infractions-click-hint infractions-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
-                                <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
-                                <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
-                            </div>`;
-                    const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
-
-                    let overviewContent = overviewFirstTimeText;
-
-                    if (infractionKeys.length > 0) {
-                        overviewContent += `
-                            <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-                                <thead>
-                                    <tr>
-                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Infraction</th>
-                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                                    </tr>
-                                </thead>
-                                <tbody>`;
-                        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
-                            overviewContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
-                                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
-                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${infractions[k]}</span></td>
-                            </tr>`;
-                        });
-                        overviewContent += `</tbody></table>`;
-                    } else {
-                        overviewContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
-                    }
-
-                    const innerHtml = `
-                        <div class="dashboard-breakdown-card-inner">
-                            <div class="dashboard-card-header infractions-card-header">
-                                <h3 class="dashboard-card-title">Infractions</h3>
-                                ${overviewTitleHintBlock}
-                            </div>
-                            <div class="infractions-tabs" role="tablist">
-                                <button class="infractions-tab active" data-tab="overview" role="tab" aria-selected="true">
-                                    <span class="infractions-tab-label">Overview</span>
-                                </button>
-                            </div>
-                            <div class="infractions-tab-panels">
-                                <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
-                                    ${overviewContent}
-                                </div>
-                            </div>
-                        </div>`;
-
-                    card.innerHTML = innerHtml;
-                    grid.appendChild(card);
-
-                    // Tab behavior within the Infractions card
-                    const tabsContainer = card.querySelector('.infractions-tabs');
-                    const panelsContainer = card.querySelector('.infractions-tab-panels');
-
-                    const setActiveTab = (tabName) => {
-                        const allTabs = card.querySelectorAll('.infractions-tab');
-                        const allPanels = card.querySelectorAll('.infractions-tab-panel');
-                        allTabs.forEach(tab => {
-                            const isActive = tab.dataset.tab === tabName;
-                            tab.classList.toggle('active', isActive);
-                            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                        });
-                        allPanels.forEach(panel => {
-                            panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
-                        });
-                    };
-
-                    const wireTabClicks = () => {
-                        const allTabs = card.querySelectorAll('.infractions-tab');
-                        allTabs.forEach(tab => {
-                            if (tab._infractionsWired) return;
-                            tab._infractionsWired = true;
-                            tab.addEventListener('click', (e) => {
-                                const closeBtn = e.target.closest('.infractions-tab-close');
-                                if (closeBtn) {
-                                    e.stopPropagation();
-                                    const name = tab.dataset.tab;
-                                    // Prevent closing the primary Overview tab
-                                    if (name === 'overview') return;
-                                    const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${name}"]`);
-                                    if (panel) {
-                                        panel.remove();
-                                    }
-                                    tab.remove();
-                                    // If the closed tab was active, fall back to Overview
-                                    if (!card.querySelector('.infractions-tab.active')) {
-                                        setActiveTab('overview');
-                                    }
-                                    return;
-                                }
-
-                                const tabName = tab.dataset.tab;
-                                if (!tabName || tab.disabled) return;
-                                setActiveTab(tabName);
-                            });
-                        });
-                    };
-
-                    wireTabClicks();
-
-                    // (i) icon: click shows hint in popover (same text as first-time reminder)
-                    card.addEventListener('click', (e) => {
-                        const icon = e.target.closest('.infractions-hint-icon');
-                        if (icon) {
-                            e.preventDefault();
-                            const hintDiv = icon.closest('.infractions-click-hint');
-                            if (!hintDiv) return;
-                            const popover = hintDiv.querySelector('.infractions-hint-popover');
-                            if (!popover) return;
-                            const msg = hintDiv.getAttribute('data-hint-message');
-                            if (msg != null) popover.textContent = msg;
-                            const isOpen = popover.getAttribute('aria-hidden') === 'false';
-                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
-                                p.style.display = 'none';
-                                p.setAttribute('aria-hidden', 'true');
-                            });
-                            if (!isOpen) {
-                                const cardEl = hintDiv.closest('.infractions-card') || card;
-                                const cardRect = cardEl.getBoundingClientRect();
-                                const hintRect = hintDiv.getBoundingClientRect();
-                                const padding = 16;
-                                const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
-                                popover.style.maxWidth = maxW + 'px';
-                                popover.style.display = 'block';
-                                popover.setAttribute('aria-hidden', 'false');
-                            }
-                            return;
-                        }
-                        const inPopover = e.target.closest('.infractions-hint-popover');
-                        if (!inPopover) {
-                            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
-                                p.style.display = 'none';
-                                p.setAttribute('aria-hidden', 'true');
-                            });
-                        }
-                    });
-                    if (!window._infractionsHintPopoverBound) {
-                        window._infractionsHintPopoverBound = true;
-                        document.addEventListener('click', (e) => {
-                            if (e.target.closest('.infractions-card')) return;
-                            document.querySelectorAll('.infractions-hint-popover').forEach(p => {
-                                p.style.display = 'none';
-                                p.setAttribute('aria-hidden', 'true');
-                            });
-                        }, true);
-                    }
-
-                    // Wire row clicks inside this newly created card
-                    const infractionRows = card.querySelectorAll('.dashboard-breakdown-item[data-infraction-type]');
-                    infractionRows.forEach(row => {
-                        row.style.cursor = 'pointer';
-                        row.addEventListener('click', () => {
-                            const type = row.getAttribute('data-infraction-type');
-                            if (!type) return;
-                            localStorage.setItem(OVERVIEW_HINT_KEY, '1');
-                            const overviewTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + OVERVIEW_HINT_KEY + '"]');
-                            if (overviewTextEl) overviewTextEl.remove();
-                            const labelText = (row.querySelector('.dashboard-breakdown-name')?.textContent || type).trim();
-                            const shortLabel = labelText.length > 28 ? `${labelText.slice(0, 25)}…` : labelText;
-                            const tabName = `inf-${type}`;
-
-                            // Look for an existing tab for this infraction
-                            let infTab = Array.from(card.querySelectorAll('.infractions-tab'))
-                                .find(t => t.dataset.tab === tabName);
-                            let targetContainer = null;
-
-                            if (!infTab) {
-                                // Create a new tab
-                                infTab = document.createElement('button');
-                                infTab.className = 'infractions-tab';
-                                infTab.dataset.tab = tabName;
-                                infTab.setAttribute('role', 'tab');
-                                infTab.setAttribute('aria-selected', 'false');
-                                const safeLabel = shortLabel || type;
-                                infTab.innerHTML = `
-                                    <span class="infractions-tab-label">${escapeHtml(safeLabel)}</span>
-                                    <span class="infractions-tab-close" aria-label="Close" role="button">&times;</span>
-                                `;
-                                tabsContainer.appendChild(infTab);
-
-                                // Create its panel
-                                const panel = document.createElement('div');
-                                panel.className = 'infractions-tab-panel';
-                                panel.dataset.tabPanel = tabName;
-
-                                targetContainer = document.createElement('div');
-                                targetContainer.className = 'overview-detail-container infractions-by-time-day';
-                                targetContainer.style.marginTop = '10px';
-
-                                panel.appendChild(targetContainer);
-                                panelsContainer.appendChild(panel);
-
-                                // (Re)wire click handlers now that a new tab exists
-                                wireTabClicks();
-                            } else {
-                                // Reuse existing panel for this infraction
-                                const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${tabName}"]`);
-                                if (panel) {
-                                    targetContainer = panel.querySelector('.infractions-by-time-day');
-                                }
-                            }
-
-                            if (targetContainer) {
-                                renderInfractionTypeBreakdown(type, targetContainer);
-                            }
-
-                            // Activate this infraction's tab
-                            setActiveTab(tabName);
-                            scheduleMasonryLayoutAfterResize(grid);
-                        });
-                    });
-                });
-            box.classList.toggle('overview-stat-selected', opened);
-            if (opened) {
-                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
-                selectionOrder.push('infractions');
-                if (!restore) {
-                    const infractionsCard = container.querySelector('.infractions-card');
-                    if (infractionsCard && typeof infractionsCard.scrollIntoView === 'function') {
-                        infractionsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                }
-            } else {
-                selectionOrder = selectionOrder.filter(k => k !== 'infractions');
-            }
-        } else if (key === 'reminders') {
-            const opened = !getExtraCard('reminders');
-            if (opened) {
-                renderReminderOrResetDetails('reminders');
-                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
-                selectionOrder.push('reminders');
-            } else {
-                removeExtraCard('reminders');
-                selectionOrder = selectionOrder.filter(k => k !== 'reminders');
-            }
-            box.classList.toggle('overview-stat-selected', opened);
-        } else if (key === 'resets') {
-            const opened = !getExtraCard('resets');
-            if (opened) {
-                renderReminderOrResetDetails('resets');
-                selectionOrder = selectionOrder.filter(k => k !== 'resets');
-                selectionOrder.push('resets');
-            } else {
-                removeExtraCard('resets');
-                selectionOrder = selectionOrder.filter(k => k !== 'resets');
-            }
-            box.classList.toggle('overview-stat-selected', opened);
-        } else if (key === 'trigger_times') {
-            // Trigger Times: create/toggle the Trigger Times card and show day-of-week breakdown
-            const opened = toggleExtraCard('trigger_times', buildTriggerTimesCard);
-            box.classList.toggle('overview-stat-selected', opened);
-            if (opened) {
-                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
-                selectionOrder.push('trigger_times');
-                if (!restore) {
-                    const triggerCard = container.querySelector('.trigger-times-card');
-                    if (triggerCard && typeof triggerCard.scrollIntoView === 'function') {
-                        triggerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
-                    toggleTriggerTimesDayTable();
-                } else {
-                    // On restore, still populate the day-of-week table once
-                    toggleTriggerTimesDayTable();
-                }
-            } else {
-                selectionOrder = selectionOrder.filter(k => k !== 'trigger_times');
-            }
-        }
-
-        // After any change that affects cards, normalize DOM order so cards
-        // appear in selection sequence and store updated order.
-        if (Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, key)) {
-            reorderExtraCards();
-            persistSelectionOrder();
-            // Re-apply masonry layout so newly added/removed cards
-            // are positioned into columns immediately after any
-            // selection change (including the very first one).
-            applySummaryMasonryLayout(grid);
-        }
-    };
-
-    statBoxes.forEach(box => {
-        box.addEventListener('click', () => {
-            const key = box.dataset.overviewKey;
-            applySelectionChange(box, key, { restore: false });
-        });
-    });
-
-    // Restore previously selected overview stats (if any) so that cards
-    // re-appear in the same order as last time the user viewed this page.
-    const storedOrder = loadSelectionOrder();
-    if (storedOrder.length) {
-        selectionOrder = [];
-        storedOrder.forEach(statKey => {
-            const box = overviewCard.querySelector(`.overview-stat[data-overview-key="${statKey}"]`);
-            if (!box) return;
-            applySelectionChange(box, statKey, { restore: true });
-        });
-        reorderExtraCards();
-    }
-
-    // Apply layout whenever overview interactions are (re)wired
-    applySummaryMasonryLayout(grid);
-
-}
-
-function renderSummaryComparison(container, data) {
-    const periods = Object.keys(data.periods || {});
-    if (periods.length === 0) {
-        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
-        return;
-    }
-
-    const trendMetrics = [
-        { label: 'Total Days', get: p => Number(p?.total_days || 0) },
-        { label: 'Safety %', get: p => Number(p?.percentages?.safety || p?.averages?.safety || 0) },
-        { label: 'Teamwork %', get: p => Number(p?.percentages?.teamwork || p?.averages?.teamwork || 0) },
-        { label: 'Accountability %', get: p => Number(p?.percentages?.accountability || p?.averages?.accountability || 0) },
-        { label: 'Relationships %', get: p => Number(p?.percentages?.relationships || p?.averages?.relationships || 0) },
-        { label: 'Overall %', get: p => Number(p?.percentages?.overall || p?.averages?.overall || 0) },
-        { label: 'Infractions', get: p => Number(Object.values(p?.infractions || {}).reduce((s, c) => s + c, 0)) },
-        { label: 'Reminders', get: p => Number(p?.additional_info?.total_reminders || 0) },
-        { label: 'Resets', get: p => Number(p?.additional_info?.total_resets || 0) }
-    ];
-
-    let topIncrease = null;
-    let topDecrease = null;
-    if (periods.length >= 2) {
-        const newestKey = periods.includes('Most Recent 30 Days') ? 'Most Recent 30 Days' : periods[periods.length - 1];
-        const oldestKey = periods.includes('Previous 30 Days') ? 'Previous 30 Days' : periods[0];
-        const newest = data.periods?.[newestKey] || {};
-        const oldest = data.periods?.[oldestKey] || {};
-
-        const deltas = trendMetrics
-            .map(m => ({ label: m.label, delta: m.get(newest) - m.get(oldest) }))
-            .filter(d => Number.isFinite(d.delta));
-
-        const positives = deltas.filter(d => d.delta > 0).sort((a, b) => b.delta - a.delta);
-        const negatives = deltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta);
-
-        topIncrease = positives.length ? positives[0] : null;
-        topDecrease = negatives.length ? negatives[0] : null;
-    }
-
-    const formatDelta = (value) => {
-        if (!Number.isFinite(value)) return 'n/a';
-        const rounded = Math.round(value * 10) / 10;
-        const sign = rounded > 0 ? '+' : '';
-        return `${sign}${rounded}`;
-    };
-
-    let html = `<div class="dashboard-card-grid">`;
-    // Comparison chart card – matches dashboard card style
-    html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header">
-            <div>
-                <h3 class="dashboard-card-title">Comparison</h3>
-                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
-            </div>
-            <div style="margin-left:auto; min-width:230px; max-width:320px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--bg-elevated);">
-                <div style="font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-secondary); margin-bottom:6px;">Trends</div>
-                <div style="display:flex; flex-direction:column; gap:4px; font-size:12px;">
-                    <div>
-                        <strong style="color:${topIncrease ? '#16a34a' : 'var(--text-secondary)'};">Top increase:</strong>
-                        ${topIncrease ? `${escapeHtml(topIncrease.label)} (${formatDelta(topIncrease.delta)})` : 'n/a'}
-                    </div>
-                    <div>
-                        <strong style="color:${topDecrease ? '#dc2626' : 'var(--text-secondary)'};">Top decrease:</strong>
-                        ${topDecrease ? `${escapeHtml(topDecrease.label)} (${formatDelta(topDecrease.delta)})` : 'n/a'}
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="dashboard-chart-wrap summary-compare-chart-wrap" style="height:260px"><canvas id="summary-compare-chart"></canvas></div>
-    </div>`;
-
-    // Comparison table card – use dashboard card header + shared table styling
-    html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header">
-            <h3 class="dashboard-card-title">Comparison breakdown</h3>
-        </div>
-        <div class="dashboard-compare-table-wrap">
-        <table class="dashboard-compare-table">
-        <thead><tr>
-            <th>Metric</th>`;
-    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
-    html += `</tr></thead><tbody>`;
-    const rows = [
-        { label: 'Total Days', get: p => p.total_days || 0 },
-        { label: 'Safety %', get: p => Math.round(p.percentages?.safety || p.averages?.safety || 0) + '%' },
-        { label: 'Teamwork %', get: p => Math.round(p.percentages?.teamwork || p.averages?.teamwork || 0) + '%' },
-        { label: 'Accountability %', get: p => Math.round(p.percentages?.accountability || p.averages?.accountability || 0) + '%' },
-        { label: 'Relationships %', get: p => Math.round(p.percentages?.relationships || p.averages?.relationships || 0) + '%' },
-        { label: 'Overall %', get: p => Math.round(p.percentages?.overall || p.averages?.overall || 0) + '%' },
-        { label: 'Infractions', get: p => Object.values(p.infractions || {}).reduce((s, c) => s + c, 0) },
-        { label: 'Reminders', get: p => p.additional_info?.total_reminders || 0 },
-        { label: 'Resets', get: p => p.additional_info?.total_resets || 0 }
-    ];
-    rows.forEach(r => {
-        html += `<tr><td>${r.label}</td>`;
-        periods.forEach(p => {
-            html += `<td>${r.get(data.periods[p])}</td>`;
-        });
-        html += `</tr>`;
-    });
-    html += `</tbody></table></div></div>`;
-    html += `</div>`;
-    container.innerHTML = html;
-
-    // Render comparison chart
-    const canvas = document.getElementById('summary-compare-chart');
-    if (canvas && typeof Chart !== 'undefined') {
-        if (summaryChartInstance) { summaryChartInstance.destroy(); summaryChartInstance = null; }
-        // Show one chart with STAR categories on the x-axis and
-        // the selected periods rendered as side-by-side bars
-        const catKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
-        const catLabels = ['Safety', 'Teamwork', 'Accountability', 'Relationships'];
-        const periodColors = [
-            '#1D4ED8', // blue
-            '#F97316', // orange
-            '#059669', // green
-            '#7C3AED'  // purple
-        ];
-        summaryChartInstance = new Chart(canvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                // X-axis is STAR categories
-                labels: catLabels,
-                // Each compared period becomes its own dataset;
-                // bars for that period sit next to each other per category
-                datasets: periods.map((p, periodIndex) => {
-                    const pd = data.periods[p] || {};
-                    return {
-                        label: p,
-                        data: catKeys.map(key => {
-                            return pd.percentages?.[key] || pd.averages?.[key] || 0;
-                        }),
-                        backgroundColor: periodColors[periodIndex % periodColors.length],
-                        // Match non-comparison STAR chart style (4 rounded corners)
-                        borderRadius: 8,
-                        borderSkipped: false,
-                        // Make each bar relatively thick so grouped bars visually fill the category
-                        barThickness: 32,
-                        maxBarThickness: 48
-                    };
-                })
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'top' },
-                    datalabels: {
-                        anchor: 'end',
-                        align: 'end',
-                        offset: -4,
-                        color: '#111827',
-                        clip: false,
-                        font: {
-                            weight: '600',
-                            size: 10
-                        },
-                        formatter: (value) => `${Math.round(value)}%`
-                    }
-                },
-                scales: {
-                    y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' }, grid: { color: 'rgba(0,0,0,0.04)' } },
-                    x: {
-                        grid: { display: false },
-                        stacked: false,
-                        // Keep bars within a category tight, but add more
-                        // whitespace between the STAR categories themselves.
-                        categoryPercentage: 0.7,
-                        barPercentage: 0.95,
-                        ticks: {
-                            maxRotation: 0,
-                            minRotation: 0,
-                            autoSkip: false
-                        }
-                    }
-                }
-            }
-        });
-    }
-}
-
-// ---- Frenzy Dashboard ----
-async function loadFrenzyDashboard() {
-    const st = dashboardState.frenzy;
-    const container = document.getElementById('frenzy-results');
-    if (!container) return;
-
-    container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading frenzy stats...</p></div>';
-
-    const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
-    const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
-    const quarterDatesForBackend = typeof convertQuarterDatesForBackend === 'function' ? convertQuarterDatesForBackend(quarterDates) : {};
-    const schoolYearDatesForBackend = typeof convertSchoolYearDatesForBackend === 'function' ? convertSchoolYearDatesForBackend(schoolYearDates) : {};
-
-    const params = [];
-    if (st.compareMode) {
-        const selectEl = document.getElementById('frenzy-timeframe-select');
-        const tf = selectEl ? selectEl.value : '';
-        if (tf) {
-            params.push(`timeframe=${tf}`);
-            if (tf === 'month') {
-                const sySelect = document.getElementById('frenzy-school-year-select');
-                const sy = sySelect ? sySelect.value : (typeof getCurrentSchoolYear === 'function' ? getCurrentSchoolYear() : '');
-                if (sy) params.push(`school_year=${encodeURIComponent(sy)}`);
-            } else if (tf === 'custom_range') {
-                const start = st.customStart;
-                const end = st.customEnd;
-                if (start && end) {
-                    params.push(`start_date=${encodeURIComponent(start)}`);
-                    params.push(`end_date=${encodeURIComponent(end)}`);
-                }
-            }
-        }
-    } else {
-        if (st.period) params.push(`period=${encodeURIComponent(st.period)}`);
-    }
-    if (st.studentId) params.push(`student_id=${st.studentId}`);
-    if (st.staffId) params.push(`staff_id=${st.staffId}`);
-    const managedCheckbox = document.getElementById('frenzy-managed-by-me-checkbox');
-    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
-    params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
-    params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
-
-    const url = '/api/frenzy-stats?' + params.join('&');
-
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        window.currentFrenzyStatsData = data;
-
-        const printBtn = document.getElementById('print-frenzy-btn');
-        if (printBtn) printBtn.disabled = false;
-
-        if (data.comparison_mode && data.periods) {
-            renderFrenzyComparison(container, data);
-        } else {
-            renderFrenzySingle(container, data);
-        }
-    } catch (err) {
-        container.innerHTML = `<div class="dashboard-empty"><p>Error loading frenzy stats: ${err.message}</p></div>`;
-    }
-}
-
-function renderFrenzySingle(container, data) {
-    const totalCount = data.total_count || 0;
-    const totalDuration = data.total_duration || 0;
-    const avgDuration = data.avg_duration || 0;
-    const byDay = data.by_day || {};
-    const byLocation = data.by_location || {};
-    const byPurpose = data.by_purpose || {};
-    const allPurposes = data.all_purposes || [];
-    const allResults = data.all_results || [];
-
-    let html = `<div class="dashboard-card-grid">`;
-
-    // Frenzy Frequency Chart
-    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const hasDayData = dayOrder.some(d => byDay[d]);
-    html += `<div class="dashboard-card">
-        <div class="dashboard-card-header">
-            <div>
-                <h3 class="dashboard-card-title">Frenzy Frequency</h3>
-                <div class="dashboard-card-subtitle">${totalCount} total frenzy event${totalCount !== 1 ? 's' : ''}</div>
-            </div>
-        </div>
-        <div class="dashboard-chart-wrap"><canvas id="frenzy-freq-chart"></canvas></div>
-    </div>`;
-
-    // Duration Stats Card
-    html += `<div class="dashboard-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Duration Breakdown</h3></div>
-        <div class="dashboard-stat-row">
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalCount}</div><div class="dashboard-stat-label">Frenzies</div></div>
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${totalDuration}</div><div class="dashboard-stat-label">Minutes</div></div>
-            <div class="dashboard-stat-box"><div class="dashboard-stat-value">${typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0'}</div><div class="dashboard-stat-label">Avg Min</div></div>
-        </div>`;
-
-    // By-location breakdown
-    const locKeys = Object.keys(byLocation);
-    if (locKeys.length > 0) {
-        html += `<ul class="dashboard-breakdown-list" style="margin-top:12px;">`;
-        locKeys.sort((a, b) => (byLocation[b].count || 0) - (byLocation[a].count || 0)).forEach((loc, i) => {
-            const ld = byLocation[loc];
-            const dotColor = DASHBOARD_COLORS.palette[i % DASHBOARD_COLORS.palette.length];
-            html += `<li class="dashboard-breakdown-item">
-                <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${dotColor}"></span>${escapeHtml(loc)}</span>
-                <span><span class="dashboard-breakdown-value">${ld.count || 0}</span><span class="dashboard-breakdown-meta">${ld.duration || 0} min</span></span>
-            </li>`;
-        });
-        html += `</ul>`;
-    }
-    html += `</div>`;
-
-    // Purpose & Results Card
-    html += `<div class="dashboard-card">
-        <div class="dashboard-card-header"><h3 class="dashboard-card-title">Purpose</h3></div>`;
-    const purposeKeys = Object.keys(byPurpose);
-    if (purposeKeys.length > 0) {
-        html += `<div class="dashboard-log-list">`;
-        purposeKeys.sort((a, b) => (byPurpose[b].count || 0) - (byPurpose[a].count || 0)).forEach(p => {
-            html += `<div class="dashboard-log-item"><span class="log-type"><span class="dashboard-badge badge-blue">${escapeHtml(p)}</span></span><span class="log-count">${byPurpose[p].count || 0}</span></div>`;
-        });
-        html += `</div>`;
-    } else {
-        html += `<p style="color:var(--text-secondary);font-size:0.875rem;">No purpose data recorded.</p>`;
-    }
-    if (allResults.length > 0) {
-        html += `<div style="margin-top:16px;"><div class="dashboard-card-subtitle" style="margin-bottom:8px;">Results</div>`;
-        html += `<div class="dashboard-tag-cloud">`;
-        const resultCounts = {};
-        allResults.forEach(r => { resultCounts[r] = (resultCounts[r] || 0) + 1; });
-        Object.keys(resultCounts).sort((a, b) => resultCounts[b] - resultCounts[a]).forEach(r => {
-            html += `<span class="dashboard-tag">${escapeHtml(r)}<span class="tag-count">${resultCounts[r]}</span></span>`;
-        });
-        html += `</div></div>`;
-    }
-    html += `</div>`;
-
-    // Day-of-week detail card
-    if (hasDayData) {
-        html += `<div class="dashboard-card">
-            <div class="dashboard-card-header"><h3 class="dashboard-card-title">By Day of Week</h3></div>
-            <ul class="dashboard-breakdown-list">`;
-        dayOrder.forEach((d, i) => {
-            const dd = byDay[d];
-            if (dd) {
-                html += `<li class="dashboard-breakdown-item">
-                    <span class="dashboard-breakdown-name"><span class="dashboard-breakdown-dot" style="background:${DASHBOARD_COLORS.palette[i]}"></span>${d.substring(0, 3)}</span>
-                    <span><span class="dashboard-breakdown-value">${dd.count || 0}</span><span class="dashboard-breakdown-meta">${dd.duration || 0} min</span></span>
-                </li>`;
-            }
-        });
-        html += `</ul></div>`;
-    }
-
-    html += `</div>`;
-    container.innerHTML = html;
-
-    // Render Frenzy Frequency Chart
-    const freqCanvas = document.getElementById('frenzy-freq-chart');
-    if (freqCanvas && typeof Chart !== 'undefined') {
-        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
-        const labels = dayOrder;
-        const counts = labels.map(d => byDay[d]?.count || 0);
-        frenzyChartInstance = new Chart(freqCanvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: labels.map(d => d.substring(0, 3)),
-                datasets: [{
-                    label: 'Frenzies',
-                    data: counts,
-                    backgroundColor: '#F97316',
-                    borderRadius: 8,
-                    maxBarThickness: 48
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.04)' } },
-                    x: { grid: { display: false } }
-                }
-            }
-        });
-    }
-}
-
-function renderFrenzyComparison(container, data) {
-    const periods = Object.keys(data.periods || {});
-    if (periods.length === 0) {
-        container.innerHTML = '<div class="dashboard-empty"><p>No comparison data available.</p></div>';
-        return;
-    }
-    let html = `<div class="dashboard-card-grid">`;
-    html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header">
-            <div>
-                <h3 class="dashboard-card-title">Frenzy Comparison</h3>
-                <div class="dashboard-card-subtitle">${periods.length} period${periods.length !== 1 ? 's' : ''} selected</div>
-            </div>
-        </div>
-        <div class="dashboard-chart-wrap" style="height:260px"><canvas id="frenzy-compare-chart"></canvas></div>
-    </div>`;
-    html += `<div class="dashboard-card full-width">
-        <div class="dashboard-card-header">
-            <h3 class="dashboard-card-title">Comparison breakdown</h3>
-        </div>
-        <div style="overflow-x:auto;">
-        <table class="dashboard-compare-table">
-        <thead><tr>
-            <th>Metric</th>`;
-    periods.forEach(p => { html += `<th style="padding:10px 12px;border:1px solid var(--border);text-align:center;">${escapeHtml(p)}</th>`; });
-    html += `</tr></thead><tbody>`;
-    const rows = [
-        { label: 'Total Frenzies', get: p => p.total_count || 0 },
-        { label: 'Total Duration (min)', get: p => p.total_duration || 0 },
-        { label: 'Avg Duration (min)', get: p => typeof p.avg_duration === 'number' ? p.avg_duration.toFixed(1) : '0' }
-    ];
-    rows.forEach(r => {
-        html += `<tr><td>${r.label}</td>`;
-        periods.forEach(p => {
-            html += `<td>${r.get(data.periods[p])}</td>`;
-        });
-        html += `</tr>`;
-    });
-    html += `</tbody></table></div></div></div>`;
-    container.innerHTML = html;
-
-    const canvas = document.getElementById('frenzy-compare-chart');
-    if (canvas && typeof Chart !== 'undefined') {
-        if (frenzyChartInstance) { frenzyChartInstance.destroy(); frenzyChartInstance = null; }
-        frenzyChartInstance = new Chart(canvas.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: periods,
-                datasets: [
-                    { label: 'Total Frenzies', data: periods.map(p => data.periods[p].total_count || 0), backgroundColor: '#F97316', borderRadius: 6, maxBarThickness: 32 },
-                    { label: 'Avg Duration (min)', data: periods.map(p => data.periods[p].avg_duration || 0), backgroundColor: '#60A5FA', borderRadius: 6, maxBarThickness: 32 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
-                scales: {
-                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
-                    x: { grid: { display: false } }
-                }
-            }
-        });
-    }
-}
-
-// Ensure numeric values in Reports tab tables are right-aligned
-function setupReportsNumberAlignment() {
-    const summaryContainer = document.getElementById('summary-results');
-    const frenzyContainer = document.getElementById('frenzy-results');
-    const pointCardContainer = document.getElementById('point-card-data-container');
-
-    const targets = [summaryContainer, frenzyContainer, pointCardContainer].filter(Boolean);
-    if (!targets.length || typeof MutationObserver === 'undefined') {
-        return;
-    }
-
-    const numericRegex = /^[^A-Za-z]*\d[^A-Za-z]*$/;
-
-    function alignNumericCells(root) {
-        if (!root) return;
-        const cells = root.querySelectorAll('table th, table td');
-        cells.forEach(cell => {
-            // First column (times/labels) stays left-aligned — do not treat as numeric
-            if (cell.cellIndex === 0) {
-                cell.classList.remove('numeric-cell');
-                return;
-            }
-            const text = (cell.textContent || '').trim();
-            if (text && numericRegex.test(text)) {
-                cell.classList.add('numeric-cell');
-            } else {
-                cell.classList.remove('numeric-cell');
-            }
-        });
-    }
-
-    targets.forEach(target => {
-        let scheduled = false;
-        const raf = window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); };
-
-        function scheduleAlign() {
-            if (scheduled) return;
-            scheduled = true;
-            raf(() => {
-                scheduled = false;
-                alignNumericCells(target);
-            });
-        }
-
-        // Initial pass in case content is already present
-        alignNumericCells(target);
-
-        const observer = new MutationObserver((mutations) => {
-            for (let i = 0; i < mutations.length; i++) {
-                const m = mutations[i];
-                if (m.type === 'childList' || m.type === 'characterData') {
-                    scheduleAlign();
-                    break;
-                }
-            }
-        });
-
-        observer.observe(target, {
-            childList: true,
-            subtree: true,
-            characterData: true
-        });
-    });
-}
-
-// ---- Initialize Dashboard ----
-function initDashboard() {
-    removeLegacyReportsToggleButtons();
-
-    ['summary', 'frenzy'].forEach(pageKey => {
-        setupDashboardSearch(`${pageKey}`, 'student');
-        setupDashboardSearch(`${pageKey}`, 'staff');
-        setupFilterPills(pageKey);
-        setupCompareToggle(pageKey);
-        setupContextClear(pageKey);
-    });
-
-    // Incentive Tracking is specific to the Summary (Point Card) view
-    setupIncentiveToggle();
-
-    // Right-align numeric values in Reports tab tables
-    setupReportsNumberAlignment();
-
-    // Wire managed-by-me checkboxes
-    const summaryManagedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-    if (summaryManagedCheckbox) {
-        summaryManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('summary'));
-    }
-    // Wire Reports sub-toggle button(s) to switch views
-    const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
-    reportsToggleButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetView = btn.dataset.reportsView;
-            if (!targetView) return;
-            // Use normal view switching so all existing logic (managed by me, dashboard load, etc.) still runs
-            switchView(targetView);
-            if (typeof triggerDashboardLoad === 'function') {
-                if (targetView === 'summary') {
-                    setTimeout(() => triggerDashboardLoad('summary'), 100);
-                }
-            }
-        });
-    });
-
-    syncSummaryPointCardButton();
-}
-
-// Auto-load when switching to summary tab
-const origNavHandler = document.querySelectorAll('.nav-btn');
-origNavHandler.forEach(btn => {
-    btn.addEventListener('click', () => {
-        const view = btn.dataset.view;
-        if (view === 'summary') {
-            setTimeout(() => triggerDashboardLoad('summary'), 100);
-        }
-    });
-});
-
-// Init when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initDashboard);
-} else {
-    setTimeout(initDashboard, 0);
-}
-
-// Expose functions to window
-window.loadParentChildren = loadParentChildren;
-window.viewChildRecords = viewChildRecords;
-window.openAmendmentRequestModal = openAmendmentRequestModal;
-window.closeAmendmentRequestModal = closeAmendmentRequestModal;
-window.submitAmendmentRequest = submitAmendmentRequest;
-window.toggleDirectoryOptOut = toggleDirectoryOptOut;
-window.exportChildData = exportChildData;
-window.removeParentStudent = removeParentStudent;
-window.addParentStudent = addParentStudent;
-window.verifyParentStudent = verifyParentStudent;

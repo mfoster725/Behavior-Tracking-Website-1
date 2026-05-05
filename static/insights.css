@@ -1,0 +1,342 @@
+/* Behavioral Insights dashboard — complements style.css design tokens */
+
+.insights-body {
+    background: var(--bg-page);
+}
+
+.insights-container.container {
+    max-width: 1280px;
+}
+
+.insights-header {
+    background: var(--bg-header);
+    color: var(--text-inverse);
+    padding: 1.25rem 2rem 1.5rem;
+}
+
+.insights-header .header-content {
+    align-items: flex-start;
+}
+
+.insights-header .header-brand .site-logo {
+    height: 40px;
+    width: auto;
+}
+
+.insights-header h1 {
+    font-family: var(--font-heading);
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.insights-header .user-info {
+    color: rgba(250, 250, 249, 0.72);
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+}
+
+.insights-back-btn {
+    margin-top: 0.25rem;
+}
+
+.insights-main {
+    padding: 1.75rem 2rem 2.5rem;
+}
+
+.insights-section {
+    margin-bottom: 2.25rem;
+}
+
+.insights-section .section-header {
+    margin-bottom: 1rem;
+}
+
+.insights-section .section-header h2 {
+    font-family: var(--font-heading);
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin: 0 0 0.35rem;
+}
+
+.insights-section .section-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin: 0;
+    max-width: 52rem;
+}
+
+/* Pulse grid */
+.pulse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.pulse-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.pulse-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.pulse-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+}
+
+.pulse-pill {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.pulse-pill-attendance {
+    border: 1px solid var(--border-strong);
+}
+
+.pulse-pill-star {
+    border: 1px solid rgba(79, 182, 176, 0.35);
+    background: rgba(79, 182, 176, 0.12);
+}
+
+.pulse-value-wrap {
+    margin-bottom: 0.5rem;
+}
+
+.pulse-value {
+    font-family: var(--font-heading);
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.pulse-caption {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.45;
+}
+
+.pulse-state-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    background: rgba(79, 182, 176, 0.18);
+    color: #0f766e;
+}
+
+.pulse-state-chip.needs-support {
+    background: rgba(251, 111, 90, 0.18);
+    color: #b91c1c;
+}
+
+.pulse-state-chip.stagnation {
+    background: rgba(245, 158, 11, 0.18);
+    color: #b45309;
+}
+
+/* Heatmap */
+.heatmap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.legend-scale {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.legend-swatch {
+    width: 28px;
+    height: 10px;
+    border-radius: 4px;
+}
+
+.legend-swatch.density-low {
+    background: #e8dcc8;
+}
+
+.legend-swatch.density-medium {
+    background: #eab386;
+}
+
+.legend-swatch.density-high {
+    background: #e07856;
+}
+
+.heatmap-grid {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+}
+
+.heatmap-grid-inner {
+    display: grid;
+    grid-auto-rows: minmax(44px, auto);
+    min-width: min(100%, 720px);
+}
+
+.heatmap-header-cell,
+.heatmap-row-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elevated);
+}
+
+.heatmap-row-label {
+    justify-content: flex-end;
+    padding-right: 0.65rem;
+}
+
+.heatmap-cell {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: default;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.heatmap-cell:hover {
+    z-index: 1;
+    box-shadow: inset 0 0 0 2px rgba(28, 25, 23, 0.08);
+}
+
+.heatmap-cell[data-density="0"] {
+    background: #faf7f2;
+}
+
+.heatmap-cell[data-density="1"] {
+    background: #efe4d6;
+}
+
+.heatmap-cell[data-density="2"] {
+    background: #e9cfa9;
+}
+
+.heatmap-cell[data-density="3"] {
+    background: #e5ac82;
+}
+
+.heatmap-cell[data-density="4"] {
+    background: #df8465;
+}
+
+.heatmap-cell-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.heatmap-cell-count {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.heatmap-tooltip {
+    position: absolute;
+    z-index: 300;
+    max-width: 280px;
+    padding: 0.65rem 0.85rem;
+    background: #0f172a;
+    color: #f8fafc;
+    border-radius: var(--radius-md);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.12s ease;
+}
+
+.heatmap-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.heatmap-tooltip h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.82rem;
+}
+
+.heatmap-tooltip ul {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+/* Charts */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+}
+
+.charts-grid-single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.chart-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    padding: 1rem;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-card-header h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    font-family: var(--font-heading);
+}
+
+.chart-card-header p {
+    margin: 0 0 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.chart-card canvas {
+    flex: 1;
+    width: 100% !important;
+    height: 220px !important;
+}

@@ -208,15 +208,6 @@
             <div class="form-section">
                 <h2>Summary & Reports</h2>
 
-                <div class="reports-toggle">
-                    <button type="button" class="reports-toggle-btn active" data-reports-view="summary">
-                        Point Card
-                    </button>
-                    <button type="button" class="reports-toggle-btn" data-reports-view="frenzy">
-                        Frenzy
-                    </button>
-                </div>
-
                 <div class="dashboard-controls">
                     <!-- Search row -->
                     <div class="dashboard-search-row">
@@ -267,7 +258,16 @@
                             </div>
                             <button type="button" class="dashboard-compare-toggle" id="summary-compare-toggle">Compare</button>
                             <button type="button" class="dashboard-compare-toggle" id="summary-incentive-toggle">Incentive Tracking</button>
+                            <a href="{{ url_for('insights_dashboard') }}" class="dashboard-compare-toggle" id="summary-insights-btn">Insights View</a>
                             <button type="button" id="print-summary-btn" disabled title="Print">Print</button>
+                            <button
+                                type="button"
+                                id="show-point-card-btn"
+                                class="is-inactive"
+                                data-tooltip="Select a student to view past point cards"
+                            >
+                                View Past Point Cards
+                            </button>
                         </div>
                     </div>
 
@@ -312,94 +312,7 @@
                         <p>Select a timeframe to view summary data</p>
                     </div>
                 </div>
-                <div id="point-card-data-container" style="display: none; margin-top: 30px;"></div>
-            </div>
-        </div>
-
-        <!-- Frenzy Stats View (accessed via Reports toggle) -->
-        <div id="frenzy-view" class="view">
-            <div class="form-section">
-                <h2>Frenzy Statistics</h2>
-
-                <div class="reports-toggle">
-                    <button type="button" class="reports-toggle-btn" data-reports-view="summary">
-                        Point Card
-                    </button>
-                    <button type="button" class="reports-toggle-btn active" data-reports-view="frenzy">
-                        Frenzy
-                    </button>
-                </div>
-
-                <div class="dashboard-controls">
-                    <div class="dashboard-search-row">
-                        <div class="dashboard-search-wrap" id="frenzy-student-search-wrap">
-                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                            <input type="text" id="frenzy-student-search" placeholder="Search student..." autocomplete="off">
-                            <div class="dashboard-search-dropdown" id="frenzy-student-dropdown"></div>
-                        </div>
-                        {% if user.role in ['staff', 'admin'] %}
-                        <div class="dashboard-search-wrap" id="frenzy-staff-search-wrap">
-                            <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            <input type="text" id="frenzy-staff-search" placeholder="Search staff..." autocomplete="off">
-                            <div class="dashboard-search-dropdown" id="frenzy-staff-dropdown"></div>
-                        </div>
-                        <label class="dashboard-managed-check">
-                            <input type="checkbox" id="frenzy-managed-by-me-checkbox">
-                            <span>Managed by me</span>
-                        </label>
-                        {% endif %}
-                        <div class="dashboard-toolbar">
-                            <button type="button" id="print-frenzy-btn" disabled title="Print">Print</button>
-                        </div>
-                    </div>
-
-                    <div class="dashboard-context-banner" id="frenzy-context-banner">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        <span>Viewing: <span class="context-label" id="frenzy-context-label"></span></span>
-                        <button class="context-clear" id="frenzy-context-clear">Clear</button>
-                    </div>
-
-                    <div class="dashboard-filter-row">
-                        <div class="dashboard-filter-pills" id="frenzy-filter-pills">
-                            <button type="button" class="dashboard-pill active" data-period="30day">30 School Days</button>
-                            <button type="button" class="dashboard-pill" data-period="current_year">Current Year</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter1">Q1</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter2">Q2</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter3">Q3</button>
-                            <button type="button" class="dashboard-pill" data-period="quarter4">Q4</button>
-                        </div>
-                        <button type="button" class="dashboard-compare-toggle" id="frenzy-compare-toggle">Compare</button>
-                    </div>
-
-                    <div class="dashboard-compare-controls" id="frenzy-compare-controls">
-                        <select id="frenzy-timeframe-select">
-                            <option value="">Select Comparison</option>
-                            <option value="30day_to_30day">30 Day to 30 Day</option>
-                            <option value="month">Month to Month</option>
-                            <option value="quarter">Quarter to Quarter</option>
-                            <option value="year">Year to Year</option>
-                            <option value="custom_range">Custom Date Range</option>
-                        </select>
-                        <div id="frenzy-custom-range-controls" style="display: none; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px;">
-                            <label for="frenzy-custom-start">From</label>
-                            <input type="date" id="frenzy-custom-start" data-role="custom-start">
-                            <span>to</span>
-                            <input type="date" id="frenzy-custom-end" data-role="custom-end">
-                            <span class="dashboard-custom-error" style="color: #b91c1c; font-size: 0.8rem;"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hidden selects for backwards compatibility -->
-                <select id="frenzy-student-select" style="display:none"><option value="">All Students</option></select>
-                <select id="frenzy-period-select" style="display:none"><option value="">Select Timeframe</option></select>
-
-                <div id="frenzy-results">
-                    <div class="dashboard-empty">
-                        <div class="dashboard-empty-icon">&#9889;</div>
-                        <p>Select a timeframe to view frenzy statistics</p>
-                    </div>
-                </div>
+                <div id="point-card-data-container" style="display: none; margin-top: 20px;"></div>
             </div>
         </div>
 
@@ -742,6 +655,16 @@
                     <!-- Quarter Configuration -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                         <h3>Quarter Date Configuration</h3>
+                        <h4 style="margin: 0 0 8px 0; color: var(--primary-color);">Calendar PDF Import (NEW)</h4>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                            Upload a calendar PDF to auto-detect the current school year using
+                            <strong>first day of school</strong> and <strong>last day of school</strong>.
+                        </p>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+                            <input type="file" id="calendar-pdf-file" accept=".pdf,application/pdf">
+                            <button id="extract-calendar-pdf-btn" class="btn-primary" type="button">Extract Dates From PDF</button>
+                        </div>
+                        <div id="calendar-pdf-results" style="display: none; margin-bottom: 12px;"></div>
                         <p style="font-size: 13px; color: #666; margin-bottom: 15px;">Set the start and end dates for each quarter (MM/DD/YYYY format)</p>
                         <div id="quarter-config" style="display: grid; gap: 15px; margin-top: 15px;">
                             <!-- Quarter config will be loaded dynamically -->
@@ -1972,7 +1895,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc13"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc17"></script>
 </body>
 </html>
 
