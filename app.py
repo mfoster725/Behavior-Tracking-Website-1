@@ -37,6 +37,7 @@ from io import StringIO, BytesIO
 from urllib.parse import urlparse, urljoin
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+import calendar as _calendar
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -47,6 +48,11 @@ try:
     _GOOGLE_SHEETS_AVAILABLE = True
 except ImportError:
     _GOOGLE_SHEETS_AVAILABLE = False
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 app = Flask(__name__)
 
@@ -4319,6 +4325,252 @@ def import_frenzy_csv(rows):
     # Parse frenzy data from CSV
     # This would need to be customized based on your exact CSV structure
     return jsonify({'message': 'Frenzy import functionality - customize based on your CSV structure'}), 200
+
+
+def _parse_flexible_date(raw_date: str):
+    if not raw_date:
+        return None
+    cleaned = re.sub(r'[,.\u00A0]+', ' ', str(raw_date)).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+
+    numeric_formats = [
+        '%m/%d/%Y', '%m/%d/%y',
+        '%m-%d-%Y', '%m-%d-%y',
+        '%Y-%m-%d'
+    ]
+    for fmt in numeric_formats:
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+
+    month_formats = []
+    for month_name in _calendar.month_name[1:]:
+        month_formats.extend([
+            f'{month_name} %d %Y',
+            f'{month_name} %d %y',
+        ])
+    for month_abbr in _calendar.month_abbr[1:]:
+        month_formats.extend([
+            f'{month_abbr} %d %Y',
+            f'{month_abbr} %d %y',
+        ])
+
+    for fmt in month_formats:
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_date_after_keyword(text: str, keyword_pattern: str):
+    if not text:
+        return None
+    match = re.search(keyword_pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    start_idx = max(0, match.start() - 40)
+    end_idx = min(len(text), match.end() + 180)
+    window = text[start_idx:end_idx]
+
+    candidates = re.findall(
+        r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2}(?:,\s*|\s+)\d{2,4})',
+        window
+    )
+    for candidate in candidates:
+        parsed = _parse_flexible_date(candidate)
+        if parsed:
+            return parsed
+    return None
+
+
+def _coerce_year(two_or_four_digit_year: int):
+    if two_or_four_digit_year >= 100:
+        return two_or_four_digit_year
+    return 2000 + two_or_four_digit_year
+
+
+def _extract_month_markers(text: str):
+    markers = []
+    month_lookup = {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
+
+    for match in re.finditer(
+        r'\b(' + '|'.join(month_lookup.keys()) + r')\b(?:\s*[\'’]?\s*(\d{2,4}))?',
+        text,
+        flags=re.IGNORECASE
+    ):
+        month_name = match.group(1).upper()
+        year_token = match.group(2)
+        year = _coerce_year(int(year_token)) if year_token else None
+        markers.append({
+            'pos': match.start(),
+            'month': month_lookup[month_name],
+            'year': year
+        })
+    return sorted(markers, key=lambda m: m['pos'])
+
+
+def _closest_month_marker(markers, char_pos: int):
+    if not markers:
+        return None
+    prior = [m for m in markers if m['pos'] <= char_pos]
+    if prior:
+        return prior[-1]
+    return markers[0]
+
+
+def _extract_day_for_keyword_with_month_context(text: str, keyword_pattern: str, markers):
+    match = re.search(keyword_pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    window_start = max(0, match.start() - 60)
+    window_end = min(len(text), match.end() + 20)
+    left_window = text[window_start:match.start()]
+
+    day_candidates = re.findall(r'\b([0-2]?\d|3[01])\b', left_window)
+    if not day_candidates:
+        return None
+
+    marker = _closest_month_marker(markers, match.start())
+    if not marker or not marker.get('year'):
+        return None
+
+    day = int(day_candidates[-1])
+    try:
+        return date(marker['year'], marker['month'], day)
+    except ValueError:
+        return None
+
+
+def _split_school_year_into_quarters(first_day: date, last_day: date):
+    total_days = (last_day - first_day).days + 1
+    base_len = total_days // 4
+    remainder = total_days % 4
+
+    quarter_lengths = [base_len] * 4
+    for i in range(remainder):
+        quarter_lengths[i] += 1
+
+    quarters = {}
+    current_start = first_day
+    for idx in range(1, 5):
+        q_len = quarter_lengths[idx - 1]
+        q_end = current_start + timedelta(days=max(q_len - 1, 0))
+        if idx == 4:
+            q_end = last_day
+        quarters[str(idx)] = {
+            'start': current_start.strftime('%m/%d/%Y'),
+            'end': q_end.strftime('%m/%d/%Y'),
+            'label': f'Quarter {idx}'
+        }
+        current_start = q_end + timedelta(days=1)
+    return quarters
+
+
+def _build_quarters_from_boundaries(first_day: date, q1_end: date, q2_end: date, q3_end: date, last_day: date):
+    q1_start = first_day
+    q2_start = q1_end + timedelta(days=1)
+    q3_start = q2_end + timedelta(days=1)
+    q4_start = q3_end + timedelta(days=1)
+
+    order_ok = (
+        q1_start <= q1_end <
+        q2_start <= q2_end <
+        q3_start <= q3_end <
+        q4_start <= last_day
+    )
+    if not order_ok:
+        return None
+
+    return {
+        '1': {'start': q1_start.strftime('%m/%d/%Y'), 'end': q1_end.strftime('%m/%d/%Y'), 'label': 'Quarter 1'},
+        '2': {'start': q2_start.strftime('%m/%d/%Y'), 'end': q2_end.strftime('%m/%d/%Y'), 'label': 'Quarter 2'},
+        '3': {'start': q3_start.strftime('%m/%d/%Y'), 'end': q3_end.strftime('%m/%d/%Y'), 'label': 'Quarter 3'},
+        '4': {'start': q4_start.strftime('%m/%d/%Y'), 'end': last_day.strftime('%m/%d/%Y'), 'label': 'Quarter 4'},
+    }
+
+
+@app.route('/api/calendar/extract-school-year', methods=['POST'])
+@admin_required
+def extract_school_year_from_calendar_pdf():
+    if PdfReader is None:
+        return jsonify({'error': 'PDF parsing is unavailable. Install the "pypdf" package.'}), 500
+
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'error': 'No PDF file provided.'}), 400
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Please upload a PDF file.'}), 400
+
+    try:
+        pdf_bytes = file.read()
+        if not pdf_bytes:
+            return jsonify({'error': 'Uploaded PDF is empty.'}), 400
+
+        reader = PdfReader(BytesIO(pdf_bytes))
+        extracted_pages = []
+        for page in reader.pages:
+            page_text = page.extract_text() or ''
+            if page_text:
+                extracted_pages.append(page_text)
+        full_text = '\n'.join(extracted_pages)
+
+        if not full_text.strip():
+            return jsonify({'error': 'Could not extract text from the PDF.'}), 400
+
+        month_markers = _extract_month_markers(full_text)
+
+        first_day = _extract_date_after_keyword(full_text, r'first\s+day\s+of\s+school')
+        last_day = _extract_date_after_keyword(full_text, r'last\s+day\s+of\s+school')
+        q1_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*1')
+        q2_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*2')
+        q3_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*3')
+
+        if first_day is None:
+            first_day = _extract_date_after_keyword(full_text, r'first\s+day')
+        if last_day is None:
+            last_day = _extract_date_after_keyword(full_text, r'last\s+day')
+
+        # Calendar layouts often print the day number separately from "End Quarter X" labels.
+        if first_day is None:
+            first_day = _extract_day_for_keyword_with_month_context(full_text, r'first\s+day\s+of\s+school', month_markers)
+        if last_day is None:
+            last_day = _extract_day_for_keyword_with_month_context(full_text, r'last\s+day\s+of\s+school', month_markers)
+        if q1_end is None:
+            q1_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*1', month_markers)
+        if q2_end is None:
+            q2_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*2', month_markers)
+        if q3_end is None:
+            q3_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*3', month_markers)
+
+        if first_day is None or last_day is None:
+            return jsonify({
+                'error': 'Could not find both "first day of school" and "last day of school" dates in the PDF.'
+            }), 400
+
+        if last_day < first_day:
+            return jsonify({'error': '"Last day of school" occurs before "first day of school".'}), 400
+
+        quarter_dates = None
+        if all([q1_end, q2_end, q3_end]):
+            quarter_dates = _build_quarters_from_boundaries(first_day, q1_end, q2_end, q3_end, last_day)
+        if quarter_dates is None:
+            quarter_dates = _split_school_year_into_quarters(first_day, last_day)
+        school_year = {
+            'start': first_day.strftime('%m/%d/%Y'),
+            'end': last_day.strftime('%m/%d/%Y'),
+            'label': f'{first_day.year}-{last_day.year}'
+        }
+
+        return jsonify({
+            'school_year': school_year,
+            'quarters': quarter_dates
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Failed to parse calendar PDF: {str(e)}'}), 500
 
 
 def _grade_to_int(s: str) -> int | None:
