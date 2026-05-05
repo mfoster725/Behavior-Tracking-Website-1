@@ -20001,7 +20001,7 @@ function attachOverviewCardInteractions(container, data) {
 
         const overviewContent = starFirstTimeText + `
             <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
-                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:0 0 265px; max-width:265px; min-height:220px; margin:0 auto;">
+                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 100%; width:100%; max-width:100%; min-height:320px; margin:0;">
                     <canvas id="overview-star-chart"></canvas>
                 </div>
                 <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
@@ -20131,8 +20131,8 @@ function attachOverviewCardInteractions(container, data) {
                         backgroundColor: STAR_CHART_BAR_COLORS,
                         borderRadius: { topLeft: 10, topRight: 10, bottomLeft: 0, bottomRight: 0 },
                         borderSkipped: false,
-                        barThickness: 35,
-                        maxBarThickness: 35
+                        barThickness: 53,
+                        maxBarThickness: 53
                     }]
                 },
                 options: {
@@ -20168,7 +20168,7 @@ function attachOverviewCardInteractions(container, data) {
                         }
                     },
                     layout: {
-                        padding: { top: 20, right: 12, bottom: 4, left: 12 }
+                        padding: { top: 12, right: 8, bottom: 4, left: 8 }
                     },
                     scales: {
                         x: {
