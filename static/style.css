@@ -4777,7 +4777,7 @@ a.dashboard-compare-toggle {
     color: #16a34a;
 }
 
-/* STAR: same 117×117 + centered %/delta as attendance; rainbow pinned to top of frame. */
+/* STAR: 127×117 wrap + centered %/delta; rainbow pinned to top of frame. */
 .overview-gauge-star {
     overflow: visible;
 }
@@ -4797,7 +4797,7 @@ a.dashboard-compare-toggle {
     top: 0;
     left: 50%;
     transform: translateX(-50%);
-    /* +20px vs wrap width; centered on same axis as % / delta (wrap stays 117px). */
+    /* +20px vs wrap width; centered on same axis as % / delta. */
     width: calc(100% + 20px);
     max-width: none;
     height: auto;
@@ -4807,9 +4807,10 @@ a.dashboard-compare-toggle {
     overflow: visible;
 }
 
-/* Taller viewBox so rainbow legs can run past the delta; arcs unchanged (xMidYMin). */
+/* Shift rainbow up so the semicircle’s open area sits over the same centered %/delta slot as attendance (text uses .overview-gauge-center--attendance-donut only). */
 .overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg.overview-gauge-svg--star-rainbow {
     overflow: visible;
+    transform: translate(-50%, -4px);
 }
 
 .overview-gauge-star .overview-gauge-star-values.overview-gauge-center--attendance-donut {
@@ -5123,6 +5124,8 @@ a.dashboard-compare-toggle {
 
 .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
     margin-top: 0;
+    width: 117px;
+    max-width: 117px;
 }
 
 .overview-card--rich .overview-gauge-star .overview-gauge-big {

@@ -16520,10 +16520,11 @@ function buildOverviewDashboardCardHtml(data) {
 
     const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
     const overallPct = Math.round(avgs.overall || 0);
-    const safetyP = Math.min(100, Math.max(0, Number(avgs.safety) || 0));
-    const teamworkP = Math.min(100, Math.max(0, Number(avgs.teamwork) || 0));
-    const accountabilityP = Math.min(100, Math.max(0, Number(avgs.accountability) || 0));
-    const relationshipsP = Math.min(100, Math.max(0, Number(avgs.relationships) || 0));
+    const toRoundedPct = (value) => Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+    const safetyP = toRoundedPct(avgs.safety);
+    const teamworkP = toRoundedPct(avgs.teamwork);
+    const accountabilityP = toRoundedPct(avgs.accountability);
+    const relationshipsP = toRoundedPct(avgs.relationships);
 
     const presentDelta = trends?.present_pct_delta;
     const starDelta = trends?.star_overall_delta;
@@ -16682,11 +16683,17 @@ function buildOverviewDashboardCardHtml(data) {
     const dashLen = 100;
     const attOff = dashLen - Math.min(100, Math.max(0, roundedPresentPct));
     const arcOff = pctVal => dashLen - Math.min(100, Math.max(0, pctVal));
-    /** STAR semicircle: first p% of path (from bottom-left) colored, rest gap — pathLength=100 on each arc. */
+    /** STAR arc only: first p% of semicircle colored (same angle for every ring when p matches). */
     const starArcDash = pctVal => {
         const p = Math.min(100, Math.max(0, Number(pctVal) || 0));
         return `${p} ${100 - p}`;
     };
+    const starLeftLeg = (x, color, p) =>
+        p > 0
+            ? `<path d="M ${x} 61 L ${x} 46" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" />`
+            : '';
+    /** Hides round linecaps at arc right endpoints (they read as stray dots in the grey half). */
+    const starArcCapMaskId = `star-arc-cap-${Math.random().toString(36).slice(2, 11)}`;
 
     return `<div class="dashboard-card overview-card overview-card--rich">
         <div class="overview-rich-header">
@@ -16712,23 +16719,34 @@ function buildOverviewDashboardCardHtml(data) {
                 <div class="overview-panel-kicker">Star Percent</div>
                 <div class="overview-gauge-wrap overview-gauge-wrap--multi">
                     <svg class="overview-gauge-svg overview-gauge-svg--star-rainbow" viewBox="0 0 100 76" preserveAspectRatio="xMidYMin meet" aria-hidden="true">
-                        <!-- Rails at true arc endpoints (50±R). Arcs start bottom-left; colored length = STAR % of semicircle. -->
-                        <path d="M 11 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 16 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 21 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 26 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 89 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 84 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 79 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 74 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" />
-                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ff3b30" stroke-width="5" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(safetyP)}" stroke-dashoffset="0" />
-                        <path d="M 16 46 A 34 34 0 0 1 84 46" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 16 46 A 34 34 0 0 1 84 46" fill="none" stroke="#007aff" stroke-width="5" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(teamworkP)}" stroke-dashoffset="0" />
-                        <path d="M 21 46 A 29 29 0 0 1 79 46" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 21 46 A 29 29 0 0 1 79 46" fill="none" stroke="#34c759" stroke-width="5" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(accountabilityP)}" stroke-dashoffset="0" />
-                        <path d="M 26 46 A 24 24 0 0 1 74 46" fill="none" stroke="#ebe8e4" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
-                        <path d="M 26 46 A 24 24 0 0 1 74 46" fill="none" stroke="#ffcc00" stroke-width="5" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(relationshipsP)}" stroke-dashoffset="0" />
+                        <defs>
+                            <mask id="${starArcCapMaskId}">
+                                <rect x="0" y="0" width="100" height="76" fill="white" />
+                                <circle cx="89" cy="46" r="4" fill="black" />
+                                <circle cx="85.5" cy="46" r="4" fill="black" />
+                                <circle cx="82" cy="46" r="4" fill="black" />
+                                <circle cx="78.5" cy="46" r="4" fill="black" />
+                            </mask>
+                        </defs>
+                        <!-- Ring radii step 3.5: with 4px strokes this yields ~0.5px overlap. -->
+                        <path d="M 89 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 85.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 82 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 78.5 46 V 61" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" />
+                        <path d="M 11 61 L 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 14.5 61 L 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 18 61 L 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        <path d="M 21.5 61 L 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ebe8e4" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0" />
+                        ${starLeftLeg(11, '#ff3b30', safetyP)}
+                        ${starLeftLeg(14.5, '#007aff', teamworkP)}
+                        ${starLeftLeg(18, '#34c759', accountabilityP)}
+                        ${starLeftLeg(21.5, '#ffcc00', relationshipsP)}
+                        <g mask="url(#${starArcCapMaskId})">
+                        <path d="M 11 46 A 39 39 0 0 1 89 46" fill="none" stroke="#ff3b30" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(safetyP)}" stroke-dashoffset="0" />
+                        <path d="M 14.5 46 A 35.5 35.5 0 0 1 85.5 46" fill="none" stroke="#007aff" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(teamworkP)}" stroke-dashoffset="0" />
+                        <path d="M 18 46 A 32 32 0 0 1 82 46" fill="none" stroke="#34c759" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(accountabilityP)}" stroke-dashoffset="0" />
+                        <path d="M 21.5 46 A 28.5 28.5 0 0 1 78.5 46" fill="none" stroke="#ffcc00" stroke-width="4" stroke-linecap="butt" pathLength="100" stroke-dasharray="${starArcDash(relationshipsP)}" stroke-dashoffset="0" />
+                        </g>
                     </svg>
                     <div class="overview-gauge-center overview-gauge-center--attendance-donut overview-gauge-star-values">
                         <div class="overview-gauge-big">${overallPct}%</div>
