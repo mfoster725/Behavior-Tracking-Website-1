@@ -509,6 +509,12 @@ def ensure_daily_query_indexes():
                 conn.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_infractions_period_record_id ON infractions (period_record_id)"
                 ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_checkpoints_date ON checkpoints (date)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_checkpoint_students_student_id ON checkpoint_students (student_id)"
+                ))
                 conn.commit()
     except Exception as e:
         app.logger.warning(f"Failed to ensure daily query indexes: {e}")
@@ -626,6 +632,31 @@ class FrenzyEvent(db.Model):
     
     # Result/outcome
     result = db.Column(db.String(100))
+
+
+class CheckpointStudent(db.Model):
+    __tablename__ = 'checkpoint_students'
+    id = db.Column(db.Integer, primary_key=True)
+    checkpoint_id = db.Column(db.Integer, db.ForeignKey('checkpoints.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+
+    student = db.relationship('Student')
+    __table_args__ = (db.UniqueConstraint('checkpoint_id', 'student_id', name='unique_checkpoint_student'),)
+
+
+class Checkpoint(db.Model):
+    __tablename__ = 'checkpoints'
+    id = db.Column(db.Integer, primary_key=True)
+    checkpoint_type = db.Column(db.String(30), nullable=False, index=True)  # intervention, transition, life_event, card_change
+    color = db.Column(db.String(20), nullable=False)
+    date = db.Column(db.Date, nullable=False, index=True)
+    label = db.Column(db.String(255), nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    created_by = db.relationship('User')
+    students = db.relationship('CheckpointStudent', backref='checkpoint', lazy=True, cascade='all, delete-orphan')
 
 class TeamMember(db.Model):
     __tablename__ = 'team_members'
@@ -2349,6 +2380,351 @@ def daily_records():
             })
         
         return jsonify(result)
+
+
+def _parse_student_ids_param(student_ids_param):
+    parsed = []
+    for raw_id in (student_ids_param or '').split(','):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            parsed.append(int(raw_id))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(parsed))
+
+
+def _resolve_student_scope(student_id=None, student_ids_param='', staff_id=None, managed_by_me=False):
+    requested_student_ids = _parse_student_ids_param(student_ids_param)
+    if student_id:
+        requested_student_ids = [student_id]
+
+    if current_user.role == 'student':
+        if current_user.student_id:
+            return [current_user.student_id]
+        return []
+
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        assigned_student_ids = [assoc.student_id for assoc in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+        if not assigned_student_ids:
+            return []
+        if requested_student_ids:
+            return [sid for sid in requested_student_ids if sid in assigned_student_ids]
+        return sorted(set(assigned_student_ids))
+
+    if requested_student_ids:
+        return requested_student_ids
+
+    if staff_id and current_user.role in ['staff', 'admin']:
+        staff_user = User.query.get(staff_id)
+        if not staff_user:
+            return []
+        staff_name = staff_user.name or ''
+        staff_username = staff_user.username or ''
+        team_members = TeamMember.query.filter(
+            (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+            (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+        ).all()
+        return sorted({tm.student_id for tm in team_members if tm.student_id})
+
+    if managed_by_me and current_user.role in ['staff', 'admin']:
+        user_name = (current_user.name or current_user.username or '').strip()
+        user_username = (current_user.username or '').strip()
+        team_members = TeamMember.query.filter(
+            db.or_(
+                db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                db.func.lower(TeamMember.name) == db.func.lower(user_username),
+            )
+        ).all()
+        return sorted({tm.student_id for tm in team_members if tm.student_id})
+
+    # Default to all active student IDs for staff/admin "all students" view.
+    student_users = User.query.filter_by(role='student').all()
+    return sorted({u.student_id for u in student_users if u.student_id})
+
+
+def _checkpoint_color_for_type(checkpoint_type, requested_color=None):
+    fixed = {
+        'intervention': 'orange',
+        'transition': 'purple',
+        'life_event': 'gray',
+    }
+    if checkpoint_type in fixed:
+        return fixed[checkpoint_type]
+    if checkpoint_type == 'card_change':
+        color = (requested_color or '').strip().lower()
+        if color in {'yellow', 'green', 'blue'}:
+            return color
+        raise ValueError('Card Change requires color: yellow, green, or blue.')
+    raise ValueError('Invalid checkpoint type.')
+
+
+def _serialize_checkpoint(checkpoint):
+    return {
+        'id': checkpoint.id,
+        'checkpoint_type': checkpoint.checkpoint_type,
+        'color': checkpoint.color,
+        'date': checkpoint.date.isoformat(),
+        'label': checkpoint.label,
+        'student_ids': [row.student_id for row in checkpoint.students],
+        'created_by_user_id': checkpoint.created_by_user_id,
+        'created_at': checkpoint.created_at.isoformat() if checkpoint.created_at else None,
+        'updated_at': checkpoint.updated_at.isoformat() if checkpoint.updated_at else None,
+    }
+
+
+@app.route('/api/trends', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def api_trends():
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = (request.args.get('student_ids') or '').strip()
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+    if start_date and end_date and end_date < start_date:
+        return jsonify({'error': 'end_date must be on or after start_date'}), 400
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify({'series': [], 'student_ids': []})
+
+    query = DailyRecord.query.filter(DailyRecord.student_id.in_(selected_ids))
+    if start_date:
+        query = query.filter(DailyRecord.date >= start_date)
+    if end_date:
+        query = query.filter(DailyRecord.date <= end_date)
+    query = query.options(
+        selectinload(DailyRecord.periods),
+        selectinload(DailyRecord.frenzies),
+    )
+
+    records = query.order_by(DailyRecord.date.asc()).all()
+    by_date = {}
+    for record in records:
+        if record.attendance_status == 'excused':
+            continue
+        key = record.date.isoformat()
+        if key not in by_date:
+            by_date[key] = {
+                'frenzy_count': 0,
+                'safety': 0,
+                'teamwork': 0,
+                'accountability': 0,
+                'relationships': 0,
+                'possible': 0,
+            }
+        entry = by_date[key]
+        entry['frenzy_count'] += len(record.frenzies or [])
+        for period in (record.periods or []):
+            entry['safety'] += int(period.safety_points or 0)
+            entry['teamwork'] += int(period.teamwork_points or 0)
+            entry['accountability'] += int(period.accountability_points or 0)
+            entry['relationships'] += int(period.relationships_points or 0)
+            entry['possible'] += int(period.points_possible or 4)
+
+    series = []
+    for date_key in sorted(by_date.keys()):
+        day = by_date[date_key]
+        avg_star_percent = None
+        if day['possible'] > 0:
+            num_periods = day['possible'] / 4
+            max_per_category = num_periods * 2 if num_periods > 0 else 0
+            if max_per_category > 0:
+                safety_pct = (day['safety'] / max_per_category) * 100
+                teamwork_pct = (day['teamwork'] / max_per_category) * 100
+                accountability_pct = (day['accountability'] / max_per_category) * 100
+                relationships_pct = (day['relationships'] / max_per_category) * 100
+                avg_star_percent = round((safety_pct + teamwork_pct + accountability_pct + relationships_pct) / 4, 2)
+        series.append({
+            'date': date_key,
+            'frenzy_count': day['frenzy_count'],
+            'average_star_percent': avg_star_percent,
+        })
+
+    return jsonify({'series': series, 'student_ids': selected_ids})
+
+
+@app.route('/api/checkpoints', methods=['GET', 'POST'])
+@limiter.limit("60 per minute")
+@login_required
+def api_checkpoints():
+    if request.method == 'POST':
+        if current_user.role not in ['staff', 'admin']:
+            return jsonify({'error': 'Permission denied'}), 403
+
+        payload = request.json or {}
+        checkpoint_type = (payload.get('checkpoint_type') or '').strip().lower()
+        label = (payload.get('label') or '').strip()
+        date_str = (payload.get('date') or '').strip()
+        student_ids = payload.get('student_ids') or []
+        if not isinstance(student_ids, list):
+            return jsonify({'error': 'student_ids must be an array'}), 400
+
+        parsed_student_ids = []
+        for raw in student_ids:
+            try:
+                parsed_student_ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        parsed_student_ids = sorted(set(parsed_student_ids))
+        if not parsed_student_ids:
+            return jsonify({'error': 'Select at least one student'}), 400
+        if not label:
+            return jsonify({'error': 'Label is required'}), 400
+        if not date_str:
+            return jsonify({'error': 'Date is required'}), 400
+        try:
+            checkpoint_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Date must be YYYY-MM-DD'}), 400
+
+        try:
+            color = _checkpoint_color_for_type(checkpoint_type, payload.get('color'))
+        except ValueError as err:
+            return jsonify({'error': str(err)}), 400
+
+        allowed_ids = set(_resolve_student_scope())
+        if any(sid not in allowed_ids for sid in parsed_student_ids):
+            return jsonify({'error': 'One or more students are outside your allowed scope'}), 403
+
+        checkpoint = Checkpoint(
+            checkpoint_type=checkpoint_type,
+            color=color,
+            date=checkpoint_date,
+            label=label,
+            created_by_user_id=current_user.id,
+        )
+        db.session.add(checkpoint)
+        db.session.flush()
+
+        for sid in parsed_student_ids:
+            db.session.add(CheckpointStudent(checkpoint_id=checkpoint.id, student_id=sid))
+
+        db.session.commit()
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='checkpoints',
+            resource_id=checkpoint.id,
+            details=f"type={checkpoint_type} date={checkpoint_date.isoformat()} students={len(parsed_student_ids)}",
+            ip_address=get_remote_address()
+        )
+        return jsonify(_serialize_checkpoint(checkpoint)), 201
+
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = (request.args.get('student_ids') or '').strip()
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify([])
+
+    query = Checkpoint.query.join(CheckpointStudent).filter(CheckpointStudent.student_id.in_(selected_ids))
+    if start_date_str:
+        query = query.filter(Checkpoint.date >= datetime.strptime(start_date_str, '%Y-%m-%d').date())
+    if end_date_str:
+        query = query.filter(Checkpoint.date <= datetime.strptime(end_date_str, '%Y-%m-%d').date())
+    checkpoints = query.options(selectinload(Checkpoint.students)).order_by(Checkpoint.date.asc(), Checkpoint.id.asc()).distinct().all()
+    return jsonify([_serialize_checkpoint(cp) for cp in checkpoints])
+
+
+@app.route('/api/checkpoints/<int:checkpoint_id>', methods=['PUT', 'DELETE'])
+@limiter.limit("60 per minute")
+@login_required
+def api_checkpoint_item(checkpoint_id):
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    checkpoint = Checkpoint.query.options(selectinload(Checkpoint.students)).get(checkpoint_id)
+    if not checkpoint:
+        return jsonify({'error': 'Checkpoint not found'}), 404
+
+    if request.method == 'DELETE':
+        db.session.delete(checkpoint)
+        db.session.commit()
+        log_phi_access(
+            action='DELETE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='checkpoints',
+            resource_id=checkpoint_id,
+            ip_address=get_remote_address()
+        )
+        return jsonify({'message': 'Checkpoint deleted'})
+
+    payload = request.json or {}
+    checkpoint_type = (payload.get('checkpoint_type') or checkpoint.checkpoint_type).strip().lower()
+    label = (payload.get('label') or checkpoint.label).strip()
+    date_str = payload.get('date')
+    color_candidate = payload.get('color')
+
+    if date_str:
+        try:
+            checkpoint.date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Date must be YYYY-MM-DD'}), 400
+    if not label:
+        return jsonify({'error': 'Label is required'}), 400
+
+    try:
+        checkpoint.color = _checkpoint_color_for_type(checkpoint_type, color_candidate or checkpoint.color)
+    except ValueError as err:
+        return jsonify({'error': str(err)}), 400
+
+    checkpoint.checkpoint_type = checkpoint_type
+    checkpoint.label = label
+
+    if 'student_ids' in payload:
+        incoming_ids = []
+        for raw in (payload.get('student_ids') or []):
+            try:
+                incoming_ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        incoming_ids = sorted(set(incoming_ids))
+        if not incoming_ids:
+            return jsonify({'error': 'Select at least one student'}), 400
+        allowed_ids = set(_resolve_student_scope())
+        if any(sid not in allowed_ids for sid in incoming_ids):
+            return jsonify({'error': 'One or more students are outside your allowed scope'}), 403
+        CheckpointStudent.query.filter_by(checkpoint_id=checkpoint.id).delete()
+        for sid in incoming_ids:
+            db.session.add(CheckpointStudent(checkpoint_id=checkpoint.id, student_id=sid))
+
+    db.session.commit()
+    checkpoint = Checkpoint.query.options(selectinload(Checkpoint.students)).get(checkpoint_id)
+    log_phi_access(
+        action='UPDATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='checkpoints',
+        resource_id=checkpoint_id,
+        ip_address=get_remote_address()
+    )
+    return jsonify(_serialize_checkpoint(checkpoint))
 
 @app.route('/api/summary', methods=['GET'])
 @limiter.limit("30 per minute")

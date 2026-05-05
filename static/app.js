@@ -17905,30 +17905,63 @@ function overviewDayInitial(day) {
     return m[day] || (day || '').slice(0, 2);
 }
 
+let summaryTrendsChartInstance = null;
+let currentSummaryCheckpointData = [];
+let currentSummaryTrendStudentIds = [];
+
+const summaryCheckpointTypeLabels = {
+    intervention: 'Intervention',
+    transition: 'Transition',
+    life_event: 'Life Event',
+    card_change: 'Card Change'
+};
+
 function buildBehaviorTrendCardHtml() {
     return `
         <div class="dashboard-card behavior-trend-card reports-trend-card" data-summary-card="behavior-trend">
             <div class="behavior-trend-controls">
-                <div class="behavior-trend-title-line">
-                    <select id="summary-trend-metric" aria-label="Trend metric">
-                        <option value="overall" selected>STAR Performance</option>
-                        <option value="safety">Safety</option>
-                        <option value="teamwork">Teamwork</option>
-                        <option value="accountability">Accountability</option>
-                        <option value="relationships">Relationships</option>
-                    </select>
-                    <select id="summary-trend-aggregation" aria-label="Trend aggregation">
-                        <option value="average" selected>Average</option>
-                    </select>
-                    <span>trend over</span>
-                    <select id="summary-trend-window" aria-label="Trend window">
-                        <option value="30day" selected>30 School Days</option>
-                    </select>
-                    <button type="button" class="behavior-trend-compare-btn" id="summary-trend-compare-btn">Compare</button>
+                <div class="behavior-trend-title-line trends-title-line">
+                    <div class="trends-heading-wrap">
+                        <h3 class="trends-title">Trends</h3>
+                    </div>
+                    <button type="button" class="behavior-trend-compare-btn" id="summary-add-checkpoint-btn" aria-label="Add checkpoint">Add Checkpoint</button>
                 </div>
             </div>
             <div class="behavior-trend-timeline" id="summary-behavior-trend-body">
                 <div class="behavior-trend-empty">Loading trend data...</div>
+            </div>
+            <div id="summary-trends-checkpoint-list" class="summary-trends-checkpoint-list"></div>
+            <div id="summary-checkpoint-modal" class="summary-checkpoint-modal-backdrop" style="display:none;">
+                <div class="summary-checkpoint-modal" role="dialog" aria-modal="true" aria-label="Add checkpoint">
+                    <div class="summary-checkpoint-modal-header">
+                        <h4 id="summary-checkpoint-modal-title">Add Checkpoint</h4>
+                        <button type="button" id="summary-checkpoint-close-btn" class="summary-checkpoint-close-btn" aria-label="Close checkpoint modal">&times;</button>
+                    </div>
+                    <div class="summary-checkpoint-modal-body">
+                        <label for="summary-checkpoint-type">Type</label>
+                        <select id="summary-checkpoint-type">
+                            <option value="intervention">Add Intervention</option>
+                            <option value="transition">Add Transition</option>
+                            <option value="life_event">Add Life Event</option>
+                            <option value="card_change">Add Card Change</option>
+                        </select>
+                        <label for="summary-checkpoint-color">Card Change Color</label>
+                        <select id="summary-checkpoint-color">
+                            <option value="yellow">Yellow</option>
+                            <option value="green">Green</option>
+                            <option value="blue">Blue</option>
+                        </select>
+                        <label for="summary-checkpoint-date">Date</label>
+                        <input type="date" id="summary-checkpoint-date">
+                        <label for="summary-checkpoint-label">Label</label>
+                        <input type="text" id="summary-checkpoint-label" maxlength="255" placeholder="Enter checkpoint label">
+                        <p id="summary-checkpoint-student-scope-note" class="summary-checkpoint-student-scope-note"></p>
+                    </div>
+                    <div class="summary-checkpoint-modal-actions">
+                        <button type="button" id="summary-checkpoint-cancel-btn" class="btn-secondary">Cancel</button>
+                        <button type="button" id="summary-checkpoint-save-btn" class="btn-primary">Save</button>
+                    </div>
+                </div>
             </div>
         </div>`;
 }
@@ -17940,17 +17973,47 @@ function getSummaryTrendFetchRange() {
         return { start: st.customStart, end: st.customEnd };
     }
 
-    const today = new Date();
-    const end = today.toISOString().split('T')[0];
-    let lookbackDays = 120;
-    if (period === 'weekly') lookbackDays = 21;
-    else if (period === 'current_year') lookbackDays = 330;
-    else if (/^quarter[1-4]$/.test(period)) lookbackDays = 150;
-    else if (period === 'all_time') return {};
+    const toIso = (value) => {
+        if (!value) return null;
+        const raw = String(value).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toISOString().split('T')[0];
+    };
 
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - lookbackDays);
-    return { start: startDate.toISOString().split('T')[0], end };
+    const today = new Date();
+    const endIso = today.toISOString().split('T')[0];
+    if (period === 'all_time') return {};
+    if (period === 'weekly') {
+        const start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        return { start: start.toISOString().split('T')[0], end: endIso };
+    }
+    if (period === '30day') {
+        const start = new Date(today);
+        start.setDate(start.getDate() - 29);
+        return { start: start.toISOString().split('T')[0], end: endIso };
+    }
+    if (period === 'current_year') {
+        const schoolYearDates = loadSchoolYearDates();
+        const current = getCurrentSchoolYear();
+        const range = schoolYearDates?.[current];
+        const start = toIso(range?.start);
+        const end = toIso(range?.end);
+        if (start && end) return { start, end };
+    }
+    if (/^quarter[1-4]$/.test(period)) {
+        const quarterNum = period.replace('quarter', '');
+        const quarterDates = loadQuarterDates();
+        const q = quarterDates?.[quarterNum];
+        const start = toIso(q?.start);
+        const end = toIso(q?.end);
+        if (start && end) return { start, end };
+    }
+    const fallback = new Date(today);
+    fallback.setDate(fallback.getDate() - 89);
+    return { start: fallback.toISOString().split('T')[0], end: endIso };
 }
 
 async function fetchSummaryTrendRecords() {
@@ -17965,12 +18028,66 @@ async function fetchSummaryTrendRecords() {
     if (range.start) params.set('start_date', range.start);
     if (range.end) params.set('end_date', range.end);
 
-    const url = `/api/daily-records${params.toString() ? `?${params.toString()}` : ''}`;
+    const url = `/api/trends${params.toString() ? `?${params.toString()}` : ''}`;
     const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Unable to load trend records (${response.status})`);
+    if (response.ok) {
+        return response.json();
     }
-    return response.json();
+    // Backward-compatible fallback: if backend hasn't loaded /api/trends yet, derive series from daily records.
+    if (response.status === 404) {
+        const fallbackParams = new URLSearchParams(params);
+        const legacyUrl = `/api/daily-records${fallbackParams.toString() ? `?${fallbackParams.toString()}` : ''}`;
+        const legacyResponse = await fetch(legacyUrl);
+        if (!legacyResponse.ok) {
+            throw new Error(`Unable to load trend records (${legacyResponse.status})`);
+        }
+        const records = await legacyResponse.json();
+        const byDate = new Map();
+        (Array.isArray(records) ? records : []).forEach((record) => {
+            if (!record || !record.date || record.attendance_status === 'excused') return;
+            if (!byDate.has(record.date)) {
+                byDate.set(record.date, {
+                    frenzy_count: 0,
+                    safety: 0,
+                    teamwork: 0,
+                    accountability: 0,
+                    relationships: 0,
+                    possible: 0
+                });
+            }
+            const row = byDate.get(record.date);
+            row.frenzy_count += Array.isArray(record.frenzies) ? record.frenzies.length : 0;
+            (record.periods || []).forEach((period) => {
+                row.safety += Number(period.safety_points) || 0;
+                row.teamwork += Number(period.teamwork_points) || 0;
+                row.accountability += Number(period.accountability_points) || 0;
+                row.relationships += Number(period.relationships_points) || 0;
+                row.possible += Number(period.points_possible) || 4;
+            });
+        });
+        const series = Array.from(byDate.keys()).sort().map((date) => {
+            const row = byDate.get(date);
+            let average_star_percent = null;
+            if (row.possible > 0) {
+                const numPeriods = row.possible / 4;
+                const maxPerCategory = numPeriods > 0 ? numPeriods * 2 : 0;
+                if (maxPerCategory > 0) {
+                    const safetyPct = (row.safety / maxPerCategory) * 100;
+                    const teamworkPct = (row.teamwork / maxPerCategory) * 100;
+                    const accountabilityPct = (row.accountability / maxPerCategory) * 100;
+                    const relationshipsPct = (row.relationships / maxPerCategory) * 100;
+                    average_star_percent = (safetyPct + teamworkPct + accountabilityPct + relationshipsPct) / 4;
+                }
+            }
+            return {
+                date,
+                frenzy_count: row.frenzy_count,
+                average_star_percent
+            };
+        });
+        return { series, student_ids: [] };
+    }
+    throw new Error(`Unable to load trend records (${response.status})`);
 }
 
 function parseIsoDateLocal(isoDate) {
@@ -18017,98 +18134,184 @@ function calculateTrendPercent(records, metric) {
     return Math.max(0, Math.min(100, pct[metric] ?? pct.overall));
 }
 
-function buildSummaryTrendPoints(records, metric) {
-    const recordsByDate = new Map();
-    (records || []).forEach(record => {
-        if (!record || !record.date) return;
-        if (!recordsByDate.has(record.date)) recordsByDate.set(record.date, []);
-        recordsByDate.get(record.date).push(record);
-    });
-
-    const dateKeys = Array.from(recordsByDate.keys()).sort();
-    const selectedDates = dateKeys.slice(-30);
-    if (!selectedDates.length) return [];
-
-    const bucketCount = Math.min(5, Math.ceil(selectedDates.length / 4));
-    const bucketSize = Math.ceil(selectedDates.length / bucketCount);
-    const points = [];
-
-    for (let i = 0; i < selectedDates.length; i += bucketSize) {
-        const bucketDates = selectedDates.slice(i, i + bucketSize);
-        const bucketRecords = bucketDates.flatMap(date => recordsByDate.get(date) || []);
-        const value = calculateTrendPercent(bucketRecords, metric);
-        if (value == null) continue;
-        points.push({
-            label: formatTrendDateLabel(bucketDates[bucketDates.length - 1]),
-            value: Math.round(value)
-        });
+async function fetchSummaryTrendCheckpoints() {
+    const st = dashboardState.summary || {};
+    const params = new URLSearchParams();
+    if (st.studentId) params.set('student_id', String(st.studentId));
+    if (st.staffId) params.set('staff_id', String(st.staffId));
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
+    const range = getSummaryTrendFetchRange();
+    if (range.start) params.set('start_date', range.start);
+    if (range.end) params.set('end_date', range.end);
+    const response = await fetch(`/api/checkpoints${params.toString() ? `?${params.toString()}` : ''}`);
+    if (response.status === 404) {
+        return [];
     }
-
-    return points;
+    if (!response.ok) {
+        throw new Error(`Unable to load checkpoints (${response.status})`);
+    }
+    return response.json();
 }
 
-function renderSummaryTrendSvg(points) {
-    if (!points || points.length < 2) {
-        return `
-            <div class="behavior-trend-empty">
-                Not enough point-card data to build a 30-school-day trend yet.
-            </div>`;
+function renderSummaryCheckpointList(checkpoints) {
+    const listEl = document.getElementById('summary-trends-checkpoint-list');
+    if (!listEl) return;
+    if (!Array.isArray(checkpoints) || checkpoints.length === 0) {
+        listEl.innerHTML = '<div class="summary-trends-checkpoint-empty">No checkpoints in this timeframe.</div>';
+        return;
     }
-
-    const width = 1000;
-    const height = 216;
-    const left = 54;
-    const right = 32;
-    const top = 26;
-    const bottom = 44;
-    const chartW = width - left - right;
-    const chartH = height - top - bottom;
-    const xStep = points.length > 1 ? chartW / (points.length - 1) : chartW;
-    const toX = i => left + (i * xStep);
-    const toY = value => top + ((100 - Math.max(0, Math.min(100, value))) / 100) * chartH;
-    const plotted = points.map((p, i) => ({ ...p, x: toX(i), y: toY(p.value) }));
-    const gridValues = [100, 75, 50, 25, 0];
-
-    let grid = '';
-    gridValues.forEach(v => {
-        const y = toY(v);
-        grid += `<line class="behavior-trend-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>`;
-        grid += `<text class="behavior-trend-axis-label" x="${left - 16}" y="${y + 4}" text-anchor="end">${v}%</text>`;
-    });
-
-    let segments = '';
-    for (let i = 0; i < plotted.length - 1; i++) {
-        const a = plotted[i];
-        const b = plotted[i + 1];
-        const color = b.value > a.value ? '#22c55e' : b.value < a.value ? '#ef4444' : '#64748b';
-        segments += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="3" stroke-linecap="round"></line>`;
-    }
-
-    const markers = plotted.map((p) => `
-        <g class="behavior-trend-point-group">
-            <circle class="behavior-trend-marker" cx="${p.x}" cy="${p.y}" r="5" fill="#ffffff" stroke="#64748b" stroke-width="2"></circle>
-            <text class="behavior-trend-point-value" x="${p.x}" y="${p.y - 11}" text-anchor="middle" fill="#64748b">${p.value}%</text>
-            <text class="behavior-trend-point-label" x="${p.x}" y="${height - 12}" text-anchor="middle">${escapeHtml(p.label)}</text>
-        </g>
+    const sorted = checkpoints.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    listEl.innerHTML = sorted.map((cp) => `
+        <div class="summary-checkpoint-item">
+            <span class="summary-checkpoint-swatch" style="background:${escapeHtml(cp.color || '#64748b')}"></span>
+            <span class="summary-checkpoint-date">${escapeHtml(formatTrendDateLabel(cp.date))}</span>
+            <span class="summary-checkpoint-type">${escapeHtml(summaryCheckpointTypeLabels[cp.checkpoint_type] || cp.checkpoint_type || 'Checkpoint')}</span>
+            <span class="summary-checkpoint-label">${escapeHtml(cp.label || '')}</span>
+            <button type="button" class="btn-secondary summary-checkpoint-edit-btn" data-checkpoint-id="${cp.id}">Edit</button>
+            <button type="button" class="btn-secondary summary-checkpoint-delete-btn" data-checkpoint-id="${cp.id}">Delete</button>
+        </div>
     `).join('');
-
-    return `
-        <div class="behavior-trend-chart-wrap">
-            <svg class="behavior-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="STAR performance trend">
-                ${grid}
-                ${segments}
-                ${markers}
-            </svg>
-        </div>`;
 }
 
-function populateSummaryBehaviorTrendCard(records) {
+function buildSummaryTrendPoints(trendPayload) {
+    const series = (trendPayload && Array.isArray(trendPayload.series)) ? trendPayload.series : [];
+    return series.map((row) => ({
+        date: row.date,
+        label: formatTrendDateLabel(row.date),
+        frenzyCount: Number(row.frenzy_count) || 0,
+        starPercent: row.average_star_percent == null ? null : Number(row.average_star_percent)
+    }));
+}
+
+function createCheckpointOverlayPlugin() {
+    return {
+        id: 'summaryCheckpointOverlay',
+        afterDatasetsDraw(chart, args, pluginOptions) {
+            const checkpoints = (pluginOptions && pluginOptions.checkpoints) ? pluginOptions.checkpoints : [];
+            if (!checkpoints.length) return;
+            const xScale = chart.scales.x;
+            const chartArea = chart.chartArea;
+            if (!xScale || !chartArea) return;
+            const ctx = chart.ctx;
+            const labels = chart.data.labels || [];
+            checkpoints.forEach((cp) => {
+                const dateLabel = formatTrendDateLabel(cp.date);
+                const idx = labels.indexOf(dateLabel);
+                if (idx < 0) return;
+                const x = xScale.getPixelForValue(idx);
+                const color = cp.color || '#64748b';
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 4]);
+                ctx.beginPath();
+                ctx.moveTo(x, chartArea.top);
+                ctx.lineTo(x, chartArea.bottom);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(x, chartArea.top + 6, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#374151';
+                ctx.font = '11px Inter, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText((cp.label || '').slice(0, 26), x + 5, chartArea.top + 12);
+                ctx.restore();
+            });
+        }
+    };
+}
+
+function renderSummaryTrendChart(points, checkpoints) {
     const body = document.getElementById('summary-behavior-trend-body');
     if (!body) return;
-    const metricSelect = document.getElementById('summary-trend-metric');
-    const metric = metricSelect ? metricSelect.value : 'overall';
-    const points = buildSummaryTrendPoints(records || [], metric);
-    body.innerHTML = renderSummaryTrendSvg(points);
+    if (!points || points.length === 0) {
+        body.innerHTML = '<div class="behavior-trend-empty">No trend data in this timeframe.</div>';
+        return;
+    }
+    body.innerHTML = '<div class="behavior-trend-chart-wrap"><canvas id="summary-trends-chart-canvas" aria-label="Trends chart" role="img"></canvas></div>';
+    const canvas = document.getElementById('summary-trends-chart-canvas');
+    if (!canvas || typeof Chart === 'undefined') return;
+    if (summaryTrendsChartInstance) {
+        summaryTrendsChartInstance.destroy();
+        summaryTrendsChartInstance = null;
+    }
+    const labels = points.map(p => p.label);
+    const frenzyData = points.map(p => p.frenzyCount);
+    const starData = points.map(p => p.starPercent);
+    const checkpointPlugin = createCheckpointOverlayPlugin();
+    summaryTrendsChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Number of Frenzies',
+                    data: frenzyData,
+                    yAxisID: 'yFrenzy',
+                    borderColor: '#1d4ed8',
+                    backgroundColor: 'rgba(29, 78, 216, 0.1)',
+                    borderWidth: 2.5,
+                    cubicInterpolationMode: 'monotone',
+                    pointRadius: 0,
+                    tension: 0.92
+                },
+                {
+                    label: 'Average STAR %',
+                    data: starData,
+                    yAxisID: 'yStar',
+                    borderColor: '#7e22ce',
+                    backgroundColor: 'rgba(126, 34, 206, 0.1)',
+                    borderWidth: 2.5,
+                    cubicInterpolationMode: 'monotone',
+                    pointRadius: 0,
+                    tension: 0.92
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                yFrenzy: {
+                    position: 'left',
+                    beginAtZero: true,
+                    title: { display: true, text: 'Number of Frenzies' },
+                    grid: { display: false }
+                },
+                yStar: {
+                    position: 'right',
+                    beginAtZero: true,
+                    max: 100,
+                    title: { display: true, text: 'Average STAR %' },
+                    grid: { display: false },
+                    ticks: {
+                        callback: (value) => `${value}%`
+                    }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: { position: 'top' },
+                summaryCheckpointOverlay: { checkpoints: checkpoints || [] },
+                datalabels: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => {
+                            const y = context.parsed.y;
+                            if (context.dataset.yAxisID === 'yStar') return `${context.dataset.label}: ${Math.round(y)}%`;
+                            return `${context.dataset.label}: ${y}`;
+                        }
+                    }
+                }
+            }
+        },
+        plugins: [checkpointPlugin]
+    });
     const grid = body.closest('.dashboard-card-grid');
     if (grid) scheduleMasonryLayoutAfterResize(grid);
 }
@@ -18117,32 +18320,176 @@ async function loadSummaryBehaviorTrendCard() {
     const body = document.getElementById('summary-behavior-trend-body');
     if (!body) return;
     try {
-        const records = await fetchSummaryTrendRecords();
-        window.currentSummaryTrendRecords = Array.isArray(records) ? records : [];
-        populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords);
+        const [trendPayload, checkpoints] = await Promise.all([
+            fetchSummaryTrendRecords(),
+            fetchSummaryTrendCheckpoints()
+        ]);
+        window.currentSummaryTrendRecords = trendPayload || { series: [] };
+        currentSummaryTrendStudentIds = Array.isArray(trendPayload?.student_ids) ? trendPayload.student_ids : [];
+        currentSummaryCheckpointData = Array.isArray(checkpoints) ? checkpoints : [];
+        const points = buildSummaryTrendPoints(window.currentSummaryTrendRecords);
+        renderSummaryTrendChart(points, currentSummaryCheckpointData);
+        renderSummaryCheckpointList(currentSummaryCheckpointData);
     } catch (err) {
         body.innerHTML = `<div class="behavior-trend-empty">Unable to load trend data: ${escapeHtml(err.message || 'Unknown error')}</div>`;
     }
 }
 
+function setSummaryCheckpointColorVisibility() {
+    const typeSelect = document.getElementById('summary-checkpoint-type');
+    const colorSelect = document.getElementById('summary-checkpoint-color');
+    if (!typeSelect || !colorSelect) return;
+    const isCardChange = typeSelect.value === 'card_change';
+    colorSelect.disabled = !isCardChange;
+    colorSelect.parentElement?.classList.toggle('is-disabled', !isCardChange);
+}
+
+function openSummaryCheckpointModal(checkpoint) {
+    const modal = document.getElementById('summary-checkpoint-modal');
+    const title = document.getElementById('summary-checkpoint-modal-title');
+    const typeSelect = document.getElementById('summary-checkpoint-type');
+    const colorSelect = document.getElementById('summary-checkpoint-color');
+    const dateInput = document.getElementById('summary-checkpoint-date');
+    const labelInput = document.getElementById('summary-checkpoint-label');
+    const scopeNote = document.getElementById('summary-checkpoint-student-scope-note');
+    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
+    if (!modal || !typeSelect || !colorSelect || !dateInput || !labelInput || !scopeNote || !saveBtn || !title) return;
+    const isEdit = !!checkpoint;
+    title.textContent = isEdit ? 'Edit Checkpoint' : 'Add Checkpoint';
+    saveBtn.dataset.mode = isEdit ? 'edit' : 'create';
+    saveBtn.dataset.checkpointId = isEdit ? String(checkpoint.id) : '';
+    typeSelect.value = isEdit ? (checkpoint.checkpoint_type || 'intervention') : 'intervention';
+    colorSelect.value = isEdit ? (checkpoint.color || 'yellow') : 'yellow';
+    dateInput.value = isEdit
+        ? (checkpoint.date || '')
+        : (new Date().toISOString().split('T')[0]);
+    labelInput.value = isEdit ? (checkpoint.label || '') : '';
+    const count = currentSummaryTrendStudentIds.length;
+    scopeNote.textContent = count <= 1
+        ? 'This checkpoint applies to the current student selection.'
+        : `This checkpoint applies to ${count} selected students.`;
+    setSummaryCheckpointColorVisibility();
+    modal.style.display = 'flex';
+}
+
+function closeSummaryCheckpointModal() {
+    const modal = document.getElementById('summary-checkpoint-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveSummaryCheckpointFromModal() {
+    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
+    const typeSelect = document.getElementById('summary-checkpoint-type');
+    const colorSelect = document.getElementById('summary-checkpoint-color');
+    const dateInput = document.getElementById('summary-checkpoint-date');
+    const labelInput = document.getElementById('summary-checkpoint-label');
+    if (!saveBtn || !typeSelect || !colorSelect || !dateInput || !labelInput) return;
+    const label = (labelInput.value || '').trim();
+    if (!label) {
+        showMessage('Please enter a checkpoint label.', 'error');
+        return;
+    }
+    if (!dateInput.value) {
+        showMessage('Please select a date.', 'error');
+        return;
+    }
+    if (!currentSummaryTrendStudentIds.length) {
+        showMessage('No students found in the current selection.', 'error');
+        return;
+    }
+    if (currentSummaryTrendStudentIds.length > 1 && saveBtn.dataset.mode !== 'edit') {
+        const ok = confirm(`You are creating a checkpoint for ${currentSummaryTrendStudentIds.length} students. Continue?`);
+        if (!ok) return;
+    }
+    const payload = {
+        checkpoint_type: typeSelect.value,
+        color: typeSelect.value === 'card_change' ? colorSelect.value : null,
+        date: dateInput.value,
+        label,
+        student_ids: currentSummaryTrendStudentIds
+    };
+    const isEdit = saveBtn.dataset.mode === 'edit' && saveBtn.dataset.checkpointId;
+    const url = isEdit ? `/api/checkpoints/${saveBtn.dataset.checkpointId}` : '/api/checkpoints';
+    const method = isEdit ? 'PUT' : 'POST';
+    const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to save checkpoint');
+    }
+    closeSummaryCheckpointModal();
+    await loadSummaryBehaviorTrendCard();
+    showMessage(isEdit ? 'Checkpoint updated.' : 'Checkpoint added.', 'success');
+}
+
+async function deleteSummaryCheckpoint(checkpointId) {
+    const ok = confirm('Delete this checkpoint?');
+    if (!ok) return;
+    const response = await fetch(`/api/checkpoints/${checkpointId}`, { method: 'DELETE' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete checkpoint');
+    }
+    await loadSummaryBehaviorTrendCard();
+    showMessage('Checkpoint deleted.', 'success');
+}
+
 function wireSummaryBehaviorTrendCard() {
-    const metricSelect = document.getElementById('summary-trend-metric');
-    if (metricSelect && !metricSelect.dataset.bound) {
-        metricSelect.dataset.bound = 'true';
-        metricSelect.addEventListener('change', () => {
-            populateSummaryBehaviorTrendCard(window.currentSummaryTrendRecords || []);
+    const addBtn = document.getElementById('summary-add-checkpoint-btn');
+    if (addBtn && !addBtn.dataset.bound) {
+        addBtn.dataset.bound = 'true';
+        addBtn.addEventListener('click', () => openSummaryCheckpointModal(null));
+    }
+    const closeBtn = document.getElementById('summary-checkpoint-close-btn');
+    if (closeBtn && !closeBtn.dataset.bound) {
+        closeBtn.dataset.bound = 'true';
+        closeBtn.addEventListener('click', closeSummaryCheckpointModal);
+    }
+    const cancelBtn = document.getElementById('summary-checkpoint-cancel-btn');
+    if (cancelBtn && !cancelBtn.dataset.bound) {
+        cancelBtn.dataset.bound = 'true';
+        cancelBtn.addEventListener('click', closeSummaryCheckpointModal);
+    }
+    const typeSelect = document.getElementById('summary-checkpoint-type');
+    if (typeSelect && !typeSelect.dataset.bound) {
+        typeSelect.dataset.bound = 'true';
+        typeSelect.addEventListener('change', setSummaryCheckpointColorVisibility);
+    }
+    const saveBtn = document.getElementById('summary-checkpoint-save-btn');
+    if (saveBtn && !saveBtn.dataset.bound) {
+        saveBtn.dataset.bound = 'true';
+        saveBtn.addEventListener('click', async () => {
+            try {
+                await saveSummaryCheckpointFromModal();
+            } catch (err) {
+                showMessage(err.message || 'Unable to save checkpoint.', 'error');
+            }
         });
     }
-
-    const compareBtn = document.getElementById('summary-trend-compare-btn');
-    if (compareBtn && !compareBtn.dataset.bound) {
-        compareBtn.dataset.bound = 'true';
-        compareBtn.addEventListener('click', () => {
-            const compareToggle = document.getElementById('summary-compare-toggle');
-            if (compareToggle) compareToggle.click();
+    const list = document.getElementById('summary-trends-checkpoint-list');
+    if (list && !list.dataset.bound) {
+        list.dataset.bound = 'true';
+        list.addEventListener('click', async (e) => {
+            const editBtn = e.target.closest('.summary-checkpoint-edit-btn');
+            if (editBtn) {
+                const id = Number(editBtn.dataset.checkpointId);
+                const checkpoint = currentSummaryCheckpointData.find((row) => Number(row.id) === id);
+                if (checkpoint) openSummaryCheckpointModal(checkpoint);
+                return;
+            }
+            const delBtn = e.target.closest('.summary-checkpoint-delete-btn');
+            if (delBtn) {
+                try {
+                    await deleteSummaryCheckpoint(Number(delBtn.dataset.checkpointId));
+                } catch (err) {
+                    showMessage(err.message || 'Unable to delete checkpoint.', 'error');
+                }
+            }
         });
     }
-
     loadSummaryBehaviorTrendCard();
 }
 
