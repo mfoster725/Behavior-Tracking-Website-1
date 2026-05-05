@@ -515,6 +515,12 @@ def ensure_daily_query_indexes():
                 conn.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_infractions_period_record_id ON infractions (period_record_id)"
                 ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_checkpoints_date ON checkpoints (date)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_checkpoint_students_student_id ON checkpoint_students (student_id)"
+                ))
                 conn.commit()
     except Exception as e:
         app.logger.warning(f"Failed to ensure daily query indexes: {e}")
@@ -632,6 +638,31 @@ class FrenzyEvent(db.Model):
     
     # Result/outcome
     result = db.Column(db.String(100))
+
+
+class CheckpointStudent(db.Model):
+    __tablename__ = 'checkpoint_students'
+    id = db.Column(db.Integer, primary_key=True)
+    checkpoint_id = db.Column(db.Integer, db.ForeignKey('checkpoints.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+
+    student = db.relationship('Student')
+    __table_args__ = (db.UniqueConstraint('checkpoint_id', 'student_id', name='unique_checkpoint_student'),)
+
+
+class Checkpoint(db.Model):
+    __tablename__ = 'checkpoints'
+    id = db.Column(db.Integer, primary_key=True)
+    checkpoint_type = db.Column(db.String(30), nullable=False, index=True)  # intervention, transition, life_event, card_change
+    color = db.Column(db.String(20), nullable=False)
+    date = db.Column(db.Date, nullable=False, index=True)
+    label = db.Column(db.String(255), nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    created_by = db.relationship('User')
+    students = db.relationship('CheckpointStudent', backref='checkpoint', lazy=True, cascade='all, delete-orphan')
 
 class TeamMember(db.Model):
     __tablename__ = 'team_members'
@@ -2356,6 +2387,351 @@ def daily_records():
         
         return jsonify(result)
 
+
+def _parse_student_ids_param(student_ids_param):
+    parsed = []
+    for raw_id in (student_ids_param or '').split(','):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            parsed.append(int(raw_id))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(parsed))
+
+
+def _resolve_student_scope(student_id=None, student_ids_param='', staff_id=None, managed_by_me=False):
+    requested_student_ids = _parse_student_ids_param(student_ids_param)
+    if student_id:
+        requested_student_ids = [student_id]
+
+    if current_user.role == 'student':
+        if current_user.student_id:
+            return [current_user.student_id]
+        return []
+
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        assigned_student_ids = [assoc.student_id for assoc in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()]
+        if not assigned_student_ids:
+            return []
+        if requested_student_ids:
+            return [sid for sid in requested_student_ids if sid in assigned_student_ids]
+        return sorted(set(assigned_student_ids))
+
+    if requested_student_ids:
+        return requested_student_ids
+
+    if staff_id and current_user.role in ['staff', 'admin']:
+        staff_user = User.query.get(staff_id)
+        if not staff_user:
+            return []
+        staff_name = staff_user.name or ''
+        staff_username = staff_user.username or ''
+        team_members = TeamMember.query.filter(
+            (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
+            (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
+        ).all()
+        return sorted({tm.student_id for tm in team_members if tm.student_id})
+
+    if managed_by_me and current_user.role in ['staff', 'admin']:
+        user_name = (current_user.name or current_user.username or '').strip()
+        user_username = (current_user.username or '').strip()
+        team_members = TeamMember.query.filter(
+            db.or_(
+                db.func.lower(TeamMember.name) == db.func.lower(user_name),
+                db.func.lower(TeamMember.name) == db.func.lower(user_username),
+            )
+        ).all()
+        return sorted({tm.student_id for tm in team_members if tm.student_id})
+
+    # Default to all active student IDs for staff/admin "all students" view.
+    student_users = User.query.filter_by(role='student').all()
+    return sorted({u.student_id for u in student_users if u.student_id})
+
+
+def _checkpoint_color_for_type(checkpoint_type, requested_color=None):
+    fixed = {
+        'intervention': 'orange',
+        'transition': 'purple',
+        'life_event': 'gray',
+    }
+    if checkpoint_type in fixed:
+        return fixed[checkpoint_type]
+    if checkpoint_type == 'card_change':
+        color = (requested_color or '').strip().lower()
+        if color in {'yellow', 'green', 'blue'}:
+            return color
+        raise ValueError('Card Change requires color: yellow, green, or blue.')
+    raise ValueError('Invalid checkpoint type.')
+
+
+def _serialize_checkpoint(checkpoint):
+    return {
+        'id': checkpoint.id,
+        'checkpoint_type': checkpoint.checkpoint_type,
+        'color': checkpoint.color,
+        'date': checkpoint.date.isoformat(),
+        'label': checkpoint.label,
+        'student_ids': [row.student_id for row in checkpoint.students],
+        'created_by_user_id': checkpoint.created_by_user_id,
+        'created_at': checkpoint.created_at.isoformat() if checkpoint.created_at else None,
+        'updated_at': checkpoint.updated_at.isoformat() if checkpoint.updated_at else None,
+    }
+
+
+@app.route('/api/trends', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def api_trends():
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = (request.args.get('student_ids') or '').strip()
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else None
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else None
+    if start_date and end_date and end_date < start_date:
+        return jsonify({'error': 'end_date must be on or after start_date'}), 400
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify({'series': [], 'student_ids': []})
+
+    query = DailyRecord.query.filter(DailyRecord.student_id.in_(selected_ids))
+    if start_date:
+        query = query.filter(DailyRecord.date >= start_date)
+    if end_date:
+        query = query.filter(DailyRecord.date <= end_date)
+    query = query.options(
+        selectinload(DailyRecord.periods),
+        selectinload(DailyRecord.frenzies),
+    )
+
+    records = query.order_by(DailyRecord.date.asc()).all()
+    by_date = {}
+    for record in records:
+        if record.attendance_status == 'excused':
+            continue
+        key = record.date.isoformat()
+        if key not in by_date:
+            by_date[key] = {
+                'frenzy_count': 0,
+                'safety': 0,
+                'teamwork': 0,
+                'accountability': 0,
+                'relationships': 0,
+                'possible': 0,
+            }
+        entry = by_date[key]
+        entry['frenzy_count'] += len(record.frenzies or [])
+        for period in (record.periods or []):
+            entry['safety'] += int(period.safety_points or 0)
+            entry['teamwork'] += int(period.teamwork_points or 0)
+            entry['accountability'] += int(period.accountability_points or 0)
+            entry['relationships'] += int(period.relationships_points or 0)
+            entry['possible'] += int(period.points_possible or 4)
+
+    series = []
+    for date_key in sorted(by_date.keys()):
+        day = by_date[date_key]
+        avg_star_percent = None
+        if day['possible'] > 0:
+            num_periods = day['possible'] / 4
+            max_per_category = num_periods * 2 if num_periods > 0 else 0
+            if max_per_category > 0:
+                safety_pct = (day['safety'] / max_per_category) * 100
+                teamwork_pct = (day['teamwork'] / max_per_category) * 100
+                accountability_pct = (day['accountability'] / max_per_category) * 100
+                relationships_pct = (day['relationships'] / max_per_category) * 100
+                avg_star_percent = round((safety_pct + teamwork_pct + accountability_pct + relationships_pct) / 4, 2)
+        series.append({
+            'date': date_key,
+            'frenzy_count': day['frenzy_count'],
+            'average_star_percent': avg_star_percent,
+        })
+
+    return jsonify({'series': series, 'student_ids': selected_ids})
+
+
+@app.route('/api/checkpoints', methods=['GET', 'POST'])
+@limiter.limit("60 per minute")
+@login_required
+def api_checkpoints():
+    if request.method == 'POST':
+        if current_user.role not in ['staff', 'admin']:
+            return jsonify({'error': 'Permission denied'}), 403
+
+        payload = request.json or {}
+        checkpoint_type = (payload.get('checkpoint_type') or '').strip().lower()
+        label = (payload.get('label') or '').strip()
+        date_str = (payload.get('date') or '').strip()
+        student_ids = payload.get('student_ids') or []
+        if not isinstance(student_ids, list):
+            return jsonify({'error': 'student_ids must be an array'}), 400
+
+        parsed_student_ids = []
+        for raw in student_ids:
+            try:
+                parsed_student_ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        parsed_student_ids = sorted(set(parsed_student_ids))
+        if not parsed_student_ids:
+            return jsonify({'error': 'Select at least one student'}), 400
+        if not label:
+            return jsonify({'error': 'Label is required'}), 400
+        if not date_str:
+            return jsonify({'error': 'Date is required'}), 400
+        try:
+            checkpoint_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Date must be YYYY-MM-DD'}), 400
+
+        try:
+            color = _checkpoint_color_for_type(checkpoint_type, payload.get('color'))
+        except ValueError as err:
+            return jsonify({'error': str(err)}), 400
+
+        allowed_ids = set(_resolve_student_scope())
+        if any(sid not in allowed_ids for sid in parsed_student_ids):
+            return jsonify({'error': 'One or more students are outside your allowed scope'}), 403
+
+        checkpoint = Checkpoint(
+            checkpoint_type=checkpoint_type,
+            color=color,
+            date=checkpoint_date,
+            label=label,
+            created_by_user_id=current_user.id,
+        )
+        db.session.add(checkpoint)
+        db.session.flush()
+
+        for sid in parsed_student_ids:
+            db.session.add(CheckpointStudent(checkpoint_id=checkpoint.id, student_id=sid))
+
+        db.session.commit()
+        log_phi_access(
+            action='CREATE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='checkpoints',
+            resource_id=checkpoint.id,
+            details=f"type={checkpoint_type} date={checkpoint_date.isoformat()} students={len(parsed_student_ids)}",
+            ip_address=get_remote_address()
+        )
+        return jsonify(_serialize_checkpoint(checkpoint)), 201
+
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = (request.args.get('student_ids') or '').strip()
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify([])
+
+    query = Checkpoint.query.join(CheckpointStudent).filter(CheckpointStudent.student_id.in_(selected_ids))
+    if start_date_str:
+        query = query.filter(Checkpoint.date >= datetime.strptime(start_date_str, '%Y-%m-%d').date())
+    if end_date_str:
+        query = query.filter(Checkpoint.date <= datetime.strptime(end_date_str, '%Y-%m-%d').date())
+    checkpoints = query.options(selectinload(Checkpoint.students)).order_by(Checkpoint.date.asc(), Checkpoint.id.asc()).distinct().all()
+    return jsonify([_serialize_checkpoint(cp) for cp in checkpoints])
+
+
+@app.route('/api/checkpoints/<int:checkpoint_id>', methods=['PUT', 'DELETE'])
+@limiter.limit("60 per minute")
+@login_required
+def api_checkpoint_item(checkpoint_id):
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    checkpoint = Checkpoint.query.options(selectinload(Checkpoint.students)).get(checkpoint_id)
+    if not checkpoint:
+        return jsonify({'error': 'Checkpoint not found'}), 404
+
+    if request.method == 'DELETE':
+        db.session.delete(checkpoint)
+        db.session.commit()
+        log_phi_access(
+            action='DELETE',
+            user_id=current_user.id,
+            username=current_user.username,
+            role=current_user.role,
+            resource_type='checkpoints',
+            resource_id=checkpoint_id,
+            ip_address=get_remote_address()
+        )
+        return jsonify({'message': 'Checkpoint deleted'})
+
+    payload = request.json or {}
+    checkpoint_type = (payload.get('checkpoint_type') or checkpoint.checkpoint_type).strip().lower()
+    label = (payload.get('label') or checkpoint.label).strip()
+    date_str = payload.get('date')
+    color_candidate = payload.get('color')
+
+    if date_str:
+        try:
+            checkpoint.date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Date must be YYYY-MM-DD'}), 400
+    if not label:
+        return jsonify({'error': 'Label is required'}), 400
+
+    try:
+        checkpoint.color = _checkpoint_color_for_type(checkpoint_type, color_candidate or checkpoint.color)
+    except ValueError as err:
+        return jsonify({'error': str(err)}), 400
+
+    checkpoint.checkpoint_type = checkpoint_type
+    checkpoint.label = label
+
+    if 'student_ids' in payload:
+        incoming_ids = []
+        for raw in (payload.get('student_ids') or []):
+            try:
+                incoming_ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        incoming_ids = sorted(set(incoming_ids))
+        if not incoming_ids:
+            return jsonify({'error': 'Select at least one student'}), 400
+        allowed_ids = set(_resolve_student_scope())
+        if any(sid not in allowed_ids for sid in incoming_ids):
+            return jsonify({'error': 'One or more students are outside your allowed scope'}), 403
+        CheckpointStudent.query.filter_by(checkpoint_id=checkpoint.id).delete()
+        for sid in incoming_ids:
+            db.session.add(CheckpointStudent(checkpoint_id=checkpoint.id, student_id=sid))
+
+    db.session.commit()
+    checkpoint = Checkpoint.query.options(selectinload(Checkpoint.students)).get(checkpoint_id)
+    log_phi_access(
+        action='UPDATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='checkpoints',
+        resource_id=checkpoint_id,
+        ip_address=get_remote_address()
+    )
+    return jsonify(_serialize_checkpoint(checkpoint))
+
 @app.route('/api/summary', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
@@ -3347,6 +3723,13 @@ def summary():
                     'relationships': round(relationships_percent_day, 1),
                     'overall': round(overall_percent_day, 1)
                 },
+                'raw_percentages': {
+                    'safety': safety_percent_day,
+                    'teamwork': teamwork_percent_day,
+                    'accountability': accountability_percent_day,
+                    'relationships': relationships_percent_day,
+                    'overall': overall_percent_day
+                },
                 'total_infractions': total_infractions_day,
                 'total_reminders': day_data['total_reminders'],
                 'total_resets': day_data['total_resets']
@@ -3416,6 +3799,13 @@ def summary():
                     'accountability': round(accountability_percent_time, 1),
                     'relationships': round(relationships_percent_time, 1),
                     'overall': round(overall_percent_time, 1),
+                },
+                'raw_percentages': {
+                    'safety': safety_percent_time,
+                    'teamwork': teamwork_percent_time,
+                    'accountability': accountability_percent_time,
+                    'relationships': relationships_percent_time,
+                    'overall': overall_percent_time,
                 },
                 'total_infractions': total_infractions_time,
                 'infractions': dict(time_data.get('infractions', {})),
@@ -3498,7 +3888,7 @@ def summary():
             'infractions_by_type': infractions_by_type,
         }
 
-    def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance):
+    def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance, cur_attendance_by_day=None, prev_attendance_by_day=None):
         """Numeric deltas vs an equal-length prior window (e.g. previous 30 school days)."""
 
         def inf_total(st):
@@ -3507,10 +3897,75 @@ def summary():
 
         cur_ai = cur_stats.get('additional_info') or {}
         prev_ai = prev_stats.get('additional_info') or {}
+        cur_pct = cur_stats.get('percentages') or {}
+        prev_pct = prev_stats.get('percentages') or {}
         cur_star = (cur_stats.get('percentages') or {}).get('overall')
         prev_star = (prev_stats.get('percentages') or {}).get('overall')
         cur_present = (cur_attendance or {}).get('present_pct')
         prev_present = (prev_attendance or {}).get('present_pct')
+        cur_present_cnt = int((cur_attendance or {}).get('present') or 0)
+        prev_present_cnt = int((prev_attendance or {}).get('present') or 0)
+        cur_excused = int((cur_attendance or {}).get('excused') or 0)
+        prev_excused = int((prev_attendance or {}).get('excused') or 0)
+        cur_unexcused = int((cur_attendance or {}).get('unexcused') or 0)
+        prev_unexcused = int((prev_attendance or {}).get('unexcused') or 0)
+        cur_by_day = cur_attendance_by_day or {}
+        prev_by_day = prev_attendance_by_day or {}
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+        def day_absence_total(by_day_map, day_label):
+            bucket = by_day_map.get(day_label) or {}
+            return int(bucket.get('excused') or 0) + int(bucket.get('unexcused') or 0)
+
+        def bucket_pct(bucket, key):
+            if not bucket:
+                return None
+            pcts = bucket.get('raw_percentages') or bucket.get('percentages') or {}
+            val = pcts.get(key)
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        def build_star_delta_map(cur_map, prev_map):
+            keys = ('overall', 'safety', 'teamwork', 'accountability', 'relationships')
+            labels = set((cur_map or {}).keys()) | set((prev_map or {}).keys())
+            result = {}
+            for label in labels:
+                cur_bucket = (cur_map or {}).get(label) or {}
+                prev_bucket = (prev_map or {}).get(label) or {}
+                per_key = {}
+                for key in keys:
+                    cur_v = bucket_pct(cur_bucket, key)
+                    prev_v = bucket_pct(prev_bucket, key)
+                    per_key[key] = None if cur_v is None or prev_v is None else round(cur_v - prev_v, 1)
+                result[label] = per_key
+            return result
+
+        day_of_week_absence_deltas = {
+            day: day_absence_total(cur_by_day, day) - day_absence_total(prev_by_day, day)
+            for day in day_order
+        }
+
+        by_time_star_deltas = build_star_delta_map(
+            cur_stats.get('by_time') or {},
+            prev_stats.get('by_time') or {}
+        )
+        by_day_star_deltas = build_star_delta_map(
+            cur_stats.get('by_day_of_week') or {},
+            prev_stats.get('by_day_of_week') or {}
+        )
+
+        star_safety_delta = None if cur_pct.get('safety') is None or prev_pct.get('safety') is None else round(
+            float(cur_pct.get('safety')) - float(prev_pct.get('safety')), 1)
+        star_teamwork_delta = None if cur_pct.get('teamwork') is None or prev_pct.get('teamwork') is None else round(
+            float(cur_pct.get('teamwork')) - float(prev_pct.get('teamwork')), 1)
+        star_accountability_delta = None if cur_pct.get('accountability') is None or prev_pct.get('accountability') is None else round(
+            float(cur_pct.get('accountability')) - float(prev_pct.get('accountability')), 1)
+        star_relationships_delta = None if cur_pct.get('relationships') is None or prev_pct.get('relationships') is None else round(
+            float(cur_pct.get('relationships')) - float(prev_pct.get('relationships')), 1)
 
         return {
             'infractions_delta': inf_total(cur_stats) - inf_total(prev_stats),
@@ -3518,10 +3973,63 @@ def summary():
             'resets_delta': int(cur_ai.get('total_resets') or 0) - int(prev_ai.get('total_resets') or 0),
             'present_pct_delta': None if cur_present is None or prev_present is None else round(
                 float(cur_present) - float(prev_present), 1),
+            'present_count_delta': cur_present_cnt - prev_present_cnt,
+            'excused_delta': cur_excused - prev_excused,
+            'unexcused_delta': cur_unexcused - prev_unexcused,
             'star_overall_delta': None if cur_star is None or prev_star is None else round(
                 float(cur_star) - float(prev_star), 1),
+            'star_safety_delta': star_safety_delta,
+            'star_teamwork_delta': star_teamwork_delta,
+            'star_accountability_delta': star_accountability_delta,
+            'star_relationships_delta': star_relationships_delta,
+            # Backwards-compatible aliases for any existing frontend consumers.
+            'safety_delta': star_safety_delta,
+            'teamwork_delta': star_teamwork_delta,
+            'accountability_delta': star_accountability_delta,
+            'relationships_delta': star_relationships_delta,
+            'day_of_week_absence_deltas': day_of_week_absence_deltas,
+            'star_deltas_by_time': by_time_star_deltas,
+            'star_deltas_by_day_of_week': by_day_star_deltas,
             'has_prior': True,
         }
+
+    def build_overview_trends_from_prior_window(cur_stats, cur_attendance, cur_attendance_by_day, cur_attendance_records):
+        """Fallback: compare current window to the immediately preceding set of school days.
+
+        Prefer an equal-length window immediately before the oldest day in the current window.
+        If history is shorter, use as many immediately preceding days as exist (partial prior).
+        """
+        cur_dates = sorted({r.date for r in (cur_attendance_records or [])}, reverse=True)
+        if not cur_dates:
+            return None
+
+        all_dates_desc = sorted({r.date for r in all_records_raw}, reverse=True)
+        oldest_cur_date = cur_dates[-1]
+        needed_days = len(cur_dates)
+        prior_dates = [d for d in all_dates_desc if d < oldest_cur_date][:needed_days]
+        if not prior_dates:
+            return None
+
+        prior_date_set = set(prior_dates)
+        prev_attendance_records = [r for r in all_records_raw if r.date in prior_date_set]
+        if not prev_attendance_records:
+            return None
+
+        prev_metric_records = [r for r in prev_attendance_records if r.attendance_status != 'excused']
+        prev_stats = calculate_summary_stats(prev_metric_records)
+        prev_attendance = compute_attendance_summary(prev_attendance_records)
+        prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+        trends = build_overview_trends(
+            cur_stats,
+            prev_stats,
+            cur_attendance,
+            prev_attendance,
+            cur_attendance_by_day,
+            prev_attendance_by_day
+        )
+        # Partial prior window: still useful for day-of-week deltas, but not a full symmetric window.
+        trends['has_prior'] = bool(len(prior_dates) >= needed_days)
+        return trends
 
     # Filter by period if specified (takes precedence over timeframe)
     if period:
@@ -3634,7 +4142,15 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary,
+                prev_attendance,
+                attendance_by_day,
+                prev_attendance_by_day
+            )
         elif period == 'weekly' and week_start and week_end:
             prev_week_start = week_start - timedelta(days=7)
             prev_week_end = week_end - timedelta(days=7)
@@ -3647,7 +4163,22 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary,
+                prev_attendance,
+                attendance_by_day,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary,
+                attendance_by_day,
+                attendance_records
+            )
         if overview_trends:
             result['overview_trends'] = overview_trends
         # Add metadata for weekly and 30-day periods
@@ -3694,7 +4225,22 @@ def summary():
         if prev_metric_records or prev_attendance_records:
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary_cur,
+                prev_attendance,
+                attendance_by_day_cur,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary_cur,
+                attendance_by_day_cur,
+                attendance_records_cur
+            )
 
         weekly_resp = {
             'timeframe': timeframe,
@@ -3755,7 +4301,22 @@ def summary():
                         prev_metric_records.append(record)
             prev_stats = calculate_summary_stats(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
-            overview_trends = build_overview_trends(stats, prev_stats, attendance_summary_cur, prev_attendance)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            overview_trends = build_overview_trends(
+                stats,
+                prev_stats,
+                attendance_summary_cur,
+                prev_attendance,
+                attendance_by_day_cur,
+                prev_attendance_by_day
+            )
+        if not overview_trends:
+            overview_trends = build_overview_trends_from_prior_window(
+                stats,
+                attendance_summary_cur,
+                attendance_by_day_cur,
+                attendance_records_cur
+            )
 
         tf30_resp = {
             'timeframe': timeframe,
@@ -3966,7 +4527,16 @@ def summary():
         # "alltime" or "all" - use all records, single summary
         records = all_records
         stats = calculate_summary_stats(records)
-        return _summary_response({
+        attendance_records_all = list(all_records_raw)
+        attendance_summary_all = compute_attendance_summary(attendance_records_all)
+        attendance_by_day_all = compute_attendance_by_day_of_week(attendance_records_all)
+        overview_trends_all = build_overview_trends_from_prior_window(
+            stats,
+            attendance_summary_all,
+            attendance_by_day_all,
+            attendance_records_all
+        )
+        resp_alltime = {
             'timeframe': timeframe,
             'comparison_mode': False,
             'total_days': stats['total_days'],
@@ -3987,7 +4557,12 @@ def summary():
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
-        })
+            'attendance_summary': attendance_summary_all,
+            'attendance_by_day_of_week': attendance_by_day_all,
+        }
+        if overview_trends_all:
+            resp_alltime['overview_trends'] = overview_trends_all
+        return _summary_response(resp_alltime)
 
 @app.route('/api/case-manager-comparison', methods=['GET'])
 @limiter.limit("30 per minute")

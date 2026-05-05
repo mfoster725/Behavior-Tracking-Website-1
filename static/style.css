@@ -1730,6 +1730,13 @@ table tbody tr:hover {
     min-width: 0;
 }
 
+.frenzy-purpose-legend:has(> .frenzy-purpose-legend-item:nth-child(5)) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 6px;
+}
+
 .frenzy-purpose-legend-item {
     display: flex;
     align-items: center;
@@ -4199,6 +4206,21 @@ a.dashboard-compare-toggle {
     color: var(--text-primary);
 }
 
+.trends-title-line {
+    justify-content: space-between;
+}
+
+.trends-heading-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.trends-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
 .behavior-trend-compare-btn {
     padding: 0.4rem 0.9rem;
     border-radius: 999px;
@@ -4290,7 +4312,120 @@ a.dashboard-compare-toggle {
 }
 
 .behavior-trend-chart-wrap {
-    /* Chart container */
+    position: relative;
+    width: 100%;
+    height: 320px;
+}
+
+#summary-trends-chart-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.summary-trends-checkpoint-list {
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.summary-checkpoint-item {
+    display: grid;
+    grid-template-columns: 10px 72px 110px 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+}
+
+.summary-checkpoint-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+}
+
+.summary-checkpoint-date,
+.summary-checkpoint-type {
+    color: var(--text-secondary);
+}
+
+.summary-checkpoint-label {
+    color: var(--text-primary);
+}
+
+.summary-trends-checkpoint-empty {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.summary-checkpoint-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.summary-checkpoint-modal {
+    width: min(460px, calc(100vw - 32px));
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+}
+
+.summary-checkpoint-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.summary-checkpoint-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    line-height: 1;
+    color: var(--text-secondary);
+}
+
+.summary-checkpoint-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+}
+
+.summary-checkpoint-modal-body label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.summary-checkpoint-modal-body input,
+.summary-checkpoint-modal-body select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.86rem;
+}
+
+.summary-checkpoint-student-scope-note {
+    margin: 2px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.summary-checkpoint-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 14px 14px;
+    border-top: 1px solid var(--border);
 }
 
 .behavior-trend-tooltip {
@@ -4738,7 +4873,7 @@ a.dashboard-compare-toggle {
 
 .overview-gauge-fill--attendance-donut {
     transform-origin: 50% 50%;
-    transform: rotate(-90deg);
+    transform: rotate(90deg);
 }
 
 .overview-gauge-center--attendance-donut {
@@ -4768,6 +4903,46 @@ a.dashboard-compare-toggle {
 
 .overview-gauge-attendance .overview-gauge-small.is-pos {
     color: #16a34a;
+}
+
+/* STAR: 127x117 wrap + centered %/delta; rainbow pinned to top of frame. */
+.overview-gauge-star {
+    overflow: visible;
+}
+
+.overview-gauge-star .overview-gauge-wrap--multi {
+    position: relative;
+    width: 117px;
+    max-width: 117px;
+    height: 117px;
+    margin-left: auto;
+    margin-right: auto;
+    overflow: visible;
+}
+
+.overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    /* +20px vs wrap width; centered on same axis as % / delta. */
+    width: calc(100% + 20px);
+    max-width: none;
+    height: auto;
+    z-index: 0;
+    pointer-events: none;
+    display: block;
+    overflow: visible;
+}
+
+/* Shift rainbow up so the semicircle open area sits over the centered %/delta slot. */
+.overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg.overview-gauge-svg--star-rainbow {
+    overflow: visible;
+    transform: translate(-50%, -4px);
+}
+
+.overview-gauge-star .overview-gauge-star-values.overview-gauge-center--attendance-donut {
+    z-index: 1;
 }
 
 .overview-trigger-panel .overview-trigger-head {
@@ -5061,8 +5236,9 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-gauge-wrap--attendance-donut {
-    width: 78px;
-    height: 78px;
+    width: 117px;
+    height: 117px;
+    max-width: 117px;
     margin-top: 0;
 }
 
@@ -5074,16 +5250,20 @@ a.dashboard-compare-toggle {
     font-size: 0.82rem;
 }
 
-.overview-card--rich .overview-gauge-star .overview-gauge-center {
-    bottom: 1px;
-}
-
 .overview-card--rich .overview-gauge-star .overview-gauge-big {
-    font-size: 0.95rem;
+    font-size: 1.28rem;
+    line-height: 1;
+    letter-spacing: -0.01em;
 }
 
 .overview-card--rich .overview-gauge-star .overview-gauge-small {
     font-size: 0.82rem;
+}
+
+.overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
+    margin-top: 0;
+    width: 117px;
+    max-width: 117px;
 }
 
 .overview-card--rich .overview-trigger-meta {
@@ -6492,6 +6672,23 @@ a.dashboard-compare-toggle {
     overflow: visible;
 }
 
+/* Days Present should render as a half-width extra card in Reports. */
+.dashboard-card.overview-extra-card[data-overview-card="days_present"] {
+    width: calc(33% - 10px);
+    max-width: calc(33% - 10px);
+    min-width: 0;
+    display: block;
+}
+
+/* STAR Performance should stay the same column width as Overview
+   so chart auto-sizing does not cause width oscillation. */
+.dashboard-card.overview-extra-card[data-overview-card="star_performance"] {
+    width: calc(33% - 10px);
+    max-width: calc(33% - 10px);
+    min-width: 0;
+    display: block;
+}
+
 /* Trigger Times card: use full masonry column width so the graph heatmap can span the card */
 .dashboard-card.overview-extra-card[data-overview-card="trigger_times"] {
     width: 100%;
@@ -7687,6 +7884,18 @@ tr[data-aggregate-day-label] {
     text-align: left;
 }
 
+/* If the infractions donut legend grows beyond 4 rows, switch to a 3-column grid */
+.overview-infractions-legend:has(> li:nth-child(5)) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 6px;
+}
+
+.overview-infractions-legend:has(> li:nth-child(5)) li {
+    margin-bottom: 0;
+}
+
 .overview-infractions-legend-item {
     display: flex;
     align-items: center;
@@ -8378,11 +8587,219 @@ tr[data-aggregate-day-label] {
 /* Days Present – Day-of-Week Absence Bar Chart: give it more space */
 .days-present-chart-wrap {
     width: 100%;
-    margin-top: 10px;
+    --days-present-graph-gap: 12px;
+    margin-top: var(--days-present-graph-gap);
     margin-inline: 0;
-    /* Fix the chart area height so it cannot keep growing */
-    height: 300px;
-    max-height: 300px;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+
+.days-present-donut-main,
+.days-present-donut-drilldown {
+    width: 100%;
+}
+
+.days-present-card .days-present-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 12px 0;
+}
+
+.days-present-card .days-present-tab {
+    position: relative;
+    background: none;
+    border: none;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+}
+
+.days-present-card .days-present-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.days-present-card .days-present-tab-panel {
+    display: none;
+}
+
+.days-present-card .days-present-tab-panel.is-active {
+    display: block;
+}
+
+.days-present-card .days-present-tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.days-present-card .days-present-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.days-present-card .days-present-tab-close:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.days-present-donut-shell {
+    position: relative;
+    width: 100%;
+    max-width: 280px;
+    height: 260px;
+    margin: 0 auto;
+}
+
+.days-present-donut-shell--day-of-week {
+    max-width: 280px;
+    height: 260px;
+}
+
+.days-present-donut-shell canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.days-present-donut-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 72%;
+    text-align: center;
+    pointer-events: none;
+}
+
+.days-present-donut-center-pct {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.days-present-donut-center-delta {
+    margin-top: 2px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.days-present-donut-center-delta.delta-positive {
+    color: #047857;
+}
+
+.days-present-donut-center-delta.delta-negative {
+    color: #b91c1c;
+}
+
+.days-present-donut-center-day {
+    margin-top: 4px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    line-height: 1.25;
+}
+
+.days-present-drilldown-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.days-present-legend {
+    margin-top: var(--days-present-graph-gap);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+    row-gap: 10px;
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Dense donut legends: use 3 columns when there are more than 4 options */
+.days-present-legend:has(> .days-present-legend-item:nth-child(5)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.days-present-legend-item {
+    min-width: 0;
+}
+
+.days-present-legend-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.days-present-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 10px;
+}
+
+.days-present-legend-value {
+    margin-top: 2px;
+    margin-left: 17px;
+    font-size: 0.95rem;
+    color: #5b6472;
+}
+
+.days-present-legend-delta.delta-positive {
+    color: #047857;
+}
+
+.days-present-legend-delta.delta-negative {
+    color: #b91c1c;
+}
+
+.days-present-legend-delta.delta-neutral {
+    color: var(--text-secondary);
+}
+
+@media (max-width: 980px) {
+    .dashboard-card.overview-extra-card[data-overview-card="days_present"] {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .dashboard-card.overview-extra-card[data-overview-card="star_performance"] {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 560px) {
+    .days-present-legend {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Custom legend block for Days Present – Day-of-Week Absence Bar Chart */
@@ -8624,6 +9041,25 @@ tr[data-aggregate-day-label] {
 
 .dashboard-stat-delta.delta-neutral {
     color: #6B7280; /* muted gray */
+}
+
+/* Chart.js HTML legend (doughnut charts): allow multi-column layout for dense legends */
+.chartjs-legend.chartjs-legend--cols-3 ul,
+ul.chartjs-legend.chartjs-legend--cols-3 {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px 10px;
+    justify-items: start;
+    width: 100%;
+}
+
+.chartjs-legend.chartjs-legend--cols-3 li,
+ul.chartjs-legend.chartjs-legend--cols-3 li {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
 }
 
 /* Scope to dashboard cards so rules never match unrelated ancestors. */
