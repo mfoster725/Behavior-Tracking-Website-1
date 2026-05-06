@@ -18054,22 +18054,65 @@ function overviewDayInitial(day) {
 function buildOverviewHeatmapColumnLabels(timeSlots) {
     const slots = Array.isArray(timeSlots) ? timeSlots : [];
     if (!slots.length) return [];
-
-    // Match the screenshot style: show a small set of anchor labels
-    // across the full span instead of labeling every single column.
-    const targetLabelCount = Math.min(6, slots.length);
-    if (targetLabelCount === slots.length) return slots.slice();
-
     const labels = new Array(slots.length).fill('');
-    const anchors = new Set([0, slots.length - 1]);
-    const interior = targetLabelCount - anchors.size;
-    for (let i = 1; i <= interior; i++) {
-        const pos = Math.round((i * (slots.length - 1)) / (interior + 1));
-        anchors.add(Math.max(0, Math.min(slots.length - 1, pos)));
+    const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const normSlots = slots.map(normalize);
+
+    const parseStartMinutes = (label) => {
+        const txt = normalize(label);
+        const m = txt.match(/(\d{1,2})\s*:\s*(\d{2})/);
+        if (!m) return null;
+        let hour = Number(m[1]);
+        const minute = Number(m[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+        // School day heuristic: 1:00-5:59 are afternoon slots.
+        if (hour >= 1 && hour <= 5) hour += 12;
+        return hour * 60 + minute;
+    };
+
+    const findNearestUnusedIndex = (targetMinutes, used) => {
+        let bestIdx = -1;
+        let bestDist = Number.POSITIVE_INFINITY;
+        slots.forEach((slot, idx) => {
+            if (used.has(idx)) return;
+            const mins = parseStartMinutes(slot);
+            if (mins == null) return;
+            const dist = Math.abs(mins - targetMinutes);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = idx;
+            }
+        });
+        return bestIdx;
+    };
+
+    const used = new Set();
+    let amBusIdx = normSlots.findIndex(s => s.includes('am') && s.includes('bus'));
+    let pmBusIdx = normSlots.findIndex(s => s.includes('pm') && s.includes('bus'));
+    if (amBusIdx < 0) amBusIdx = 0;
+    if (pmBusIdx < 0) pmBusIdx = slots.length - 1;
+
+    used.add(amBusIdx);
+    labels[amBusIdx] = 'AM\nBus';
+    if (pmBusIdx !== amBusIdx) {
+        used.add(pmBusIdx);
+        labels[pmBusIdx] = 'PM\nBus';
     }
-    anchors.forEach(idx => {
-        labels[idx] = slots[idx];
+
+    const anchors = [
+        { text: '9:00', mins: 9 * 60 },
+        { text: '10:30', mins: 10 * 60 + 30 },
+        { text: '12:00', mins: 12 * 60 },
+        { text: '1:30', mins: 13 * 60 + 30 }
+    ];
+    anchors.forEach(anchor => {
+        const idx = findNearestUnusedIndex(anchor.mins, used);
+        if (idx >= 0) {
+            labels[idx] = anchor.text;
+            used.add(idx);
+        }
     });
+
     return labels;
 }
 
