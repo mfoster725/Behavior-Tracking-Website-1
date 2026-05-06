@@ -18872,7 +18872,7 @@ function buildOverviewDashboardCardHtml(data) {
     const trendRem = trends && formatOverviewSignedInt(remDelta);
 
     const trendsBlock = `
-        <div class="overview-trends-card" aria-label="Trends vs prior window">
+        <div class="overview-trends-card" data-overview-key="trends" aria-label="Trends vs prior window">
             <div class="overview-trends-title">Trends</div>
             <div class="overview-trend-line ${topOverviewIncrease ? 'overview-trend-line-pos' : 'overview-trend-line-neutral'}">
                 <svg class="overview-spark overview-spark--up" viewBox="0 0 40 14" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="0,12 14,8 26,10 40,4"/></svg>
@@ -19066,15 +19066,24 @@ function renderSummarySingle(container, data) {
 function applySummaryMasonryLayout(grid) {
     if (!grid) return;
 
-    const cards = Array.from(grid.querySelectorAll('.dashboard-card'));
-    if (!cards.length) return;
+    const allCards = Array.from(grid.querySelectorAll('.dashboard-card'));
+    if (!allCards.length) return;
+    const cards = allCards.filter(card => !card.classList.contains('overview-card-collapsed'));
+    if (!cards.length) {
+        grid.style.height = '';
+        const summaryContainer = grid.parentElement;
+        if (summaryContainer && summaryContainer.id === 'summary-results') {
+            summaryContainer.style.minHeight = '';
+        }
+        return;
+    }
 
     // Reset positioning so measurements are correct.
     // Keep existing grid/container heights during recalculation to avoid
     // temporary document shrink that can clamp scroll and cause jump-to-top.
     grid.style.position = '';
     const summaryContainer = grid.parentElement;
-    cards.forEach(card => {
+    allCards.forEach(card => {
         card.style.position = '';
         card.style.top = '';
         card.style.left = '';
@@ -19300,6 +19309,7 @@ function attachOverviewCardInteractions(container, data) {
 
     const statBoxes = overviewCard.querySelectorAll('.overview-stat');
     if (!statBoxes.length) return;
+    const trendsBox = overviewCard.querySelector('.overview-trends-card[data-overview-key="trends"]');
 
     const grid = overviewCard.closest('.dashboard-card-grid') || container;
 
@@ -21151,6 +21161,25 @@ function attachOverviewCardInteractions(container, data) {
             applySelectionChange(box, key, { restore: false });
         });
     });
+
+    if (trendsBox) {
+        trendsBox.addEventListener('click', () => {
+            const trendsCard = container.querySelector('.dashboard-card[data-summary-card="behavior-trend"]');
+            if (!trendsCard) return;
+            const isClosed = trendsCard.classList.toggle('overview-card-collapsed');
+            trendsBox.classList.toggle('overview-stat-selected', !isClosed);
+            if (!isClosed) {
+                if (typeof trendsCard.scrollIntoView === 'function') {
+                    trendsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                trendsCard.classList.add('overview-card-spotlight');
+                setTimeout(() => trendsCard.classList.remove('overview-card-spotlight'), 1300);
+            }
+            applySummaryMasonryLayout(grid);
+        });
+        // Default state is open.
+        trendsBox.classList.add('overview-stat-selected');
+    }
 
     // Restore previously selected overview stats (if any) so that cards
     // re-appear in the same order as last time the user viewed this page.
