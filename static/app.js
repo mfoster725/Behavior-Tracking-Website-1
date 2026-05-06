@@ -17281,7 +17281,22 @@ function setupDashboardSearch(prefix, type) {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
             const q = input.value.trim().toLowerCase();
-            if (q.length < 1) { dropdown.classList.remove('active'); return; }
+            if (q.length < 1) {
+                dropdown.classList.remove('active');
+                const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
+                const st = dashboardState[pageKey] || {};
+                if (type === 'student') {
+                    st.studentId = null;
+                    st.studentName = null;
+                    const hiddenSelect = document.getElementById(`${pageKey}-student-select`);
+                    if (hiddenSelect) hiddenSelect.value = '';
+                } else {
+                    st.staffId = null;
+                    st.staffName = null;
+                }
+                updateContextBanner(pageKey);
+                return;
+            }
             let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
 
             // Fallback: if we have no data yet, try to load it once
@@ -17964,39 +17979,67 @@ function collectOverviewTimeSlots(byTimeByDay) {
     return ordered.concat(arr);
 }
 
-function overviewHeatmapMeta(byTimeByDay) {
+function overviewHeatmapMeta(byTimeByDay, frenzySeverityByTimeByDay) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     const timeSlots = collectOverviewTimeSlots(byTimeByDay);
-    let maxInf = 0;
+    const severityTimeSlots = collectOverviewTimeSlots(frenzySeverityByTimeByDay);
+    severityTimeSlots.forEach(slot => {
+        if (!timeSlots.includes(slot)) timeSlots.push(slot);
+    });
+    // Severity scale is fixed (1=Para → 5=SRO) so the heatmap reads
+    // consistently across periods. We still surface "worst"/"best" cells
+    // for headline meta and selection highlights.
+    let worstSev = -Infinity;
     let worst = null;
-    let bestOv = -1;
+    let bestSev = Infinity;
     let best = null;
+    let hasSeverity = false;
+    let minAvgSeverity = Infinity;
+    let maxAvgSeverity = -Infinity;
     days.forEach(day => {
-        const tm = (byTimeByDay || {})[day] || {};
+        const sevMap = (frenzySeverityByTimeByDay || {})[day] || {};
         timeSlots.forEach(timeLabel => {
-            const cell = tm[timeLabel];
-            if (!cell) return;
-            const inf = cell.total_infractions || 0;
-            const ov = typeof cell.percentages?.overall === 'number' ? cell.percentages.overall : null;
-            if (inf > maxInf) {
-                maxInf = inf;
+            const sevCell = sevMap[timeLabel];
+            const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
+            if (avg == null) return;
+            hasSeverity = true;
+            if (avg < minAvgSeverity) minAvgSeverity = avg;
+            if (avg > maxAvgSeverity) maxAvgSeverity = avg;
+            if (avg > worstSev) {
+                worstSev = avg;
                 worst = { day, timeLabel };
             }
-            if (ov != null && ov > bestOv) {
-                bestOv = ov;
+            if (avg < bestSev) {
+                bestSev = avg;
                 best = { day, timeLabel };
             }
         });
     });
-    return { days, timeSlots, maxInf: maxInf || 1, worst, best };
+    if (!hasSeverity) {
+        worst = null;
+        best = null;
+        minAvgSeverity = null;
+        maxAvgSeverity = null;
+    }
+    return { days, timeSlots, worst, best, hasSeverity, minAvgSeverity, maxAvgSeverity };
 }
 
-function overviewHeatColor(cell, maxInf) {
-    const inf = cell?.total_infractions || 0;
-    const ov = typeof cell?.percentages?.overall === 'number' ? cell.percentages.overall : null;
+function overviewHeatColor(severityCell, hm) {
+    // Empty cells (no frenzies) render as the coolest color on the scale.
+    const avg = typeof severityCell?.avg_severity === 'number' ? severityCell.avg_severity : null;
     let t = 0;
-    if (maxInf > 0) t = Math.min(1, inf / maxInf);
-    else if (ov != null) t = Math.min(1, (100 - ov) / 100);
+    if (avg != null) {
+        const minAvg = hm?.minAvgSeverity;
+        const maxAvg = hm?.maxAvgSeverity;
+        if (hm?.hasSeverity && typeof minAvg === 'number' && typeof maxAvg === 'number' && maxAvg > minAvg) {
+            // Normalize to observed range to avoid a uniformly green map when
+            // most averages cluster in a narrow band.
+            t = Math.min(1, Math.max(0, (avg - minAvg) / (maxAvg - minAvg)));
+        } else {
+            // Fallback to absolute 1..5 severity scale.
+            t = Math.min(1, Math.max(0, (avg - 1) / 4));
+        }
+    }
     const r = Math.round(34 + t * (239 - 34));
     const g = Math.round(197 + t * (68 - 197));
     const b = Math.round(94 + t * (68 - 94));
@@ -18006,6 +18049,28 @@ function overviewHeatColor(cell, maxInf) {
 function overviewDayInitial(day) {
     const m = { Monday: 'M', Tuesday: 'T', Wednesday: 'W', Thursday: 'Th', Friday: 'F' };
     return m[day] || (day || '').slice(0, 2);
+}
+
+function buildOverviewHeatmapColumnLabels(timeSlots) {
+    const slots = Array.isArray(timeSlots) ? timeSlots : [];
+    if (!slots.length) return [];
+
+    // Match the screenshot style: show a small set of anchor labels
+    // across the full span instead of labeling every single column.
+    const targetLabelCount = Math.min(6, slots.length);
+    if (targetLabelCount === slots.length) return slots.slice();
+
+    const labels = new Array(slots.length).fill('');
+    const anchors = new Set([0, slots.length - 1]);
+    const interior = targetLabelCount - anchors.size;
+    for (let i = 1; i <= interior; i++) {
+        const pos = Math.round((i * (slots.length - 1)) / (interior + 1));
+        anchors.add(Math.max(0, Math.min(slots.length - 1, pos)));
+    }
+    anchors.forEach(idx => {
+        labels[idx] = slots[idx];
+    });
+    return labels;
 }
 
 let summaryTrendsChartInstance = null;
@@ -18117,8 +18182,66 @@ function getSummaryTrendFetchRange() {
     return { start: fallback.toISOString().split('T')[0], end: endIso };
 }
 
-async function fetchSummaryTrendRecordsForRange(rangeOverride) {
+function getNormalizedSummaryTrendScope() {
     const st = dashboardState.summary || {};
+    const normalized = { ...st };
+    const studentInput = document.getElementById('summary-student-search');
+    const staffInput = document.getElementById('summary-staff-search');
+    const studentBlank = !studentInput || !studentInput.value.trim();
+    const staffBlank = !staffInput || !staffInput.value.trim();
+    if (studentBlank) {
+        normalized.studentId = null;
+        normalized.studentName = null;
+    }
+    if (staffBlank) {
+        normalized.staffId = null;
+        normalized.staffName = null;
+    }
+    return normalized;
+}
+
+function filterSummaryCheckpointsByEffectiveSelection(checkpoints, trendStudentIds) {
+    const st = getNormalizedSummaryTrendScope();
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    const managedOnly = !!(managedCheckbox && managedCheckbox.checked);
+
+    let effectiveSelectionIds = [];
+    if (st.studentId) {
+        effectiveSelectionIds = [Number(st.studentId)];
+    } else if (st.staffId || managedOnly) {
+        effectiveSelectionIds = Array.isArray(trendStudentIds) ? trendStudentIds.map(Number).filter(Boolean) : [];
+    } else {
+        // No explicit selection => treat scope as all loaded students in the UI.
+        // This matches the user-facing "all students" selection semantics.
+        const allUiStudentIds = Array.isArray(allStudents) ? allStudents.map((s) => Number(s?.id)).filter(Boolean) : [];
+        effectiveSelectionIds = allUiStudentIds.length
+            ? allUiStudentIds
+            : (Array.isArray(trendStudentIds) ? trendStudentIds.map(Number).filter(Boolean) : []);
+    }
+
+    const requiredIds = Array.from(new Set(effectiveSelectionIds));
+    if (!requiredIds.length) return [];
+    const requiredCount = requiredIds.length;
+    const requiredSet = new Set(requiredIds);
+    return (Array.isArray(checkpoints) ? checkpoints : []).filter((cp) => {
+        const studentIds = Array.isArray(cp?.student_ids) ? cp.student_ids : [];
+        // Fast-fail: if checkpoint touches fewer students than the required scope,
+        // it cannot possibly be a superset.
+        if (studentIds.length < requiredCount) return false;
+        const cpSet = new Set();
+        for (const raw of studentIds) {
+            const sid = Number(raw);
+            if (sid) cpSet.add(sid);
+        }
+        for (const sid of requiredSet) {
+            if (!cpSet.has(sid)) return false;
+        }
+        return true;
+    });
+}
+
+async function fetchSummaryTrendRecordsForRange(rangeOverride) {
+    const st = getNormalizedSummaryTrendScope();
     const params = new URLSearchParams();
     if (st.studentId) params.set('student_id', String(st.studentId));
     if (st.staffId) params.set('staff_id', String(st.staffId));
@@ -18250,7 +18373,7 @@ function calculateTrendPercent(records, metric) {
 }
 
 async function fetchSummaryTrendCheckpoints(rangeOverride) {
-    const st = dashboardState.summary || {};
+    const st = getNormalizedSummaryTrendScope();
     const params = new URLSearchParams();
     if (st.studentId) params.set('student_id', String(st.studentId));
     if (st.staffId) params.set('staff_id', String(st.staffId));
@@ -18404,7 +18527,7 @@ function aggregateTrendPointsToTarget(points, targetBucketCount) {
 }
 
 async function fetchSummaryTrendTargetPointCount() {
-    const st = dashboardState.summary || {};
+    const st = getNormalizedSummaryTrendScope();
     const scopeKey = getSummaryTrendScopeCacheKey(st);
     if (summaryTrendTargetCache.key === scopeKey && Number.isFinite(summaryTrendTargetCache.count)) {
         return summaryTrendTargetCache.count;
@@ -18931,19 +19054,26 @@ async function loadSummaryBehaviorTrendCard() {
     if (!body) return;
     try {
         const currentPeriod = (dashboardState.summary || {}).period || '30day';
-        let trendPayload = await fetchSummaryTrendRecordsForRange();
-        let checkpointRange = null;
+        let trendPayload = null;
+        let checkpoints = [];
         if (currentPeriod === '30day') {
+            trendPayload = await fetchSummaryTrendRecordsForRange();
+            let checkpointRange = null;
             const sliced = sliceTrendPayloadToLastSchoolDays(trendPayload);
             trendPayload = sliced.payload;
             if (sliced.range.start && sliced.range.end) {
                 checkpointRange = { start: sliced.range.start, end: sliced.range.end };
             }
+            checkpoints = await fetchSummaryTrendCheckpoints(checkpointRange);
+        } else {
+            [trendPayload, checkpoints] = await Promise.all([
+                fetchSummaryTrendRecordsForRange(),
+                fetchSummaryTrendCheckpoints()
+            ]);
         }
-        const checkpoints = await fetchSummaryTrendCheckpoints(checkpointRange);
         window.currentSummaryTrendRecords = trendPayload || { series: [] };
         currentSummaryTrendStudentIds = Array.isArray(trendPayload?.student_ids) ? trendPayload.student_ids : [];
-        currentSummaryCheckpointData = Array.isArray(checkpoints) ? checkpoints : [];
+        currentSummaryCheckpointData = filterSummaryCheckpointsByEffectiveSelection(checkpoints, currentSummaryTrendStudentIds);
         const rawPoints = buildSummaryTrendPoints(window.currentSummaryTrendRecords);
         const points = shouldApplyTrendPointCapping(currentPeriod)
             ? aggregateTrendPointsToTarget(rawPoints, await fetchSummaryTrendTargetPointCount())
@@ -19219,7 +19349,15 @@ function buildOverviewDashboardCardHtml(data) {
         hardestTriggerLabel = hardestKey;
     }
 
-    const hm = overviewHeatmapMeta(byTimeByDay);
+    const frenzySeverityByTimeByDay = data.frenzy_severity_by_time_by_day || {};
+    const hm = overviewHeatmapMeta(byTimeByDay, frenzySeverityByTimeByDay);
+    const severityLabels = {
+        1: 'Para',
+        2: 'Professional',
+        3: 'Response Team',
+        4: 'Administration',
+        5: 'SRO'
+    };
     let headlineTime = '';
     let headlineDay = '';
     if (hm.worst) {
@@ -19302,21 +19440,29 @@ function buildOverviewDashboardCardHtml(data) {
     const remH = Math.round((reminders / incidentMax) * 100);
     const rstH = Math.round((resets / incidentMax) * 100);
 
+    const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots);
     let heatRows = '';
-    hm.timeSlots.forEach(tlabel => {
-        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(tlabel)}</div>`;
-        hm.days.forEach(day => {
-            const cell = (byTimeByDay[day] || {})[tlabel];
-            const bg = overviewHeatColor(cell, hm.maxInf);
-            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && (cell?.total_infractions || 0) > 0;
-            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && cell
-                && typeof cell.percentages?.overall === 'number';
+    hm.days.forEach(day => {
+        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
+        hm.timeSlots.forEach(tlabel => {
+            const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
+            const bg = overviewHeatColor(sevCell, hm);
+            const hasSeverity = typeof sevCell?.avg_severity === 'number';
+            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && hasSeverity;
             let cls = 'overview-heatmap-cell';
             if (isWorst) cls += ' overview-heatmap-cell--worst';
             if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-            const title = cell
-                ? `${Math.round(cell.percentages?.overall || 0)}% • ${cell.total_infractions || 0} infractions`
-                : 'No data';
+            let title;
+            if (hasSeverity) {
+                const avg = sevCell.avg_severity;
+                const closest = Math.max(1, Math.min(5, Math.round(avg)));
+                const levelName = severityLabels[closest] || '';
+                const count = sevCell.frenzy_count || 0;
+                title = `Avg severity ${avg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
+            } else {
+                title = 'No frenzies';
+            }
             row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
         });
         row += '</div>';
@@ -19474,10 +19620,10 @@ function buildOverviewDashboardCardHtml(data) {
             </div>
             <div class="overview-trigger-hero">${headlineRight}</div>
             ${hardestTriggerSubtitle ? `<div class="overview-trigger-sub">${escapeHtml(hardestTriggerSubtitle)}</div>` : ''}
-            <div class="overview-heatmap">
+            <div class="overview-heatmap" style="--overview-heatmap-col-count:${Math.max(1, hm.timeSlots.length)};">
                 <div class="overview-heatmap-cols">
                     <div></div>
-                    ${hm.days.map(d => `<div class="overview-heatmap-colhead">${overviewDayInitial(d)}</div>`).join('')}
+                    ${timeHeaderLabels.map(t => `<div class="overview-heatmap-colhead">${t ? escapeHtml(t) : ''}</div>`).join('')}
                 </div>
                 ${heatRows}
                 <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>

@@ -698,7 +698,10 @@ class FrenzyEvent(db.Model):
     purpose = db.Column(db.String(100))
     purpose2 = db.Column(db.String(100))
     duration_minutes = db.Column(db.Integer)
-    
+    # Frenzy severity level (1=Para, 2=Professional, 3=Response Team,
+    # 4=Administration, 5=SRO). Backfilled to 1 by migrate_frenzy_severity.py.
+    severity = db.Column(db.Integer)
+
     # Result/outcome
     result = db.Column(db.String(100))
 
@@ -3560,6 +3563,7 @@ def summary():
             'by_class': by_class_formatted,
             'by_time': by_time_formatted,
             'by_time_by_day': {},
+            'frenzy_severity_by_time_by_day': {},
             'infractions_by_type': {},
         }
     
@@ -3606,14 +3610,40 @@ def summary():
         # Nested time-of-day statistics by day of week:
         # { 'Monday': { '7:45-8:30': bucket, ... }, ... }
         by_time_by_day = {day: {} for day in weekdays}
-        
+
+        # Per-(day, time) frenzy severity aggregation. Each cell tracks the sum
+        # and count of frenzy event severities so the overview heatmap can
+        # display average severity (1 = Para, 5 = SRO).
+        frenzy_severity_by_time_by_day = {day: {} for day in weekdays}
+
         for record in record_list:
             # Track day of week statistics (weekdays only)
             day_of_week = record.day_of_week
             is_weekday = day_of_week in weekdays
-            
+
             if is_weekday:
                 by_day_of_week[day_of_week]['total_days'] += 1
+
+                # Aggregate frenzy severity per (day, time) cell. Frenzies
+                # without a severity recorded are skipped so the average only
+                # reflects events with a known level.
+                for frenzy in (record.frenzies or []):
+                    sev = frenzy.severity
+                    if sev is None:
+                        continue
+                    try:
+                        sev_int = int(sev)
+                    except (TypeError, ValueError):
+                        continue
+                    time_label = (frenzy.time_range or '').strip() or 'Unknown'
+                    sev_map = frenzy_severity_by_time_by_day[day_of_week]
+                    bucket = sev_map.get(time_label)
+                    if bucket is None:
+                        bucket = {'severity_sum': 0, 'severity_count': 0}
+                        sev_map[time_label] = bucket
+                    bucket['severity_sum'] += sev_int
+                    bucket['severity_count'] += 1
+
             for period in record.periods:
                 total_safety += period.safety_points
                 total_teamwork += period.teamwork_points
@@ -4289,6 +4319,22 @@ def summary():
                 }
             by_time_by_day_formatted[day] = formatted_times
 
+        # Format frenzy severity per (day, time) cell into average severity.
+        frenzy_severity_by_time_by_day_formatted = {}
+        for day, times_map in frenzy_severity_by_time_by_day.items():
+            formatted_sev = {}
+            for time_label, bucket in times_map.items():
+                count = bucket.get('severity_count') or 0
+                if count <= 0:
+                    continue
+                sev_sum = bucket.get('severity_sum') or 0
+                avg_sev = sev_sum / count
+                formatted_sev[time_label] = {
+                    'avg_severity': round(avg_sev, 2),
+                    'frenzy_count': count,
+                }
+            frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
+
         # Build per-infraction breakdowns by time of day and day of week
         infractions_by_type = {}
         # From time-of-day buckets
@@ -4325,6 +4371,7 @@ def summary():
             'by_class': by_class_formatted,
             'by_time': by_time_formatted,
             'by_time_by_day': by_time_by_day_formatted,
+            'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'infractions_by_type': infractions_by_type,
         }
 
@@ -4567,6 +4614,7 @@ def summary():
             'by_class': stats['by_class'],
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
+            'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
             'attendance_summary': attendance_summary,
@@ -4703,6 +4751,7 @@ def summary():
             'by_class': stats.get('by_class', {}),
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
+            'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'week_start': most_recent_monday.isoformat(),
             'week_end': most_recent_sunday.isoformat(),
@@ -4779,6 +4828,7 @@ def summary():
             'by_class': stats.get('by_class', {}),
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
+            'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'available_data_points': available_data_points,
             'has_full_30_days': available_data_points >= 30,
@@ -4997,6 +5047,7 @@ def summary():
             'by_class': stats.get('by_class', {}),
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
+            'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
             'attendance_summary': attendance_summary_all,

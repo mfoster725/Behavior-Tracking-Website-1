@@ -5000,7 +5000,7 @@ a.dashboard-compare-toggle {
 
 .overview-heatmap-cols {
     display: grid;
-    grid-template-columns: minmax(72px, 0.35fr) repeat(5, 1fr);
+    grid-template-columns: minmax(72px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
     gap: 4px;
     margin-bottom: 4px;
 }
@@ -5014,7 +5014,7 @@ a.dashboard-compare-toggle {
 
 .overview-heatmap-row {
     display: grid;
-    grid-template-columns: minmax(72px, 0.35fr) repeat(5, 1fr);
+    grid-template-columns: minmax(72px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
     gap: 4px;
     margin-bottom: 4px;
     align-items: stretch;
@@ -5303,7 +5303,7 @@ a.dashboard-compare-toggle {
 
 .overview-card--rich .overview-heatmap-cols,
 .overview-card--rich .overview-heatmap-row {
-    grid-template-columns: minmax(32px, 0.35fr) repeat(5, 1fr);
+    grid-template-columns: minmax(32px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
     gap: 2px;
     margin-bottom: 2px;
 }
