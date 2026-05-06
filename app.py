@@ -19,7 +19,7 @@ if sys.platform == 'win32':
 
     _platform.machine = _platform_machine_fast
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, event
 from sqlalchemy.orm import selectinload, load_only, joinedload
@@ -37,7 +37,6 @@ import logging
 import shutil
 from types import SimpleNamespace
 from io import StringIO, BytesIO
-import shutil
 from urllib.parse import urlparse, urljoin
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -74,33 +73,6 @@ except ImportError:
     Image = None
 
 app = Flask(__name__)
-
-
-@app.before_request
-def _start_request_timer():
-    g._req_started_at = time.perf_counter()
-
-
-@app.after_request
-def _log_request_timing(response):
-    try:
-        started = getattr(g, '_req_started_at', None)
-        if started is not None:
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
-            path = request.path or ''
-            # Focus logs on API traffic that affects tab load performance.
-            if path.startswith('/api/'):
-                app.logger.warning(
-                    "api timing: %s %s status=%s ms=%.1f",
-                    request.method,
-                    path,
-                    response.status_code,
-                    elapsed_ms,
-                )
-    except Exception:
-        # Never let logging affect responses.
-        pass
-    return response
 
 # Database configuration: Use PostgreSQL (Aiven, Render, Neon, etc.) or SQLite locally
 database_url = os.environ.get('DATABASE_URL')
@@ -3047,12 +3019,9 @@ def summary():
     
     # For staff/admin views, restrict to active students only (students with a User account role='student')
     if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
-        active_student_ids_q = (
-            User.query.with_entities(User.student_id)
-            .filter(User.role == 'student', User.student_id.isnot(None))
-            .distinct()
-        )
-        if active_student_ids_q.first() is None:
+        student_users = User.query.filter_by(role='student').all()
+        active_student_ids = {u.student_id for u in student_users if u.student_id}
+        if not active_student_ids:
             # No active students -> return empty summary
             return jsonify({
                 'timeframe': timeframe,
@@ -3080,7 +3049,7 @@ def summary():
                 },
                 'starbucks_total': 0,
             })
-        query = query.filter(DailyRecord.student_id.in_(active_student_ids_q))
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
 
     # Pre-limit record window for common dashboard modes to avoid loading full history.
     # Keep enough history for trend comparisons (e.g., prior 30-day / prior week).
@@ -3203,7 +3172,7 @@ def summary():
                 PeriodRecord.frenzy,
                 PeriodRecord.info,
             )
-            .joinedload(PeriodRecord.infractions)
+            .selectinload(PeriodRecord.infractions)
             .load_only(
                 Infraction.period_record_id,
                 Infraction.infraction_type,
@@ -3211,7 +3180,6 @@ def summary():
             ),
         )
         all_records_raw = query.all()
-    summary_query_ms = (time.perf_counter() - summary_query_start) * 1000.0
     print(f"Found {len(all_records_raw)} total records before filtering")
     
     # Filter out excused records for STAR/frenzy calculations, but keep attendance info on all_records_raw.
@@ -3228,19 +3196,6 @@ def summary():
     
     all_records = filtered_records
     print(f"After filtering out excused records: {len(all_records)} records")
-    summary_filter_ms = (time.perf_counter() - summary_query_start) * 1000.0 - summary_query_ms
-    app.logger.warning(
-        "summary timings: query_ms=%.1f filter_ms=%.1f records_raw=%d records_metric=%d period=%s timeframe=%s student_id=%s staff_id=%s managed_by_me=%s",
-        summary_query_ms,
-        summary_filter_ms,
-        len(all_records_raw),
-        len(all_records),
-        period,
-        timeframe,
-        student_id,
-        staff_id,
-        managed_by_me,
-    )
 
     # Compute Starbucks total for this summary (per-student only; aggregated views use 0)
     starbucks_total = 0
@@ -5039,161 +4994,6 @@ def summary():
         return _summary_response(resp_alltime)
 
 
-@app.route('/api/summary-debug-timing', methods=['GET'])
-@limiter.limit("20 per minute")
-@login_required
-def summary_debug_timing():
-    """Diagnostic-only summary profiler. Returns timing breakdown as JSON."""
-    from datetime import date, timedelta
-
-    t0 = time.perf_counter()
-    student_id = request.args.get('student_id', type=int)
-    student_ids_param = (request.args.get('student_ids') or '').strip()
-    staff_id = request.args.get('staff_id', type=int)
-    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
-    period = request.args.get('period', '30day')
-    timeframe = request.args.get('timeframe', None)
-
-    selected_ids = _resolve_student_scope(
-        student_id=student_id,
-        student_ids_param=student_ids_param,
-        staff_id=staff_id,
-        managed_by_me=managed_by_me,
-    )
-    if not selected_ids:
-        return jsonify({
-            'ok': True,
-            'message': 'No records in selected scope.',
-            'timings_ms': {'total': round((time.perf_counter() - t0) * 1000.0, 1)},
-            'counts': {'selected_students': 0, 'records_raw': 0, 'records_metric': 0},
-        })
-
-    query = DailyRecord.query.filter(DailyRecord.student_id.in_(selected_ids))
-
-    # Mirror summary pre-limiting behavior for common report modes.
-    if period in ('30day',) or timeframe in ('30day', '30day_to_30day'):
-        distinct_start = time.perf_counter()
-        recent_date_rows = (
-            query.with_entities(DailyRecord.date)
-            .distinct()
-            .order_by(DailyRecord.date.desc())
-            .limit(60)
-            .all()
-        )
-        recent_dates = [row[0] for row in recent_date_rows if row and row[0] is not None]
-        distinct_ms = (time.perf_counter() - distinct_start) * 1000.0
-        if recent_dates:
-            query = query.filter(DailyRecord.date.in_(recent_dates))
-    elif period in ('weekly',) or timeframe in ('weekly',):
-        today = date.today()
-        days_since_monday = today.weekday()
-        week_start = today - timedelta(days=days_since_monday)
-        week_end = week_start + timedelta(days=6)
-        prev_week_start = week_start - timedelta(days=7)
-        query = query.filter(DailyRecord.date >= prev_week_start, DailyRecord.date <= week_end)
-        distinct_ms = 0.0
-    else:
-        distinct_ms = 0.0
-
-    fetch_start = time.perf_counter()
-    records_raw = query.options(
-        load_only(
-            DailyRecord.id,
-            DailyRecord.student_id,
-            DailyRecord.date,
-            DailyRecord.day_of_week,
-            DailyRecord.attendance_status,
-            DailyRecord.present,
-        ),
-        selectinload(DailyRecord.periods)
-        .load_only(
-            PeriodRecord.id,
-            PeriodRecord.daily_record_id,
-            PeriodRecord.time_range,
-            PeriodRecord.location,
-            PeriodRecord.safety_points,
-            PeriodRecord.teamwork_points,
-            PeriodRecord.accountability_points,
-            PeriodRecord.relationships_points,
-            PeriodRecord.points_possible,
-            PeriodRecord.frenzy,
-            PeriodRecord.info,
-        )
-        .joinedload(PeriodRecord.infractions)
-        .load_only(
-            Infraction.period_record_id,
-            Infraction.infraction_type,
-            Infraction.count,
-        ),
-    ).all()
-    fetch_ms = (time.perf_counter() - fetch_start) * 1000.0
-
-    filter_start = time.perf_counter()
-    records_metric = []
-    for record in records_raw:
-        status = record.attendance_status or ('present' if record.present else 'unexcused')
-        if status != 'excused':
-            records_metric.append(record)
-    filter_ms = (time.perf_counter() - filter_start) * 1000.0
-
-    agg_start = time.perf_counter()
-    total_periods = 0
-    total_infractions = 0
-    total_points_possible = 0
-    total_reminders = 0
-    total_resets = 0
-    json_parse_errors = 0
-
-    for record in records_metric:
-        for period_row in record.periods:
-            total_periods += 1
-            total_points_possible += int(period_row.points_possible or 0)
-            for inf in period_row.infractions:
-                total_infractions += int(inf.count or 0)
-            if period_row.info:
-                try:
-                    info_data = json.loads(period_row.info)
-                    for reminder_key in ('reminder1', 'reminder2', 'reminder3'):
-                        rv = info_data.get(reminder_key, False)
-                        if rv and rv not in [False, None, '', 'false', 'False', '0', 0]:
-                            total_reminders += 1
-                    reset = info_data.get('reset', False)
-                    if reset and reset not in [False, None, '', 'false', 'False', '0', 0]:
-                        total_resets += 1
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    json_parse_errors += 1
-    agg_ms = (time.perf_counter() - agg_start) * 1000.0
-
-    total_ms = (time.perf_counter() - t0) * 1000.0
-    return jsonify({
-        'ok': True,
-        'params': {
-            'student_id': student_id,
-            'staff_id': staff_id,
-            'managed_by_me': managed_by_me,
-            'period': period,
-            'timeframe': timeframe,
-        },
-        'counts': {
-            'selected_students': len(selected_ids),
-            'records_raw': len(records_raw),
-            'records_metric': len(records_metric),
-            'period_rows': total_periods,
-            'infractions_total_count': total_infractions,
-            'points_possible_total': total_points_possible,
-            'reminders_counted': total_reminders,
-            'resets_counted': total_resets,
-            'info_json_parse_errors': json_parse_errors,
-        },
-        'timings_ms': {
-            'distinct_dates': round(distinct_ms, 1),
-            'db_fetch': round(fetch_ms, 1),
-            'attendance_filter': round(filter_ms, 1),
-            'aggregation': round(agg_ms, 1),
-            'total': round(total_ms, 1),
-        }
-    })
-
 @app.route('/api/case-manager-comparison', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
@@ -6601,12 +6401,9 @@ def frenzy_stats():
 
     # For staff/admin views, restrict to active students only (students with a User account role='student')
     if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
-        active_student_ids_q = (
-            User.query.with_entities(User.student_id)
-            .filter(User.role == 'student', User.student_id.isnot(None))
-            .distinct()
-        )
-        if active_student_ids_q.first() is None:
+        student_users = User.query.filter_by(role='student').all()
+        active_student_ids = {u.student_id for u in student_users if u.student_id}
+        if not active_student_ids:
             return jsonify({
                 'by_day': {},
                 'by_time': {},
@@ -6618,7 +6415,7 @@ def frenzy_stats():
                 'all_purposes': [],
                 'all_results': []
             })
-        query = query.filter(DailyRecord.student_id.in_(active_student_ids_q))
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
     
     # Eager-load related data to avoid N+1 queries while aggregating frenzy stats.
     all_records = query.options(

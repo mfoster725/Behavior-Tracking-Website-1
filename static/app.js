@@ -17879,8 +17879,6 @@ async function loadSummaryDashboard() {
     if (st.staffId) params.push(`staff_id=${st.staffId}`);
     const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
     if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
-    // Request lightweight payload for dashboard initial load.
-    params.push('lite=1');
     params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
     params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
 
@@ -18614,24 +18612,6 @@ function wireSummaryBehaviorTrendCard() {
             }
         });
     }
-    const st = dashboardState.summary || {};
-    const trendBody = document.getElementById('summary-behavior-trend-body');
-    const needsNarrowScope = !st.studentId && !st.staffId;
-    if (needsNarrowScope) {
-        if (trendBody) {
-            trendBody.innerHTML = '<div class="behavior-trend-empty">Select a student or staff member to load trends.</div>';
-        }
-        renderSummaryCheckpointList([]);
-        window.currentSummaryTrendRecords = { series: [] };
-        currentSummaryTrendStudentIds = [];
-        currentSummaryCheckpointData = [];
-        if (summaryTrendsChartInstance) {
-            summaryTrendsChartInstance.destroy();
-            summaryTrendsChartInstance = null;
-        }
-        return;
-    }
-
     loadSummaryBehaviorTrendCard();
 }
 
