@@ -1012,6 +1012,11 @@ function setupEventListeners() {
                         console.log('Cleared student selection - student not in filtered list');
                     }
                 }
+
+                // Refresh dashboard once after student scope updates.
+                if (typeof triggerDashboardLoad === 'function') {
+                    triggerDashboardLoad('summary');
+                }
             });
         }
         
@@ -1340,22 +1345,11 @@ async function switchView(viewName) {
             const shouldCheck = window.currentUser.role === 'staff';
             if (summaryManagedByMeCheckbox.checked !== shouldCheck) {
                 summaryManagedByMeCheckbox.checked = shouldCheck;
-                summaryManagedByMeCheckbox.dispatchEvent(new Event('change'));
             }
         }
         
-        // Check if summary has been loaded before (has student/quarter selected)
-        const summaryStudentSelect = document.getElementById('summary-student-select');
-        const quarterSelect = document.getElementById('quarter-select');
-        if (summaryStudentSelect && quarterSelect) {
-            // Reload summary if there's a quarter selected
-            if (quarterSelect.value) {
-                loadSummary();
-            }
-        }
-
-        // Always load the new dashboard-style summary when entering the tab,
-        // so the default 30-day + "managed by me" state shows data immediately.
+        // Load only the dashboard-style summary when entering the tab.
+        // Avoid firing legacy loadSummary() and dashboard load together.
         if (typeof triggerDashboardLoad === 'function') {
             triggerDashboardLoad('summary');
         }
@@ -1542,6 +1536,17 @@ function saveQuarterDatesConfig() {
     // Save to localStorage
     saveQuarterDates(newQuarterDates);
     quarterDates = newQuarterDates;
+
+    // Keep school-year range aligned with admin quarter configuration.
+    const q1Start = newQuarterDates['1']?.start || '';
+    const q4End = newQuarterDates['4']?.end || '';
+    if (q1Start && q4End) {
+        saveSchoolYearDates({
+            label: `${q1Start} - ${q4End}`,
+            start: q1Start,
+            end: q4End
+        });
+    }
     
     // Update the quarter display if on daily entry view
     updateQuarterDisplay();
@@ -6332,6 +6337,10 @@ async function saveEditedPointCard(recordId, studentId, date) {
 }
 
 async function loadFrenzyStats() {
+    // Safe-guard: separate Frenzy view is retired; avoid extra API work.
+    if (!document.getElementById('frenzy-view') || !document.getElementById('frenzy-results')) {
+        return;
+    }
     const studentId = document.getElementById('frenzy-student-select').value;
     const periodSelect = document.getElementById('frenzy-period-select');
     const timeframeSelect = document.getElementById('frenzy-timeframe-select');
@@ -17825,12 +17834,14 @@ function syncSummaryPointCardButton() {
 }
 
 function triggerDashboardLoad(pageKey) {
-    if (pageKey === 'summary') loadSummaryDashboard();
-    else loadFrenzyDashboard();
+    // Frenzy has been merged into Summary reports; keep dashboard loads on Summary only.
+    if (pageKey !== 'summary') return;
+    loadSummaryDashboard();
 }
 
 // ---- Summary Dashboard ----
 async function loadSummaryDashboard() {
+    const summaryLoadStart = performance.now();
     const st = dashboardState.summary;
     const container = document.getElementById('summary-results');
     if (!container) return;
@@ -17868,24 +17879,32 @@ async function loadSummaryDashboard() {
     if (st.staffId) params.push(`staff_id=${st.staffId}`);
     const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
     if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    // Request lightweight payload for dashboard initial load.
+    params.push('lite=1');
     params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
     params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
 
     const url = '/api/summary?' + params.join('&');
 
     try {
+        const fetchStart = performance.now();
         const response = await fetch(url);
         const data = await response.json();
+        const fetchMs = performance.now() - fetchStart;
         window.currentSummaryData = data;
 
         const printBtn = document.getElementById('print-summary-btn');
         if (printBtn) printBtn.disabled = false;
 
+        const renderStart = performance.now();
         if (data.comparison_mode && data.periods) {
             renderSummaryComparison(container, data);
         } else {
             renderSummarySingle(container, data);
         }
+        const renderMs = performance.now() - renderStart;
+        const totalMs = performance.now() - summaryLoadStart;
+        console.info(`Summary load timings: fetch=${fetchMs.toFixed(1)}ms render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`);
         syncSummaryPointCardButton();
     } catch (err) {
         container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
@@ -18083,10 +18102,8 @@ function getSummaryTrendFetchRange() {
     }
     if (period === 'current_year') {
         const schoolYearDates = loadSchoolYearDates();
-        const current = getCurrentSchoolYear();
-        const range = schoolYearDates?.[current];
-        const start = toIso(range?.start);
-        const end = toIso(range?.end);
+        const start = toIso(schoolYearDates?.start);
+        const end = toIso(schoolYearDates?.end);
         if (start && end) return { start, end };
     }
     if (/^quarter[1-4]$/.test(period)) {
@@ -18310,6 +18327,25 @@ function createCheckpointOverlayPlugin() {
     };
 }
 
+function smoothTrendSeries(values, windowRadius = 3) {
+    if (!Array.isArray(values) || values.length === 0) return [];
+    const smoothed = [];
+    for (let i = 0; i < values.length; i++) {
+        let weightedSum = 0;
+        let totalWeight = 0;
+        for (let j = Math.max(0, i - windowRadius); j <= Math.min(values.length - 1, i + windowRadius); j++) {
+            const v = values[j];
+            if (v == null || Number.isNaN(Number(v))) continue;
+            // Triangular weighting keeps nearby points dominant but still smooths strongly.
+            const weight = windowRadius + 1 - Math.abs(i - j);
+            weightedSum += Number(v) * weight;
+            totalWeight += weight;
+        }
+        smoothed.push(totalWeight > 0 ? Number((weightedSum / totalWeight).toFixed(2)) : null);
+    }
+    return smoothed;
+}
+
 function renderSummaryTrendChart(points, checkpoints) {
     const body = document.getElementById('summary-behavior-trend-body');
     if (!body) return;
@@ -18325,8 +18361,10 @@ function renderSummaryTrendChart(points, checkpoints) {
         summaryTrendsChartInstance = null;
     }
     const labels = points.map(p => p.label);
-    const frenzyData = points.map(p => p.frenzyCount);
-    const starData = points.map(p => p.starPercent);
+    const frenzyDataRaw = points.map(p => p.frenzyCount);
+    const starDataRaw = points.map(p => p.starPercent);
+    const frenzyData = smoothTrendSeries(frenzyDataRaw, 3);
+    const starData = smoothTrendSeries(starDataRaw, 3);
     const checkpointPlugin = createCheckpointOverlayPlugin();
     summaryTrendsChartInstance = new Chart(canvas, {
         type: 'line',
@@ -18576,6 +18614,24 @@ function wireSummaryBehaviorTrendCard() {
             }
         });
     }
+    const st = dashboardState.summary || {};
+    const trendBody = document.getElementById('summary-behavior-trend-body');
+    const needsNarrowScope = !st.studentId && !st.staffId;
+    if (needsNarrowScope) {
+        if (trendBody) {
+            trendBody.innerHTML = '<div class="behavior-trend-empty">Select a student or staff member to load trends.</div>';
+        }
+        renderSummaryCheckpointList([]);
+        window.currentSummaryTrendRecords = { series: [] };
+        currentSummaryTrendStudentIds = [];
+        currentSummaryCheckpointData = [];
+        if (summaryTrendsChartInstance) {
+            summaryTrendsChartInstance.destroy();
+            summaryTrendsChartInstance = null;
+        }
+        return;
+    }
+
     loadSummaryBehaviorTrendCard();
 }
 
@@ -18713,7 +18769,7 @@ function buildOverviewDashboardCardHtml(data) {
     let attendanceSub = '';
     if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
         const abs = Math.abs(Number(presentDelta));
-        attendanceSub = abs < 0.05 ? 'No change' : `${formatOverviewSignedInt(presentDelta)}%`;
+        attendanceSub = abs < 0.05 ? '—' : `${formatOverviewSignedInt(presentDelta)}%`;
     } else {
         attendanceSub = totalDays > 0 ? '' : '—';
     }
@@ -21652,10 +21708,7 @@ function initDashboard() {
     setupReportsNumberAlignment();
 
     // Wire managed-by-me checkboxes
-    const summaryManagedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
-    if (summaryManagedCheckbox) {
-        summaryManagedCheckbox.addEventListener('change', () => triggerDashboardLoad('summary'));
-    }
+    // Managed-by-me checkbox is wired earlier in setupEventListeners().
     // Wire Reports sub-toggle button(s) to switch views
     const reportsToggleButtons = document.querySelectorAll('.reports-toggle-btn');
     reportsToggleButtons.forEach(btn => {
@@ -21664,27 +21717,13 @@ function initDashboard() {
             if (!targetView) return;
             // Use normal view switching so all existing logic (managed by me, dashboard load, etc.) still runs
             switchView(targetView);
-            if (typeof triggerDashboardLoad === 'function') {
-                if (targetView === 'summary') {
-                    setTimeout(() => triggerDashboardLoad('summary'), 100);
-                }
-            }
         });
     });
 
     syncSummaryPointCardButton();
 }
 
-// Auto-load when switching to summary tab
-const origNavHandler = document.querySelectorAll('.nav-btn');
-origNavHandler.forEach(btn => {
-    btn.addEventListener('click', () => {
-        const view = btn.dataset.view;
-        if (view === 'summary') {
-            setTimeout(() => triggerDashboardLoad('summary'), 100);
-        }
-    });
-});
+// Summary loads are handled centrally by switchView().
 
 // Init when DOM is ready
 if (document.readyState === 'loading') {

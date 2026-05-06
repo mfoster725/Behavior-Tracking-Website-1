@@ -19,10 +19,10 @@ if sys.platform == 'win32':
 
     _platform.machine = _platform_machine_fast
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
-from sqlalchemy.orm import selectinload
+from sqlalchemy import text, event
+from sqlalchemy.orm import selectinload, load_only, joinedload
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -32,8 +32,12 @@ import re
 import secrets
 import csv
 import json
+import time
 import logging
+import shutil
+from types import SimpleNamespace
 from io import StringIO, BytesIO
+import shutil
 from urllib.parse import urlparse, urljoin
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -54,7 +58,49 @@ try:
 except ImportError:
     PdfReader = None
 
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
+
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
 app = Flask(__name__)
+
+
+@app.before_request
+def _start_request_timer():
+    g._req_started_at = time.perf_counter()
+
+
+@app.after_request
+def _log_request_timing(response):
+    try:
+        started = getattr(g, '_req_started_at', None)
+        if started is not None:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            path = request.path or ''
+            # Focus logs on API traffic that affects tab load performance.
+            if path.startswith('/api/'):
+                app.logger.warning(
+                    "api timing: %s %s status=%s ms=%.1f",
+                    request.method,
+                    path,
+                    response.status_code,
+                    elapsed_ms,
+                )
+    except Exception:
+        # Never let logging affect responses.
+        pass
+    return response
 
 # Database configuration: Use PostgreSQL (Aiven, Render, Neon, etc.) or SQLite locally
 database_url = os.environ.get('DATABASE_URL')
@@ -85,9 +131,19 @@ if database_url:
     }
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
 else:
-    # Local development: Use instance folder for database (Flask convention)
-    instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+    # Local development: use a non-OneDrive local DB path by default on Windows.
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    instance_path = os.path.join(project_root, 'instance')
     os.makedirs(instance_path, exist_ok=True)
+
+    local_appdata = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+    default_local_db_dir = os.path.join(local_appdata, 'BehaviorTracking')
+    local_db_dir = os.environ.get('LOCAL_DB_DIR', default_local_db_dir)
+    os.makedirs(local_db_dir, exist_ok=True)
+
+    legacy_db_path = os.path.join(instance_path, "behavior_tracking.db")
+    local_db_path = os.path.join(local_db_dir, "behavior_tracking.db")
+
     # Optional: use test DB for seeding (run with USE_TEST_DB=1 to use behavior_tracking_test.db)
     if os.environ.get('USE_TEST_DB') or os.environ.get('TEST_DATABASE_URI'):
         test_uri = os.environ.get('TEST_DATABASE_URI')
@@ -97,7 +153,17 @@ else:
             test_db_path = os.path.join(instance_path, "behavior_tracking_test.db").replace("\\", "/")
             app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{test_db_path}'
     else:
-        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(instance_path, "behavior_tracking.db")}'
+        # One-time migration: move existing DB from project instance folder to local non-OneDrive path.
+        if os.path.exists(legacy_db_path) and not os.path.exists(local_db_path):
+            try:
+                shutil.move(legacy_db_path, local_db_path)
+                print(f"Moved SQLite DB to local path: {local_db_path}")
+            except Exception as move_err:
+                print(f"Warning: failed to move DB to local path ({move_err}); using legacy path.")
+                local_db_path = legacy_db_path
+        elif not os.path.exists(local_db_path) and os.path.exists(legacy_db_path):
+            local_db_path = legacy_db_path
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{local_db_path}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -112,6 +178,25 @@ limiter = Limiter(
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+# SQLite performance tuning for local development.
+# Safe no-op for Postgres environments.
+if str(app.config.get('SQLALCHEMY_DATABASE_URI', '')).startswith('sqlite'):
+    with app.app_context():
+        _sqlite_engine = db.engine
+
+    @event.listens_for(_sqlite_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            # Negative cache_size means kibibytes; -65536 ~= 64MB page cache.
+            cursor.execute("PRAGMA cache_size=-65536")
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
 # Audit Logging Setup
 audit_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
@@ -505,6 +590,12 @@ def ensure_daily_query_indexes():
             with db.engine.connect() as conn:
                 conn.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_daily_records_date ON daily_records (date)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_daily_records_student_id ON daily_records (student_id)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_daily_records_student_date ON daily_records (student_id, date)"
                 ))
                 conn.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_period_records_daily_record_id ON period_records (daily_record_id)"
@@ -2802,6 +2893,7 @@ def summary():
     
     # Check if filtering by "managed by me"
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    lite_mode = request.args.get('lite', 'false').lower() in ('1', 'true', 'yes')
     
     # If staff_id is provided and the current user has permission, filter to that staff member's students
     if staff_id and current_user.role in ['staff', 'admin']:
@@ -2955,9 +3047,12 @@ def summary():
     
     # For staff/admin views, restrict to active students only (students with a User account role='student')
     if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
-        student_users = User.query.filter_by(role='student').all()
-        active_student_ids = {u.student_id for u in student_users if u.student_id}
-        if not active_student_ids:
+        active_student_ids_q = (
+            User.query.with_entities(User.student_id)
+            .filter(User.role == 'student', User.student_id.isnot(None))
+            .distinct()
+        )
+        if active_student_ids_q.first() is None:
             # No active students -> return empty summary
             return jsonify({
                 'timeframe': timeframe,
@@ -2985,15 +3080,138 @@ def summary():
                 },
                 'starbucks_total': 0,
             })
-        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids_q))
 
-    # Get all records first, then filter in Python for more reliable date handling.
-    # Eager-load related data to avoid N+1 query patterns in summary calculations.
-    query = query.options(
-        selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
-        selectinload(DailyRecord.frenzies),
-    )
-    all_records_raw = query.all()
+    # Pre-limit record window for common dashboard modes to avoid loading full history.
+    # Keep enough history for trend comparisons (e.g., prior 30-day / prior week).
+    from datetime import date, timedelta
+    if period in ('30day',) or timeframe in ('30day', '30day_to_30day'):
+        recent_date_rows = (
+            query.with_entities(DailyRecord.date)
+            .distinct()
+            .order_by(DailyRecord.date.desc())
+            .limit(60)
+            .all()
+        )
+        recent_dates = [row[0] for row in recent_date_rows if row and row[0] is not None]
+        if recent_dates:
+            query = query.filter(DailyRecord.date.in_(recent_dates))
+    elif period in ('weekly',) or timeframe in ('weekly',):
+        today = date.today()
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+        week_end = week_start + timedelta(days=6)
+        prev_week_start = week_start - timedelta(days=7)
+        query = query.filter(DailyRecord.date >= prev_week_start, DailyRecord.date <= week_end)
+
+    # Get records and related data. In lite mode, use compact row fetches to avoid
+    # heavy ORM object graph materialization costs.
+    summary_query_start = time.perf_counter()
+    if lite_mode:
+        daily_rows = query.with_entities(
+            DailyRecord.id,
+            DailyRecord.student_id,
+            DailyRecord.date,
+            DailyRecord.day_of_week,
+            DailyRecord.attendance_status,
+            DailyRecord.present,
+        ).all()
+
+        daily_ids = [r.id for r in daily_rows]
+        periods_by_daily = {}
+        if daily_ids:
+            period_rows = db.session.query(
+                PeriodRecord.id,
+                PeriodRecord.daily_record_id,
+                PeriodRecord.time_range,
+                PeriodRecord.location,
+                PeriodRecord.safety_points,
+                PeriodRecord.teamwork_points,
+                PeriodRecord.accountability_points,
+                PeriodRecord.relationships_points,
+                PeriodRecord.points_possible,
+                PeriodRecord.frenzy,
+                PeriodRecord.info,
+            ).filter(PeriodRecord.daily_record_id.in_(daily_ids)).all()
+
+            period_ids = [p.id for p in period_rows]
+            infractions_by_period = {}
+            if period_ids:
+                inf_rows = db.session.query(
+                    Infraction.period_record_id,
+                    Infraction.infraction_type,
+                    db.func.sum(Infraction.count),
+                ).filter(
+                    Infraction.period_record_id.in_(period_ids)
+                ).group_by(
+                    Infraction.period_record_id, Infraction.infraction_type
+                ).all()
+                for pr_id, itype, cnt in inf_rows:
+                    infractions_by_period.setdefault(pr_id, []).append(
+                        SimpleNamespace(infraction_type=itype, count=int(cnt or 0))
+                    )
+
+            for p in period_rows:
+                p_obj = SimpleNamespace(
+                    id=p.id,
+                    daily_record_id=p.daily_record_id,
+                    time_range=p.time_range,
+                    location=p.location,
+                    safety_points=int(p.safety_points or 0),
+                    teamwork_points=int(p.teamwork_points or 0),
+                    accountability_points=int(p.accountability_points or 0),
+                    relationships_points=int(p.relationships_points or 0),
+                    points_possible=int(p.points_possible or 0),
+                    frenzy=bool(p.frenzy),
+                    info=p.info,
+                    infractions=infractions_by_period.get(p.id, []),
+                )
+                periods_by_daily.setdefault(p.daily_record_id, []).append(p_obj)
+
+        all_records_raw = []
+        for r in daily_rows:
+            all_records_raw.append(SimpleNamespace(
+                id=r.id,
+                student_id=r.student_id,
+                date=r.date,
+                day_of_week=r.day_of_week,
+                attendance_status=r.attendance_status,
+                present=r.present,
+                periods=periods_by_daily.get(r.id, []),
+            ))
+    else:
+        query = query.options(
+            load_only(
+                DailyRecord.id,
+                DailyRecord.student_id,
+                DailyRecord.date,
+                DailyRecord.day_of_week,
+                DailyRecord.attendance_status,
+                DailyRecord.present,
+            ),
+            selectinload(DailyRecord.periods)
+            .load_only(
+                PeriodRecord.id,
+                PeriodRecord.daily_record_id,
+                PeriodRecord.time_range,
+                PeriodRecord.location,
+                PeriodRecord.safety_points,
+                PeriodRecord.teamwork_points,
+                PeriodRecord.accountability_points,
+                PeriodRecord.relationships_points,
+                PeriodRecord.points_possible,
+                PeriodRecord.frenzy,
+                PeriodRecord.info,
+            )
+            .joinedload(PeriodRecord.infractions)
+            .load_only(
+                Infraction.period_record_id,
+                Infraction.infraction_type,
+                Infraction.count,
+            ),
+        )
+        all_records_raw = query.all()
+    summary_query_ms = (time.perf_counter() - summary_query_start) * 1000.0
     print(f"Found {len(all_records_raw)} total records before filtering")
     
     # Filter out excused records for STAR/frenzy calculations, but keep attendance info on all_records_raw.
@@ -3010,6 +3228,19 @@ def summary():
     
     all_records = filtered_records
     print(f"After filtering out excused records: {len(all_records)} records")
+    summary_filter_ms = (time.perf_counter() - summary_query_start) * 1000.0 - summary_query_ms
+    app.logger.warning(
+        "summary timings: query_ms=%.1f filter_ms=%.1f records_raw=%d records_metric=%d period=%s timeframe=%s student_id=%s staff_id=%s managed_by_me=%s",
+        summary_query_ms,
+        summary_filter_ms,
+        len(all_records_raw),
+        len(all_records),
+        period,
+        timeframe,
+        student_id,
+        staff_id,
+        managed_by_me,
+    )
 
     # Compute Starbucks total for this summary (per-student only; aggregated views use 0)
     starbucks_total = 0
@@ -3122,6 +3353,247 @@ def summary():
             if any(counts.values()):
                 trimmed[day] = counts
         return trimmed
+
+    def calculate_summary_stats_lite(record_list):
+        """Faster summary aggregation used for dashboard loads."""
+        weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+
+        total_safety = 0
+        total_teamwork = 0
+        total_accountability = 0
+        total_relationships = 0
+        total_possible = 0
+        total_frenzies = 0
+        total_infractions = {}
+
+        additional_info = {
+            'infractions': {},
+            'total_reminders': 0,
+            'total_resets': 0,
+            'infractions_for_reminders': {},
+            'infractions_for_resets': {},
+        }
+
+        by_day_of_week = {
+            day: {
+                'total_days': 0,
+                'safety_points': 0,
+                'teamwork_points': 0,
+                'accountability_points': 0,
+                'relationships_points': 0,
+                'possible_points': 0,
+                'infractions': {},
+                'total_reminders': 0,
+                'total_resets': 0,
+            } for day in weekdays
+        }
+        by_class = {}
+        by_time = {}
+
+        for record in record_list:
+            day_of_week = record.day_of_week
+            is_weekday = day_of_week in weekdays
+            if is_weekday:
+                by_day_of_week[day_of_week]['total_days'] += 1
+
+            for period in record.periods:
+                sp = int(period.safety_points or 0)
+                tp = int(period.teamwork_points or 0)
+                ap = int(period.accountability_points or 0)
+                rp = int(period.relationships_points or 0)
+                pp = int(period.points_possible or 0)
+
+                total_safety += sp
+                total_teamwork += tp
+                total_accountability += ap
+                total_relationships += rp
+                total_possible += pp
+                if period.frenzy:
+                    total_frenzies += 1
+
+                class_name = period.location or 'Unknown'
+                time_label = (period.time_range or '').strip() or 'Unknown'
+
+                if class_name not in by_class:
+                    by_class[class_name] = {
+                        'total_days': 0, 'safety_points': 0, 'teamwork_points': 0,
+                        'accountability_points': 0, 'relationships_points': 0,
+                        'possible_points': 0, 'infractions': {}, 'total_reminders': 0,
+                        'total_resets': 0, '_unique_dates': set()
+                    }
+                cls = by_class[class_name]
+                cls['safety_points'] += sp
+                cls['teamwork_points'] += tp
+                cls['accountability_points'] += ap
+                cls['relationships_points'] += rp
+                cls['possible_points'] += pp
+                if record.date not in cls['_unique_dates']:
+                    cls['_unique_dates'].add(record.date)
+                    cls['total_days'] += 1
+
+                if time_label not in by_time:
+                    by_time[time_label] = {
+                        'total_days': 0, 'safety_points': 0, 'teamwork_points': 0,
+                        'accountability_points': 0, 'relationships_points': 0,
+                        'possible_points': 0, 'infractions': {}, 'total_reminders': 0,
+                        'total_resets': 0, '_unique_dates': set(), 'class_counts': {}
+                    }
+                tm = by_time[time_label]
+                tm['safety_points'] += sp
+                tm['teamwork_points'] += tp
+                tm['accountability_points'] += ap
+                tm['relationships_points'] += rp
+                tm['possible_points'] += pp
+                tm['class_counts'][class_name] = tm['class_counts'].get(class_name, 0) + 1
+                if record.date not in tm['_unique_dates']:
+                    tm['_unique_dates'].add(record.date)
+                    tm['total_days'] += 1
+
+                if is_weekday:
+                    d = by_day_of_week[day_of_week]
+                    d['safety_points'] += sp
+                    d['teamwork_points'] += tp
+                    d['accountability_points'] += ap
+                    d['relationships_points'] += rp
+                    d['possible_points'] += pp
+
+                period_infraction_counts = {}
+                for infraction in period.infractions:
+                    itype = infraction.infraction_type
+                    cnt = int(infraction.count or 0)
+                    total_infractions[itype] = total_infractions.get(itype, 0) + cnt
+                    additional_info['infractions'][itype] = additional_info['infractions'].get(itype, 0) + cnt
+                    cls['infractions'][itype] = cls['infractions'].get(itype, 0) + cnt
+                    tm['infractions'][itype] = tm['infractions'].get(itype, 0) + cnt
+                    if is_weekday:
+                        d = by_day_of_week[day_of_week]
+                        d['infractions'][itype] = d['infractions'].get(itype, 0) + cnt
+                    period_infraction_counts[itype] = period_infraction_counts.get(itype, 0) + cnt
+
+                has_reminder_for_period = False
+                has_reset_for_period = False
+                if period.info:
+                    try:
+                        info_data = json.loads(period.info)
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        info_data = {}
+
+                    for reminder_key in ('reminder1', 'reminder2', 'reminder3'):
+                        rv = info_data.get(reminder_key, False)
+                        if rv and rv not in [False, None, '', 'false', 'False', '0', 0]:
+                            additional_info['total_reminders'] += 1
+                            cls['total_reminders'] += 1
+                            tm['total_reminders'] += 1
+                            has_reminder_for_period = True
+                            if is_weekday:
+                                by_day_of_week[day_of_week]['total_reminders'] += 1
+
+                    reset = info_data.get('reset', False)
+                    if reset and reset not in [False, None, '', 'false', 'False', '0', 0]:
+                        additional_info['total_resets'] += 1
+                        cls['total_resets'] += 1
+                        tm['total_resets'] += 1
+                        has_reset_for_period = True
+                        if is_weekday:
+                            by_day_of_week[day_of_week]['total_resets'] += 1
+
+                if has_reminder_for_period and period_infraction_counts:
+                    for itype, cnt in period_infraction_counts.items():
+                        additional_info['infractions_for_reminders'][itype] = (
+                            additional_info['infractions_for_reminders'].get(itype, 0) + cnt
+                        )
+                if has_reset_for_period and period_infraction_counts:
+                    for itype, cnt in period_infraction_counts.items():
+                        additional_info['infractions_for_resets'][itype] = (
+                            additional_info['infractions_for_resets'].get(itype, 0) + cnt
+                        )
+
+        def pct_bundle(points):
+            num_periods = points['possible_points'] / 4 if points['possible_points'] > 0 else 0
+            max_cat = num_periods * 2 if num_periods > 0 else 0
+            if max_cat <= 0:
+                return {'safety': 0.0, 'teamwork': 0.0, 'accountability': 0.0, 'relationships': 0.0, 'overall': 0.0}
+            s = (points['safety_points'] / max_cat) * 100
+            t = (points['teamwork_points'] / max_cat) * 100
+            a = (points['accountability_points'] / max_cat) * 100
+            r = (points['relationships_points'] / max_cat) * 100
+            return {'safety': s, 'teamwork': t, 'accountability': a, 'relationships': r, 'overall': (s + t + a + r) / 4}
+
+        total_num_periods = total_possible / 4 if total_possible > 0 else 0
+        total_max_cat = total_num_periods * 2 if total_num_periods > 0 else 0
+        safety_percent = (total_safety / total_max_cat * 100) if total_max_cat > 0 else 0
+        teamwork_percent = (total_teamwork / total_max_cat * 100) if total_max_cat > 0 else 0
+        accountability_percent = (total_accountability / total_max_cat * 100) if total_max_cat > 0 else 0
+        relationships_percent = (total_relationships / total_max_cat * 100) if total_max_cat > 0 else 0
+        overall_percent = (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4 if total_max_cat > 0 else 0
+
+        by_day_of_week_formatted = {}
+        for day, d in by_day_of_week.items():
+            p = pct_bundle(d)
+            by_day_of_week_formatted[day] = {
+                'total_days': d['total_days'],
+                'percentages': {k: round(v, 1) for k, v in p.items()},
+                'raw_percentages': p,
+                'total_infractions': sum(d['infractions'].values()),
+                'total_reminders': d['total_reminders'],
+                'total_resets': d['total_resets'],
+            }
+
+        by_class_formatted = {}
+        for class_name, c in by_class.items():
+            p = pct_bundle(c)
+            by_class_formatted[class_name] = {
+                'total_days': c['total_days'],
+                'percentages': {k: round(v, 1) for k, v in p.items()},
+                'total_infractions': sum(c['infractions'].values()),
+                'total_reminders': c['total_reminders'],
+                'total_resets': c['total_resets'],
+            }
+
+        by_time_formatted = {}
+        for time_label, t in by_time.items():
+            p = pct_bundle(t)
+            top_class_name = None
+            top_class_count = 0
+            if t['class_counts']:
+                top_class_name, top_class_count = max(t['class_counts'].items(), key=lambda kv: kv[1])
+            by_time_formatted[time_label] = {
+                'total_days': t['total_days'],
+                'percentages': {k: round(v, 1) for k, v in p.items()},
+                'raw_percentages': p,
+                'total_infractions': sum(t['infractions'].values()),
+                'infractions': dict(t['infractions']),
+                'total_reminders': t['total_reminders'],
+                'total_resets': t['total_resets'],
+                'top_class': top_class_name,
+                'top_class_count': top_class_count,
+            }
+
+        return {
+            'total_days': len(record_list),
+            'totals': {
+                'safety': total_safety,
+                'teamwork': total_teamwork,
+                'accountability': total_accountability,
+                'relationships': total_relationships,
+                'possible': total_possible
+            },
+            'percentages': {
+                'safety': round(safety_percent, 1),
+                'teamwork': round(teamwork_percent, 1),
+                'accountability': round(accountability_percent, 1),
+                'relationships': round(relationships_percent, 1),
+                'overall': round(overall_percent, 1)
+            },
+            'infractions': total_infractions,
+            'total_frenzies': total_frenzies,
+            'additional_info': additional_info,
+            'by_day_of_week': by_day_of_week_formatted,
+            'by_class': by_class_formatted,
+            'by_time': by_time_formatted,
+            'by_time_by_day': {},
+            'infractions_by_type': {},
+        }
     
     # Helper function to calculate summary stats for a set of records
     def calculate_summary_stats(record_list):
@@ -3993,6 +4465,8 @@ def summary():
             'has_prior': True,
         }
 
+    summary_stats_fn = calculate_summary_stats_lite if lite_mode else calculate_summary_stats
+
     def build_overview_trends_from_prior_window(cur_stats, cur_attendance, cur_attendance_by_day, cur_attendance_records):
         """Fallback: compare current window to the immediately preceding set of school days.
 
@@ -4016,7 +4490,7 @@ def summary():
             return None
 
         prev_metric_records = [r for r in prev_attendance_records if r.attendance_status != 'excused']
-        prev_stats = calculate_summary_stats(prev_metric_records)
+        prev_stats = summary_stats_fn(prev_metric_records)
         prev_attendance = compute_attendance_summary(prev_attendance_records)
         prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
         trends = build_overview_trends(
@@ -4103,7 +4577,7 @@ def summary():
                         metric_records.append(record)
         
         # Calculate single summary for period
-        stats = calculate_summary_stats(metric_records)
+        stats = summary_stats_fn(metric_records)
         attendance_summary = compute_attendance_summary(attendance_records)
         attendance_by_day = compute_attendance_by_day_of_week(attendance_records)
         result = {
@@ -4140,7 +4614,7 @@ def summary():
                     prev_attendance_records.append(record)
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
-            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_stats = summary_stats_fn(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4161,7 +4635,7 @@ def summary():
                     prev_attendance_records.append(record)
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
-            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_stats = summary_stats_fn(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4210,7 +4684,7 @@ def summary():
         records = [r for r in all_records if most_recent_monday <= r.date <= most_recent_sunday]
         print(f"After weekly filtering: {len(records)} records from {most_recent_monday} to {most_recent_sunday}")
         # Calculate single summary
-        stats = calculate_summary_stats(records)
+        stats = summary_stats_fn(records)
         attendance_records_cur = [
             r for r in all_records_raw if most_recent_monday <= r.date <= most_recent_sunday
         ]
@@ -4223,7 +4697,7 @@ def summary():
         prev_metric_records = [r for r in all_records if prev_week_start <= r.date <= prev_week_end]
         prev_attendance_records = [r for r in all_records_raw if prev_week_start <= r.date <= prev_week_end]
         if prev_metric_records or prev_attendance_records:
-            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_stats = summary_stats_fn(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4284,7 +4758,7 @@ def summary():
         records = [r for r in all_records if r.date in selected_dates]
         print(f"After 30 day filtering: {len(records)} records from {len(selected_dates)} unique dates")
         # Calculate single summary
-        stats = calculate_summary_stats(records)
+        stats = summary_stats_fn(records)
         attendance_records_cur = [r for r in all_records_raw if r.date in selected_dates]
         attendance_summary_cur = compute_attendance_summary(attendance_records_cur)
         attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
@@ -4299,7 +4773,7 @@ def summary():
                     prev_attendance_records.append(record)
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
-            prev_stats = calculate_summary_stats(prev_metric_records)
+            prev_stats = summary_stats_fn(prev_metric_records)
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4366,8 +4840,8 @@ def summary():
         previous_records = [r for r in all_records if r.date in previous_dates]
         
         # Calculate stats for each period
-        most_recent_stats = calculate_summary_stats(most_recent_records)
-        previous_stats = calculate_summary_stats(previous_records)
+        most_recent_stats = summary_stats_fn(most_recent_records)
+        previous_stats = summary_stats_fn(previous_records)
         
         # Add data points info to each period's stats
         most_recent_stats['available_data_points'] = most_recent_data_points
@@ -4420,7 +4894,7 @@ def summary():
         
         comparison_data = {}
         for month_key in sorted_months:
-            month_stats = calculate_summary_stats(month_groups[month_key])
+            month_stats = summary_stats_fn(month_groups[month_key])
             comparison_data[month_key] = month_stats
         
         # Get available school years for dropdown
@@ -4456,7 +4930,7 @@ def summary():
         sorted_quarters = sorted(quarter_groups.keys(), key=lambda x: (int(x.split()[1]), int(x[1])))
         comparison_data = {}
         for quarter_key in sorted_quarters:
-            quarter_stats = calculate_summary_stats(quarter_groups[quarter_key])
+            quarter_stats = summary_stats_fn(quarter_groups[quarter_key])
             comparison_data[quarter_key] = quarter_stats
         
         return _summary_response({
@@ -4484,7 +4958,7 @@ def summary():
         sorted_years = sorted(year_groups.keys())
         comparison_data = {}
         for year_key in sorted_years:
-            year_stats = calculate_summary_stats(year_groups[year_key])
+            year_stats = summary_stats_fn(year_groups[year_key])
             comparison_data[year_key] = year_stats
         
         return _summary_response({
@@ -4514,7 +4988,7 @@ def summary():
             })
 
         records = [r for r in all_records if start <= r.date <= end]
-        stats = calculate_summary_stats(records)
+        stats = summary_stats_fn(records)
         label = f"{start.isoformat()} to {end.isoformat()}"
         comparison_data = {label: stats}
 
@@ -4526,7 +5000,7 @@ def summary():
     else:
         # "alltime" or "all" - use all records, single summary
         records = all_records
-        stats = calculate_summary_stats(records)
+        stats = summary_stats_fn(records)
         attendance_records_all = list(all_records_raw)
         attendance_summary_all = compute_attendance_summary(attendance_records_all)
         attendance_by_day_all = compute_attendance_by_day_of_week(attendance_records_all)
@@ -4563,6 +5037,162 @@ def summary():
         if overview_trends_all:
             resp_alltime['overview_trends'] = overview_trends_all
         return _summary_response(resp_alltime)
+
+
+@app.route('/api/summary-debug-timing', methods=['GET'])
+@limiter.limit("20 per minute")
+@login_required
+def summary_debug_timing():
+    """Diagnostic-only summary profiler. Returns timing breakdown as JSON."""
+    from datetime import date, timedelta
+
+    t0 = time.perf_counter()
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = (request.args.get('student_ids') or '').strip()
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    period = request.args.get('period', '30day')
+    timeframe = request.args.get('timeframe', None)
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify({
+            'ok': True,
+            'message': 'No records in selected scope.',
+            'timings_ms': {'total': round((time.perf_counter() - t0) * 1000.0, 1)},
+            'counts': {'selected_students': 0, 'records_raw': 0, 'records_metric': 0},
+        })
+
+    query = DailyRecord.query.filter(DailyRecord.student_id.in_(selected_ids))
+
+    # Mirror summary pre-limiting behavior for common report modes.
+    if period in ('30day',) or timeframe in ('30day', '30day_to_30day'):
+        distinct_start = time.perf_counter()
+        recent_date_rows = (
+            query.with_entities(DailyRecord.date)
+            .distinct()
+            .order_by(DailyRecord.date.desc())
+            .limit(60)
+            .all()
+        )
+        recent_dates = [row[0] for row in recent_date_rows if row and row[0] is not None]
+        distinct_ms = (time.perf_counter() - distinct_start) * 1000.0
+        if recent_dates:
+            query = query.filter(DailyRecord.date.in_(recent_dates))
+    elif period in ('weekly',) or timeframe in ('weekly',):
+        today = date.today()
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+        week_end = week_start + timedelta(days=6)
+        prev_week_start = week_start - timedelta(days=7)
+        query = query.filter(DailyRecord.date >= prev_week_start, DailyRecord.date <= week_end)
+        distinct_ms = 0.0
+    else:
+        distinct_ms = 0.0
+
+    fetch_start = time.perf_counter()
+    records_raw = query.options(
+        load_only(
+            DailyRecord.id,
+            DailyRecord.student_id,
+            DailyRecord.date,
+            DailyRecord.day_of_week,
+            DailyRecord.attendance_status,
+            DailyRecord.present,
+        ),
+        selectinload(DailyRecord.periods)
+        .load_only(
+            PeriodRecord.id,
+            PeriodRecord.daily_record_id,
+            PeriodRecord.time_range,
+            PeriodRecord.location,
+            PeriodRecord.safety_points,
+            PeriodRecord.teamwork_points,
+            PeriodRecord.accountability_points,
+            PeriodRecord.relationships_points,
+            PeriodRecord.points_possible,
+            PeriodRecord.frenzy,
+            PeriodRecord.info,
+        )
+        .joinedload(PeriodRecord.infractions)
+        .load_only(
+            Infraction.period_record_id,
+            Infraction.infraction_type,
+            Infraction.count,
+        ),
+    ).all()
+    fetch_ms = (time.perf_counter() - fetch_start) * 1000.0
+
+    filter_start = time.perf_counter()
+    records_metric = []
+    for record in records_raw:
+        status = record.attendance_status or ('present' if record.present else 'unexcused')
+        if status != 'excused':
+            records_metric.append(record)
+    filter_ms = (time.perf_counter() - filter_start) * 1000.0
+
+    agg_start = time.perf_counter()
+    total_periods = 0
+    total_infractions = 0
+    total_points_possible = 0
+    total_reminders = 0
+    total_resets = 0
+    json_parse_errors = 0
+
+    for record in records_metric:
+        for period_row in record.periods:
+            total_periods += 1
+            total_points_possible += int(period_row.points_possible or 0)
+            for inf in period_row.infractions:
+                total_infractions += int(inf.count or 0)
+            if period_row.info:
+                try:
+                    info_data = json.loads(period_row.info)
+                    for reminder_key in ('reminder1', 'reminder2', 'reminder3'):
+                        rv = info_data.get(reminder_key, False)
+                        if rv and rv not in [False, None, '', 'false', 'False', '0', 0]:
+                            total_reminders += 1
+                    reset = info_data.get('reset', False)
+                    if reset and reset not in [False, None, '', 'false', 'False', '0', 0]:
+                        total_resets += 1
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    json_parse_errors += 1
+    agg_ms = (time.perf_counter() - agg_start) * 1000.0
+
+    total_ms = (time.perf_counter() - t0) * 1000.0
+    return jsonify({
+        'ok': True,
+        'params': {
+            'student_id': student_id,
+            'staff_id': staff_id,
+            'managed_by_me': managed_by_me,
+            'period': period,
+            'timeframe': timeframe,
+        },
+        'counts': {
+            'selected_students': len(selected_ids),
+            'records_raw': len(records_raw),
+            'records_metric': len(records_metric),
+            'period_rows': total_periods,
+            'infractions_total_count': total_infractions,
+            'points_possible_total': total_points_possible,
+            'reminders_counted': total_reminders,
+            'resets_counted': total_resets,
+            'info_json_parse_errors': json_parse_errors,
+        },
+        'timings_ms': {
+            'distinct_dates': round(distinct_ms, 1),
+            'db_fetch': round(fetch_ms, 1),
+            'attendance_filter': round(filter_ms, 1),
+            'aggregation': round(agg_ms, 1),
+            'total': round(total_ms, 1),
+        }
+    })
 
 @app.route('/api/case-manager-comparison', methods=['GET'])
 @limiter.limit("30 per minute")
@@ -4971,8 +5601,10 @@ def _extract_month_markers(text: str):
     markers = []
     month_lookup = {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
 
+    # Accept typical quote separators before 2-4 digit year, including replacement char seen in some PDFs.
+    year_sep_chars = "'‘’`´�"
     for match in re.finditer(
-        r'\b(' + '|'.join(month_lookup.keys()) + r')\b(?:\s*[\'’]?\s*(\d{2,4}))?',
+        r'\b(' + '|'.join(month_lookup.keys()) + r')\b(?:[^\S\r\n]*[' + year_sep_chars + r']?[^\S\r\n]*(\d{2,4}))?',
         text,
         flags=re.IGNORECASE
     ):
@@ -4992,6 +5624,11 @@ def _closest_month_marker(markers, char_pos: int):
         return None
     prior = [m for m in markers if m['pos'] <= char_pos]
     if prior:
+        # Prefer nearest prior marker that includes a year, because calendars often
+        # repeat bare month headers (e.g., "MAY") after "MAY '26".
+        for marker in reversed(prior):
+            if marker.get('year') is not None:
+                return marker
         return prior[-1]
     return markers[0]
 
@@ -5018,6 +5655,154 @@ def _extract_day_for_keyword_with_month_context(text: str, keyword_pattern: str,
         return date(marker['year'], marker['month'], day)
     except ValueError:
         return None
+
+
+def _extract_date_from_patterns(text: str, patterns, markers):
+    for pattern in patterns:
+        parsed = _extract_date_after_keyword(text, pattern)
+        if parsed:
+            return parsed
+    for pattern in patterns:
+        parsed = _extract_day_for_keyword_with_month_context(text, pattern, markers)
+        if parsed:
+            return parsed
+    return None
+
+
+def _extract_date_from_line_fallback(text: str, keyword_tokens):
+    """
+    OCR/layout fallback:
+    - Walk line-by-line
+    - Keep nearest month/year context
+    - When a line looks like target keyword, try to resolve day from same or nearby lines
+    """
+    month_lookup = {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
+    lines = [ln.strip() for ln in (text or '').splitlines() if ln and ln.strip()]
+    if not lines:
+        return None
+
+    current_month = None
+    current_year = None
+
+    def _line_matches_tokens(line: str):
+        normalized = re.sub(r'[^a-z0-9 ]+', ' ', line.lower())
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return all(tok in normalized for tok in keyword_tokens)
+
+    for i, line in enumerate(lines):
+        # Update month/year context if this line contains one.
+        for month_name, month_num in month_lookup.items():
+            m = re.search(rf'\b{month_name}\b(?:\s*[\'’]?\s*(\d{{2,4}}))?', line.upper())
+            if m:
+                current_month = month_num
+                year_token = m.group(1)
+                if year_token:
+                    current_year = _coerce_year(int(year_token))
+                break
+
+        if not _line_matches_tokens(line):
+            continue
+
+        if current_month is None or current_year is None:
+            continue
+
+        # Search for day in local neighborhood (before/same/after lines).
+        neighborhood = []
+        for j in range(max(0, i - 2), min(len(lines), i + 3)):
+            neighborhood.append(lines[j])
+        neighborhood_text = ' '.join(neighborhood)
+        day_candidates = [int(d) for d in re.findall(r'\b([0-2]?\d|3[01])\b', neighborhood_text)]
+        if not day_candidates:
+            continue
+
+        # Prefer the smallest-distance candidate to the keyword line by trying current line first.
+        same_line_days = [int(d) for d in re.findall(r'\b([0-2]?\d|3[01])\b', line)]
+        ordered_candidates = same_line_days + [d for d in day_candidates if d not in same_line_days]
+        for day in ordered_candidates:
+            try:
+                return date(current_year, current_month, day)
+            except ValueError:
+                continue
+    return None
+
+
+def _configure_tesseract_path():
+    if pytesseract is None:
+        return False
+    if shutil.which('tesseract'):
+        return True
+
+    common_paths = [
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe'
+    ]
+    for path in common_paths:
+        if os.path.isfile(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            return True
+    return False
+
+
+def _extract_text_with_ocr(pdf_bytes: bytes):
+    if fitz is None or pytesseract is None or Image is None:
+        return ''
+    if not _configure_tesseract_path():
+        return ''
+
+    ocr_pages = []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+        for page in doc:
+            # Render at higher DPI for OCR readability.
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            img = Image.open(BytesIO(pix.tobytes('png')))
+            text = pytesseract.image_to_string(img) or ''
+            if text.strip():
+                ocr_pages.append(text)
+        doc.close()
+    except Exception:
+        return ''
+
+    return '\n'.join(ocr_pages)
+
+
+def _extract_text_from_pdf_bytes(pdf_bytes: bytes):
+    extracted_pages = []
+
+    # Primary extractor: pypdf
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            for page in reader.pages:
+                page_text = page.extract_text() or ''
+                if page_text.strip():
+                    extracted_pages.append(page_text)
+        except Exception:
+            pass
+
+    if extracted_pages:
+        return '\n'.join(extracted_pages), 'pypdf'
+
+    # Fallback extractor: PyMuPDF (helps on some PDFs where pypdf returns empty text)
+    if fitz is not None:
+        try:
+            doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+            for page in doc:
+                page_text = page.get_text('text') or ''
+                if page_text.strip():
+                    extracted_pages.append(page_text)
+            doc.close()
+        except Exception:
+            pass
+
+    if extracted_pages:
+        return '\n'.join(extracted_pages), 'pymupdf'
+
+    ocr_text = _extract_text_with_ocr(pdf_bytes)
+    if ocr_text.strip():
+        return ocr_text, 'ocr'
+
+    return '', None
 
 
 def _split_school_year_into_quarters(first_day: date, last_day: date):
@@ -5071,8 +5856,10 @@ def _build_quarters_from_boundaries(first_day: date, q1_end: date, q2_end: date,
 @app.route('/api/calendar/extract-school-year', methods=['POST'])
 @admin_required
 def extract_school_year_from_calendar_pdf():
-    if PdfReader is None:
-        return jsonify({'error': 'PDF parsing is unavailable. Install the "pypdf" package.'}), 500
+    if PdfReader is None and fitz is None and pytesseract is None:
+        return jsonify({
+            'error': 'PDF parsing is unavailable. Install "pypdf", "PyMuPDF", and OCR dependencies.'
+        }), 500
 
     file = request.files.get('file')
     if not file:
@@ -5085,41 +5872,55 @@ def extract_school_year_from_calendar_pdf():
         if not pdf_bytes:
             return jsonify({'error': 'Uploaded PDF is empty.'}), 400
 
-        reader = PdfReader(BytesIO(pdf_bytes))
-        extracted_pages = []
-        for page in reader.pages:
-            page_text = page.extract_text() or ''
-            if page_text:
-                extracted_pages.append(page_text)
-        full_text = '\n'.join(extracted_pages)
+        full_text, extractor_used = _extract_text_from_pdf_bytes(pdf_bytes)
 
         if not full_text.strip():
-            return jsonify({'error': 'Could not extract text from the PDF.'}), 400
+            return jsonify({
+                'error': 'Could not extract text from the PDF. If this is scanned, install Tesseract OCR and retry.'
+            }), 400
 
         month_markers = _extract_month_markers(full_text)
 
-        first_day = _extract_date_after_keyword(full_text, r'first\s+day\s+of\s+school')
-        last_day = _extract_date_after_keyword(full_text, r'last\s+day\s+of\s+school')
-        q1_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*1')
-        q2_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*2')
-        q3_end = _extract_date_after_keyword(full_text, r'end\s+quarter\s*3')
+        first_day_patterns = [
+            r'first\s*day\s*(?:of\s*)?school',
+            r'first\s*day'
+        ]
+        last_day_patterns = [
+            r'last\s*day\s*(?:of\s*)?school',
+            r'last\s*day'
+        ]
+        q1_patterns = [
+            r'end\s*quarter\s*1',
+            r'quarter\s*1\s*end[s]?',
+            r'q1\s*end[s]?'
+        ]
+        q2_patterns = [
+            r'end\s*quarter\s*2',
+            r'quarter\s*2\s*end[s]?',
+            r'q2\s*end[s]?'
+        ]
+        q3_patterns = [
+            r'end\s*quarter\s*3',
+            r'quarter\s*3\s*end[s]?',
+            r'q3\s*end[s]?'
+        ]
+
+        first_day = _extract_date_from_patterns(full_text, first_day_patterns, month_markers)
+        last_day = _extract_date_from_patterns(full_text, last_day_patterns, month_markers)
+        q1_end = _extract_date_from_patterns(full_text, q1_patterns, month_markers)
+        q2_end = _extract_date_from_patterns(full_text, q2_patterns, month_markers)
+        q3_end = _extract_date_from_patterns(full_text, q3_patterns, month_markers)
 
         if first_day is None:
-            first_day = _extract_date_after_keyword(full_text, r'first\s+day')
+            first_day = _extract_date_from_line_fallback(full_text, ['first', 'day', 'school'])
         if last_day is None:
-            last_day = _extract_date_after_keyword(full_text, r'last\s+day')
-
-        # Calendar layouts often print the day number separately from "End Quarter X" labels.
-        if first_day is None:
-            first_day = _extract_day_for_keyword_with_month_context(full_text, r'first\s+day\s+of\s+school', month_markers)
-        if last_day is None:
-            last_day = _extract_day_for_keyword_with_month_context(full_text, r'last\s+day\s+of\s+school', month_markers)
+            last_day = _extract_date_from_line_fallback(full_text, ['last', 'day', 'school'])
         if q1_end is None:
-            q1_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*1', month_markers)
+            q1_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '1'])
         if q2_end is None:
-            q2_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*2', month_markers)
+            q2_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '2'])
         if q3_end is None:
-            q3_end = _extract_day_for_keyword_with_month_context(full_text, r'end\s+quarter\s*3', month_markers)
+            q3_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '3'])
 
         if first_day is None or last_day is None:
             return jsonify({
@@ -5142,7 +5943,8 @@ def extract_school_year_from_calendar_pdf():
 
         return jsonify({
             'school_year': school_year,
-            'quarters': quarter_dates
+            'quarters': quarter_dates,
+            'extractor_used': extractor_used
         }), 200
     except Exception as e:
         return jsonify({'error': f'Failed to parse calendar PDF: {str(e)}'}), 500
@@ -5799,9 +6601,12 @@ def frenzy_stats():
 
     # For staff/admin views, restrict to active students only (students with a User account role='student')
     if current_user.role in ['staff', 'admin'] or (current_user.role == 'staff' and current_user.is_outside_staff):
-        student_users = User.query.filter_by(role='student').all()
-        active_student_ids = {u.student_id for u in student_users if u.student_id}
-        if not active_student_ids:
+        active_student_ids_q = (
+            User.query.with_entities(User.student_id)
+            .filter(User.role == 'student', User.student_id.isnot(None))
+            .distinct()
+        )
+        if active_student_ids_q.first() is None:
             return jsonify({
                 'by_day': {},
                 'by_time': {},
@@ -5813,19 +6618,21 @@ def frenzy_stats():
                 'all_purposes': [],
                 'all_results': []
             })
-        query = query.filter(DailyRecord.student_id.in_(active_student_ids))
+        query = query.filter(DailyRecord.student_id.in_(active_student_ids_q))
     
-    # Get all records first
-    all_records = query.all()
+    # Eager-load related data to avoid N+1 queries while aggregating frenzy stats.
+    all_records = query.options(
+        selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
+        selectinload(DailyRecord.frenzies),
+    ).all()
     
-    # Filter out excused records (they should be saved but excluded from calculations)
-    # Also migrate attendance_status for records that don't have it yet
+    # Filter out excused records (they should be saved but excluded from calculations).
+    # Do not commit inside this read endpoint; treat missing attendance_status in-memory.
     filtered_records = []
     for record in all_records:
-        # Migrate attendance_status if needed
+        # Backfill attendance status in-memory for consistent calculations.
         if not record.attendance_status:
             record.attendance_status = 'present' if record.present else 'unexcused'
-            db.session.commit()
         
         # Exclude excused records from calculations
         if record.attendance_status != 'excused':
