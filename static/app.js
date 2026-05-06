@@ -18094,9 +18094,9 @@ function getSummaryTrendFetchRange() {
         return { start: start.toISOString().split('T')[0], end: endIso };
     }
     if (period === '30day') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - 29);
-        return { start: start.toISOString().split('T')[0], end: endIso };
+        // Last 30 school/data days are resolved after fetch by slicing
+        // to the latest 30 dates that actually have records.
+        return {};
     }
     if (period === 'current_year') {
         const schoolYearDates = loadSchoolYearDates();
@@ -18117,7 +18117,7 @@ function getSummaryTrendFetchRange() {
     return { start: fallback.toISOString().split('T')[0], end: endIso };
 }
 
-async function fetchSummaryTrendRecords() {
+async function fetchSummaryTrendRecordsForRange(rangeOverride) {
     const st = dashboardState.summary || {};
     const params = new URLSearchParams();
     if (st.studentId) params.set('student_id', String(st.studentId));
@@ -18125,7 +18125,7 @@ async function fetchSummaryTrendRecords() {
     const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
     if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
 
-    const range = getSummaryTrendFetchRange();
+    const range = rangeOverride || getSummaryTrendFetchRange();
     if (range.start) params.set('start_date', range.start);
     if (range.end) params.set('end_date', range.end);
 
@@ -18249,14 +18249,14 @@ function calculateTrendPercent(records, metric) {
     return Math.max(0, Math.min(100, pct[metric] ?? pct.overall));
 }
 
-async function fetchSummaryTrendCheckpoints() {
+async function fetchSummaryTrendCheckpoints(rangeOverride) {
     const st = dashboardState.summary || {};
     const params = new URLSearchParams();
     if (st.studentId) params.set('student_id', String(st.studentId));
     if (st.staffId) params.set('staff_id', String(st.staffId));
     const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
     if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
-    const range = getSummaryTrendFetchRange();
+    const range = rangeOverride || getSummaryTrendFetchRange();
     if (range.start) params.set('start_date', range.start);
     if (range.end) params.set('end_date', range.end);
     const response = await fetch(`/api/checkpoints${params.toString() ? `?${params.toString()}` : ''}`);
@@ -18297,6 +18297,129 @@ function buildSummaryTrendPoints(trendPayload) {
         frenzyCount: Number(row.frenzy_count) || 0,
         starPercent: row.average_star_percent == null ? null : Number(row.average_star_percent)
     }));
+}
+
+const SUMMARY_TREND_SCHOOL_DAY_TARGET_COUNT = 30;
+const SUMMARY_TREND_MIN_TARGET_POINTS = 12;
+const SUMMARY_TREND_MAX_TARGET_POINTS = 60;
+let summaryTrendTargetCache = { key: '', count: null };
+
+function sliceTrendPayloadToLastSchoolDays(trendPayload, schoolDayCount = SUMMARY_TREND_SCHOOL_DAY_TARGET_COUNT) {
+    const payload = trendPayload || {};
+    const originalSeries = Array.isArray(payload.series) ? payload.series : [];
+    if (!Number.isFinite(schoolDayCount) || schoolDayCount <= 0 || originalSeries.length <= schoolDayCount) {
+        return {
+            payload,
+            range: {
+                start: originalSeries.length ? String(originalSeries[0].date || '') : '',
+                end: originalSeries.length ? String(originalSeries[originalSeries.length - 1].date || '') : ''
+            }
+        };
+    }
+    const slicedSeries = originalSeries.slice(-schoolDayCount);
+    return {
+        payload: {
+            ...payload,
+            series: slicedSeries
+        },
+        range: {
+            start: String(slicedSeries[0].date || ''),
+            end: String(slicedSeries[slicedSeries.length - 1].date || '')
+        }
+    };
+}
+
+function getSummaryTrendScopeCacheKey(st) {
+    if (!st) return 'global';
+    return [
+        st.studentId || '',
+        st.staffId || '',
+        st.period || '',
+        st.customStart || '',
+        st.customEnd || '',
+        document.getElementById('summary-managed-by-me-checkbox')?.checked ? 'managed' : 'all'
+    ].join('|');
+}
+
+function shouldApplyTrendPointCapping(period) {
+    return [
+        'current_year',
+        'quarter1',
+        'quarter2',
+        'quarter3',
+        'quarter4',
+        'all_time',
+        'custom_range'
+    ].includes(period);
+}
+
+// Bucket every raw daily point into roughly `targetBucketCount` time buckets so
+// nothing is silently skipped. Each bucket sums frenzies and averages STAR%
+// across the days inside it, so spikes (outlier days) still appear as visible
+// peaks instead of being dropped between sampled points.
+function aggregateTrendPointsToTarget(points, targetBucketCount) {
+    if (!Array.isArray(points) || points.length === 0) return [];
+    if (!Number.isFinite(targetBucketCount) || targetBucketCount < 1) return points;
+    if (points.length <= targetBucketCount) return points;
+
+    const bucketSize = Math.max(1, Math.ceil(points.length / targetBucketCount));
+    const buckets = [];
+    for (let i = 0; i < points.length; i += bucketSize) {
+        const slice = points.slice(i, Math.min(i + bucketSize, points.length));
+        if (!slice.length) continue;
+
+        let frenzySum = 0;
+        let starSum = 0;
+        let starCount = 0;
+        let maxFrenzyDay = slice[0];
+        slice.forEach((p) => {
+            const frenzy = Number(p.frenzyCount) || 0;
+            frenzySum += frenzy;
+            if ((Number(maxFrenzyDay.frenzyCount) || 0) < frenzy) maxFrenzyDay = p;
+            if (Number.isFinite(p.starPercent)) {
+                starSum += p.starPercent;
+                starCount += 1;
+            }
+        });
+
+        const midPoint = slice[Math.floor(slice.length / 2)];
+        buckets.push({
+            date: midPoint.date,
+            label: formatTrendDateLabel(midPoint.date),
+            frenzyCount: frenzySum,
+            starPercent: starCount > 0 ? starSum / starCount : null,
+            bucketStartDate: slice[0].date,
+            bucketEndDate: slice[slice.length - 1].date,
+            bucketDays: slice.length,
+            isAggregated: slice.length > 1,
+            peakFrenzyDate: maxFrenzyDay.date,
+            peakFrenzyCount: Number(maxFrenzyDay.frenzyCount) || 0
+        });
+    }
+    return buckets;
+}
+
+async function fetchSummaryTrendTargetPointCount() {
+    const st = dashboardState.summary || {};
+    const scopeKey = getSummaryTrendScopeCacheKey(st);
+    if (summaryTrendTargetCache.key === scopeKey && Number.isFinite(summaryTrendTargetCache.count)) {
+        return summaryTrendTargetCache.count;
+    }
+
+    try {
+        const baselinePayload = await fetchSummaryTrendRecordsForRange({});
+        const baselineCount = buildSummaryTrendPoints(
+            sliceTrendPayloadToLastSchoolDays(baselinePayload).payload
+        ).length;
+        const target = Math.max(
+            SUMMARY_TREND_MIN_TARGET_POINTS,
+            Math.min(SUMMARY_TREND_MAX_TARGET_POINTS, baselineCount || 0)
+        );
+        summaryTrendTargetCache = { key: scopeKey, count: target || 24 };
+        return summaryTrendTargetCache.count;
+    } catch (_err) {
+        return 24;
+    }
 }
 
 function createCheckpointOverlayPlugin() {
@@ -18378,121 +18501,218 @@ function createCheckpointOverlayPlugin() {
                     });
                 }
             });
-            const LABEL_X_OFFSET = 8;
-            const LABEL_HEIGHT = 12;
-            const laneYs = [];
-            for (let y = chartArea.top - 4; y >= chartArea.top - 52; y -= 12) laneYs.push(y);
-            const segmentIntersectsRect = (segment, rect) => {
-                const pad = 6;
-                const left = rect.left - pad;
-                const right = rect.right + pad;
-                const top = rect.top - pad;
-                const bottom = rect.bottom + pad;
-                const minX = Math.min(segment.x1, segment.x2);
-                const maxX = Math.max(segment.x1, segment.x2);
-                if (maxX < left || minX > right) return false;
-                if (Math.abs(segment.x2 - segment.x1) < 0.001) {
-                    const yMin = Math.min(segment.y1, segment.y2);
-                    const yMax = Math.max(segment.y1, segment.y2);
-                    return !(yMax < top || yMin > bottom);
-                }
-                const startX = Math.max(left, minX);
-                const endX = Math.min(right, maxX);
-                const tStart = (startX - segment.x1) / (segment.x2 - segment.x1);
-                const tEnd = (endX - segment.x1) / (segment.x2 - segment.x1);
-                const yStart = segment.y1 + (segment.y2 - segment.y1) * tStart;
-                const yEnd = segment.y1 + (segment.y2 - segment.y1) * tEnd;
-                const segYMin = Math.min(yStart, yEnd);
-                const segYMax = Math.max(yStart, yEnd);
-                return !(segYMax < top || segYMin > bottom);
-            };
+            const LABEL_X_OFFSET = 10;
+            const LABEL_HORIZONTAL_GAP = 16;
+            const RIGHT_AXIS_CLEARANCE = 8;
+            const LABEL_FONT_SIZES = [11, 9];
+            const labelHeightForFont = (fontSize) => fontSize + 3;
+            // Uniform geometry: every checkpoint line extends from chartArea.bottom
+            // up to LINE_TOP_OFFSET pixels above chartArea.top so the lines clear
+            // the right Y-axis "100%" tick label. The dot sits at the top of the
+            // line, and the label is rendered on the same row as the dot.
+            const LINE_TOP_OFFSET = 22;
+            const lineTopY = chartArea.top - LINE_TOP_OFFSET;
+            const dotY = lineTopY + 4;
             const sortedCheckpointMeta = checkpointMeta.slice().sort((a, b) => a.x - b.x);
-            const stackByIndex = new Array(sortedCheckpointMeta.length).fill(0);
-            // Cluster-based deterministic ordering:
-            // only nearby checkpoints stack; within a cluster, left-most goes higher.
-            const clusterThreshold = 68;
-            let clusterStart = 0;
-            for (let i = 1; i <= sortedCheckpointMeta.length; i++) {
-                const atBoundary =
-                    i === sortedCheckpointMeta.length ||
-                    Math.abs(sortedCheckpointMeta[i].x - sortedCheckpointMeta[i - 1].x) > clusterThreshold;
-                if (!atBoundary) continue;
-                const clusterEnd = i - 1;
-                const clusterSize = clusterEnd - clusterStart + 1;
-                if (clusterSize > 1) {
-                    for (let j = clusterStart; j <= clusterEnd; j++) {
-                        const rankFromLeft = j - clusterStart;
-                        const lane = Math.max(0, clusterSize - 1 - rankFromLeft);
-                        stackByIndex[j] = lane;
-                    }
-                }
-                clusterStart = i;
-            }
-            const placedLabelRects = [];
-            const rectsOverlap = (a, b, gap = 4) =>
-                !(
-                    a.right + gap < b.left ||
-                    a.left - gap > b.right ||
-                    a.bottom + gap < b.top ||
-                    a.top - gap > b.bottom
-                );
-            for (let sortedIndex = sortedCheckpointMeta.length - 1; sortedIndex >= 0; sortedIndex--) {
-                const { cp, x } = sortedCheckpointMeta[sortedIndex];
-                const color = cp.color || '#64748b';
-                const labelText = (cp.label || '').slice(0, 26);
-                ctx.save();
-                ctx.font = '11px Inter, sans-serif';
-                const textWidth = ctx.measureText(labelText).width;
-                const minX = chartArea.left + 2;
-                // Allow checkpoint labels to use the right-side margin so spacing from the
-                // checkpoint line remains consistent near the chart edge.
-                const maxX = chart.width - textWidth - 8;
-                const stackIndex = stackByIndex[sortedIndex] || 0;
-                const chosenX = Math.max(minX, Math.min(maxX, x + LABEL_X_OFFSET));
-                let laneIndex = Math.min(stackIndex, laneYs.length - 1);
-                const rectForLane = (idx) => {
-                    const y = laneYs[idx];
-                    return {
-                        left: chosenX - 1,
-                        right: chosenX + textWidth + 1,
-                        top: y - LABEL_HEIGHT,
-                        bottom: y
-                    };
-                };
-                const laneHasConflicts = (idx) => {
-                    const rect = rectForLane(idx);
-                    const overlapsPlacedLabel = placedLabelRects.some((placed) => rectsOverlap(rect, placed, 6));
-                    if (overlapsPlacedLabel) return true;
-                    return datasetSegments.some((segment) => segmentIntersectsRect(segment, rect));
-                };
-                while (laneIndex + 1 < laneYs.length && laneHasConflicts(laneIndex)) {
-                    laneIndex += 1;
-                }
-                if (laneHasConflicts(laneIndex)) laneIndex = laneYs.length - 1;
-                const chosenY = laneYs[laneIndex];
-                const chosenRect = rectForLane(laneIndex);
-                placedLabelRects.push(chosenRect);
 
-                const labelTopY = chosenY - LABEL_HEIGHT;
-                const lineTopY = Math.min(chartArea.top, labelTopY - 2);
-                const dotY = lineTopY + 6;
+            const drawCheckpointLine = (xPos, lineTopY, color) => {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 4]);
                 ctx.beginPath();
-                ctx.moveTo(x, lineTopY);
-                ctx.lineTo(x, chartArea.bottom);
+                ctx.moveTo(xPos, lineTopY);
+                ctx.lineTo(xPos, chartArea.bottom);
                 ctx.stroke();
                 ctx.setLineDash([]);
+            };
+            const drawCheckpointDot = (xPos, dotY, color) => {
                 ctx.fillStyle = color;
                 ctx.beginPath();
-                ctx.arc(x, dotY, 3, 0, Math.PI * 2);
+                ctx.arc(xPos, dotY, 3, 0, Math.PI * 2);
                 ctx.fill();
+            };
+
+            // Try to place every label at the given font size on a single row
+            // (aligned with each dashed line's dot). Returns { allFit, placements }
+            // where placements is indexed by sortedIndex. Collision is purely
+            // horizontal: a label "fits" only if it stays inside the plot area
+            // and is at least LABEL_HORIZONTAL_GAP pixels from every other label.
+            const tryPlaceLabels = (fontSize) => {
+                const labelHeight = labelHeightForFont(fontSize);
+                ctx.save();
+                ctx.font = `${fontSize}px Inter, sans-serif`;
+                const placements = new Array(sortedCheckpointMeta.length);
+                let allFit = true;
+                for (let sortedIndex = 0; sortedIndex < sortedCheckpointMeta.length; sortedIndex++) {
+                    const { cp, x } = sortedCheckpointMeta[sortedIndex];
+                    const labelText = (cp.label || '').slice(0, 26);
+                    const textWidth = ctx.measureText(labelText).width;
+                    const minX = chartArea.left + 2;
+                    const chosenX = x + LABEL_X_OFFSET;
+                    const fitsHorizontally =
+                        chosenX >= minX &&
+                        chosenX + textWidth <= chartArea.right - RIGHT_AXIS_CLEARANCE;
+                    if (!fitsHorizontally) {
+                        allFit = false;
+                        break;
+                    }
+                    const myLeft = chosenX - 1;
+                    const myRight = chosenX + textWidth + 1;
+                    const overlapsExisting = placements.some((prev) => {
+                        if (!prev) return false;
+                        return !(myRight + LABEL_HORIZONTAL_GAP < prev.left ||
+                                 myLeft - LABEL_HORIZONTAL_GAP > prev.right);
+                    });
+                    if (overlapsExisting) {
+                        allFit = false;
+                        break;
+                    }
+                    placements[sortedIndex] = {
+                        labelText,
+                        textWidth,
+                        chosenX,
+                        left: myLeft,
+                        right: myRight
+                    };
+                }
+                ctx.restore();
+                return { allFit, placements, fontSize, labelHeight };
+            };
+
+            // Pick the largest font size that lets every label fit without collision.
+            // If neither size works, hide all labels uniformly (only lines + dots).
+            let chosenLayout = null;
+            for (const fontSize of LABEL_FONT_SIZES) {
+                const attempt = tryPlaceLabels(fontSize);
+                if (attempt.allFit) {
+                    chosenLayout = attempt;
+                    break;
+                }
+            }
+            const hideAllLabels = chosenLayout === null;
+
+            const hiddenCheckpoints = [];
+            ctx.save();
+            if (!hideAllLabels) {
+                ctx.font = `${chosenLayout.fontSize}px Inter, sans-serif`;
+            } else {
+                ctx.font = '11px Inter, sans-serif';
+            }
+            for (let sortedIndex = 0; sortedIndex < sortedCheckpointMeta.length; sortedIndex++) {
+                const { cp, x } = sortedCheckpointMeta[sortedIndex];
+                const color = cp.color || '#64748b';
+                const labelText = (cp.label || '').slice(0, 26);
+                drawCheckpointLine(x, lineTopY, color);
+                drawCheckpointDot(x, dotY, color);
+
+                if (hideAllLabels) {
+                    const textWidth = ctx.measureText(labelText).width;
+                    hiddenCheckpoints.push({
+                        cp,
+                        x,
+                        color,
+                        labelText,
+                        textWidth,
+                        dotY
+                    });
+                    continue;
+                }
+
+                const placement = chosenLayout.placements[sortedIndex];
+                if (!placement) continue;
+                const { chosenX } = placement;
                 ctx.fillStyle = '#374151';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(labelText, chosenX, dotY);
+            }
+            ctx.restore();
+
+            chart.$summaryHiddenCheckpoints = hiddenCheckpoints;
+
+            const hovered = chart.$summaryHoveredCheckpoint;
+            if (hovered && hiddenCheckpoints.some((entry) => entry === hovered || entry.cp === hovered.cp)) {
+                ctx.save();
+                ctx.font = '11px Inter, sans-serif';
+                const popupText = (hovered.labelText || '').slice(0, 40);
+                const popupTextWidth = ctx.measureText(popupText).width;
+                const popupPadX = 9;
+                const popupPadY = 5;
+                const popupHeight = 22;
+                const popupWidth = popupTextWidth + popupPadX * 2;
+                let popupX = hovered.x + 8;
+                if (popupX + popupWidth > chartArea.right - 4) {
+                    popupX = Math.max(chartArea.left + 2, chartArea.right - 4 - popupWidth);
+                }
+                if (popupX < chartArea.left + 2) popupX = chartArea.left + 2;
+                const popupY = Math.max(2, chartArea.top - 6 - popupHeight);
+
+                ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+                ctx.shadowBlur = 6;
+                ctx.shadowOffsetY = 2;
+                ctx.fillStyle = '#ffffff';
+                ctx.strokeStyle = hovered.color || '#64748b';
+                ctx.lineWidth = 1.5;
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.beginPath();
+                    ctx.roundRect(popupX, popupY, popupWidth, popupHeight, 5);
+                    ctx.fill();
+                } else {
+                    ctx.fillRect(popupX, popupY, popupWidth, popupHeight);
+                }
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.beginPath();
+                    ctx.roundRect(popupX, popupY, popupWidth, popupHeight, 5);
+                    ctx.stroke();
+                } else {
+                    ctx.strokeRect(popupX, popupY, popupWidth, popupHeight);
+                }
+
+                ctx.fillStyle = '#1f2937';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(popupText, popupX + popupPadX, popupY + popupHeight / 2);
                 ctx.restore();
+            }
+        },
+        afterEvent(chart, args) {
+            const event = args && args.event;
+            if (!event) return;
+            const isMove = event.type === 'mousemove';
+            const isLeave = event.type === 'mouseout' || event.type === 'mouseleave';
+            if (!isMove && !isLeave) return;
+
+            const hidden = chart.$summaryHiddenCheckpoints || [];
+            let nearest = null;
+            if (isMove && hidden.length) {
+                const cursorX = event.x;
+                const cursorY = event.y;
+                const chartArea = chart.chartArea;
+                if (
+                    chartArea &&
+                    cursorX >= chartArea.left &&
+                    cursorX <= chartArea.right &&
+                    cursorY >= chartArea.top - 14 &&
+                    cursorY <= chartArea.bottom + 4
+                ) {
+                    let nearestDist = Infinity;
+                    const HIT_RADIUS = 14;
+                    hidden.forEach((entry) => {
+                        const dist = Math.abs(entry.x - cursorX);
+                        if (dist < HIT_RADIUS && dist < nearestDist) {
+                            nearest = entry;
+                            nearestDist = dist;
+                        }
+                    });
+                }
+            }
+
+            if (chart.$summaryHoveredCheckpoint !== nearest) {
+                chart.$summaryHoveredCheckpoint = nearest;
+                args.changed = true;
             }
         }
     };
@@ -18558,60 +18778,11 @@ function renderSummaryTrendChart(points, checkpoints) {
                 baseFit.call(this);
                 const overlayOpts = chart.options?.plugins?.summaryCheckpointOverlay || {};
                 const checkpoints = Array.isArray(overlayOpts.checkpoints) ? overlayOpts.checkpoints : [];
-                const pointDates = Array.isArray(overlayOpts.pointDates) ? overlayOpts.pointDates : [];
-                const toDay = (value) => {
-                    const key = normalizeDateKey(value);
-                    const [y, m, d] = key.split('-').map(Number);
-                    if (!y || !m || !d) return null;
-                    return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
-                };
-                const pointDays = pointDates.map(toDay);
-                const dayToFloatIndex = (targetDay) => {
-                    if (targetDay == null || !pointDays.length) return null;
-                    let first = -1;
-                    let last = -1;
-                    for (let i = 0; i < pointDays.length; i++) {
-                        const day = pointDays[i];
-                        if (day == null) continue;
-                        if (first < 0) first = i;
-                        last = i;
-                        if (day === targetDay) return i;
-                    }
-                    if (first < 0 || last < 0) return null;
-                    if (targetDay <= pointDays[first]) return first;
-                    if (targetDay >= pointDays[last]) return last;
-                    for (let i = first; i < last; i++) {
-                        const left = pointDays[i];
-                        const right = pointDays[i + 1];
-                        if (left == null || right == null || right <= left) continue;
-                        if (targetDay < left || targetDay > right) continue;
-                        return i + ((targetDay - left) / (right - left));
-                    }
-                    return null;
-                };
-                const checkpointIndices = checkpoints
-                    .map((cp) => dayToFloatIndex(toDay(cp?.date)))
-                    .filter((idx) => idx != null)
-                    .sort((a, b) => a - b);
-
-                let maxClusterSize = 1;
-                let currentClusterSize = 1;
-                for (let i = 1; i < checkpointIndices.length; i++) {
-                    const idxGap = checkpointIndices[i] - checkpointIndices[i - 1];
-                    if (idxGap <= 1.05) {
-                        currentClusterSize += 1;
-                    } else {
-                        maxClusterSize = Math.max(maxClusterSize, currentClusterSize);
-                        currentClusterSize = 1;
-                    }
+                // Single-row label geometry: reserve a fixed gap above the
+                // plot area for the dashed line extension + dot + label row.
+                if (checkpoints.length > 0) {
+                    this.height += 32;
                 }
-                maxClusterSize = Math.max(maxClusterSize, currentClusterSize);
-                const collisionLikely = checkpointIndices.length > 1 && maxClusterSize > 1;
-                const predictedMaxLane = collisionLikely ? Math.max(1, maxClusterSize - 1) : 0;
-                const extraGap = predictedMaxLane > 0
-                    ? 22 + (predictedMaxLane * 34)
-                    : 18;
-                this.height += extraGap;
             };
             legend.__gapPatched = true;
         }
@@ -18717,9 +18888,28 @@ function renderSummaryTrendChart(points, checkpoints) {
                 datalabels: { display: false },
                 tooltip: {
                     callbacks: {
+                        title: (items) => {
+                            if (!items || !items.length) return '';
+                            const point = points[items[0].dataIndex];
+                            if (point && point.isAggregated && point.bucketStartDate && point.bucketEndDate) {
+                                const startLabel = formatTrendDateLabel(point.bucketStartDate);
+                                const endLabel = formatTrendDateLabel(point.bucketEndDate);
+                                return `${startLabel} - ${endLabel} (${point.bucketDays} days)`;
+                            }
+                            return items[0].label || '';
+                        },
                         label: (context) => {
                             const y = context.parsed.y;
-                            if (context.dataset.yAxisID === 'yStar') return `${context.dataset.label}: ${Math.round(y)}%`;
+                            const point = points[context.dataIndex];
+                            if (context.dataset.yAxisID === 'yStar') {
+                                return `${context.dataset.label}: ${Math.round(y)}%`;
+                            }
+                            if (point && point.isAggregated) {
+                                const peak = (point.peakFrenzyCount || 0) > 0
+                                    ? ` (peak ${formatTrendDateLabel(point.peakFrenzyDate)}: ${point.peakFrenzyCount})`
+                                    : '';
+                                return `${context.dataset.label}: ${y}${peak}`;
+                            }
                             return `${context.dataset.label}: ${y}`;
                         }
                     }
@@ -18736,14 +18926,24 @@ async function loadSummaryBehaviorTrendCard() {
     const body = document.getElementById('summary-behavior-trend-body');
     if (!body) return;
     try {
-        const [trendPayload, checkpoints] = await Promise.all([
-            fetchSummaryTrendRecords(),
-            fetchSummaryTrendCheckpoints()
-        ]);
+        const currentPeriod = (dashboardState.summary || {}).period || '30day';
+        let trendPayload = await fetchSummaryTrendRecordsForRange();
+        let checkpointRange = null;
+        if (currentPeriod === '30day') {
+            const sliced = sliceTrendPayloadToLastSchoolDays(trendPayload);
+            trendPayload = sliced.payload;
+            if (sliced.range.start && sliced.range.end) {
+                checkpointRange = { start: sliced.range.start, end: sliced.range.end };
+            }
+        }
+        const checkpoints = await fetchSummaryTrendCheckpoints(checkpointRange);
         window.currentSummaryTrendRecords = trendPayload || { series: [] };
         currentSummaryTrendStudentIds = Array.isArray(trendPayload?.student_ids) ? trendPayload.student_ids : [];
         currentSummaryCheckpointData = Array.isArray(checkpoints) ? checkpoints : [];
-        const points = buildSummaryTrendPoints(window.currentSummaryTrendRecords);
+        const rawPoints = buildSummaryTrendPoints(window.currentSummaryTrendRecords);
+        const points = shouldApplyTrendPointCapping(currentPeriod)
+            ? aggregateTrendPointsToTarget(rawPoints, await fetchSummaryTrendTargetPointCount())
+            : rawPoints;
         renderSummaryTrendChart(points, currentSummaryCheckpointData);
         renderSummaryCheckpointList(currentSummaryCheckpointData);
     } catch (err) {
