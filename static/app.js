@@ -18325,25 +18325,6 @@ function createCheckpointOverlayPlugin() {
     };
 }
 
-function smoothTrendSeries(values, windowRadius = 3) {
-    if (!Array.isArray(values) || values.length === 0) return [];
-    const smoothed = [];
-    for (let i = 0; i < values.length; i++) {
-        let weightedSum = 0;
-        let totalWeight = 0;
-        for (let j = Math.max(0, i - windowRadius); j <= Math.min(values.length - 1, i + windowRadius); j++) {
-            const v = values[j];
-            if (v == null || Number.isNaN(Number(v))) continue;
-            // Triangular weighting keeps nearby points dominant but still smooths strongly.
-            const weight = windowRadius + 1 - Math.abs(i - j);
-            weightedSum += Number(v) * weight;
-            totalWeight += weight;
-        }
-        smoothed.push(totalWeight > 0 ? Number((weightedSum / totalWeight).toFixed(2)) : null);
-    }
-    return smoothed;
-}
-
 function renderSummaryTrendChart(points, checkpoints) {
     const body = document.getElementById('summary-behavior-trend-body');
     if (!body) return;
@@ -18359,11 +18340,54 @@ function renderSummaryTrendChart(points, checkpoints) {
         summaryTrendsChartInstance = null;
     }
     const labels = points.map(p => p.label);
-    const frenzyDataRaw = points.map(p => p.frenzyCount);
-    const starDataRaw = points.map(p => p.starPercent);
-    const frenzyData = smoothTrendSeries(frenzyDataRaw, 3);
-    const starData = smoothTrendSeries(starDataRaw, 3);
+    const frenzyData = points.map(p => p.frenzyCount);
+    const starData = points.map(p => p.starPercent);
+    const gradientFill = (context, rgbaTop) => {
+        const chart = context.chart;
+        const { ctx, chartArea } = chart;
+        if (!chartArea) return rgbaTop;
+        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        gradient.addColorStop(0, rgbaTop);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        return gradient;
+    };
+    const makeLegendSwatch = (lineColor, fillTopRgba) => {
+        const swatch = document.createElement('canvas');
+        swatch.width = 13;
+        swatch.height = 13;
+        const sctx = swatch.getContext('2d');
+        if (!sctx) return swatch;
+        const grad = sctx.createLinearGradient(0, 4, 0, 13);
+        grad.addColorStop(0, fillTopRgba);
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        sctx.fillStyle = grad;
+        sctx.fillRect(0, 4, 13, 9);
+        sctx.strokeStyle = lineColor;
+        sctx.lineWidth = 2;
+        sctx.beginPath();
+        sctx.moveTo(0, 3);
+        sctx.lineTo(13, 3);
+        sctx.stroke();
+        return swatch;
+    };
+    const legendSwatches = {
+        frenzy: makeLegendSwatch('#1d4ed8', 'rgba(29, 78, 216, 0.22)'),
+        star: makeLegendSwatch('#7e22ce', 'rgba(126, 34, 206, 0.18)')
+    };
     const checkpointPlugin = createCheckpointOverlayPlugin();
+    const legendBottomGapPlugin = {
+        id: 'summaryTrendLegendBottomGap',
+        beforeInit(chart) {
+            const legend = chart.legend;
+            if (!legend || legend.__gapPatched) return;
+            const baseFit = legend.fit;
+            legend.fit = function patchedFit() {
+                baseFit.call(this);
+                this.height += 12;
+            };
+            legend.__gapPatched = true;
+        }
+    };
     summaryTrendsChartInstance = new Chart(canvas, {
         type: 'line',
         data: {
@@ -18374,22 +18398,32 @@ function renderSummaryTrendChart(points, checkpoints) {
                     data: frenzyData,
                     yAxisID: 'yFrenzy',
                     borderColor: '#1d4ed8',
-                    backgroundColor: 'rgba(29, 78, 216, 0.1)',
+                    backgroundColor: (context) => gradientFill(context, 'rgba(29, 78, 216, 0.22)'),
+                    fill: true,
                     borderWidth: 2.5,
                     cubicInterpolationMode: 'monotone',
-                    pointRadius: 0,
-                    tension: 0.92
+                    pointRadius: 4,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#ffffff',
+                    pointBorderColor: '#1d4ed8',
+                    pointBorderWidth: 2,
+                    tension: 0.4
                 },
                 {
                     label: 'Average STAR %',
                     data: starData,
                     yAxisID: 'yStar',
                     borderColor: '#7e22ce',
-                    backgroundColor: 'rgba(126, 34, 206, 0.1)',
+                    backgroundColor: (context) => gradientFill(context, 'rgba(126, 34, 206, 0.18)'),
+                    fill: true,
                     borderWidth: 2.5,
                     cubicInterpolationMode: 'monotone',
-                    pointRadius: 0,
-                    tension: 0.92
+                    pointRadius: 4,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#ffffff',
+                    pointBorderColor: '#7e22ce',
+                    pointBorderWidth: 2,
+                    tension: 0.4
                 }
             ]
         },
@@ -18400,25 +18434,56 @@ function renderSummaryTrendChart(points, checkpoints) {
                 yFrenzy: {
                     position: 'left',
                     beginAtZero: true,
-                    title: { display: true, text: 'Number of Frenzies' },
+                    title: { display: true, text: 'Number of Frenzies', color: '#1d4ed8' },
                     grid: { display: false }
                 },
                 yStar: {
                     position: 'right',
                     beginAtZero: true,
                     max: 100,
-                    title: { display: true, text: 'Average STAR %' },
+                    title: { display: true, text: 'Average STAR %', color: '#7e22ce' },
                     grid: { display: false },
                     ticks: {
                         callback: (value) => `${value}%`
                     }
                 },
                 x: {
-                    grid: { display: false }
+                    grid: {
+                        display: true,
+                        drawOnChartArea: true,
+                        drawTicks: true
+                    },
+                    ticks: {
+                        autoSkip: false,
+                        maxRotation: 0,
+                        callback(value, index) {
+                            return index % 5 === 0 ? this.getLabelForValue(value) : '';
+                        }
+                    }
                 }
             },
             plugins: {
-                legend: { position: 'top' },
+                legend: {
+                    position: 'top',
+                    labels: {
+                        font: { size: 13 },
+                        usePointStyle: true,
+                        pointStyle: 'rect',
+                        pointStyleWidth: 13,
+                        boxWidth: 13,
+                        boxHeight: 13,
+                        generateLabels(chart) {
+                            const defaults = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                            return defaults.map((label) => {
+                                const isFrenzy = label.datasetIndex === 0;
+                                return {
+                                    ...label,
+                                    pointStyle: isFrenzy ? legendSwatches.frenzy : legendSwatches.star
+                                };
+                            });
+                        }
+                    }
+                },
                 summaryCheckpointOverlay: { checkpoints: checkpoints || [] },
                 datalabels: { display: false },
                 tooltip: {
@@ -18432,7 +18497,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                 }
             }
         },
-        plugins: [checkpointPlugin]
+        plugins: [checkpointPlugin, legendBottomGapPlugin]
     });
     const grid = body.closest('.dashboard-card-grid');
     if (grid) scheduleMasonryLayoutAfterResize(grid);
