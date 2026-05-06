@@ -18192,9 +18192,23 @@ async function fetchSummaryTrendRecords() {
 }
 
 function parseIsoDateLocal(isoDate) {
-    const [year, month, day] = String(isoDate || '').split('-').map(Number);
+    const normalized = normalizeDateKey(isoDate);
+    const [year, month, day] = normalized.split('-').map(Number);
     if (!year || !month || !day) return null;
     return new Date(year, month - 1, day);
+}
+
+function normalizeDateKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const isoPrefix = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoPrefix) return `${isoPrefix[1]}-${isoPrefix[2]}-${isoPrefix[3]}`;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
 }
 
 function formatTrendDateLabel(isoDate) {
@@ -18296,31 +18310,190 @@ function createCheckpointOverlayPlugin() {
             if (!xScale || !chartArea) return;
             const ctx = chart.ctx;
             const labels = chart.data.labels || [];
-            checkpoints.forEach((cp) => {
-                const dateLabel = formatTrendDateLabel(cp.date);
-                const idx = labels.indexOf(dateLabel);
-                if (idx < 0) return;
-                const x = xScale.getPixelForValue(idx);
+            const pointDateKeys = Array.isArray(pluginOptions?.pointDates)
+                ? pluginOptions.pointDates.map(normalizeDateKey)
+                : [];
+            const toDayNumber = (dateKey) => {
+                if (!dateKey) return null;
+                const [y, m, d] = String(dateKey).split('-').map(Number);
+                if (!y || !m || !d) return null;
+                return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+            };
+            const pointDayNumbers = pointDateKeys.map(toDayNumber);
+            const interpolatedXForDay = (targetDay) => {
+                if (targetDay == null) return null;
+                let firstValid = -1;
+                let lastValid = -1;
+                for (let i = 0; i < pointDayNumbers.length; i++) {
+                    if (pointDayNumbers[i] == null) continue;
+                    if (firstValid < 0) firstValid = i;
+                    lastValid = i;
+                    if (pointDayNumbers[i] === targetDay) {
+                        return xScale.getPixelForValue(i);
+                    }
+                }
+                if (firstValid < 0 || lastValid < 0) return null;
+                // Outside known range: clamp to boundary tick.
+                if (targetDay <= pointDayNumbers[firstValid]) return xScale.getPixelForValue(firstValid);
+                if (targetDay >= pointDayNumbers[lastValid]) return xScale.getPixelForValue(lastValid);
+                // Interpolate between surrounding dates to avoid snapping to wrong day.
+                for (let i = firstValid; i < lastValid; i++) {
+                    const leftDay = pointDayNumbers[i];
+                    const rightDay = pointDayNumbers[i + 1];
+                    if (leftDay == null || rightDay == null || rightDay <= leftDay) continue;
+                    if (targetDay < leftDay || targetDay > rightDay) continue;
+                    const ratio = (targetDay - leftDay) / (rightDay - leftDay);
+                    const leftX = xScale.getPixelForValue(i);
+                    const rightX = xScale.getPixelForValue(i + 1);
+                    return leftX + ((rightX - leftX) * ratio);
+                }
+                return null;
+            };
+            const checkpointMeta = checkpoints
+                .map((cp) => {
+                    const checkpointKey = normalizeDateKey(cp.date);
+                    const checkpointDay = toDayNumber(checkpointKey);
+                    let idx = checkpointKey ? pointDateKeys.indexOf(checkpointKey) : -1;
+                    if (idx >= 0) return { cp, x: xScale.getPixelForValue(idx) };
+                    if (idx < 0) idx = labels.indexOf(formatTrendDateLabel(cp.date));
+                    if (idx >= 0) return { cp, x: xScale.getPixelForValue(idx) };
+                    const interpX = interpolatedXForDay(checkpointDay);
+                    if (interpX != null) return { cp, x: interpX };
+                    return null;
+                })
+                .filter(Boolean);
+            const checkpointXs = checkpointMeta.map((item) => item.x);
+            const datasetSegments = [];
+            (chart.data.datasets || []).forEach((_dataset, datasetIndex) => {
+                const meta = chart.getDatasetMeta(datasetIndex);
+                const points = (meta?.data || [])
+                    .map((p) => ({ x: p?.x, y: p?.y }))
+                    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+                for (let i = 1; i < points.length; i++) {
+                    datasetSegments.push({
+                        x1: points[i - 1].x,
+                        y1: points[i - 1].y,
+                        x2: points[i].x,
+                        y2: points[i].y
+                    });
+                }
+            });
+            const LABEL_X_OFFSET = 8;
+            const LABEL_HEIGHT = 12;
+            const laneYs = [];
+            for (let y = chartArea.top - 4; y >= chartArea.top - 52; y -= 12) laneYs.push(y);
+            const segmentIntersectsRect = (segment, rect) => {
+                const pad = 6;
+                const left = rect.left - pad;
+                const right = rect.right + pad;
+                const top = rect.top - pad;
+                const bottom = rect.bottom + pad;
+                const minX = Math.min(segment.x1, segment.x2);
+                const maxX = Math.max(segment.x1, segment.x2);
+                if (maxX < left || minX > right) return false;
+                if (Math.abs(segment.x2 - segment.x1) < 0.001) {
+                    const yMin = Math.min(segment.y1, segment.y2);
+                    const yMax = Math.max(segment.y1, segment.y2);
+                    return !(yMax < top || yMin > bottom);
+                }
+                const startX = Math.max(left, minX);
+                const endX = Math.min(right, maxX);
+                const tStart = (startX - segment.x1) / (segment.x2 - segment.x1);
+                const tEnd = (endX - segment.x1) / (segment.x2 - segment.x1);
+                const yStart = segment.y1 + (segment.y2 - segment.y1) * tStart;
+                const yEnd = segment.y1 + (segment.y2 - segment.y1) * tEnd;
+                const segYMin = Math.min(yStart, yEnd);
+                const segYMax = Math.max(yStart, yEnd);
+                return !(segYMax < top || segYMin > bottom);
+            };
+            const sortedCheckpointMeta = checkpointMeta.slice().sort((a, b) => a.x - b.x);
+            const stackByIndex = new Array(sortedCheckpointMeta.length).fill(0);
+            // Cluster-based deterministic ordering:
+            // only nearby checkpoints stack; within a cluster, left-most goes higher.
+            const clusterThreshold = 68;
+            let clusterStart = 0;
+            for (let i = 1; i <= sortedCheckpointMeta.length; i++) {
+                const atBoundary =
+                    i === sortedCheckpointMeta.length ||
+                    Math.abs(sortedCheckpointMeta[i].x - sortedCheckpointMeta[i - 1].x) > clusterThreshold;
+                if (!atBoundary) continue;
+                const clusterEnd = i - 1;
+                const clusterSize = clusterEnd - clusterStart + 1;
+                if (clusterSize > 1) {
+                    for (let j = clusterStart; j <= clusterEnd; j++) {
+                        const rankFromLeft = j - clusterStart;
+                        const lane = Math.max(0, clusterSize - 1 - rankFromLeft);
+                        stackByIndex[j] = lane;
+                    }
+                }
+                clusterStart = i;
+            }
+            const placedLabelRects = [];
+            const rectsOverlap = (a, b, gap = 4) =>
+                !(
+                    a.right + gap < b.left ||
+                    a.left - gap > b.right ||
+                    a.bottom + gap < b.top ||
+                    a.top - gap > b.bottom
+                );
+            for (let sortedIndex = sortedCheckpointMeta.length - 1; sortedIndex >= 0; sortedIndex--) {
+                const { cp, x } = sortedCheckpointMeta[sortedIndex];
                 const color = cp.color || '#64748b';
+                const labelText = (cp.label || '').slice(0, 26);
                 ctx.save();
+                ctx.font = '11px Inter, sans-serif';
+                const textWidth = ctx.measureText(labelText).width;
+                const minX = chartArea.left + 2;
+                // Allow checkpoint labels to use the right-side margin so spacing from the
+                // checkpoint line remains consistent near the chart edge.
+                const maxX = chart.width - textWidth - 8;
+                const stackIndex = stackByIndex[sortedIndex] || 0;
+                const chosenX = Math.max(minX, Math.min(maxX, x + LABEL_X_OFFSET));
+                let laneIndex = Math.min(stackIndex, laneYs.length - 1);
+                const rectForLane = (idx) => {
+                    const y = laneYs[idx];
+                    return {
+                        left: chosenX - 1,
+                        right: chosenX + textWidth + 1,
+                        top: y - LABEL_HEIGHT,
+                        bottom: y
+                    };
+                };
+                const laneHasConflicts = (idx) => {
+                    const rect = rectForLane(idx);
+                    const overlapsPlacedLabel = placedLabelRects.some((placed) => rectsOverlap(rect, placed, 6));
+                    if (overlapsPlacedLabel) return true;
+                    return datasetSegments.some((segment) => segmentIntersectsRect(segment, rect));
+                };
+                while (laneIndex + 1 < laneYs.length && laneHasConflicts(laneIndex)) {
+                    laneIndex += 1;
+                }
+                if (laneHasConflicts(laneIndex)) laneIndex = laneYs.length - 1;
+                const chosenY = laneYs[laneIndex];
+                const chosenRect = rectForLane(laneIndex);
+                placedLabelRects.push(chosenRect);
+
+                const labelTopY = chosenY - LABEL_HEIGHT;
+                const lineTopY = Math.min(chartArea.top, labelTopY - 2);
+                const dotY = lineTopY + 6;
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 4]);
                 ctx.beginPath();
-                ctx.moveTo(x, chartArea.top);
+                ctx.moveTo(x, lineTopY);
                 ctx.lineTo(x, chartArea.bottom);
                 ctx.stroke();
                 ctx.setLineDash([]);
                 ctx.fillStyle = color;
                 ctx.beginPath();
-                ctx.arc(x, chartArea.top + 6, 3, 0, Math.PI * 2);
+                ctx.arc(x, dotY, 3, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.fillStyle = '#374151';
-                ctx.font = '11px Inter, sans-serif';
                 ctx.textAlign = 'left';
-                ctx.fillText((cp.label || '').slice(0, 26), x + 5, chartArea.top + 12);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(labelText, chosenX, dotY);
                 ctx.restore();
-            });
+            }
         }
     };
 }
@@ -18383,7 +18556,62 @@ function renderSummaryTrendChart(points, checkpoints) {
             const baseFit = legend.fit;
             legend.fit = function patchedFit() {
                 baseFit.call(this);
-                this.height += 12;
+                const overlayOpts = chart.options?.plugins?.summaryCheckpointOverlay || {};
+                const checkpoints = Array.isArray(overlayOpts.checkpoints) ? overlayOpts.checkpoints : [];
+                const pointDates = Array.isArray(overlayOpts.pointDates) ? overlayOpts.pointDates : [];
+                const toDay = (value) => {
+                    const key = normalizeDateKey(value);
+                    const [y, m, d] = key.split('-').map(Number);
+                    if (!y || !m || !d) return null;
+                    return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+                };
+                const pointDays = pointDates.map(toDay);
+                const dayToFloatIndex = (targetDay) => {
+                    if (targetDay == null || !pointDays.length) return null;
+                    let first = -1;
+                    let last = -1;
+                    for (let i = 0; i < pointDays.length; i++) {
+                        const day = pointDays[i];
+                        if (day == null) continue;
+                        if (first < 0) first = i;
+                        last = i;
+                        if (day === targetDay) return i;
+                    }
+                    if (first < 0 || last < 0) return null;
+                    if (targetDay <= pointDays[first]) return first;
+                    if (targetDay >= pointDays[last]) return last;
+                    for (let i = first; i < last; i++) {
+                        const left = pointDays[i];
+                        const right = pointDays[i + 1];
+                        if (left == null || right == null || right <= left) continue;
+                        if (targetDay < left || targetDay > right) continue;
+                        return i + ((targetDay - left) / (right - left));
+                    }
+                    return null;
+                };
+                const checkpointIndices = checkpoints
+                    .map((cp) => dayToFloatIndex(toDay(cp?.date)))
+                    .filter((idx) => idx != null)
+                    .sort((a, b) => a - b);
+
+                let maxClusterSize = 1;
+                let currentClusterSize = 1;
+                for (let i = 1; i < checkpointIndices.length; i++) {
+                    const idxGap = checkpointIndices[i] - checkpointIndices[i - 1];
+                    if (idxGap <= 1.05) {
+                        currentClusterSize += 1;
+                    } else {
+                        maxClusterSize = Math.max(maxClusterSize, currentClusterSize);
+                        currentClusterSize = 1;
+                    }
+                }
+                maxClusterSize = Math.max(maxClusterSize, currentClusterSize);
+                const collisionLikely = checkpointIndices.length > 1 && maxClusterSize > 1;
+                const predictedMaxLane = collisionLikely ? Math.max(1, maxClusterSize - 1) : 0;
+                const extraGap = predictedMaxLane > 0
+                    ? 22 + (predictedMaxLane * 34)
+                    : 18;
+                this.height += extraGap;
             };
             legend.__gapPatched = true;
         }
@@ -18465,6 +18693,7 @@ function renderSummaryTrendChart(points, checkpoints) {
             plugins: {
                 legend: {
                     position: 'top',
+                    align: 'start',
                     labels: {
                         font: { size: 13 },
                         usePointStyle: true,
@@ -18484,7 +18713,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                         }
                     }
                 },
-                summaryCheckpointOverlay: { checkpoints: checkpoints || [] },
+                summaryCheckpointOverlay: { checkpoints: checkpoints || [], pointDates: points.map((p) => p.date) },
                 datalabels: { display: false },
                 tooltip: {
                     callbacks: {
