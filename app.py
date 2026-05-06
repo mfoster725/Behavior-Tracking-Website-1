@@ -2699,6 +2699,11 @@ def api_checkpoints():
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
     start_date_str = request.args.get('start_date')
     end_date_str = request.args.get('end_date')
+    # When true, only return checkpoints whose attached students include
+    # every selected student. Used by the trends summary card so a checkpoint
+    # for a subset of the current scope doesn't appear on a chart that
+    # aggregates students it doesn't apply to.
+    require_all_students = request.args.get('require_all_students', 'false').lower() == 'true'
 
     selected_ids = _resolve_student_scope(
         student_id=student_id,
@@ -2715,6 +2720,14 @@ def api_checkpoints():
     if end_date_str:
         query = query.filter(Checkpoint.date <= datetime.strptime(end_date_str, '%Y-%m-%d').date())
     checkpoints = query.options(selectinload(Checkpoint.students)).order_by(Checkpoint.date.asc(), Checkpoint.id.asc()).distinct().all()
+
+    if require_all_students:
+        selected_set = set(selected_ids)
+        checkpoints = [
+            cp for cp in checkpoints
+            if selected_set.issubset({row.student_id for row in cp.students})
+        ]
+
     return jsonify([_serialize_checkpoint(cp) for cp in checkpoints])
 
 
