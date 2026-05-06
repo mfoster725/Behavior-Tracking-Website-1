@@ -18256,6 +18256,10 @@ async function fetchSummaryTrendCheckpoints(rangeOverride) {
     if (st.staffId) params.set('staff_id', String(st.staffId));
     const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
     if (managedCheckbox && managedCheckbox.checked) params.set('managed_by_me', 'true');
+    // The trends chart aggregates data across the full selection, so only
+    // surface checkpoints that apply to every selected student. If even one
+    // student in scope is missing from the checkpoint, hide it.
+    params.set('require_all_students', 'true');
     const range = rangeOverride || getSummaryTrendFetchRange();
     if (range.start) params.set('start_date', range.start);
     if (range.end) params.set('end_date', range.end);
@@ -19527,8 +19531,6 @@ function renderSummarySingle(container, data) {
 
     html += buildBehaviorTrendCardHtml(data);
     html += buildOverviewDashboardCardHtml(data);
-    html += buildDefaultTriggerTimesCardHtml(data);
-
     html += `</div>`;
     container.innerHTML = html;
     window.currentSummaryTrendRecords = [];
@@ -19609,35 +19611,29 @@ function applySummaryMasonryLayout(grid) {
     const perColWidth = columnWidth / columnCount;
 
     const trendCard = grid.querySelector('.reports-trend-card');
-    const defaultTriggerCard = grid.querySelector('.summary-default-trigger-card');
     const overviewCard = grid.querySelector('.overview-card');
-    const useRestoredReportsLayout = trendCard && defaultTriggerCard && overviewCard && columnCount >= 3;
+    const useRestoredReportsLayout = trendCard && overviewCard && columnCount >= 3;
 
     if (useRestoredReportsLayout) {
         const leftWidth = (perColWidth * 2) + gap;
         const rightWidth = perColWidth;
-        const leftCards = [trendCard, defaultTriggerCard].filter(Boolean);
         const rightLeft = leftWidth + gap;
 
         grid.style.position = 'relative';
         trendCard.style.width = leftWidth + 'px';
-        defaultTriggerCard.style.width = leftWidth + 'px';
         overviewCard.style.width = rightWidth + 'px';
 
-        [...leftCards, overviewCard].forEach(card => {
+        [trendCard, overviewCard].forEach(card => {
             card.style.position = 'static';
         });
 
         void grid.offsetHeight;
 
-        let leftTop = 0;
-        leftCards.forEach(card => {
-            card.style.position = 'absolute';
-            card.style.left = '0px';
-            card.style.top = leftTop + 'px';
-            card.style.width = leftWidth + 'px';
-            leftTop += card.offsetHeight + gap;
-        });
+        trendCard.style.position = 'absolute';
+        trendCard.style.left = '0px';
+        trendCard.style.top = '0px';
+        trendCard.style.width = leftWidth + 'px';
+        const trendBottom = trendCard.offsetHeight + gap;
 
         let overviewTopOffset = 0;
         const formSection = grid.closest('.form-section');
@@ -19654,20 +19650,30 @@ function applySummaryMasonryLayout(grid) {
         overviewCard.style.width = rightWidth + 'px';
 
         let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
-        const handled = new Set([trendCard, defaultTriggerCard, overviewCard]);
+        let leftTop = trendBottom;
+        const handled = new Set([trendCard, overviewCard]);
         const extraCards = cards.filter(card => !handled.has(card));
+        const triggerTimesExtraCard = extraCards.find(card => card.dataset.overviewCard === 'trigger_times');
+        if (triggerTimesExtraCard) {
+            triggerTimesExtraCard.style.position = 'absolute';
+            triggerTimesExtraCard.style.width = rightWidth + 'px';
+            triggerTimesExtraCard.style.left = '0px';
+            triggerTimesExtraCard.style.top = leftTop + 'px';
+            leftTop += triggerTimesExtraCard.offsetHeight + gap;
+            handled.add(triggerTimesExtraCard);
+        }
         extraCards.forEach(card => {
+            if (handled.has(card)) return;
             card.style.position = 'absolute';
-            card.style.width = perColWidth + 'px';
-            if (rightTop <= leftTop) {
+            card.style.width = rightWidth + 'px';
+            if (leftTop <= rightTop) {
+                card.style.left = '0px';
+                card.style.top = leftTop + 'px';
+                leftTop += card.offsetHeight + gap;
+            } else {
                 card.style.left = rightLeft + 'px';
                 card.style.top = rightTop + 'px';
                 rightTop += card.offsetHeight + gap;
-            } else {
-                card.style.left = '0px';
-                card.style.top = leftTop + 'px';
-                card.style.width = leftWidth + 'px';
-                leftTop += card.offsetHeight + gap;
             }
         });
 
