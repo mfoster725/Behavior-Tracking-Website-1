@@ -978,7 +978,11 @@ function setupEventListeners() {
         if (loadSummaryBtn) {
             loadSummaryBtn.addEventListener('click', () => {
                 console.log('Load summary button clicked');
-                loadSummary();
+                if (typeof triggerDashboardLoad === 'function') {
+                    triggerDashboardLoad('summary');
+                } else {
+                    loadSummary();
+                }
             });
         } else {
             console.warn('load-summary-btn not found');
@@ -1004,6 +1008,36 @@ function setupEventListeners() {
             });
         } else {
             console.warn('print-summary-btn not found');
+        }
+
+        const showPointCardBtn = document.getElementById('show-point-card-btn');
+        if (showPointCardBtn) {
+            showPointCardBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (showPointCardBtn.dataset.loading === 'true') {
+                    return;
+                }
+                if (showPointCardBtn.classList.contains('is-inactive')) {
+                    showMessage('Please select a student first', 'error');
+                    return;
+                }
+                const container = document.getElementById('point-card-data-container');
+                const isOpen = !!(container && container.style.display !== 'none' && container.innerHTML.trim());
+                if (isOpen) {
+                    container.style.display = 'none';
+                    showPointCardBtn.textContent = 'View Past Point Cards';
+                    return;
+                }
+                showPointCardBtn.dataset.loading = 'true';
+                try {
+                    await loadPointCardData();
+                } finally {
+                    delete showPointCardBtn.dataset.loading;
+                }
+            });
+        } else {
+            console.warn('show-point-card-btn not found');
         }
         
         // Make period and timeframe dropdowns mutually exclusive for summary
@@ -3945,9 +3979,10 @@ async function saveStudent() {
 function refreshSummaryIfActive() {
     const summaryView = document.getElementById('summary-view');
     if (summaryView && summaryView.classList.contains('active')) {
-        const quarterSelect = document.getElementById('quarter-select');
-        if (quarterSelect && quarterSelect.value) {
-            loadSummary();
+        // Always refresh Summary through the dashboard loader so the active
+        // context (selected student/staff) is preserved consistently.
+        if (typeof triggerDashboardLoad === 'function') {
+            triggerDashboardLoad('summary');
         }
     }
 }
@@ -5628,6 +5663,7 @@ async function loadPointCardData() {
             </div>
         `;
         
+        html += '<div class="point-card-days-grid">';
         records.forEach(record => {
             // Parse date without timezone issues (YYYY-MM-DD format)
             const [year, month, day] = record.date.split('-').map(Number);
@@ -5648,6 +5684,7 @@ async function loadPointCardData() {
                 </div>
             `;
         });
+        html += '</div>';
         
         container.innerHTML = html;
         const btn = document.getElementById('show-point-card-btn');
@@ -6011,11 +6048,20 @@ function renderPointCardGrid(record) {
     `;
 
     record.periods.forEach((period, periodIndex) => {
-        const hasInfo = period.info && period.info.trim() !== '';
+        let hasInfo = false;
+        if (period.info && period.info.trim() !== '') {
+            try {
+                const parsedInfo = JSON.parse(period.info);
+                hasInfo = hasInfoData(parsedInfo);
+            } catch (e) {
+                hasInfo = period.info.trim() !== '';
+            }
+        }
         const recordId = record.id;
         const infoHtml = hasInfo
             ? `<button class="pc-info-view-btn info-view-btn" data-record-id="${recordId}" data-period-index="${periodIndex}">View</button>`
             : '<span style="color: var(--text-secondary);">-</span>';
+        const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
 
         html += `
             <div class="pc-cell pc-time-cell">${period.time_range}</div>
@@ -6024,7 +6070,7 @@ function renderPointCardGrid(record) {
             <div class="pc-cell pc-data-cell" data-category="t">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</div>
             <div class="pc-cell pc-data-cell" data-category="a">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</div>
             <div class="pc-cell pc-data-cell" data-category="r">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</div>
-            <div class="pc-cell pc-info-cell">${infoHtml}</div>
+            <div class="${infoCellClass}">${infoHtml}</div>
         `;
     });
 
@@ -17306,6 +17352,8 @@ let dashboardState = {
 
 let summaryChartInstance = null;
 let frenzyChartInstance = null;
+let summaryLoadAbortController = null;
+let summaryLoadRequestToken = 0;
 
 // ---- Input hardening to resist password managers on search fields ----
 function hardenSearchInput(input) {
@@ -17357,6 +17405,12 @@ function setupDashboardSearch(prefix, type) {
 
     let debounceTimer = null;
     let attemptedLoadData = false;
+    const coerceDashboardEntityId = (rawId) => {
+        if (rawId == null) return null;
+        const text = String(rawId).trim();
+        if (!text) return null;
+        return /^\d+$/.test(text) ? Number(text) : text;
+    };
 
     input.addEventListener('input', async () => {
         clearTimeout(debounceTimer);
@@ -17417,7 +17471,8 @@ function setupDashboardSearch(prefix, type) {
     dropdown.addEventListener('click', (e) => {
         const opt = e.target.closest('.dashboard-search-option');
         if (!opt) return;
-        const id = parseInt(opt.dataset.id);
+        const id = coerceDashboardEntityId(opt.dataset.id);
+        if (id == null) return;
         const name = opt.dataset.name;
         input.value = name;
         dropdown.classList.remove('active');
@@ -17486,7 +17541,8 @@ function setupDashboardSearch(prefix, type) {
             if (matches.length === 0) return;
 
             const match = matches[0];
-            const id = parseInt(match.id);
+            const id = coerceDashboardEntityId(match.id);
+            if (id == null) return;
             const name = match.name || match.username;
             const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
 
@@ -17938,11 +17994,18 @@ function triggerDashboardLoad(pageKey) {
 // ---- Summary Dashboard ----
 async function loadSummaryDashboard() {
     const summaryLoadStart = performance.now();
+    const requestToken = ++summaryLoadRequestToken;
+    if (summaryLoadAbortController) {
+        summaryLoadAbortController.abort();
+    }
+    summaryLoadAbortController = new AbortController();
+    const activeAbortController = summaryLoadAbortController;
     const st = dashboardState.summary;
     const container = document.getElementById('summary-results');
     if (!container) return;
 
     container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading summary...</p></div>';
+    syncSummaryPointCardButton();
 
     const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
     const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
@@ -17982,8 +18045,9 @@ async function loadSummaryDashboard() {
 
     try {
         const fetchStart = performance.now();
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: activeAbortController.signal });
         const data = await response.json();
+        if (requestToken !== summaryLoadRequestToken) return;
         const fetchMs = performance.now() - fetchStart;
         window.currentSummaryData = data;
 
@@ -18001,8 +18065,16 @@ async function loadSummaryDashboard() {
         console.info(`Summary load timings: fetch=${fetchMs.toFixed(1)}ms render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`);
         syncSummaryPointCardButton();
     } catch (err) {
+        if (err && err.name === 'AbortError') {
+            return;
+        }
+        if (requestToken !== summaryLoadRequestToken) return;
         container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
         syncSummaryPointCardButton();
+    } finally {
+        if (summaryLoadAbortController === activeAbortController) {
+            summaryLoadAbortController = null;
+        }
     }
 }
 
@@ -19405,33 +19477,98 @@ function renderSummaryTrendChart(points, checkpoints) {
                 summaryCheckpointOverlay: { checkpoints: checkpoints || [], pointDates: points.map((p) => p.date) },
                 datalabels: { display: false },
                 tooltip: {
-                    ...UNIFIED_CHART_TOOLTIP_STYLE,
-                    callbacks: {
-                        title: (items) => {
-                            if (!items || !items.length) return '';
-                            const point = points[items[0].dataIndex];
-                            if (point && point.isAggregated && point.bucketStartDate && point.bucketEndDate) {
-                                const startLabel = formatTrendDateLabel(point.bucketStartDate);
-                                const endLabel = formatTrendDateLabel(point.bucketEndDate);
-                                return `${startLabel} - ${endLabel} (${point.bucketDays} days)`;
-                            }
-                            return items[0].label || '';
-                        },
-                        label: (context) => {
-                            const y = context.parsed.y;
-                            const point = points[context.dataIndex];
-                            if (context.dataset.yAxisID === 'yStar') {
-                                const baseLabel = context.dataset.label.replace(/\s*%\s*$/, '');
-                                return `${baseLabel}: ${Math.round(y)}%`;
-                            }
-                            if (point && point.isAggregated) {
-                                const peak = (point.peakFrenzyCount || 0) > 0
-                                    ? ` (peak ${formatTrendDateLabel(point.peakFrenzyDate)}: ${point.peakFrenzyCount})`
-                                    : '';
-                                return `${context.dataset.label}: ${y}${peak}`;
-                            }
-                            return `${context.dataset.label}: ${y}`;
+                    enabled: false,
+                    external: (ctx) => {
+                        const { chart, tooltip } = ctx;
+                        const parentEl = chart.canvas.parentNode;
+                        if (!parentEl) return;
+                        if (getComputedStyle(parentEl).position === 'static') {
+                            parentEl.style.position = 'relative';
                         }
+                        let el = parentEl.querySelector(':scope > .summary-trends-tooltip');
+                        if (!el) {
+                            el = document.createElement('div');
+                            el.className = 'summary-trends-tooltip';
+                            el.style.position = 'absolute';
+                            el.style.pointerEvents = 'none';
+                            el.style.background = '#ffffff';
+                            el.style.border = '1.5px solid #cbd5e1';
+                            el.style.borderRadius = '5px';
+                            el.style.padding = '9px';
+                            el.style.color = '#4b5563';
+                            el.style.fontFamily = 'Inter, sans-serif';
+                            el.style.fontSize = '11px';
+                            el.style.fontWeight = '400';
+                            el.style.lineHeight = '1.45';
+                            el.style.whiteSpace = 'nowrap';
+                            el.style.opacity = '0';
+                            el.style.transition = 'opacity 0.1s ease';
+                            el.style.zIndex = '5';
+                            parentEl.appendChild(el);
+                        }
+                        if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
+                            el.style.opacity = '0';
+                            return;
+                        }
+                        const idx = tooltip.dataPoints[0].dataIndex;
+                        const point = points[idx];
+                        const prev = idx > 0 ? points[idx - 1] : null;
+                        let titleText;
+                        if (point && point.isAggregated && point.bucketStartDate && point.bucketEndDate) {
+                            titleText = `${formatTrendDateLabel(point.bucketStartDate)} - ${formatTrendDateLabel(point.bucketEndDate)} (${point.bucketDays} days)`;
+                        } else {
+                            titleText = tooltip.dataPoints[0].label || '';
+                        }
+                        const buildDeltaHtml = (delta, color, suffix) => {
+                            const sign = delta > 0 ? '+' : '-';
+                            return ` <span style="color:${color};font-weight:600;">${sign}${Math.abs(delta)}${suffix}</span>`;
+                        };
+                        const linesHtml = tooltip.dataPoints.map((dp) => {
+                            const y = dp.parsed.y;
+                            const isStar = dp.dataset.yAxisID === 'yStar';
+                            let valueText;
+                            let deltaHtml = '';
+                            if (isStar) {
+                                const yRounded = Math.round(y);
+                                const baseLabel = dp.dataset.label.replace(/\s*%\s*$/, '');
+                                valueText = `${baseLabel}: ${yRounded}%`;
+                                if (prev) {
+                                    const delta = yRounded - Math.round(prev.starPercent || 0);
+                                    if (delta !== 0) {
+                                        deltaHtml = buildDeltaHtml(delta, delta > 0 ? '#16a34a' : '#dc2626', '%');
+                                    }
+                                }
+                            } else {
+                                const currentCount = (point && typeof point.frenzyCount === 'number') ? point.frenzyCount : y;
+                                valueText = `${dp.dataset.label}: ${y}`;
+                                if (prev) {
+                                    const delta = currentCount - (prev.frenzyCount || 0);
+                                    if (delta !== 0) {
+                                        deltaHtml = buildDeltaHtml(delta, delta > 0 ? '#dc2626' : '#16a34a', '');
+                                    }
+                                }
+                                if (point && point.isAggregated && (point.peakFrenzyCount || 0) > 0) {
+                                    valueText += ` (peak ${formatTrendDateLabel(point.peakFrenzyDate)}: ${point.peakFrenzyCount})`;
+                                }
+                            }
+                            return `<div>${escapeHtml(valueText)}${deltaHtml}</div>`;
+                        }).join('');
+                        el.innerHTML = `<div style="color:#1f2937;font-weight:600;margin-bottom:4px;">${escapeHtml(titleText)}</div>${linesHtml}`;
+                        const canvasRect = chart.canvas.getBoundingClientRect();
+                        const parentRect = parentEl.getBoundingClientRect();
+                        const canvasLeftInParent = canvasRect.left - parentRect.left;
+                        const canvasTopInParent = canvasRect.top - parentRect.top;
+                        const elWidth = el.offsetWidth;
+                        const parentWidth = parentEl.clientWidth;
+                        let left = canvasLeftInParent + tooltip.caretX + 12;
+                        if (left + elWidth > parentWidth - 4) {
+                            left = canvasLeftInParent + tooltip.caretX - elWidth - 12;
+                        }
+                        if (left < 4) left = 4;
+                        const top = canvasTopInParent + tooltip.caretY;
+                        el.style.left = `${left}px`;
+                        el.style.top = `${top}px`;
+                        el.style.opacity = '1';
                     }
                 }
             }
@@ -20747,6 +20884,12 @@ function attachOverviewCardInteractions(container, data) {
         const drilldownLabels = sortedDayEntries.map(([day]) => day);
         const drilldownValues = sortedDayEntries.map(([, counts]) => (counts.excused || 0) + (counts.unexcused || 0));
         const hasDrilldownData = drilldownValues.some((value) => value > 0);
+        const getResponsiveDonutLabelOffset = (context, baseOffset) => {
+            const chartWidth = Number(context?.chart?.width || 0);
+            if (chartWidth > 0 && chartWidth < 250) return Math.max(2, baseOffset - 2);
+            if (chartWidth > 420) return baseOffset + 1;
+            return baseOffset;
+        };
         if (donutCanvas && hasDonutData && typeof Chart !== 'undefined') {
             const legendDeltaForLabel = (label) => {
                 if (label === 'Present') {
@@ -20810,18 +20953,22 @@ function attachOverviewCardInteractions(container, data) {
                     rotation: 180,
                     cutout: '62%',
                     layout: {
-                        padding: { top: 22, right: 28, bottom: 34, left: 28 }
+                        padding: { top: 46, right: 28, bottom: 58, left: 28 }
                     },
                     plugins: {
                         legend: {
                             display: false
                         },
                         datalabels: {
+                            display: (context) => {
+                                const value = Number(context?.dataset?.data?.[context.dataIndex] || 0);
+                                return value > 0;
+                            },
                             color: '#ffffff',
                             font: { size: 12, weight: '700' },
                             anchor: 'end',
                             align: 'end',
-                            offset: 6,
+                            offset: (context) => getResponsiveDonutLabelOffset(context, 6),
                             clamp: true,
                             clip: false,
                             backgroundColor: (context) => {
@@ -20938,18 +21085,22 @@ function attachOverviewCardInteractions(container, data) {
                             rotation: 180,
                             cutout: '62%',
                             layout: {
-                                padding: { top: 26, right: 36, bottom: 38, left: 36 }
+                                padding: { top: 50, right: 36, bottom: 62, left: 36 }
                             },
                             plugins: {
                                 legend: {
                                     display: false
                                 },
                                 datalabels: {
+                                    display: (context) => {
+                                        const value = Number(context?.dataset?.data?.[context.dataIndex] || 0);
+                                        return value > 0;
+                                    },
                                     color: '#ffffff',
                                     font: { size: 12, weight: '700' },
                                     anchor: 'end',
                                     align: 'end',
-                                    offset: 8,
+                                    offset: (context) => getResponsiveDonutLabelOffset(context, 8),
                                     clamp: true,
                                     clip: false,
                                     backgroundColor: (context) => {

@@ -2485,10 +2485,10 @@ table tbody tr:hover {
 
 .point-card-days-grid .point-card-day {
     margin-bottom: 0;
-    /* Aim for three cards per row on desktop while still wrapping responsively */
-    flex: 1 1 calc(33.333% - 1.25rem);
-    max-width: calc(33.333% - 1.25rem);
-    min-width: 260px;
+    /* Default to two cards per row for easier date comparison */
+    flex: 1 1 calc(50% - 0.625rem);
+    max-width: calc(50% - 0.625rem);
+    min-width: 320px;
 }
 
 .point-card-day {
@@ -2663,6 +2663,18 @@ table tbody tr:hover {
 .pc-cell.pc-info-cell {
     justify-content: center;
     background: rgba(241, 239, 233, 0.75);
+}
+
+.pc-cell.pc-info-cell.pc-info-cell-has-data {
+    box-shadow: inset 0 0 0 2px #dc2626;
+}
+
+@media (max-width: 900px) {
+    .point-card-days-grid .point-card-day {
+        flex: 1 1 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
 }
 
 .pc-cell.pc-percent-cell {
@@ -8951,13 +8963,13 @@ tr[data-aggregate-day-label] {
     position: relative;
     width: 100%;
     max-width: 280px;
-    height: 260px;
+    height: 290px;
     margin: 0 auto;
 }
 
 .days-present-donut-shell--day-of-week {
     max-width: 280px;
-    height: 260px;
+    height: 290px;
 }
 
 .days-present-donut-shell canvas {
