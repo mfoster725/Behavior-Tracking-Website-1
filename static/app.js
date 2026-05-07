@@ -43,6 +43,34 @@ const INFRACTION_TYPES = {
     harmful: ['Walk', 'Aggression', 'Property Destruction', 'Sexual Reference', 'Threat', 'Disrespectful']
 };
 
+const UNIFIED_CHART_TOOLTIP_STYLE = Object.freeze({
+    backgroundColor: '#ffffff',
+    borderColor: '#cbd5e1',
+    borderWidth: 1.5,
+    cornerRadius: 5,
+    padding: 9,
+    titleColor: '#1f2937',
+    bodyColor: '#4b5563',
+    titleFont: {
+        family: 'Inter, sans-serif',
+        size: 11,
+        weight: '600'
+    },
+    bodyFont: {
+        family: 'Inter, sans-serif',
+        size: 11,
+        weight: '400'
+    },
+    displayColors: false
+});
+
+function applyUnifiedChartTooltipStyle() {
+    if (typeof Chart === 'undefined' || !Chart.defaults || !Chart.defaults.plugins || !Chart.defaults.plugins.tooltip) {
+        return;
+    }
+    Object.assign(Chart.defaults.plugins.tooltip, UNIFIED_CHART_TOOLTIP_STYLE);
+}
+
 let currentStudentId = null;
 let currentDate = new Date().toISOString().split('T')[0];
 let currentPeriod = null;
@@ -499,6 +527,7 @@ if (document.readyState !== 'loading') {
 document.addEventListener('DOMContentLoaded', () => {
     try {
         attachNavAndHamburger();
+        applyUnifiedChartTooltipStyle();
         console.log('Current user:', window.currentUser);
         
         // Disable browser autocomplete/autofill on all inputs in the main app
@@ -19409,7 +19438,8 @@ function renderSummaryTrendChart(points, checkpoints) {
                             const y = context.parsed.y;
                             const point = points[context.dataIndex];
                             if (context.dataset.yAxisID === 'yStar') {
-                                return `${context.dataset.label}: ${Math.round(y)}%`;
+                                const baseLabel = context.dataset.label.replace(/\s*%\s*$/, '');
+                                return `${baseLabel}: ${Math.round(y)}%`;
                             }
                             if (point && point.isAggregated) {
                                 const peak = (point.peakFrenzyCount || 0) > 0

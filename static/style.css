@@ -4453,17 +4453,24 @@ a.dashboard-compare-toggle {
     border-top: 1px solid var(--border);
 }
 
+/* Shared hover popup style aligned to Reports > Trends chart tooltip */
+.behavior-trend-tooltip,
+.infractions-hint-popover {
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 5px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+    color: #4b5563;
+    font-family: Inter, sans-serif;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.35;
+}
+
 .behavior-trend-tooltip {
     position: absolute;
     display: none;
-    padding: 8px 12px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    padding: 9px;
     pointer-events: none;
     z-index: 10;
     white-space: nowrap;
@@ -8109,17 +8116,10 @@ tr[data-aggregate-day-label] {
     left: 0;
     top: 100%;
     margin-top: 6px;
-    padding: 8px 10px;
+    padding: 9px;
     width: 200px;
     max-width: 200px;
     box-sizing: border-box;
-    font-size: 0.8rem;
-    line-height: 1.35;
-    color: var(--text-primary);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     z-index: 10;
 }
 
