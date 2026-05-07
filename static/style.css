@@ -5018,6 +5018,37 @@ a.dashboard-compare-toggle {
     white-space: nowrap;
 }
 
+.overview-trigger-meta-row--sub .overview-trigger-meta-k,
+.overview-trigger-meta-row--sub .overview-trigger-meta-v,
+.overview-trigger-prev-sub {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.overview-trigger-prev-sub {
+    margin-top: 1px;
+    line-height: 1.15;
+    display: grid;
+    grid-template-columns: max-content max-content;
+    column-gap: 8px;
+    align-items: start;
+}
+
+.overview-trigger-prev-sub-k {
+    white-space: nowrap;
+}
+
+.overview-trigger-prev-sub-v {
+    white-space: nowrap;
+}
+
+.overview-trigger-hero-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+}
+
 .overview-trigger-hero {
     font-size: var(--overview-trigger-hero-size, 1.15rem);
     font-weight: 700;
@@ -6925,6 +6956,83 @@ a.dashboard-compare-toggle {
 .trigger-times-card .trigger-times-time-table {
     width: max-content;
     max-width: 100%;
+}
+
+/* Larger heatmap footprint for Trigger Times graph mode */
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap {
+    margin-left: -8px;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap-grid {
+    grid-template-columns: minmax(28px, 0.16fr) repeat(var(--overview-heatmap-col-count, 5), minmax(0, 1fr));
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap-colhead {
+    font-size: 0.76rem;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap-time {
+    font-size: 0.72rem;
+    justify-content: flex-start;
+    padding-right: 0;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap-cell {
+    aspect-ratio: 1.15 / 1;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-heatmap-legend {
+    font-size: 0.66rem;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] {
+    margin: 0;
+    padding: 0;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-panel {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+}
+
+/* Keep hero (left) and trigger meta table (right) on one row */
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-row {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    padding-left: 0;
+    gap: 10px;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-row > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-meta {
+    flex: 0 0 auto;
+    grid-template-columns: max-content max-content;
+    align-items: baseline;
+    column-gap: 10px;
+}
+
+/* Keep hero readable after adding extra meta rows */
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-hero {
+    font-size: min(var(--overview-trigger-hero-size, 1.15rem), 1.55rem);
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-meta-v {
+    justify-self: end;
+    text-align: right;
+}
+
+.trigger-times-card [data-trigger-times-panel="graph"] .overview-trigger-meta-row--sub .overview-trigger-meta-k {
+    opacity: 0.9;
 }
 
 /* Trigger Times card Tier 1 tabs (Time / Day) – match other card tabs */

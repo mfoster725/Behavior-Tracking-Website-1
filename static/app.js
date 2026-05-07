@@ -17972,9 +17972,7 @@ async function loadSummaryDashboard() {
         console.info(`Summary load timings: fetch=${fetchMs.toFixed(1)}ms render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`);
         syncSummaryPointCardButton();
     } catch (err) {
-        const firstStackLine = String(err?.stack || '').split('\n').slice(0, 2).join(' | ');
-        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p>${firstStackLine ? `<p style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(firstStackLine)}</p>` : ''}</div>`;
-        console.error('Summary render stack:', err);
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
         syncSummaryPointCardButton();
     }
 }
@@ -21790,8 +21788,8 @@ function attachOverviewCardInteractions(container, data) {
         const hasPriorTriggerData = Boolean(previousTrigger.time && previousTrigger.day);
         const previousTriggerTime = hasPriorTriggerData ? previousTrigger.time : 'No prior data';
         const previousTriggerDay = hasPriorTriggerData ? previousTrigger.day : 'No prior data';
-        const previousCombined = hasPriorTriggerData
-            ? `${previousTriggerTime} on ${previousTriggerDay}`
+        const previousHeroValue = hasPriorTriggerData
+            ? `${escapeHtml(previousTriggerTime)} on<br>${escapeHtml(previousTriggerDay)}`
             : 'No prior data';
         const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
         let heatRows = '';
@@ -21839,10 +21837,15 @@ function attachOverviewCardInteractions(container, data) {
             <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
                 <div class="overview-trigger-head">
                     <div class="overview-trigger-row">
-                        <div class="overview-trigger-hero">${headlineRight}</div>
+                        <div class="overview-trigger-hero-block">
+                            <div class="overview-trigger-hero">${headlineRight}</div>
+                            <div class="overview-trigger-prev-sub">
+                                <span class="overview-trigger-prev-sub-k">Previously:</span>
+                                <span class="overview-trigger-prev-sub-v">${previousHeroValue}</span>
+                            </div>
+                        </div>
                         ${triggerMetaLines}
                     </div>
-                    <div class="overview-trigger-prev-sub">Previously: ${escapeHtml(previousCombined)}</div>
                 </div>
                 <div class="overview-heatmap" style="--overview-heatmap-col-count:${Math.max(1, hm.timeSlots.length)};">
                     <div class="overview-heatmap-grid">
