@@ -17545,9 +17545,25 @@ function attachOverviewCardInteractions(container, data) {
                 }
                 const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
                 if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
-                    const drillPalette = ['#2563EB', '#7C3AED', '#0D9488', '#059669', '#EA580C', '#DC2626', '#475569'];
-                    const dayLegendRows = drilldownLabels.map((label, idx) => {
-                        const value = Number(drilldownValues[idx] || 0);
+                    const weekdayColorMap = {
+                        monday: '#0D9488',
+                        tuesday: '#7C3AED',
+                        wednesday: '#EA580C',
+                        thursday: '#10B981',
+                        friday: '#2563EB'
+                    };
+                    const fallbackPalette = ['#DC2626', '#475569', '#14B8A6', '#F59E0B'];
+                    const drilldownEntries = drilldownLabels.map((label, idx) => ({
+                        label,
+                        value: Number(drilldownValues[idx] || 0)
+                    })).filter((entry) => entry.value > 0);
+                    const getDayColor = (label, idx) => {
+                        const normalized = String(label || '').toLowerCase();
+                        return weekdayColorMap[normalized] || fallbackPalette[idx % fallbackPalette.length];
+                    };
+                    const dayLegendRows = drilldownEntries.map((entry, idx) => {
+                        const label = entry.label;
+                        const value = entry.value;
                         const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
                         const hasDelta = Number.isFinite(rawDelta);
                         let delta = { text: '—', cls: 'delta-neutral' };
@@ -17564,7 +17580,7 @@ function attachOverviewCardInteractions(container, data) {
                         return `
                             <div class="days-present-legend-item">
                                 <div class="days-present-legend-label">
-                                    <span class="days-present-legend-dot" style="background:${drillPalette[idx % drillPalette.length]};"></span>
+                                    <span class="days-present-legend-dot" style="background:${getDayColor(label, idx)};"></span>
                                     <span>${escapeHtml(label)}</span>
                                 </div>
                                 <div class="days-present-legend-value">
@@ -17580,10 +17596,10 @@ function attachOverviewCardInteractions(container, data) {
                     new Chart(drilldownCanvas.getContext('2d'), {
                         type: 'doughnut',
                         data: {
-                            labels: drilldownLabels,
+                            labels: drilldownEntries.map((entry) => entry.label),
                             datasets: [{
-                                data: drilldownValues,
-                                backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
+                                data: drilldownEntries.map((entry) => entry.value),
+                                backgroundColor: drilldownEntries.map((entry, idx) => getDayColor(entry.label, idx)),
                                 radius: '90%',
                                 borderColor: '#ffffff',
                                 borderWidth: 2,
@@ -17612,7 +17628,9 @@ function attachOverviewCardInteractions(container, data) {
                                     clip: false,
                                     backgroundColor: (context) => {
                                         const idx = context.dataIndex || 0;
-                                        return drillPalette[idx % drillPalette.length];
+                                        const chartLabels = context.chart?.data?.labels || [];
+                                        const label = chartLabels[idx] || '';
+                                        return getDayColor(label, idx);
                                     },
                                     borderRadius: 8,
                                     padding: { top: 6, right: 10, bottom: 6, left: 10 },

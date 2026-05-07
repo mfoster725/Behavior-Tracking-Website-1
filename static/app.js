@@ -19214,6 +19214,16 @@ function renderSummaryTrendChart(points, checkpoints) {
     const labels = points.map(p => p.label);
     const frenzyData = points.map(p => p.frenzyCount);
     const starData = points.map(p => p.starPercent);
+    const TREND_COLORS = {
+        frenzy: {
+            line: '#be123c',
+            fill: 'rgba(190, 18, 60, 0.22)'
+        },
+        star: {
+            line: '#0f766e',
+            fill: 'rgba(15, 118, 110, 0.18)'
+        }
+    };
     const gradientFill = (context, rgbaTop) => {
         const chart = context.chart;
         const { ctx, chartArea } = chart;
@@ -19243,8 +19253,8 @@ function renderSummaryTrendChart(points, checkpoints) {
         return swatch;
     };
     const legendSwatches = {
-        frenzy: makeLegendSwatch('#dc2626', 'rgba(220, 38, 38, 0.22)'),
-        star: makeLegendSwatch('#7e22ce', 'rgba(126, 34, 206, 0.18)')
+        frenzy: makeLegendSwatch(TREND_COLORS.frenzy.line, TREND_COLORS.frenzy.fill),
+        star: makeLegendSwatch(TREND_COLORS.star.line, TREND_COLORS.star.fill)
     };
     const checkpointPlugin = createCheckpointOverlayPlugin();
     const legendBottomGapPlugin = {
@@ -19275,15 +19285,15 @@ function renderSummaryTrendChart(points, checkpoints) {
                     label: 'Number of Frenzies',
                     data: frenzyData,
                     yAxisID: 'yFrenzy',
-                    borderColor: '#dc2626',
-                    backgroundColor: (context) => gradientFill(context, 'rgba(220, 38, 38, 0.22)'),
+                    borderColor: TREND_COLORS.frenzy.line,
+                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.frenzy.fill),
                     fill: true,
                     borderWidth: 2.5,
                     cubicInterpolationMode: 'monotone',
                     pointRadius: 4,
                     pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
-                    pointBorderColor: '#dc2626',
+                    pointBorderColor: TREND_COLORS.frenzy.line,
                     pointBorderWidth: 2,
                     tension: 0.4
                 },
@@ -19291,15 +19301,15 @@ function renderSummaryTrendChart(points, checkpoints) {
                     label: 'Average STAR %',
                     data: starData,
                     yAxisID: 'yStar',
-                    borderColor: '#7e22ce',
-                    backgroundColor: (context) => gradientFill(context, 'rgba(126, 34, 206, 0.18)'),
+                    borderColor: TREND_COLORS.star.line,
+                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.star.fill),
                     fill: true,
                     borderWidth: 2.5,
                     cubicInterpolationMode: 'monotone',
                     pointRadius: 4,
                     pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
-                    pointBorderColor: '#7e22ce',
+                    pointBorderColor: TREND_COLORS.star.line,
                     pointBorderWidth: 2,
                     tension: 0.4
                 }
@@ -19312,14 +19322,14 @@ function renderSummaryTrendChart(points, checkpoints) {
                 yFrenzy: {
                     position: 'left',
                     beginAtZero: true,
-                    title: { display: true, text: 'Number of Frenzies', color: '#dc2626' },
+                    title: { display: true, text: 'Number of Frenzies', color: TREND_COLORS.frenzy.line },
                     grid: { display: false }
                 },
                 yStar: {
                     position: 'right',
                     beginAtZero: true,
                     max: 100,
-                    title: { display: true, text: 'Average STAR %', color: '#7e22ce' },
+                    title: { display: true, text: 'Average STAR %', color: TREND_COLORS.star.line },
                     grid: { display: false },
                     ticks: {
                         callback: (value) => `${value}%`
@@ -20849,9 +20859,25 @@ function attachOverviewCardInteractions(container, data) {
                 }
                 const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
                 if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
-                    const drillPalette = ['#2563EB', '#7C3AED', '#0D9488', '#059669', '#EA580C', '#DC2626', '#475569'];
-                    const dayLegendRows = drilldownLabels.map((label, idx) => {
-                        const value = Number(drilldownValues[idx] || 0);
+                    const weekdayColorMap = {
+                        monday: '#0D9488',
+                        tuesday: '#7C3AED',
+                        wednesday: '#EA580C',
+                        thursday: '#10B981',
+                        friday: '#2563EB'
+                    };
+                    const fallbackPalette = ['#DC2626', '#475569', '#14B8A6', '#F59E0B'];
+                    const drilldownEntries = drilldownLabels.map((label, idx) => ({
+                        label,
+                        value: Number(drilldownValues[idx] || 0)
+                    })).filter((entry) => entry.value > 0);
+                    const getDayColor = (label, idx) => {
+                        const normalized = String(label || '').toLowerCase();
+                        return weekdayColorMap[normalized] || fallbackPalette[idx % fallbackPalette.length];
+                    };
+                    const dayLegendRows = drilldownEntries.map((entry, idx) => {
+                        const label = entry.label;
+                        const value = entry.value;
                         const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
                         const hasDelta = Number.isFinite(rawDelta);
                         let delta = { text: '—', cls: 'delta-neutral' };
@@ -20868,7 +20894,7 @@ function attachOverviewCardInteractions(container, data) {
                         return `
                             <div class="days-present-legend-item">
                                 <div class="days-present-legend-label">
-                                    <span class="days-present-legend-dot" style="background:${drillPalette[idx % drillPalette.length]};"></span>
+                                    <span class="days-present-legend-dot" style="background:${getDayColor(label, idx)};"></span>
                                     <span>${escapeHtml(label)}</span>
                                 </div>
                                 <div class="days-present-legend-value">
@@ -20884,10 +20910,10 @@ function attachOverviewCardInteractions(container, data) {
                     new Chart(drilldownCanvas.getContext('2d'), {
                         type: 'doughnut',
                         data: {
-                            labels: drilldownLabels,
+                            labels: drilldownEntries.map((entry) => entry.label),
                             datasets: [{
-                                data: drilldownValues,
-                                backgroundColor: drilldownLabels.map((_, idx) => drillPalette[idx % drillPalette.length]),
+                                data: drilldownEntries.map((entry) => entry.value),
+                                backgroundColor: drilldownEntries.map((entry, idx) => getDayColor(entry.label, idx)),
                                 radius: '90%',
                                 borderColor: '#ffffff',
                                 borderWidth: 2,
@@ -20916,7 +20942,9 @@ function attachOverviewCardInteractions(container, data) {
                                     clip: false,
                                     backgroundColor: (context) => {
                                         const idx = context.dataIndex || 0;
-                                        return drillPalette[idx % drillPalette.length];
+                                        const chartLabels = context.chart?.data?.labels || [];
+                                        const label = chartLabels[idx] || '';
+                                        return getDayColor(label, idx);
                                     },
                                     borderRadius: 8,
                                     padding: { top: 6, right: 10, bottom: 6, left: 10 },
