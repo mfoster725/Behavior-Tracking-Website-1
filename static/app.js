@@ -20860,10 +20860,10 @@ function attachOverviewCardInteractions(container, data) {
                 const drilldownCanvas = dayPanel ? dayPanel.querySelector(`#${drilldownCanvasId}`) : null;
                 if (drilldownCanvas && !drilldownCanvas.dataset.chartBuilt && hasDrilldownData) {
                     const weekdayColorMap = {
-                        monday: '#0D9488',
+                        monday: '#14B8A6',
                         tuesday: '#7C3AED',
-                        wednesday: '#EA580C',
-                        thursday: '#10B981',
+                        wednesday: '#F97316',
+                        thursday: '#E11D48',
                         friday: '#2563EB'
                     };
                     const fallbackPalette = ['#DC2626', '#475569', '#14B8A6', '#F59E0B'];
@@ -20875,9 +20875,8 @@ function attachOverviewCardInteractions(container, data) {
                         const normalized = String(label || '').toLowerCase();
                         return weekdayColorMap[normalized] || fallbackPalette[idx % fallbackPalette.length];
                     };
-                    const dayLegendRows = drilldownEntries.map((entry, idx) => {
-                        const label = entry.label;
-                        const value = entry.value;
+                    const dayLegendRows = drilldownLabels.map((label, idx) => {
+                        const value = Number(drilldownValues[idx] || 0);
                         const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
                         const hasDelta = Number.isFinite(rawDelta);
                         let delta = { text: '—', cls: 'delta-neutral' };
