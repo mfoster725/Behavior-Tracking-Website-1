@@ -3361,11 +3361,32 @@ def summary():
         by_class = {}
         by_time = {}
 
+        # Per-(day, time) frenzy severity aggregation. Mirrors the heavy
+        # summary path so the overview heatmap always has severity data.
+        frenzy_severity_by_time_by_day = {day: {} for day in weekdays}
+
         for record in record_list:
             day_of_week = record.day_of_week
             is_weekday = day_of_week in weekdays
             if is_weekday:
                 by_day_of_week[day_of_week]['total_days'] += 1
+
+                for frenzy in (getattr(record, 'frenzies', None) or []):
+                    sev = getattr(frenzy, 'severity', None)
+                    if sev is None:
+                        continue
+                    try:
+                        sev_int = int(sev)
+                    except (TypeError, ValueError):
+                        continue
+                    time_label = (getattr(frenzy, 'time_range', '') or '').strip() or 'Unknown'
+                    sev_map = frenzy_severity_by_time_by_day[day_of_week]
+                    bucket = sev_map.get(time_label)
+                    if bucket is None:
+                        bucket = {'severity_sum': 0, 'severity_count': 0}
+                        sev_map[time_label] = bucket
+                    bucket['severity_sum'] += sev_int
+                    bucket['severity_count'] += 1
 
             for period in record.periods:
                 sp = int(period.safety_points or 0)
@@ -3540,6 +3561,22 @@ def summary():
                 'top_class_count': top_class_count,
             }
 
+        # Format frenzy severity per (day, time) cell into average severity.
+        frenzy_severity_by_time_by_day_formatted = {}
+        for day, times_map in frenzy_severity_by_time_by_day.items():
+            formatted_sev = {}
+            for time_label, bucket in times_map.items():
+                count = bucket.get('severity_count') or 0
+                if count <= 0:
+                    continue
+                sev_sum = bucket.get('severity_sum') or 0
+                avg_sev = sev_sum / count
+                formatted_sev[time_label] = {
+                    'avg_severity': round(avg_sev, 2),
+                    'frenzy_count': count,
+                }
+            frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
+
         return {
             'total_days': len(record_list),
             'totals': {
@@ -3563,7 +3600,7 @@ def summary():
             'by_class': by_class_formatted,
             'by_time': by_time_formatted,
             'by_time_by_day': {},
-            'frenzy_severity_by_time_by_day': {},
+            'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'infractions_by_type': {},
         }
     

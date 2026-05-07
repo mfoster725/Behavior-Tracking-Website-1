@@ -17960,35 +17960,126 @@ function overviewTrendDeltaClass(metric, delta) {
 }
 
 function collectOverviewTimeSlots(byTimeByDay) {
-    const hints = ['AM Bus', '9:00', '10:30', '12:00', '1:30', 'PM Bus'];
     const pool = new Set();
     Object.values(byTimeByDay || {}).forEach(tm => {
         Object.keys(tm || {}).forEach(k => pool.add(k));
     });
-    let arr = [...pool];
-    const ordered = [];
-    hints.forEach(h => {
-        const idx = arr.findIndex(k =>
-            k === h || k.includes(h) || (h.length <= 4 && k.startsWith(h)));
-        if (idx >= 0) {
-            ordered.push(arr[idx]);
-            arr = arr.filter((_, i) => i !== idx);
-        }
+    const arr = [...pool];
+    const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const parseStartMinutes = (label) => {
+        const txt = normalize(label);
+        if (txt.includes('am bus')) return -1;
+        if (txt.includes('pm bus')) return 24 * 60 + 1;
+        const m = txt.match(/(\d{1,2})\s*:\s*(\d{2})/);
+        if (!m) return null;
+        let hour = Number(m[1]);
+        const minute = Number(m[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+        // School-day heuristic: 1:00-5:59 are afternoon slots.
+        if (hour >= 1 && hour <= 5) hour += 12;
+        return hour * 60 + minute;
+    };
+    arr.sort((a, b) => {
+        const aMins = parseStartMinutes(a);
+        const bMins = parseStartMinutes(b);
+        if (aMins != null && bMins != null && aMins !== bMins) return aMins - bMins;
+        if (aMins != null && bMins == null) return -1;
+        if (aMins == null && bMins != null) return 1;
+        return a.localeCompare(b);
     });
-    arr.sort((a, b) => a.localeCompare(b));
-    return ordered.concat(arr);
+    return arr;
 }
 
-function overviewHeatmapMeta(byTimeByDay, frenzySeverityByTimeByDay) {
+function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const timeSlots = collectOverviewTimeSlots(byTimeByDay);
-    const severityTimeSlots = collectOverviewTimeSlots(frenzySeverityByTimeByDay);
-    severityTimeSlots.forEach(slot => {
+    // Build the column set from period data (so rows always have cells),
+    // and merge in any extra slots that only appear in frenzy severity data.
+    const fallbackSlots = collectOverviewTimeSlots(byTimeByDayFallback || {});
+    const severitySlots = collectOverviewTimeSlots(frenzySeverityByTimeByDay || {});
+    const timeSlots = fallbackSlots.slice();
+    severitySlots.forEach(slot => {
         if (!timeSlots.includes(slot)) timeSlots.push(slot);
     });
-    // Severity scale is fixed (1=Para → 5=SRO) so the heatmap reads
-    // consistently across periods. We still surface "worst"/"best" cells
-    // for headline meta and selection highlights.
+    const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    let hasAmBusData = false;
+    let hasPmBusData = false;
+    Object.values(frenzySeverityByTimeByDay || {}).forEach((dayMap) => {
+        Object.entries(dayMap || {}).forEach(([slotLabel, cell]) => {
+            const count = Number(cell?.frenzy_count || 0);
+            if (count <= 0) return;
+            const slot = normalize(slotLabel);
+            if (slot.includes('am') && slot.includes('bus')) hasAmBusData = true;
+            if (slot.includes('pm') && slot.includes('bus')) hasPmBusData = true;
+        });
+    });
+    const showBusColumns = hasAmBusData || hasPmBusData;
+    if (!showBusColumns) {
+        for (let i = timeSlots.length - 1; i >= 0; i--) {
+            const slot = normalize(timeSlots[i]);
+            if (slot.includes('am') && slot.includes('bus')) timeSlots.splice(i, 1);
+            else if (slot.includes('pm') && slot.includes('bus')) timeSlots.splice(i, 1);
+        }
+    }
+    const tieStarPercent = (cell) => {
+        const v = cell?.percentages?.overall;
+        return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    };
+    const tieInfractions = (cell) => {
+        const v = Number(cell?.total_infractions || 0);
+        return Number.isFinite(v) ? v : 0;
+    };
+    const compareHeatTie = (a, b) => {
+        if (a.frenzyCount !== b.frenzyCount) return a.frenzyCount - b.frenzyCount;
+        const aStar = a.starPercent;
+        const bStar = b.starPercent;
+        if (aStar != null && bStar != null && aStar !== bStar) return bStar - aStar; // lower STAR is hotter
+        if (aStar != null && bStar == null) return -1;
+        if (aStar == null && bStar != null) return 1;
+        if (a.infractions !== b.infractions) return a.infractions - b.infractions;
+        return `${a.day}|${a.timeLabel}`.localeCompare(`${b.day}|${b.timeLabel}`);
+    };
+    const compareTriggerAggregate = (a, b) => {
+        if (a.totalSeverity !== b.totalSeverity) return a.totalSeverity - b.totalSeverity;
+        if (a.frenzyCount !== b.frenzyCount) return a.frenzyCount - b.frenzyCount;
+        const aStar = a.avgStarPercent;
+        const bStar = b.avgStarPercent;
+        if (aStar != null && bStar != null && aStar !== bStar) return bStar - aStar; // lower STAR is hotter
+        if (aStar != null && bStar == null) return -1;
+        if (aStar == null && bStar != null) return 1;
+        if (a.infractions !== b.infractions) return a.infractions - b.infractions;
+        return String(b.label || '').localeCompare(String(a.label || ''));
+    };
+    const aggregateCells = (label, cellRefs) => {
+        let totalSeverity = 0;
+        let frenzyCount = 0;
+        let infractions = 0;
+        let starSum = 0;
+        let starCount = 0;
+        cellRefs.forEach(({ sevCell, fallbackCell }) => {
+            const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
+            const count = Number(sevCell?.frenzy_count || 0);
+            if (avg != null && count > 0) {
+                totalSeverity += avg * count;
+                frenzyCount += count;
+            }
+            const star = tieStarPercent(fallbackCell);
+            if (star != null) {
+                starSum += star;
+                starCount += 1;
+            }
+            infractions += tieInfractions(fallbackCell);
+        });
+        if (frenzyCount <= 0) return null;
+        return {
+            label,
+            totalSeverity,
+            frenzyCount,
+            avgStarPercent: starCount > 0 ? starSum / starCount : null,
+            infractions
+        };
+    };
+    // Severity remains the main scale. Exact severity ties are spread by
+    // frenzy count, then lower STAR %, then infractions.
     let worstSev = -Infinity;
     let worst = null;
     let bestSev = Infinity;
@@ -17996,53 +18087,164 @@ function overviewHeatmapMeta(byTimeByDay, frenzySeverityByTimeByDay) {
     let hasSeverity = false;
     let minAvgSeverity = Infinity;
     let maxAvgSeverity = -Infinity;
+    const observedSeverityValues = [];
+    const observedCells = [];
+    let triggerTime = null;
+    let triggerDay = null;
     days.forEach(day => {
         const sevMap = (frenzySeverityByTimeByDay || {})[day] || {};
+        const fallbackMap = (byTimeByDayFallback || {})[day] || {};
         timeSlots.forEach(timeLabel => {
             const sevCell = sevMap[timeLabel];
             const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
             if (avg == null) return;
+            const fallbackCell = fallbackMap[timeLabel] || {};
+            const observedCell = {
+                day,
+                timeLabel,
+                severityCell: sevCell,
+                avg,
+                frenzyCount: Number(sevCell?.frenzy_count || 0),
+                starPercent: tieStarPercent(fallbackCell),
+                infractions: tieInfractions(fallbackCell)
+            };
             hasSeverity = true;
+            observedSeverityValues.push(avg);
+            observedCells.push(observedCell);
             if (avg < minAvgSeverity) minAvgSeverity = avg;
             if (avg > maxAvgSeverity) maxAvgSeverity = avg;
-            if (avg > worstSev) {
+            if (avg > worstSev || (avg === worstSev && (!worst || compareHeatTie(worst, observedCell) < 0))) {
                 worstSev = avg;
-                worst = { day, timeLabel };
+                worst = observedCell;
             }
-            if (avg < bestSev) {
+            if (avg < bestSev || (avg === bestSev && (!best || compareHeatTie(best, observedCell) > 0))) {
                 bestSev = avg;
-                best = { day, timeLabel };
+                best = observedCell;
             }
         });
+    });
+    timeSlots.forEach(timeLabel => {
+        const agg = aggregateCells(timeLabel, days.map(day => ({
+            sevCell: (frenzySeverityByTimeByDay || {})[day]?.[timeLabel],
+            fallbackCell: (byTimeByDayFallback || {})[day]?.[timeLabel]
+        })));
+        if (agg && (!triggerTime || compareTriggerAggregate(triggerTime, agg) < 0)) {
+            triggerTime = { ...agg, timeLabel };
+        }
+    });
+    days.forEach(day => {
+        const agg = aggregateCells(day, timeSlots.map(timeLabel => ({
+            sevCell: (frenzySeverityByTimeByDay || {})[day]?.[timeLabel],
+            fallbackCell: (byTimeByDayFallback || {})[day]?.[timeLabel]
+        })));
+        if (agg && (!triggerDay || compareTriggerAggregate(triggerDay, agg) < 0)) {
+            triggerDay = { ...agg, day };
+        }
     });
     if (!hasSeverity) {
         worst = null;
         best = null;
+        triggerTime = null;
+        triggerDay = null;
         minAvgSeverity = null;
         maxAvgSeverity = null;
     }
-    return { days, timeSlots, worst, best, hasSeverity, minAvgSeverity, maxAvgSeverity };
+    const uniqueSeverityValues = [...new Set(observedSeverityValues.map(v => Number(v.toFixed(4))))].sort((a, b) => a - b);
+    if (hasSeverity) {
+        const baseForSeverity = (avg) => {
+            if (!(typeof minAvgSeverity === 'number' && typeof maxAvgSeverity === 'number') || maxAvgSeverity <= minAvgSeverity) {
+                return 0;
+            }
+            return Math.min(1, Math.max(0, (avg - minAvgSeverity) / (maxAvgSeverity - minAvgSeverity)));
+        };
+        const baseBySeverity = new Map(uniqueSeverityValues.map(v => [v, baseForSeverity(v)]));
+        const cellsBySeverity = new Map();
+        observedCells.forEach(cell => {
+            const key = Number(cell.avg.toFixed(4));
+            if (!cellsBySeverity.has(key)) cellsBySeverity.set(key, []);
+            cellsBySeverity.get(key).push(cell);
+        });
+        uniqueSeverityValues.forEach((sevKey, idx) => {
+            const group = cellsBySeverity.get(sevKey) || [];
+            const base = baseBySeverity.get(sevKey) ?? 0;
+            if (group.length <= 1) {
+                if (group[0]) group[0].severityCell.heat_t = uniqueSeverityValues.length === 1 ? 1 : base;
+                return;
+            }
+            group.sort(compareHeatTie);
+            const prevBase = idx > 0 ? (baseBySeverity.get(uniqueSeverityValues[idx - 1]) ?? base) : null;
+            const nextBase = idx < uniqueSeverityValues.length - 1 ? (baseBySeverity.get(uniqueSeverityValues[idx + 1]) ?? base) : null;
+            let low = base;
+            let high = base;
+            if (prevBase == null && nextBase == null) {
+                low = 0;
+                high = 1;
+            } else if (prevBase == null) {
+                low = 0;
+                high = base + ((nextBase - base) * 0.35);
+            } else if (nextBase == null) {
+                low = base - ((base - prevBase) * 0.35);
+                high = 1;
+            } else {
+                const band = Math.min(base - prevBase, nextBase - base) * 0.35;
+                low = base - (band / 2);
+                high = base + (band / 2);
+            }
+            group.forEach((cell, groupIdx) => {
+                const u = group.length > 1 ? groupIdx / (group.length - 1) : 0;
+                cell.severityCell.heat_t = Math.min(1, Math.max(0, low + ((high - low) * u)));
+            });
+        });
+    }
+    return { days, timeSlots, worst, worstSev, best, bestSev, triggerTime, triggerDay, hasSeverity, minAvgSeverity, maxAvgSeverity, uniqueSeverityValues, showBusColumns };
 }
 
 function overviewHeatColor(severityCell, hm) {
     // Empty cells (no frenzies) render as the coolest color on the scale.
     const avg = typeof severityCell?.avg_severity === 'number' ? severityCell.avg_severity : null;
     let t = 0;
-    if (avg != null) {
+    if (typeof severityCell?.heat_t === 'number' && Number.isFinite(severityCell.heat_t)) {
+        t = Math.min(1, Math.max(0, severityCell.heat_t));
+    } else if (avg != null) {
         const minAvg = hm?.minAvgSeverity;
         const maxAvg = hm?.maxAvgSeverity;
-        if (hm?.hasSeverity && typeof minAvg === 'number' && typeof maxAvg === 'number' && maxAvg > minAvg) {
-            // Normalize to observed range to avoid a uniformly green map when
-            // most averages cluster in a narrow band.
+        const hasRange = typeof minAvg === 'number' && typeof maxAvg === 'number' && maxAvg > minAvg;
+        if (hasRange) {
+            // Linear scale relative to the lowest and highest observed
+            // severity in the current selection: the lowest renders coolest,
+            // the highest renders hottest, and intermediate values land
+            // proportionally between them.
             t = Math.min(1, Math.max(0, (avg - minAvg) / (maxAvg - minAvg)));
         } else {
-            // Fallback to absolute 1..5 severity scale.
-            t = Math.min(1, Math.max(0, (avg - 1) / 4));
+            // Only one observed value (or none) — render at the cool end.
+            t = 0;
         }
     }
-    const r = Math.round(34 + t * (239 - 34));
-    const g = Math.round(197 + t * (68 - 197));
-    const b = Math.round(94 + t * (68 - 94));
+    // Multi-stop palette sampled from the reference Trigger Time heatmap.
+    // Coolest cells use the vibrant dark green, then warm up through grass
+    // green → olive → amber → orange → deep red.
+    const stops = [
+        { p: 0.00, c: [54, 158, 44] },   // vibrant dark green (coolest)
+        { p: 0.30, c: [126, 184, 81] },  // medium grass green
+        { p: 0.50, c: [188, 180, 50] },  // olive / yellow-green
+        { p: 0.70, c: [227, 170, 48] },  // amber / yellow
+        { p: 0.86, c: [221, 127, 41] },  // orange
+        { p: 1.00, c: [187, 35, 23] }    // deep red
+    ];
+    let r = stops[0].c[0], g = stops[0].c[1], b = stops[0].c[2];
+    for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i];
+        const z = stops[i + 1];
+        if (t <= z.p) {
+            const span = (z.p - a.p) || 1;
+            const u = Math.min(1, Math.max(0, (t - a.p) / span));
+            r = Math.round(a.c[0] + u * (z.c[0] - a.c[0]));
+            g = Math.round(a.c[1] + u * (z.c[1] - a.c[1]));
+            b = Math.round(a.c[2] + u * (z.c[2] - a.c[2]));
+            break;
+        }
+        r = z.c[0]; g = z.c[1]; b = z.c[2];
+    }
     return `rgb(${r},${g},${b})`;
 }
 
@@ -18051,12 +18253,11 @@ function overviewDayInitial(day) {
     return m[day] || (day || '').slice(0, 2);
 }
 
-function buildOverviewHeatmapColumnLabels(timeSlots) {
+function buildOverviewHeatmapColumnLabels(timeSlots, frenzySeverityByTimeByDay, showBusColumns = null) {
     const slots = Array.isArray(timeSlots) ? timeSlots : [];
     if (!slots.length) return [];
     const labels = new Array(slots.length).fill('');
     const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
-    const normSlots = slots.map(normalize);
 
     const parseStartMinutes = (label) => {
         const txt = normalize(label);
@@ -18065,7 +18266,7 @@ function buildOverviewHeatmapColumnLabels(timeSlots) {
         let hour = Number(m[1]);
         const minute = Number(m[2]);
         if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-        // School day heuristic: 1:00-5:59 are afternoon slots.
+        // School-day heuristic for unqualified afternoon times.
         if (hour >= 1 && hour <= 5) hour += 12;
         return hour * 60 + minute;
     };
@@ -18086,26 +18287,54 @@ function buildOverviewHeatmapColumnLabels(timeSlots) {
         return bestIdx;
     };
 
-    const used = new Set();
-    let amBusIdx = normSlots.findIndex(s => s.includes('am') && s.includes('bus'));
-    let pmBusIdx = normSlots.findIndex(s => s.includes('pm') && s.includes('bus'));
-    if (amBusIdx < 0) amBusIdx = 0;
-    if (pmBusIdx < 0) pmBusIdx = slots.length - 1;
+    // Rule 4: if there is no frenzy data in AM/PM bus for the selected set,
+    // hide bus labels and use 7:45 ... 2:30 anchors instead.
+    let hasAmBusData = false;
+    let hasPmBusData = false;
+    Object.values(frenzySeverityByTimeByDay || {}).forEach((dayMap) => {
+        Object.entries(dayMap || {}).forEach(([slotLabel, cell]) => {
+            const slot = normalize(slotLabel);
+            const count = Number(cell?.frenzy_count || 0);
+            if (count <= 0) return;
+            if (slot.includes('am') && slot.includes('bus')) hasAmBusData = true;
+            if (slot.includes('pm') && slot.includes('bus')) hasPmBusData = true;
+        });
+    });
+    const showBusLabels = showBusColumns == null ? (hasAmBusData || hasPmBusData) : !!showBusColumns;
 
-    used.add(amBusIdx);
-    labels[amBusIdx] = 'AM\nBus';
-    if (pmBusIdx !== amBusIdx) {
-        used.add(pmBusIdx);
-        labels[pmBusIdx] = 'PM\nBus';
+    const used = new Set();
+    const normSlots = slots.map(normalize);
+
+    if (showBusLabels) {
+        const amBusIdx = normSlots.findIndex(s => s.includes('am') && s.includes('bus'));
+        const pmBusIdx = normSlots.findIndex(s => s.includes('pm') && s.includes('bus'));
+        if (amBusIdx >= 0) {
+            labels[amBusIdx] = 'AM\nBus';
+            used.add(amBusIdx);
+        }
+        if (pmBusIdx >= 0 && pmBusIdx !== amBusIdx) {
+            labels[pmBusIdx] = 'PM\nBus';
+            used.add(pmBusIdx);
+        }
     }
 
-    const anchors = [
-        { text: '9:00', mins: 9 * 60 },
-        { text: '10:30', mins: 10 * 60 + 30 },
-        { text: '12:00', mins: 12 * 60 },
-        { text: '1:30', mins: 13 * 60 + 30 }
-    ];
-    anchors.forEach(anchor => {
+    const anchorTimes = showBusLabels
+        ? [
+            { text: '9:00', mins: 9 * 60 },
+            { text: '10:30', mins: 10 * 60 + 30 },
+            { text: '12:00', mins: 12 * 60 },
+            { text: '1:30', mins: 13 * 60 + 30 }
+        ]
+        : [
+            { text: '7:45', mins: 7 * 60 + 45 },
+            { text: '9:00', mins: 9 * 60 },
+            { text: '10:30', mins: 10 * 60 + 30 },
+            { text: '12:00', mins: 12 * 60 },
+            { text: '1:30', mins: 13 * 60 + 30 },
+            { text: '2:30', mins: 14 * 60 + 30 }
+        ];
+
+    anchorTimes.forEach((anchor) => {
         const idx = findNearestUnusedIndex(anchor.mins, used);
         if (idx >= 0) {
             labels[idx] = anchor.text;
@@ -19350,50 +19579,11 @@ function buildOverviewDashboardCardHtml(data) {
     const presentPct = typeof attendance.present_pct === 'number'
         ? attendance.present_pct
         : 0;
-    const byClass = data.by_class || {};
-    const byTime = data.by_time || {};
-    const byTimeByDay = data.by_time_by_day || {};
     const trends = data.overview_trends || null;
 
-    const timeKeys = Object.keys(byTime);
-    const classNames = Object.keys(byClass);
-    const useByTime = timeKeys.length > 0;
-    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-    let hardestTriggerLabel = '';
-    let hardestTriggerSubtitle = '';
-    if (triggerEntries.length > 0) {
-        const sortedTriggerKeys = triggerEntries.sort((a, b) => {
-            const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-            const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-            const aPct = typeof aData.percentages?.overall === 'number'
-                ? Math.round(aData.percentages.overall)
-                : Number.POSITIVE_INFINITY;
-            const bPct = typeof bData.percentages?.overall === 'number'
-                ? Math.round(bData.percentages.overall)
-                : Number.POSITIVE_INFINITY;
-            if (aPct !== bPct) return aPct - bPct;
-            const aInfra = typeof aData.total_infractions === 'number'
-                ? aData.total_infractions
-                : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-            const bInfra = typeof bData.total_infractions === 'number'
-                ? bData.total_infractions
-                : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-            return bInfra - aInfra;
-        });
-        const hardestKey = sortedTriggerKeys[0];
-        const hardestData = useByTime ? (byTime[hardestKey] || {}) : (byClass[hardestKey] || {});
-        const hardestPctOverall = hardestData.percentages?.overall;
-        const hardestInfractionsCount = typeof hardestData.total_infractions === 'number'
-            ? hardestData.total_infractions
-            : (typeof hardestData.infractions === 'number' ? hardestData.infractions : 0);
-        hardestTriggerSubtitle = typeof hardestPctOverall === 'number'
-            ? `${Math.round(hardestPctOverall)}% avg • ${hardestInfractionsCount} infractions`
-            : `${hardestInfractionsCount} infractions`;
-        hardestTriggerLabel = hardestKey;
-    }
-
     const frenzySeverityByTimeByDay = data.frenzy_severity_by_time_by_day || {};
-    const hm = overviewHeatmapMeta(byTimeByDay, frenzySeverityByTimeByDay);
+    const byTimeByDay = data.by_time_by_day || {};
+    const hm = overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDay);
     const severityLabels = {
         1: 'Para',
         2: 'Professional',
@@ -19404,12 +19594,11 @@ function buildOverviewDashboardCardHtml(data) {
     let headlineTime = '';
     let headlineDay = '';
     if (hm.worst) {
-        headlineTime = hm.worst.timeLabel;
+        headlineTime = hm.worst.timeLabel || '';
         headlineDay = hm.worst.day || '';
-    } else if (hardestTriggerLabel) {
-        headlineTime = hardestTriggerLabel;
-        headlineDay = '';
     }
+    const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
+    const metaTriggerDay = hm.triggerDay?.day || headlineDay;
 
     const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
     const overallPct = Math.round(avgs.overall || 0);
@@ -19483,10 +19672,10 @@ function buildOverviewDashboardCardHtml(data) {
     const remH = Math.round((reminders / incidentMax) * 100);
     const rstH = Math.round((resets / incidentMax) * 100);
 
-    const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots);
+    const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
     let heatRows = '';
     hm.days.forEach(day => {
-        let row = `<div class="overview-heatmap-row"><div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
+        let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
         hm.timeSlots.forEach(tlabel => {
             const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
             const bg = overviewHeatColor(sevCell, hm);
@@ -19508,7 +19697,6 @@ function buildOverviewDashboardCardHtml(data) {
             }
             row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
         });
-        row += '</div>';
         heatRows += row;
     });
 
@@ -19572,13 +19760,14 @@ function buildOverviewDashboardCardHtml(data) {
         </div>`;
 
     const headlineRight = headlineDay
-        ? `${escapeHtml(headlineTime)} on ${escapeHtml(headlineDay)}`
+        ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
         : escapeHtml(headlineTime || '—');
 
     const triggerMetaLines = headlineTime ? `
             <div class="overview-trigger-meta">
-                <div><span class="overview-trigger-meta-k">Trigger Time</span> ${escapeHtml(headlineTime)}</div>
-                <div><span class="overview-trigger-meta-k">Trigger Day</span> ${escapeHtml(headlineDay || '—')}</div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || '—')}</span></div>
+                <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || '—')}</span></div>
             </div>` : '';
 
     const dashLen = 100;
@@ -19659,16 +19848,17 @@ function buildOverviewDashboardCardHtml(data) {
         <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
             <div class="overview-trigger-head">
                 <div class="overview-panel-kicker">Trigger Time</div>
-                ${triggerMetaLines}
+                <div class="overview-trigger-row">
+                    <div class="overview-trigger-hero">${headlineRight}</div>
+                    ${triggerMetaLines}
+                </div>
             </div>
-            <div class="overview-trigger-hero">${headlineRight}</div>
-            ${hardestTriggerSubtitle ? `<div class="overview-trigger-sub">${escapeHtml(hardestTriggerSubtitle)}</div>` : ''}
             <div class="overview-heatmap" style="--overview-heatmap-col-count:${Math.max(1, hm.timeSlots.length)};">
-                <div class="overview-heatmap-cols">
+                <div class="overview-heatmap-grid">
                     <div></div>
                     ${timeHeaderLabels.map(t => `<div class="overview-heatmap-colhead">${t ? escapeHtml(t) : ''}</div>`).join('')}
+                    ${heatRows}
                 </div>
-                ${heatRows}
                 <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
             </div>
         </div>
@@ -19725,17 +19915,85 @@ function renderSummarySingle(container, data) {
     window.currentSummaryTrendRecords = [];
     wireSummaryBehaviorTrendCard();
 
-    // Attach interactive behavior for Overview card selections
     try {
         attachOverviewCardInteractions(container, data);
     } catch (e) {
         console.error('Error wiring overview card interactions:', e);
     }
 
-    // Initial masonry-like layout for the summary dashboard cards
     const gridEl = container.querySelector('.dashboard-card-grid');
     if (gridEl) {
         applySummaryMasonryLayout(gridEl);
+    }
+
+    syncOverviewTriggerHeroSize(container);
+    syncOverviewHeatmapColumns(container);
+}
+
+// Force the heatmap's column tracks to be integer-pixel-equal, bypassing the
+// subpixel rounding that CSS Grid does when many `1fr` columns share a
+// finite width. Without this, certain columns end up 1px wider than others
+// and the visible 1px gap looks "fatter" wherever an extra pixel landed.
+function syncOverviewHeatmapColumns(scope) {
+    const root = scope || document;
+    const apply = () => {
+        root.querySelectorAll('.overview-heatmap-grid').forEach((grid) => {
+            if (!grid.isConnected) return;
+            const colCountAttr = Number(getComputedStyle(grid).getPropertyValue('--overview-heatmap-col-count')) || 0;
+            const colCount = colCountAttr > 0 ? colCountAttr : (grid.children.length > 1 ? Math.max(1, grid.children.length - 1) : 1);
+            const totalWidth = grid.clientWidth;
+            if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
+            const isRich = !!grid.closest('.overview-card--rich');
+            const dayColMin = isRich ? 32 : 72;
+            const gapPx = 1;
+            const totalGapPx = gapPx * colCount; // gaps between day-col + N cells
+            const usableForCells = Math.max(0, totalWidth - dayColMin - totalGapPx);
+            const cellWidthFloor = Math.floor(usableForCells / colCount);
+            if (cellWidthFloor <= 0) return;
+            const usedWidth = dayColMin + totalGapPx + cellWidthFloor * colCount;
+            const dayCol = dayColMin + (totalWidth - usedWidth); // absorb leftover into day-label column so every cell stays integer-equal
+            grid.style.gridTemplateColumns = `${dayCol}px repeat(${colCount}, ${cellWidthFloor}px)`;
+        });
+    };
+    apply();
+    requestAnimationFrame(apply);
+    if (!window.__overviewHeatmapColumnsResizeBound) {
+        window.__overviewHeatmapColumnsResizeBound = true;
+        let raf = 0;
+        window.addEventListener('resize', () => {
+            if (raf) cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(() => syncOverviewHeatmapColumns(document));
+        });
+    }
+}
+
+// Match the Trigger Time hero text font-size so the hero's two-line block
+// renders exactly as tall as the Trigger Time / Trigger Day meta table on
+// the right. Re-run on resize so it stays in sync.
+function syncOverviewTriggerHeroSize(scope) {
+    const root = scope || document;
+    const apply = () => {
+        const hero = root.querySelector('.overview-trigger-hero');
+        const meta = root.querySelector('.overview-trigger-meta');
+        if (!hero || !meta) return;
+        const targetH = meta.getBoundingClientRect().height;
+        if (!Number.isFinite(targetH) || targetH <= 0) return;
+        const cs = getComputedStyle(hero);
+        const lh = parseFloat(cs.lineHeight);
+        const lineHeight = Number.isFinite(lh) && lh > 0 ? lh / parseFloat(cs.fontSize) : 1.15;
+        const lines = (hero.innerHTML || '').includes('<br') ? 2 : 1;
+        const fontPx = Math.max(10, (targetH / (lines * lineHeight)) * 0.9);
+        hero.style.setProperty('--overview-trigger-hero-size', `${fontPx}px`);
+    };
+    apply();
+    requestAnimationFrame(apply);
+    if (!window.__overviewTriggerHeroResizeBound) {
+        window.__overviewTriggerHeroResizeBound = true;
+        let raf = 0;
+        window.addEventListener('resize', () => {
+            if (raf) cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(() => syncOverviewTriggerHeroSize(document));
+        });
     }
 }
 

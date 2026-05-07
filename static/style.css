@@ -4966,30 +4966,71 @@ a.dashboard-compare-toggle {
 
 .overview-trigger-panel .overview-trigger-head {
     display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 20px;
+    padding-right: 8px;
+    box-sizing: border-box;
+}
+
+.overview-trigger-row {
+    display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 12px;
     flex-wrap: wrap;
+    min-width: 0;
+    padding-left: 33px;
+    box-sizing: border-box;
 }
 
 .overview-trigger-meta {
+    display: grid;
+    grid-template-columns: auto auto;
+    column-gap: 12px;
+    row-gap: 2px;
     font-size: 0.82rem;
     color: var(--text-secondary);
-    text-align: right;
     line-height: 1.45;
 }
 
+.overview-trigger-meta-row {
+    display: contents;
+}
+
+.overview-trigger-meta-divider {
+    grid-column: 1 / -1;
+    height: 1px;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.12);
+    margin: 4px 0;
+}
+
 .overview-trigger-meta-k {
-    color: #94a3b8;
-    font-weight: 600;
-    margin-right: 4px;
+    color: #64748b;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.overview-trigger-meta-v {
+    color: var(--text-primary);
+    font-weight: 400;
+    white-space: nowrap;
 }
 
 .overview-trigger-hero {
-    font-size: 1.15rem;
+    font-size: var(--overview-trigger-hero-size, 1.15rem);
     font-weight: 700;
     color: var(--text-primary);
-    margin: 10px 0 4px;
+    line-height: 1.15;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.overview-trigger-panel .overview-panel-kicker {
+    font-weight: 600;
 }
 
 .overview-trigger-sub {
@@ -4998,41 +5039,62 @@ a.dashboard-compare-toggle {
     margin-bottom: 12px;
 }
 
-.overview-heatmap-cols {
+.overview-heatmap-grid {
     display: grid;
-    grid-template-columns: minmax(72px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
-    gap: 4px;
-    margin-bottom: 4px;
+    grid-template-columns: minmax(72px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), minmax(0, 1fr));
+    gap: 1px;
+    align-items: stretch;
+    justify-items: stretch;
+    max-width: 100%;
+}
+
+.overview-heatmap-grid > * {
+    min-width: 0;
+    min-height: 0;
+}
+
+.overview-heatmap-grid > .overview-heatmap-empty {
+    grid-column: 1 / -1;
 }
 
 .overview-heatmap-colhead {
     text-align: center;
-    font-size: 0.82rem;
+    justify-self: center;
+    align-self: center;
+    font-size: 0.68rem;
     font-weight: 700;
     color: #64748b;
+    white-space: pre-line;
+    line-height: 1.05;
 }
 
+/* Legacy two-grid classes are no longer used for layout; keep no-op so any
+   remaining markup still flows correctly inside the unified grid. */
+.overview-heatmap-cols,
 .overview-heatmap-row {
-    display: grid;
-    grid-template-columns: minmax(72px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
-    gap: 4px;
-    margin-bottom: 4px;
-    align-items: stretch;
+    display: contents;
 }
 
 .overview-heatmap-time {
-    font-size: 0.82rem;
+    font-size: 0.68rem;
     font-weight: 600;
     color: #64748b;
     display: flex;
     align-items: center;
+    justify-content: center;
     padding-right: 4px;
 }
 
 .overview-heatmap-cell {
-    border-radius: 6px;
-    min-height: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 2px;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    aspect-ratio: 1.45 / 1;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
 }
 
 .overview-heatmap-cell--worst {
@@ -5046,24 +5108,39 @@ a.dashboard-compare-toggle {
 .overview-heatmap-legend {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 10px;
-    font-size: 0.68rem;
+    justify-content: flex-start;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 0.54rem;
     color: #64748b;
 }
 
 .overview-heatmap-legend-bar {
-    flex: 0 1 120px;
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+    flex: 0 1 90px;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(
+        90deg,
+        rgb(54, 158, 44) 0%,
+        rgb(126, 184, 81) 30%,
+        rgb(188, 180, 50) 50%,
+        rgb(227, 170, 48) 70%,
+        rgb(221, 127, 41) 86%,
+        rgb(187, 35, 23) 100%
+    );
 }
 
 .overview-heatmap-empty {
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin: 8px 0;
+}
+
+.overview-heatmap {
+    max-width: 100%;
+    overflow: hidden;
+    padding-right: 8px;
+    box-sizing: border-box;
 }
 
 .overview-infractions-body {
@@ -5291,9 +5368,14 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-trigger-hero {
-    font-size: 0.78rem;
+    font-size: var(--overview-trigger-hero-size, 1.15rem);
+    font-weight: 700;
     line-height: 1.15;
-    margin: 5px 0 2px;
+    margin: 0;
+}
+
+.overview-card--rich .overview-trigger-panel .overview-trigger-head {
+    margin-bottom: 20px;
 }
 
 .overview-card--rich .overview-trigger-sub {
@@ -5301,31 +5383,29 @@ a.dashboard-compare-toggle {
     margin-bottom: 6px;
 }
 
-.overview-card--rich .overview-heatmap-cols,
-.overview-card--rich .overview-heatmap-row {
-    grid-template-columns: minmax(32px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), 1fr);
-    gap: 2px;
-    margin-bottom: 2px;
+.overview-card--rich .overview-heatmap-grid {
+    grid-template-columns: minmax(32px, 0.35fr) repeat(var(--overview-heatmap-col-count, 5), minmax(0, 1fr));
+    gap: 1px;
 }
 
 .overview-card--rich .overview-heatmap-colhead {
-    font-size: 0.82rem;
+    font-size: 0.68rem;
 }
 
 .overview-card--rich .overview-heatmap-time {
-    font-size: 0.82rem;
+    font-size: 0.68rem;
     padding-right: 2px;
 }
 
 .overview-card--rich .overview-heatmap-cell {
-    min-height: 10px;
+    min-height: 0;
     border-radius: 2px;
 }
 
 .overview-card--rich .overview-heatmap-legend {
-    gap: 5px;
-    margin-top: 5px;
-    font-size: 0.82rem;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 0.54rem;
 }
 
 .overview-card--rich .overview-heatmap-legend-bar {
