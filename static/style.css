@@ -4334,7 +4334,7 @@ a.dashboard-compare-toggle {
 .summary-checkpoint-item {
     display: grid;
     grid-template-columns: 10px 72px 110px 1fr auto auto;
-    align-items: center;
+    align-items: start;
     gap: 8px;
     font-size: 0.8rem;
 }
@@ -4352,6 +4352,21 @@ a.dashboard-compare-toggle {
 
 .summary-checkpoint-label {
     color: var(--text-primary);
+    font-weight: 600;
+}
+
+.summary-checkpoint-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.summary-checkpoint-description {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.3;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .summary-trends-checkpoint-empty {
@@ -4412,6 +4427,16 @@ a.dashboard-compare-toggle {
     border: 1px solid var(--border);
     border-radius: 8px;
     font-size: 0.86rem;
+}
+
+.summary-checkpoint-modal-body textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.86rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 72px;
 }
 
 .summary-checkpoint-student-scope-note {
@@ -5129,11 +5154,17 @@ a.dashboard-compare-toggle {
 }
 
 .overview-heatmap-cell--worst {
-    box-shadow: inset 0 0 0 2px #991b1b;
+    box-shadow:
+        inset 0 0 0 2px #ffffff,
+        inset 0 0 0 4px #991b1b,
+        0 0 0 1px #7f1d1d;
 }
 
 .overview-heatmap-cell--best {
-    box-shadow: inset 0 0 0 2px #166534;
+    box-shadow:
+        inset 0 0 0 2px #ffffff,
+        inset 0 0 0 4px #166534,
+        0 0 0 1px #14532d;
 }
 
 .overview-heatmap-legend {
@@ -6843,7 +6874,7 @@ a.dashboard-compare-toggle {
    and share available width. */
 .trigger-times-card .overview-two-col {
     flex-wrap: nowrap;
-    gap: 32px;
+    gap: 14px;
 }
 
 .trigger-times-card .overview-two-col > div {
@@ -6884,16 +6915,63 @@ a.dashboard-compare-toggle {
 /* Separate the Trigger Times list and Day-of-week table
    a bit more visually inside the card. */
 .trigger-times-card .overview-two-col > div:last-child {
-    padding-left: 12px;
+    padding-left: 0;
 }
 
 /* Keep the Day-of-week table safely inside the card and
    allow it to scroll horizontally if needed on small screens. */
 .trigger-times-card .overview-detail-container {
     max-width: 100%;
-    /* Keep content within the card and, when necessary on smaller
-       screens, allow horizontal scrolling instead of clipping. */
-    overflow-x: auto;
+    overflow-x: hidden;
+}
+
+.trigger-times-card .trigger-times-compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.76rem;
+}
+
+.trigger-times-card .trigger-times-compact-table th,
+.trigger-times-card .trigger-times-compact-table td {
+    padding: 4px 4px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.trigger-times-card .trigger-times-compact-table th {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.1;
+    text-align: center;
+}
+
+.trigger-times-card .trigger-times-compact-table th:first-child,
+.trigger-times-card .trigger-times-compact-table td:first-child {
+    width: 40%;
+}
+
+.trigger-times-card .trigger-times-compact-table th:nth-child(2),
+.trigger-times-card .trigger-times-compact-table td:nth-child(2),
+.trigger-times-card .trigger-times-compact-table th:nth-child(3),
+.trigger-times-card .trigger-times-compact-table td:nth-child(3) {
+    text-align: right;
+}
+
+.trigger-times-card .trigger-times-compact-table tr.trigger-times-row-jump {
+    cursor: pointer;
+}
+
+.trigger-times-card .trigger-times-compact-table tr.trigger-times-row-jump:hover td {
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.trigger-times-card .trigger-times-day-table th:first-child,
+.trigger-times-card .trigger-times-day-table td:first-child {
+    width: 28%;
 }
 
 /* Trigger Times - Time tab table layout */

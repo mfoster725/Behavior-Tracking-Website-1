@@ -18428,6 +18428,8 @@ function buildBehaviorTrendCardHtml() {
                         <input type="date" id="summary-checkpoint-date">
                         <label for="summary-checkpoint-label">Label</label>
                         <input type="text" id="summary-checkpoint-label" maxlength="255" placeholder="Enter checkpoint label">
+                        <label for="summary-checkpoint-description">Description</label>
+                        <textarea id="summary-checkpoint-description" maxlength="2000" rows="3" placeholder="Enter checkpoint description (shown on hover and in table)"></textarea>
                         <p id="summary-checkpoint-student-scope-note" class="summary-checkpoint-student-scope-note"></p>
                     </div>
                     <div class="summary-checkpoint-modal-actions">
@@ -18714,7 +18716,10 @@ function renderSummaryCheckpointList(checkpoints) {
             <span class="summary-checkpoint-swatch" style="background:${escapeHtml(cp.color || '#64748b')}"></span>
             <span class="summary-checkpoint-date">${escapeHtml(formatTrendDateLabel(cp.date))}</span>
             <span class="summary-checkpoint-type">${escapeHtml(summaryCheckpointTypeLabels[cp.checkpoint_type] || cp.checkpoint_type || 'Checkpoint')}</span>
-            <span class="summary-checkpoint-label">${escapeHtml(cp.label || '')}</span>
+            <div class="summary-checkpoint-details">
+                <span class="summary-checkpoint-label">${escapeHtml(cp.label || '')}</span>
+                <span class="summary-checkpoint-description">${escapeHtml(cp.description || '')}</span>
+            </div>
             <button type="button" class="btn-secondary summary-checkpoint-edit-btn" data-checkpoint-id="${cp.id}">Edit</button>
             <button type="button" class="btn-secondary summary-checkpoint-delete-btn" data-checkpoint-id="${cp.id}">Delete</button>
         </div>
@@ -19024,6 +19029,7 @@ function createCheckpointOverlayPlugin() {
             const hideAllLabels = chosenLayout === null;
 
             const hiddenCheckpoints = [];
+            const allCheckpointHoverTargets = [];
             ctx.save();
             if (!hideAllLabels) {
                 ctx.font = `${chosenLayout.fontSize}px Inter, sans-serif`;
@@ -19039,39 +19045,66 @@ function createCheckpointOverlayPlugin() {
 
                 if (hideAllLabels) {
                     const textWidth = ctx.measureText(labelText).width;
-                    hiddenCheckpoints.push({
+                    const hoverTarget = {
                         cp,
                         x,
                         color,
                         labelText,
                         textWidth,
-                        dotY
-                    });
+                        dotY,
+                        labelLeft: null,
+                        labelRight: null,
+                        labelTop: null,
+                        labelBottom: null,
+                        isLabelHidden: true
+                    };
+                    hiddenCheckpoints.push(hoverTarget);
+                    allCheckpointHoverTargets.push(hoverTarget);
                     continue;
                 }
 
                 const placement = chosenLayout.placements[sortedIndex];
                 if (!placement) continue;
                 const { chosenX } = placement;
+                const labelHalfHeight = Math.max(7, Math.ceil(chosenLayout.labelHeight / 2));
                 ctx.fillStyle = '#374151';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(labelText, chosenX, dotY);
+                allCheckpointHoverTargets.push({
+                    cp,
+                    x,
+                    color,
+                    labelText,
+                    textWidth: placement.textWidth,
+                    dotY,
+                    labelLeft: chosenX - 2,
+                    labelRight: chosenX + placement.textWidth + 2,
+                    labelTop: dotY - labelHalfHeight,
+                    labelBottom: dotY + labelHalfHeight,
+                    isLabelHidden: false
+                });
             }
             ctx.restore();
 
             chart.$summaryHiddenCheckpoints = hiddenCheckpoints;
+            chart.$summaryCheckpointHoverTargets = allCheckpointHoverTargets;
 
             const hovered = chart.$summaryHoveredCheckpoint;
-            if (hovered && hiddenCheckpoints.some((entry) => entry === hovered || entry.cp === hovered.cp)) {
+            const hoveredDescription = (hovered?.cp?.description || '').trim();
+            const shouldRenderPopup = !!hovered;
+            if (shouldRenderPopup) {
                 ctx.save();
+                const popupTitle = (hovered.labelText || hovered?.cp?.label || '').slice(0, 64);
+                const popupSubtext = (hoveredDescription || 'No description').slice(0, 120);
+                ctx.font = '600 11px Inter, sans-serif';
+                const titleWidth = ctx.measureText(popupTitle).width;
                 ctx.font = '11px Inter, sans-serif';
-                const popupText = (hovered.labelText || '').slice(0, 40);
-                const popupTextWidth = ctx.measureText(popupText).width;
+                const subtextWidth = ctx.measureText(popupSubtext).width;
                 const popupPadX = 9;
                 const popupPadY = 5;
-                const popupHeight = 22;
-                const popupWidth = popupTextWidth + popupPadX * 2;
+                const popupHeight = 36;
+                const popupWidth = Math.max(titleWidth, subtextWidth) + popupPadX * 2;
                 let popupX = hovered.x + 8;
                 if (popupX + popupWidth > chartArea.right - 4) {
                     popupX = Math.max(chartArea.left + 2, chartArea.right - 4 - popupWidth);
@@ -19105,8 +19138,12 @@ function createCheckpointOverlayPlugin() {
 
                 ctx.fillStyle = '#1f2937';
                 ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(popupText, popupX + popupPadX, popupY + popupHeight / 2);
+                ctx.textBaseline = 'top';
+                ctx.font = '600 11px Inter, sans-serif';
+                ctx.fillText(popupTitle, popupX + popupPadX, popupY + popupPadY);
+                ctx.font = '11px Inter, sans-serif';
+                ctx.fillStyle = '#4b5563';
+                ctx.fillText(popupSubtext, popupX + popupPadX, popupY + popupPadY + 15);
                 ctx.restore();
             }
         },
@@ -19117,9 +19154,9 @@ function createCheckpointOverlayPlugin() {
             const isLeave = event.type === 'mouseout' || event.type === 'mouseleave';
             if (!isMove && !isLeave) return;
 
-            const hidden = chart.$summaryHiddenCheckpoints || [];
+            const hoverTargets = chart.$summaryCheckpointHoverTargets || [];
             let nearest = null;
-            if (isMove && hidden.length) {
+            if (isMove && hoverTargets.length) {
                 const cursorX = event.x;
                 const cursorY = event.y;
                 const chartArea = chart.chartArea;
@@ -19127,14 +19164,24 @@ function createCheckpointOverlayPlugin() {
                     chartArea &&
                     cursorX >= chartArea.left &&
                     cursorX <= chartArea.right &&
-                    cursorY >= chartArea.top - 14 &&
+                    cursorY >= chartArea.top - 36 &&
                     cursorY <= chartArea.bottom + 4
                 ) {
                     let nearestDist = Infinity;
                     const HIT_RADIUS = 14;
-                    hidden.forEach((entry) => {
+                    hoverTargets.forEach((entry) => {
+                        const isOverLabel = !entry.isLabelHidden &&
+                            Number.isFinite(entry.labelLeft) &&
+                            Number.isFinite(entry.labelRight) &&
+                            Number.isFinite(entry.labelTop) &&
+                            Number.isFinite(entry.labelBottom) &&
+                            cursorX >= entry.labelLeft &&
+                            cursorX <= entry.labelRight &&
+                            cursorY >= entry.labelTop &&
+                            cursorY <= entry.labelBottom;
                         const dist = Math.abs(entry.x - cursorX);
-                        if (dist < HIT_RADIUS && dist < nearestDist) {
+                        const isOverLine = dist < HIT_RADIUS;
+                        if ((isOverLabel || isOverLine) && dist < nearestDist) {
                             nearest = entry;
                             nearestDist = dist;
                         }
@@ -19196,7 +19243,7 @@ function renderSummaryTrendChart(points, checkpoints) {
         return swatch;
     };
     const legendSwatches = {
-        frenzy: makeLegendSwatch('#1d4ed8', 'rgba(29, 78, 216, 0.22)'),
+        frenzy: makeLegendSwatch('#dc2626', 'rgba(220, 38, 38, 0.22)'),
         star: makeLegendSwatch('#7e22ce', 'rgba(126, 34, 206, 0.18)')
     };
     const checkpointPlugin = createCheckpointOverlayPlugin();
@@ -19228,15 +19275,15 @@ function renderSummaryTrendChart(points, checkpoints) {
                     label: 'Number of Frenzies',
                     data: frenzyData,
                     yAxisID: 'yFrenzy',
-                    borderColor: '#1d4ed8',
-                    backgroundColor: (context) => gradientFill(context, 'rgba(29, 78, 216, 0.22)'),
+                    borderColor: '#dc2626',
+                    backgroundColor: (context) => gradientFill(context, 'rgba(220, 38, 38, 0.22)'),
                     fill: true,
                     borderWidth: 2.5,
                     cubicInterpolationMode: 'monotone',
                     pointRadius: 4,
                     pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
-                    pointBorderColor: '#1d4ed8',
+                    pointBorderColor: '#dc2626',
                     pointBorderWidth: 2,
                     tension: 0.4
                 },
@@ -19265,7 +19312,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                 yFrenzy: {
                     position: 'left',
                     beginAtZero: true,
-                    title: { display: true, text: 'Number of Frenzies', color: '#1d4ed8' },
+                    title: { display: true, text: 'Number of Frenzies', color: '#dc2626' },
                     grid: { display: false }
                 },
                 yStar: {
@@ -19319,6 +19366,24 @@ function renderSummaryTrendChart(points, checkpoints) {
                 summaryCheckpointOverlay: { checkpoints: checkpoints || [], pointDates: points.map((p) => p.date) },
                 datalabels: { display: false },
                 tooltip: {
+                    backgroundColor: '#ffffff',
+                    borderColor: '#cbd5e1',
+                    borderWidth: 1.5,
+                    cornerRadius: 5,
+                    padding: 9,
+                    titleColor: '#1f2937',
+                    bodyColor: '#4b5563',
+                    titleFont: {
+                        family: 'Inter, sans-serif',
+                        size: 11,
+                        weight: '600'
+                    },
+                    bodyFont: {
+                        family: 'Inter, sans-serif',
+                        size: 11,
+                        weight: '400'
+                    },
+                    displayColors: false,
                     callbacks: {
                         title: (items) => {
                             if (!items || !items.length) return '';
@@ -19406,9 +19471,10 @@ function openSummaryCheckpointModal(checkpoint) {
     const colorSelect = document.getElementById('summary-checkpoint-color');
     const dateInput = document.getElementById('summary-checkpoint-date');
     const labelInput = document.getElementById('summary-checkpoint-label');
+    const descriptionInput = document.getElementById('summary-checkpoint-description');
     const scopeNote = document.getElementById('summary-checkpoint-student-scope-note');
     const saveBtn = document.getElementById('summary-checkpoint-save-btn');
-    if (!modal || !typeSelect || !colorSelect || !dateInput || !labelInput || !scopeNote || !saveBtn || !title) return;
+    if (!modal || !typeSelect || !colorSelect || !dateInput || !labelInput || !descriptionInput || !scopeNote || !saveBtn || !title) return;
     const isEdit = !!checkpoint;
     title.textContent = isEdit ? 'Edit Checkpoint' : 'Add Checkpoint';
     saveBtn.dataset.mode = isEdit ? 'edit' : 'create';
@@ -19419,6 +19485,7 @@ function openSummaryCheckpointModal(checkpoint) {
         ? (checkpoint.date || '')
         : (new Date().toISOString().split('T')[0]);
     labelInput.value = isEdit ? (checkpoint.label || '') : '';
+    descriptionInput.value = isEdit ? (checkpoint.description || '') : '';
     const count = currentSummaryTrendStudentIds.length;
     scopeNote.textContent = count <= 1
         ? 'This checkpoint applies to the current student selection.'
@@ -19438,8 +19505,10 @@ async function saveSummaryCheckpointFromModal() {
     const colorSelect = document.getElementById('summary-checkpoint-color');
     const dateInput = document.getElementById('summary-checkpoint-date');
     const labelInput = document.getElementById('summary-checkpoint-label');
-    if (!saveBtn || !typeSelect || !colorSelect || !dateInput || !labelInput) return;
+    const descriptionInput = document.getElementById('summary-checkpoint-description');
+    if (!saveBtn || !typeSelect || !colorSelect || !dateInput || !labelInput || !descriptionInput) return;
     const label = (labelInput.value || '').trim();
+    const description = (descriptionInput.value || '').trim();
     if (!label) {
         showMessage('Please enter a checkpoint label.', 'error');
         return;
@@ -19461,6 +19530,7 @@ async function saveSummaryCheckpointFromModal() {
         color: typeSelect.value === 'card_change' ? colorSelect.value : null,
         date: dateInput.value,
         label,
+        description,
         student_ids: currentSummaryTrendStudentIds
     };
     const isEdit = saveBtn.dataset.mode === 'edit' && saveBtn.dataset.checkpointId;
@@ -19507,6 +19577,21 @@ function wireSummaryBehaviorTrendCard() {
     if (cancelBtn && !cancelBtn.dataset.bound) {
         cancelBtn.dataset.bound = 'true';
         cancelBtn.addEventListener('click', closeSummaryCheckpointModal);
+    }
+    const modal = document.getElementById('summary-checkpoint-modal');
+    if (modal && !modal.dataset.boundEnterSave) {
+        modal.dataset.boundEnterSave = 'true';
+        modal.addEventListener('keydown', async (e) => {
+            if (e.key !== 'Enter') return;
+            const targetTag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+            if (targetTag === 'textarea' && e.shiftKey) return;
+            e.preventDefault();
+            try {
+                await saveSummaryCheckpointFromModal();
+            } catch (err) {
+                showMessage(err.message || 'Unable to save checkpoint.', 'error');
+            }
+        });
     }
     const typeSelect = document.getElementById('summary-checkpoint-type');
     if (typeSelect && !typeSelect.dataset.bound) {
@@ -19599,7 +19684,7 @@ function buildDefaultTriggerTimesCardHtml(data) {
                 ${rows ? `
                     <table class="trigger-times-table">
                         <thead>
-                            <tr><th>Time</th><th>Avg Severity</th><th>Frenzies</th></tr>
+                            <tr><th>Time</th><th>Avg Severity</th><th>Frenzy</th></tr>
                         </thead>
                         <tbody>${rows}</tbody>
                     </table>` : empty}
@@ -19720,7 +19805,7 @@ function buildOverviewDashboardCardHtml(data) {
             const bg = overviewHeatColor(sevCell, hm);
             const hasSeverity = typeof sevCell?.avg_severity === 'number';
             const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && hasSeverity;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
             let cls = 'overview-heatmap-cell';
             if (isWorst) cls += ' overview-heatmap-cell--worst';
             if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
@@ -21396,6 +21481,7 @@ function attachOverviewCardInteractions(container, data) {
             });
             if (frenzyCount <= 0) return;
             rows.push({
+                day: d,
                 label: d.substring(0, 3),
                 avgSeverity: severitySum / frenzyCount,
                 frenzyCount
@@ -21414,7 +21500,7 @@ function attachOverviewCardInteractions(container, data) {
         });
         let bodyRows = '';
         rows.forEach(r => {
-            bodyRows += `<tr>
+            bodyRows += `<tr class="trigger-times-row-jump" data-drill-type="day" data-drill-day="${escapeHtml(r.day)}">
                 <td>${r.label}</td>
                 <td>${Number(r.avgSeverity).toFixed(2)}</td>
                 <td>${r.frenzyCount}</td>
@@ -21423,17 +21509,29 @@ function attachOverviewCardInteractions(container, data) {
 
         target.innerHTML = `
             <h4>Day of Week Breakdown</h4>
-            <table>
+            <table class="trigger-times-compact-table trigger-times-day-table">
+                <colgroup>
+                    <col style="width:28%">
+                    <col style="width:36%">
+                    <col style="width:36%">
+                </colgroup>
                 <thead>
                     <tr>
                         <th>Day</th>
                         <th>Avg Severity</th>
-                        <th>Frenzies</th>
+                        <th>Frenzy</th>
                     </tr>
                 </thead>
                 <tbody>${bodyRows}</tbody>
             </table>
         `;
+        target.onclick = (evt) => {
+            const row = evt.target.closest('tr.trigger-times-row-jump');
+            if (!row) return;
+            if (row.dataset.drillType === 'day') {
+                triggerCard.__jumpToTriggerDrilldown?.({ day: row.dataset.drillDay || '' });
+            }
+        };
         target.style.display = 'block';
         scheduleMasonryLayoutAfterResize(grid);
     };
@@ -21740,6 +21838,13 @@ function attachOverviewCardInteractions(container, data) {
         const previousTrigger = data.previous_trigger || {};
         const frenzyCellDetailsByTimeByDay = data.frenzy_cell_details_by_time_by_day || {};
         const byTimeByDay = data.by_time_by_day || {};
+        const formatTriggerTimeStack = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw || !raw.includes('-')) return escapeHtml(raw || '—');
+            const parts = raw.split('-').map(p => p.trim()).filter(Boolean);
+            if (parts.length !== 2) return escapeHtml(raw);
+            return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
+        };
         const severityByTime = {};
         Object.values(frenzySeverityByTimeByDay).forEach(timesMap => {
             Object.entries(timesMap || {}).forEach(([timeLabel, severityCell]) => {
@@ -21762,7 +21867,6 @@ function attachOverviewCardInteractions(container, data) {
                 frenzyCount: agg.frenzyCount,
                 avgSeverity: agg.frenzyCount > 0 ? (agg.severitySum / agg.frenzyCount) : null
             }))
-            .filter(row => row.avgSeverity != null)
             .sort((a, b) => {
                 if (a.avgSeverity !== b.avgSeverity) return b.avgSeverity - a.avgSeverity;
                 if (a.frenzyCount !== b.frenzyCount) return b.frenzyCount - a.frenzyCount;
@@ -21800,7 +21904,7 @@ function attachOverviewCardInteractions(container, data) {
                 const bg = overviewHeatColor(sevCell, hm);
                 const hasSeverity = typeof sevCell?.avg_severity === 'number';
                 const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-                const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && hasSeverity;
+                const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
                 let cls = 'overview-heatmap-cell';
                 if (isWorst) cls += ' overview-heatmap-cell--worst';
                 if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
@@ -21889,21 +21993,24 @@ function attachOverviewCardInteractions(container, data) {
                 <div class="overview-two-col">`;
 
         // Left column: trigger time/class breakdown list
-        innerHtml += `<div>`;
+        innerHtml += `<div class="overview-detail-container" style="margin-top:10px;">`;
+        innerHtml += `<h4>Trigger Times</h4>`;
         if (sortedTriggerRows.length > 0) {
-            innerHtml += `<ul class="dashboard-breakdown-list">`;
+            innerHtml += `<table class="trigger-times-compact-table trigger-times-time-table">`;
+            innerHtml += `<colgroup>
+                <col style="width:34%">
+                <col style="width:33%">
+                <col style="width:33%">
+            </colgroup>`;
+            innerHtml += `<thead><tr><th>Time</th><th>Avg Severity</th><th>Frenzy</th></tr></thead><tbody>`;
             sortedTriggerRows.forEach((row) => {
-                innerHtml += `<li class="dashboard-breakdown-item">
-                    <span class="dashboard-breakdown-name">
-                        <span><div>${escapeHtml(row.timeLabel)}</div></span>
-                    </span>
-                    <span>
-                        <span class="dashboard-breakdown-value">${Number(row.avgSeverity).toFixed(2)}</span>
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Frenzies: ${row.frenzyCount}</div>
-                    </span>
-                </li>`;
+                innerHtml += `<tr class="trigger-times-row-jump" data-drill-type="time" data-drill-time="${escapeHtml(row.timeLabel)}">
+                    <td>${formatTriggerTimeStack(row.timeLabel)}</td>
+                    <td>${Number(row.avgSeverity).toFixed(2)}</td>
+                    <td>${row.frenzyCount}</td>
+                </tr>`;
             });
-            innerHtml += `</ul>`;
+            innerHtml += `</tbody></table>`;
         } else {
             innerHtml += `<p style="color:var(--text-secondary);font-size:0.875rem;">No trigger time data for this period.</p>`;
         }
@@ -21912,7 +22019,12 @@ function attachOverviewCardInteractions(container, data) {
         // Right column: day-of-week breakdown table (initially hidden until populated)
         innerHtml += `<div class="overview-detail-container trigger-times-day-of-week" style="margin-top:10px; display:none;"></div>`;
 
-        innerHtml += `</div></div>`;
+        innerHtml += `</div>`;
+        innerHtml += `<div class="trigger-times-table-drilldown" style="display:none;margin-top:10px;">
+                <div class="trigger-times-drilldown-tabs" role="tablist"></div>
+                <div class="trigger-times-drilldown-panels"></div>
+            </div>`;
+        innerHtml += `</div>`;
         innerHtml += `<div data-trigger-times-panel="graph">${triggerGraphHtml}</div>`;
         innerHtml += `</div>`;
 
@@ -21921,9 +22033,53 @@ function attachOverviewCardInteractions(container, data) {
 
         const tablePanel = card.querySelector('[data-trigger-times-panel="table"]');
         const graphPanel = card.querySelector('[data-trigger-times-panel="graph"]');
+        const tableMainContent = tablePanel ? tablePanel.querySelector('.overview-two-col') : null;
+        const tableDrilldown = card.querySelector('.trigger-times-table-drilldown');
+        const tableDrillTabsContainer = tableDrilldown ? tableDrilldown.querySelector('.trigger-times-drilldown-tabs') : null;
+        const tableDrillPanelsContainer = tableDrilldown ? tableDrilldown.querySelector('.trigger-times-drilldown-panels') : null;
         const modeButtons = card.querySelectorAll('[data-trigger-times-view]');
         const drillTabsContainer = graphPanel ? graphPanel.querySelector('.trigger-times-drilldown-tabs') : null;
         const drillPanelsContainer = graphPanel ? graphPanel.querySelector('.trigger-times-drilldown-panels') : null;
+        const getActiveTriggerDrillTabName = () => {
+            if (!drillTabsContainer) return 'overview';
+            return drillTabsContainer.querySelector('.trigger-times-drill-tab.active')?.dataset.drillTab || 'overview';
+        };
+        const closeTriggerDrillTab = (tabName) => {
+            if (!graphPanel || !tabName || tabName === 'overview') return;
+            const tab = graphPanel.querySelector(`.trigger-times-drill-tab[data-drill-tab="${tabName}"]`);
+            const panel = graphPanel.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+            if (panel) panel.remove();
+            if (tab) tab.remove();
+            setActiveTriggerDrillTab('overview');
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+        const syncTableDrilldownFromGraph = () => {
+            if (!tableDrilldown || !tableDrillTabsContainer || !tableDrillPanelsContainer || !drillTabsContainer || !drillPanelsContainer) return;
+            tableDrillTabsContainer.innerHTML = drillTabsContainer.innerHTML;
+            tableDrillPanelsContainer.innerHTML = drillPanelsContainer.innerHTML;
+            const activeTab = getActiveTriggerDrillTabName();
+            const showTableDrilldown = activeTab !== 'overview';
+            tableDrilldown.style.display = showTableDrilldown ? 'block' : 'none';
+            if (tableMainContent) {
+                tableMainContent.style.display = showTableDrilldown ? 'none' : '';
+            }
+            tableDrillTabsContainer.querySelectorAll('.trigger-times-drill-tab').forEach((tab) => {
+                tab.addEventListener('click', (evt) => {
+                    const closeBtn = evt.target.closest('.trigger-times-drill-tab-close');
+                    const tabName = tab.dataset.drillTab;
+                    if (!tabName) return;
+                    if (closeBtn) {
+                        closeTriggerDrillTab(tabName);
+                        return;
+                    }
+                    const sourceTab = drillTabsContainer.querySelector(`.trigger-times-drill-tab[data-drill-tab="${tabName}"]`);
+                    if (!sourceTab) return;
+                    sourceTab.click();
+                });
+            });
+        };
         const setActiveTriggerDrillTab = (tabName) => {
             if (!graphPanel) return;
             const allTabs = graphPanel.querySelectorAll('.trigger-times-drill-tab');
@@ -21936,6 +22092,7 @@ function attachOverviewCardInteractions(container, data) {
             allPanels.forEach((panel) => {
                 panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
             });
+            syncTableDrilldownFromGraph();
         };
         const wireTriggerDrillClicks = () => {
             if (!graphPanel) return;
@@ -21948,14 +22105,8 @@ function attachOverviewCardInteractions(container, data) {
                     if (closeBtn) {
                         evt.stopPropagation();
                         const tabName = tab.dataset.drillTab;
-                        if (tabName === 'overview') return;
-                        const panel = graphPanel.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
-                        if (panel) panel.remove();
-                        tab.remove();
-                        setActiveTriggerDrillTab('overview');
-                        if (typeof scheduleMasonryLayoutAfterResize === 'function') {
-                            scheduleMasonryLayoutAfterResize(grid);
-                        }
+                        closeTriggerDrillTab(tabName);
+                        syncTableDrilldownFromGraph();
                         return;
                     }
                     const tabName = tab.dataset.drillTab;
@@ -21964,18 +22115,67 @@ function attachOverviewCardInteractions(container, data) {
                 });
             });
         };
-        const openTriggerCellDrilldown = (day, timeLabel) => {
+        const mergeBreakdownCounts = (target, source) => {
+            Object.entries(source || {}).forEach(([key, value]) => {
+                const n = Number(value || 0);
+                if (!Number.isFinite(n) || n <= 0) return;
+                target[key] = Number(target[key] || 0) + n;
+            });
+            return target;
+        };
+        const openTriggerDrilldown = ({ day = '', timeLabel = '' } = {}) => {
             if (!drillTabsContainer || !drillPanelsContainer) return;
-            const tabName = `cell-${day}-${timeLabel}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+            const isCell = Boolean(day && timeLabel);
+            const isDay = Boolean(day && !timeLabel);
+            const isTime = Boolean(!day && timeLabel);
+            if (!isCell && !isDay && !isTime) return;
+            const tabName = `${isCell ? `cell-${day}-${timeLabel}` : isDay ? `day-${day}` : `time-${timeLabel}`}`.replace(/[^a-zA-Z0-9_-]/g, '-');
             let tab = drillTabsContainer.querySelector(`.trigger-times-drill-tab[data-drill-tab="${tabName}"]`);
             let panel = drillPanelsContainer.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
-            const sevCell = (frenzySeverityByTimeByDay[day] || {})[timeLabel];
-            const avg = Number(sevCell?.avg_severity);
-            const safeAvg = Number.isFinite(avg) ? avg : 0;
-            const count = Number(sevCell?.frenzy_count || 0);
-            const details = ((frenzyCellDetailsByTimeByDay[day] || {})[timeLabel]) || {};
-            const severityBreakdown = details.severity_breakdown || {};
-            const purposeBreakdown = details.purpose_breakdown || {};
+            let summaryLabel = `${day} • ${timeLabel}`;
+            let count = 0;
+            let severitySum = 0;
+            let severityBreakdown = {};
+            let purposeBreakdown = {};
+
+            if (isCell) {
+                const sevCell = (frenzySeverityByTimeByDay[day] || {})[timeLabel];
+                const avg = Number(sevCell?.avg_severity);
+                const cellCount = Number(sevCell?.frenzy_count || 0);
+                count = Number.isFinite(cellCount) ? cellCount : 0;
+                if (Number.isFinite(avg) && count > 0) severitySum = avg * count;
+                const details = ((frenzyCellDetailsByTimeByDay[day] || {})[timeLabel]) || {};
+                severityBreakdown = mergeBreakdownCounts({}, details.severity_breakdown || {});
+                purposeBreakdown = mergeBreakdownCounts({}, details.purpose_breakdown || {});
+            } else if (isDay) {
+                summaryLabel = `${day} (All Times)`;
+                Object.entries(frenzySeverityByTimeByDay[day] || {}).forEach(([timeKey, sevCell]) => {
+                    const avg = Number(sevCell?.avg_severity);
+                    const cellCount = Number(sevCell?.frenzy_count || 0);
+                    if (Number.isFinite(avg) && Number.isFinite(cellCount) && cellCount > 0) {
+                        count += cellCount;
+                        severitySum += avg * cellCount;
+                    }
+                    const details = ((frenzyCellDetailsByTimeByDay[day] || {})[timeKey]) || {};
+                    mergeBreakdownCounts(severityBreakdown, details.severity_breakdown || {});
+                    mergeBreakdownCounts(purposeBreakdown, details.purpose_breakdown || {});
+                });
+            } else {
+                summaryLabel = `${timeLabel} (All Days)`;
+                hm.days.forEach((dayKey) => {
+                    const sevCell = (frenzySeverityByTimeByDay[dayKey] || {})[timeLabel];
+                    const avg = Number(sevCell?.avg_severity);
+                    const cellCount = Number(sevCell?.frenzy_count || 0);
+                    if (Number.isFinite(avg) && Number.isFinite(cellCount) && cellCount > 0) {
+                        count += cellCount;
+                        severitySum += avg * cellCount;
+                    }
+                    const details = ((frenzyCellDetailsByTimeByDay[dayKey] || {})[timeLabel]) || {};
+                    mergeBreakdownCounts(severityBreakdown, details.severity_breakdown || {});
+                    mergeBreakdownCounts(purposeBreakdown, details.purpose_breakdown || {});
+                });
+            }
+            const safeAvg = count > 0 ? (severitySum / count) : 0;
             if (!tab) {
                 tab = document.createElement('button');
                 tab.className = 'trigger-times-drill-tab';
@@ -21983,22 +22183,21 @@ function attachOverviewCardInteractions(container, data) {
                 tab.setAttribute('aria-selected', 'false');
                 tab.dataset.drillTab = tabName;
                 tab.innerHTML = `
-                    <span class="trigger-times-drill-tab-label">${escapeHtml(`${overviewDayInitial(day)} ${timeLabel}`)}</span>
+                    <span class="trigger-times-drill-tab-label">${escapeHtml(isCell ? `${overviewDayInitial(day)} ${timeLabel}` : isDay ? `${overviewDayInitial(day)} all times` : `${timeLabel} all days`)}</span>
                     <span class="trigger-times-drill-tab-close" role="button" aria-label="Close">&times;</span>
                 `;
                 drillTabsContainer.appendChild(tab);
             }
             if (!panel) {
                 const severityPct = Math.max(0, Math.min(100, (safeAvg / 5) * 100));
-                const levelName = severityLabels[Math.max(1, Math.min(5, Math.round(safeAvg)))] || 'Unspecified';
                 if (count <= 0) {
                     panel = document.createElement('div');
                     panel.className = 'trigger-times-drill-tab-panel';
                     panel.dataset.drillTabPanel = tabName;
                     panel.innerHTML = `
                         <div class="overview-detail-container" style="margin-top:0;padding-top:0;border-top:0;">
-                            <h4 style="margin:0 0 10px 0;">${escapeHtml(day)} • ${escapeHtml(timeLabel)}</h4>
-                            <p style="margin:0;color:var(--text-secondary);font-size:0.9rem;">No frenzies recorded for this day/time.</p>
+                            <h4 style="margin:0 0 10px 0;">${escapeHtml(summaryLabel)}</h4>
+                            <p style="margin:0;color:var(--text-secondary);font-size:0.9rem;">No frenzies recorded for this selection.</p>
                         </div>
                     `;
                     drillPanelsContainer.appendChild(panel);
@@ -22007,6 +22206,7 @@ function attachOverviewCardInteractions(container, data) {
                     if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                         scheduleMasonryLayoutAfterResize(grid);
                     }
+                    syncTableDrilldownFromGraph();
                     return;
                 }
                 const severityRows = [1, 2, 3, 4, 5].map((level) => {
@@ -22023,17 +22223,16 @@ function attachOverviewCardInteractions(container, data) {
                 panel.dataset.drillTabPanel = tabName;
                 panel.innerHTML = `
                     <div class="overview-detail-container" style="margin-top:0;padding-top:0;border-top:0;">
-                        <h4 style="margin:0 0 10px 0;">${escapeHtml(day)} • ${escapeHtml(timeLabel)}</h4>
+                        <h4 style="margin:0 0 10px 0;">${escapeHtml(summaryLabel)}</h4>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
                             <div style="font-size:1.15rem;font-weight:700;">Avg Severity ${safeAvg.toFixed(2)}</div>
-                            <div style="font-size:0.85rem;color:var(--text-secondary);">${escapeHtml(levelName)}</div>
                             <div style="font-size:0.85rem;color:var(--text-secondary);">${count} frenz${count === 1 ? 'y' : 'ies'}</div>
                         </div>
                         <div style="width:100%;height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden;">
                             <div style="height:100%;width:${severityPct.toFixed(1)}%;background:linear-gradient(90deg,rgb(54,158,44),rgb(126,184,81),rgb(188,180,50),rgb(227,170,48),rgb(221,127,41),rgb(187,35,23));"></div>
                         </div>
                         <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-top:4px;">
-                            <span>1 (Para)</span><span>5 (SRO)</span>
+                            <span>1</span><span>5</span>
                         </div>
                         <div class="overview-two-col" style="margin-top:12px;">
                             <div>
@@ -22060,25 +22259,44 @@ function attachOverviewCardInteractions(container, data) {
             if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                 scheduleMasonryLayoutAfterResize(grid);
             }
+            syncTableDrilldownFromGraph();
         };
+        const jumpToTriggerDrilldown = ({ day = '', timeLabel = '' } = {}) => {
+            if (!day && !timeLabel) return;
+            openTriggerDrilldown({ day, timeLabel });
+        };
+        if (tablePanel) {
+            tablePanel.addEventListener('click', (evt) => {
+                const row = evt.target.closest('tr.trigger-times-row-jump');
+                if (!row) return;
+                if (row.dataset.drillType === 'time') {
+                    jumpToTriggerDrilldown({ timeLabel: row.dataset.drillTime || '' });
+                }
+            });
+        }
         if (graphPanel) {
             graphPanel.addEventListener('click', (evt) => {
                 const cell = evt.target.closest('.overview-heatmap-cell[data-trigger-day][data-trigger-time]');
                 if (!cell) return;
-                openTriggerCellDrilldown(cell.dataset.triggerDay || '', cell.dataset.triggerTime || '');
+                openTriggerDrilldown({ day: cell.dataset.triggerDay || '', timeLabel: cell.dataset.triggerTime || '' });
             });
             graphPanel.addEventListener('keydown', (evt) => {
                 if (!(evt.key === 'Enter' || evt.key === ' ')) return;
                 const cell = evt.target.closest('.overview-heatmap-cell[data-trigger-day][data-trigger-time]');
                 if (!cell) return;
                 evt.preventDefault();
-                openTriggerCellDrilldown(cell.dataset.triggerDay || '', cell.dataset.triggerTime || '');
+                openTriggerDrilldown({ day: cell.dataset.triggerDay || '', timeLabel: cell.dataset.triggerTime || '' });
             });
         }
         const setTriggerTimesView = (mode) => {
             const isGraph = mode === 'graph';
             if (tablePanel) tablePanel.hidden = isGraph;
             if (graphPanel) graphPanel.hidden = !isGraph;
+            if (!isGraph) {
+                syncTableDrilldownFromGraph();
+            } else if (tableMainContent) {
+                tableMainContent.style.display = '';
+            }
             modeButtons.forEach((btn) => {
                 const active = btn.dataset.triggerTimesView === mode;
                 btn.classList.toggle('active', active);
@@ -22097,6 +22315,7 @@ function attachOverviewCardInteractions(container, data) {
                 }
             });
         });
+        card.__jumpToTriggerDrilldown = jumpToTriggerDrilldown;
         wireTriggerDrillClicks();
         setTriggerTimesView('graph');
     };

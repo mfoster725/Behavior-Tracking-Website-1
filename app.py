@@ -725,6 +725,7 @@ class Checkpoint(db.Model):
     color = db.Column(db.String(20), nullable=False)
     date = db.Column(db.Date, nullable=False, index=True)
     label = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -1129,6 +1130,18 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add grades_taught column (may already exist): {e}")
+
+                # Ensure checkpoints.description exists for checkpoint notes.
+                if 'checkpoints' in table_names:
+                    checkpoint_columns = [col['name'] for col in inspector.get_columns('checkpoints')]
+                    if 'description' not in checkpoint_columns:
+                        print("Adding description column to checkpoints table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE checkpoints ADD COLUMN description TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add checkpoints.description column (may already exist): {e}")
                     
                     if 'linked_case_manager_id' not in columns:
                         print("Adding linked_case_manager_id column to users table...")
@@ -2541,6 +2554,7 @@ def _serialize_checkpoint(checkpoint):
         'color': checkpoint.color,
         'date': checkpoint.date.isoformat(),
         'label': checkpoint.label,
+        'description': checkpoint.description,
         'student_ids': [row.student_id for row in checkpoint.students],
         'created_by_user_id': checkpoint.created_by_user_id,
         'created_at': checkpoint.created_at.isoformat() if checkpoint.created_at else None,
@@ -2640,6 +2654,7 @@ def api_checkpoints():
         payload = request.json or {}
         checkpoint_type = (payload.get('checkpoint_type') or '').strip().lower()
         label = (payload.get('label') or '').strip()
+        description = (payload.get('description') or '').strip()
         date_str = (payload.get('date') or '').strip()
         student_ids = payload.get('student_ids') or []
         if not isinstance(student_ids, list):
@@ -2656,6 +2671,8 @@ def api_checkpoints():
             return jsonify({'error': 'Select at least one student'}), 400
         if not label:
             return jsonify({'error': 'Label is required'}), 400
+        if len(description) > 2000:
+            return jsonify({'error': 'Description must be 2000 characters or fewer'}), 400
         if not date_str:
             return jsonify({'error': 'Date is required'}), 400
         try:
@@ -2677,6 +2694,7 @@ def api_checkpoints():
             color=color,
             date=checkpoint_date,
             label=label,
+            description=description or None,
             created_by_user_id=current_user.id,
         )
         db.session.add(checkpoint)
@@ -2764,6 +2782,7 @@ def api_checkpoint_item(checkpoint_id):
     payload = request.json or {}
     checkpoint_type = (payload.get('checkpoint_type') or checkpoint.checkpoint_type).strip().lower()
     label = (payload.get('label') or checkpoint.label).strip()
+    description = (payload.get('description') or '').strip() if 'description' in payload else checkpoint.description
     date_str = payload.get('date')
     color_candidate = payload.get('color')
 
@@ -2774,6 +2793,8 @@ def api_checkpoint_item(checkpoint_id):
             return jsonify({'error': 'Date must be YYYY-MM-DD'}), 400
     if not label:
         return jsonify({'error': 'Label is required'}), 400
+    if description and len(description) > 2000:
+        return jsonify({'error': 'Description must be 2000 characters or fewer'}), 400
 
     try:
         checkpoint.color = _checkpoint_color_for_type(checkpoint_type, color_candidate or checkpoint.color)
@@ -2782,6 +2803,7 @@ def api_checkpoint_item(checkpoint_id):
 
     checkpoint.checkpoint_type = checkpoint_type
     checkpoint.label = label
+    checkpoint.description = description or None
 
     if 'student_ids' in payload:
         incoming_ids = []
@@ -10375,6 +10397,18 @@ if __name__ == '__main__':
                         with db.engine.connect() as conn:
                             conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR(100)"))
                             conn.commit()
+
+                # Ensure checkpoints.description exists for hover/table details.
+                if 'checkpoints' in table_names:
+                    checkpoint_columns = [col['name'] for col in inspector.get_columns('checkpoints')]
+                    if 'description' not in checkpoint_columns:
+                        print("Adding description column to checkpoints table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE checkpoints ADD COLUMN description TEXT"))
+                                conn.commit()
+                        except Exception as cp_migration_error:
+                            print(f"Checkpoint description migration warning: {cp_migration_error}")
         except Exception as e:
             print(f"Schema check completed (table may not exist yet or columns already exist): {e}")
         # Migration: Add attendance_status column if it doesn't exist
