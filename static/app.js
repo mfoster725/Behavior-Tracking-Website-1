@@ -7143,7 +7143,7 @@ async function loadFrenzyStats() {
                         }
                         return '';
                     })()}
-                    <h4 style="margin-top: 20px;">Results of Behavior</h4>
+                    <h4 style="margin-top: 20px;">Frenzy Notes</h4>
                     <div style="overflow-x: auto; margin-top: 10px; max-height: 300px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse;">
                             <thead style="position: sticky; top: 0; z-index: 20;">
@@ -7946,6 +7946,11 @@ async function showInfoModal(event) {
     const frenzyWarning = document.getElementById('info-frenzy-warning');
     frenzyCheckbox.checked = infoData.frenzy || false;
     frenzyCheckbox.disabled = isReadOnly;
+    const severitySelect = ensureInfoSeverityControl();
+    if (severitySelect) {
+        severitySelect.value = infoData.severity ? String(infoData.severity) : '';
+        severitySelect.disabled = isReadOnly;
+    }
     
     // Show/hide frenzy warnings (both in Frenzy line and Reset line) based on reset checkbox state
     const resetFrenzyWarning = document.getElementById('info-reset-frenzy-warning');
@@ -7976,6 +7981,34 @@ async function showInfoModal(event) {
     modal.style.display = 'block';
 }
 
+function ensureInfoSeverityControl() {
+    let severitySelect = document.getElementById('info-severity');
+    if (severitySelect) return severitySelect;
+
+    const resultsInput = document.getElementById('info-results');
+    if (!resultsInput) return null;
+
+    const resultsGroup = resultsInput.closest('.form-group');
+    if (!resultsGroup || !resultsGroup.parentNode) return null;
+
+    const severityGroup = document.createElement('div');
+    severityGroup.className = 'form-group';
+    severityGroup.innerHTML = `
+        <label for="info-severity">Highest Level of Staff Called:</label>
+        <select id="info-severity">
+            <option value="">Select severity</option>
+            <option value="1">1 - Para</option>
+            <option value="2">2 - Response Team</option>
+            <option value="3">3 - Professional</option>
+            <option value="4">4 - Administration</option>
+            <option value="5">5 - SRO</option>
+        </select>
+    `;
+
+    resultsGroup.parentNode.insertBefore(severityGroup, resultsGroup.nextSibling);
+    return document.getElementById('info-severity');
+}
+
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
     modal.style.display = 'none';
@@ -8001,6 +8034,11 @@ function saveInfoModal() {
         reset: document.getElementById('info-reset').checked,
         alternate_location: document.getElementById('info-alternate-location').value || '',
         frenzy: document.getElementById('info-frenzy').checked,
+        severity: (() => {
+            const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
+            const severityValue = severityEl ? severityEl.value : '';
+            return severityValue ? parseInt(severityValue, 10) : null;
+        })(),
         duration: document.getElementById('info-duration').value,
         results: document.getElementById('info-results').value
     };
@@ -8097,6 +8135,7 @@ function hasInfoData(infoData) {
            infoData.reset || 
            hasInfractions ||
            infoData.frenzy ||
+           infoData.severity ||
            hasPurposes ||
            infoData.duration ||
            infoData.results ||
@@ -8115,6 +8154,15 @@ function showInfoViewPopup(infoDataString, time, location) {
             infoData = { notes: infoDataString };
         }
     }
+    const severityLabels = {
+        1: 'Para',
+        2: 'Response Team',
+        3: 'Professional',
+        4: 'Administration',
+        5: 'SRO'
+    };
+    const severityValue = Number(infoData.severity);
+    const severityText = severityLabels[severityValue] ? `${severityValue} - ${severityLabels[severityValue]}` : 'None';
     
     // Create modal HTML
     const modal = document.createElement('div');
@@ -8194,6 +8242,10 @@ function showInfoViewPopup(infoDataString, time, location) {
                     <label>Frenzy:</label>
                     <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
                 </div>
+                <div class="form-group">
+                    <label>Highest Level of Staff Called:</label>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${severityText}</div>
+                </div>
 
                 <!-- Purposes -->
                 <div class="form-group">
@@ -8230,9 +8282,9 @@ function showInfoViewPopup(infoDataString, time, location) {
                     <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.duration || 'None'}</div>
                 </div>
 
-                <!-- Results of Behavior -->
+                <!-- Frenzy Notes -->
                 <div class="form-group">
-                    <label>Results of Behavior:</label>
+                    <label>Frenzy Notes:</label>
                     <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.results || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
             </div>
@@ -12254,14 +12306,14 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestTime.label)}</td>
-                                            <td style="${tdRight}">${bestTime.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}">${Number(bestTime.percent ?? 0).toFixed(1)}%</td>
                                             <td style="${tdRight}"><span style="color:${drillDeltaColor(bestTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestTime.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstTime ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstTime.label)}</td>
-                                            <td style="${tdRight}">${worstTime.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}">${Number(worstTime.percent ?? 0).toFixed(1)}%</td>
                                             <td style="${tdRight}"><span style="color:${drillDeltaColor(worstTime.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstTime.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
@@ -12289,14 +12341,14 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Highest</td>
                                             <td style="${tdLeft}">${escapeHtml(bestDay.label)}</td>
-                                            <td style="${tdRight}">${bestDay.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}">${Number(bestDay.percent ?? 0).toFixed(1)}%</td>
                                             <td style="${tdRight}"><span style="color:${drillDeltaColor(bestDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(bestDay.delta))}</span></td>
                                         </tr>` : ''}
                                         ${worstDay ? `
                                         <tr>
                                             <td style="${tdLeft}; font-weight: 600;">Lowest</td>
                                             <td style="${tdLeft}">${escapeHtml(worstDay.label)}</td>
-                                            <td style="${tdRight}">${worstDay.percent.toFixed(1)}%</td>
+                                            <td style="${tdRight}">${Number(worstDay.percent ?? 0).toFixed(1)}%</td>
                                             <td style="${tdRight}"><span style="color:${drillDeltaColor(worstDay.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(worstDay.delta))}</span></td>
                                         </tr>` : ''}
                                     </tbody>
@@ -17920,7 +17972,9 @@ async function loadSummaryDashboard() {
         console.info(`Summary load timings: fetch=${fetchMs.toFixed(1)}ms render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`);
         syncSummaryPointCardButton();
     } catch (err) {
-        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
+        const firstStackLine = String(err?.stack || '').split('\n').slice(0, 2).join(' | ');
+        container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p>${firstStackLine ? `<p style="font-size:0.8rem;color:var(--text-secondary);">${escapeHtml(firstStackLine)}</p>` : ''}</div>`;
+        console.error('Summary render stack:', err);
         syncSummaryPointCardButton();
     }
 }
@@ -18039,47 +18093,31 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         return `${a.day}|${a.timeLabel}`.localeCompare(`${b.day}|${b.timeLabel}`);
     };
     const compareTriggerAggregate = (a, b) => {
-        if (a.totalSeverity !== b.totalSeverity) return a.totalSeverity - b.totalSeverity;
+        if (a.avgSeverity !== b.avgSeverity) return a.avgSeverity - b.avgSeverity;
         if (a.frenzyCount !== b.frenzyCount) return a.frenzyCount - b.frenzyCount;
-        const aStar = a.avgStarPercent;
-        const bStar = b.avgStarPercent;
-        if (aStar != null && bStar != null && aStar !== bStar) return bStar - aStar; // lower STAR is hotter
-        if (aStar != null && bStar == null) return -1;
-        if (aStar == null && bStar != null) return 1;
-        if (a.infractions !== b.infractions) return a.infractions - b.infractions;
         return String(b.label || '').localeCompare(String(a.label || ''));
     };
-    const aggregateCells = (label, cellRefs) => {
+    const aggregateCells = (label, sevCells) => {
         let totalSeverity = 0;
         let frenzyCount = 0;
-        let infractions = 0;
-        let starSum = 0;
-        let starCount = 0;
-        cellRefs.forEach(({ sevCell, fallbackCell }) => {
+        sevCells.forEach((sevCell) => {
             const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
             const count = Number(sevCell?.frenzy_count || 0);
             if (avg != null && count > 0) {
                 totalSeverity += avg * count;
                 frenzyCount += count;
             }
-            const star = tieStarPercent(fallbackCell);
-            if (star != null) {
-                starSum += star;
-                starCount += 1;
-            }
-            infractions += tieInfractions(fallbackCell);
         });
         if (frenzyCount <= 0) return null;
         return {
             label,
             totalSeverity,
             frenzyCount,
-            avgStarPercent: starCount > 0 ? starSum / starCount : null,
-            infractions
+            avgSeverity: totalSeverity / frenzyCount
         };
     };
     // Severity remains the main scale. Exact severity ties are spread by
-    // frenzy count, then lower STAR %, then infractions.
+    // frenzy count.
     let worstSev = -Infinity;
     let worst = null;
     let bestSev = Infinity;
@@ -18097,7 +18135,6 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         timeSlots.forEach(timeLabel => {
             const sevCell = sevMap[timeLabel];
             const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
-            if (avg == null) return;
             const fallbackCell = fallbackMap[timeLabel] || {};
             const observedCell = {
                 day,
@@ -18108,42 +18145,39 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
                 starPercent: tieStarPercent(fallbackCell),
                 infractions: tieInfractions(fallbackCell)
             };
-            hasSeverity = true;
-            observedSeverityValues.push(avg);
             observedCells.push(observedCell);
-            if (avg < minAvgSeverity) minAvgSeverity = avg;
-            if (avg > maxAvgSeverity) maxAvgSeverity = avg;
-            if (avg > worstSev || (avg === worstSev && (!worst || compareHeatTie(worst, observedCell) < 0))) {
-                worstSev = avg;
-                worst = observedCell;
+            if (avg != null) {
+                hasSeverity = true;
+                observedSeverityValues.push(avg);
+                if (avg < minAvgSeverity) minAvgSeverity = avg;
+                if (avg > maxAvgSeverity) maxAvgSeverity = avg;
+                if (avg > worstSev || (avg === worstSev && (!worst || compareHeatTie(worst, observedCell) < 0))) {
+                    worstSev = avg;
+                    worst = observedCell;
+                }
             }
-            if (avg < bestSev || (avg === bestSev && (!best || compareHeatTie(best, observedCell) > 0))) {
-                bestSev = avg;
+            // A cell with no frenzies is cooler than any cell with frenzies.
+            const coolRank = avg == null ? -1 : avg;
+            if (coolRank < bestSev || (coolRank === bestSev && (!best || compareHeatTie(best, observedCell) > 0))) {
+                bestSev = coolRank;
                 best = observedCell;
             }
         });
     });
     timeSlots.forEach(timeLabel => {
-        const agg = aggregateCells(timeLabel, days.map(day => ({
-            sevCell: (frenzySeverityByTimeByDay || {})[day]?.[timeLabel],
-            fallbackCell: (byTimeByDayFallback || {})[day]?.[timeLabel]
-        })));
+        const agg = aggregateCells(timeLabel, days.map(day => (frenzySeverityByTimeByDay || {})[day]?.[timeLabel]));
         if (agg && (!triggerTime || compareTriggerAggregate(triggerTime, agg) < 0)) {
             triggerTime = { ...agg, timeLabel };
         }
     });
     days.forEach(day => {
-        const agg = aggregateCells(day, timeSlots.map(timeLabel => ({
-            sevCell: (frenzySeverityByTimeByDay || {})[day]?.[timeLabel],
-            fallbackCell: (byTimeByDayFallback || {})[day]?.[timeLabel]
-        })));
+        const agg = aggregateCells(day, timeSlots.map(timeLabel => (frenzySeverityByTimeByDay || {})[day]?.[timeLabel]));
         if (agg && (!triggerDay || compareTriggerAggregate(triggerDay, agg) < 0)) {
             triggerDay = { ...agg, day };
         }
     });
     if (!hasSeverity) {
         worst = null;
-        best = null;
         triggerTime = null;
         triggerDay = null;
         minAvgSeverity = null;
@@ -18160,6 +18194,7 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         const baseBySeverity = new Map(uniqueSeverityValues.map(v => [v, baseForSeverity(v)]));
         const cellsBySeverity = new Map();
         observedCells.forEach(cell => {
+            if (typeof cell.avg !== 'number' || !Number.isFinite(cell.avg)) return;
             const key = Number(cell.avg.toFixed(4));
             if (!cellsBySeverity.has(key)) cellsBySeverity.set(key, []);
             cellsBySeverity.get(key).push(cell);
@@ -19516,36 +19551,42 @@ function wireSummaryBehaviorTrendCard() {
 }
 
 function buildDefaultTriggerTimesCardHtml(data) {
-    const byClass = data.by_class || {};
-    const byTime = data.by_time || {};
-    const timeKeys = Object.keys(byTime);
-    const classNames = Object.keys(byClass);
-    const useByTime = timeKeys.length > 0;
-    const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-
-    const sortedTriggerKeys = triggerEntries.sort((a, b) => {
-        const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-        const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-        const aPct = typeof aData.percentages?.overall === 'number' ? Math.round(aData.percentages.overall) : Number.POSITIVE_INFINITY;
-        const bPct = typeof bData.percentages?.overall === 'number' ? Math.round(bData.percentages.overall) : Number.POSITIVE_INFINITY;
-        if (aPct !== bPct) return aPct - bPct;
-        const aInfra = typeof aData.total_infractions === 'number' ? aData.total_infractions : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-        const bInfra = typeof bData.total_infractions === 'number' ? bData.total_infractions : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-        return bInfra - aInfra;
+    const frenzySeverityByTimeByDay = data.frenzy_severity_by_time_by_day || {};
+    const severityByTime = {};
+    Object.values(frenzySeverityByTimeByDay).forEach(timesMap => {
+        Object.entries(timesMap || {}).forEach(([timeLabel, severityCell]) => {
+            const avg = Number(severityCell?.avg_severity);
+            const count = Number(severityCell?.frenzy_count || 0);
+            if (!Number.isFinite(avg) || count <= 0) return;
+            if (!severityByTime[timeLabel]) {
+                severityByTime[timeLabel] = {
+                    severitySum: 0,
+                    frenzyCount: 0
+                };
+            }
+            severityByTime[timeLabel].severitySum += avg * count;
+            severityByTime[timeLabel].frenzyCount += count;
+        });
     });
+    const sortedTriggerRows = Object.entries(severityByTime)
+        .map(([timeLabel, agg]) => ({
+            timeLabel,
+            frenzyCount: agg.frenzyCount,
+            avgSeverity: agg.frenzyCount > 0 ? (agg.severitySum / agg.frenzyCount) : null
+        }))
+        .filter(row => row.avgSeverity != null)
+        .sort((a, b) => {
+            if (a.avgSeverity !== b.avgSeverity) return b.avgSeverity - a.avgSeverity;
+            if (a.frenzyCount !== b.frenzyCount) return b.frenzyCount - a.frenzyCount;
+            return String(a.timeLabel).localeCompare(String(b.timeLabel));
+        });
 
     let rows = '';
-    sortedTriggerKeys.slice(0, 6).forEach(key => {
-        const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
-        const pctOverall = rowData.percentages?.overall;
-        const infractionsCount = typeof rowData.total_infractions === 'number'
-            ? rowData.total_infractions
-            : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
-        const topClass = useByTime ? (rowData.top_class || '') : '';
+    sortedTriggerRows.slice(0, 6).forEach(row => {
         rows += `<tr>
-            <td>${escapeHtml(key)}${topClass ? `<div class="trigger-times-sub">${escapeHtml(topClass)}</div>` : ''}</td>
-            <td>${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</td>
-            <td>${infractionsCount}</td>
+            <td>${escapeHtml(row.timeLabel)}</td>
+            <td>${Number(row.avgSeverity).toFixed(2)}</td>
+            <td>${row.frenzyCount}</td>
         </tr>`;
     });
 
@@ -19560,7 +19601,7 @@ function buildDefaultTriggerTimesCardHtml(data) {
                 ${rows ? `
                     <table class="trigger-times-table">
                         <thead>
-                            <tr><th>Time</th><th>Average</th><th>Infractions</th></tr>
+                            <tr><th>Time</th><th>Avg Severity</th><th>Frenzies</th></tr>
                         </thead>
                         <tbody>${rows}</tbody>
                     </table>` : empty}
@@ -19586,8 +19627,8 @@ function buildOverviewDashboardCardHtml(data) {
     const hm = overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDay);
     const severityLabels = {
         1: 'Para',
-        2: 'Professional',
-        3: 'Response Team',
+        2: 'Response Team',
+        3: 'Professional',
         4: 'Administration',
         5: 'SRO'
     };
@@ -19687,11 +19728,12 @@ function buildOverviewDashboardCardHtml(data) {
             if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
             let title;
             if (hasSeverity) {
-                const avg = sevCell.avg_severity;
-                const closest = Math.max(1, Math.min(5, Math.round(avg)));
+                const avg = Number(sevCell.avg_severity);
+                const safeAvg = Number.isFinite(avg) ? avg : 0;
+                const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
                 const levelName = severityLabels[closest] || '';
                 const count = sevCell.frenzy_count || 0;
-                title = `Avg severity ${avg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
+                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
             } else {
                 title = 'No frenzies';
             }
@@ -19944,15 +19986,20 @@ function syncOverviewHeatmapColumns(scope) {
             const totalWidth = grid.clientWidth;
             if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
             const isRich = !!grid.closest('.overview-card--rich');
-            const dayColMin = isRich ? 32 : 72;
+            const isTriggerGraph = !!grid.closest('.trigger-times-card [data-trigger-times-panel="graph"]');
+            const dayColMin = isTriggerGraph ? 28 : (isRich ? 32 : 72);
             const gapPx = 1;
             const totalGapPx = gapPx * colCount; // gaps between day-col + N cells
             const usableForCells = Math.max(0, totalWidth - dayColMin - totalGapPx);
-            const cellWidthFloor = Math.floor(usableForCells / colCount);
-            if (cellWidthFloor <= 0) return;
-            const usedWidth = dayColMin + totalGapPx + cellWidthFloor * colCount;
-            const dayCol = dayColMin + (totalWidth - usedWidth); // absorb leftover into day-label column so every cell stays integer-equal
-            grid.style.gridTemplateColumns = `${dayCol}px repeat(${colCount}, ${cellWidthFloor}px)`;
+            const cellWidth = isTriggerGraph
+                ? (usableForCells / colCount)
+                : Math.floor(usableForCells / colCount);
+            if (cellWidth <= 0) return;
+            const usedWidth = dayColMin + totalGapPx + cellWidth * colCount;
+            const dayCol = isTriggerGraph
+                ? dayColMin
+                : (dayColMin + (totalWidth - usedWidth)); // absorb leftover into day-label column so every cell stays integer-equal
+            grid.style.gridTemplateColumns = `${dayCol}px repeat(${colCount}, ${cellWidth}px)`;
         });
     };
     apply();
@@ -19982,7 +20029,11 @@ function syncOverviewTriggerHeroSize(scope) {
         const lh = parseFloat(cs.lineHeight);
         const lineHeight = Number.isFinite(lh) && lh > 0 ? lh / parseFloat(cs.fontSize) : 1.15;
         const lines = (hero.innerHTML || '').includes('<br') ? 2 : 1;
-        const fontPx = Math.max(10, (targetH / (lines * lineHeight)) * 0.9);
+        const isTriggerTimesCard = !!hero.closest('.trigger-times-card');
+        const basePx = targetH / (lines * lineHeight);
+        const fontPx = isTriggerTimesCard
+            ? Math.max(10, (basePx * 0.78) - 2)
+            : Math.max(10, basePx * 0.9);
         hero.style.setProperty('--overview-trigger-hero-size', `${fontPx}px`);
     };
     apply();
@@ -21331,22 +21382,25 @@ function attachOverviewCardInteractions(container, data) {
             return;
         }
 
-        const byDayData = data.by_day_of_week || {};
+        const frenzySeverityByTimeByDay = data.frenzy_severity_by_time_by_day || {};
         const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
         const rows = [];
         weekdays.forEach(d => {
-            const dd = byDayData[d];
-            if (!dd) return;
-            const pct = typeof dd.percentages?.overall === 'number'
-                ? dd.percentages.overall
-                : 0;
-            const infractionsCount = typeof dd.total_infractions === 'number'
-                ? dd.total_infractions
-                : 0;
+            const daySev = frenzySeverityByTimeByDay[d] || {};
+            let severitySum = 0;
+            let frenzyCount = 0;
+            Object.values(daySev).forEach(severityCell => {
+                const avg = Number(severityCell?.avg_severity);
+                const count = Number(severityCell?.frenzy_count || 0);
+                if (!Number.isFinite(avg) || count <= 0) return;
+                severitySum += avg * count;
+                frenzyCount += count;
+            });
+            if (frenzyCount <= 0) return;
             rows.push({
                 label: d.substring(0, 3),
-                pct,
-                infractions: infractionsCount
+                avgSeverity: severitySum / frenzyCount,
+                frenzyCount
             });
         });
 
@@ -21357,15 +21411,15 @@ function attachOverviewCardInteractions(container, data) {
         }
 
         rows.sort((a, b) => {
-            if (b.infractions !== a.infractions) return b.infractions - a.infractions;
-            return (b.pct || 0) - (a.pct || 0);
+            if (a.avgSeverity !== b.avgSeverity) return b.avgSeverity - a.avgSeverity;
+            return b.frenzyCount - a.frenzyCount;
         });
         let bodyRows = '';
         rows.forEach(r => {
             bodyRows += `<tr>
                 <td>${r.label}</td>
-                <td>${Math.round(r.pct)}%</td>
-                <td>${r.infractions}</td>
+                <td>${Number(r.avgSeverity).toFixed(2)}</td>
+                <td>${r.frenzyCount}</td>
             </tr>`;
         });
 
@@ -21375,8 +21429,8 @@ function attachOverviewCardInteractions(container, data) {
                 <thead>
                     <tr>
                         <th>Day</th>
-                        <th>Overall %</th>
-                        <th>Infractions</th>
+                        <th>Avg Severity</th>
+                        <th>Frenzies</th>
                     </tr>
                 </thead>
                 <tbody>${bodyRows}</tbody>
@@ -21684,40 +21738,136 @@ function attachOverviewCardInteractions(container, data) {
     };
 
     const buildTriggerTimesCard = () => {
-        const byClass = data.by_class || {};
-        const byTime = data.by_time || {};
-
-        const timeKeys = Object.keys(byTime);
-        const classNames = Object.keys(byClass);
-        const useByTime = timeKeys.length > 0;
-        const triggerEntries = useByTime ? timeKeys.slice() : classNames.slice();
-        let sortedTriggerKeys = [];
-
-        if (triggerEntries.length > 0) {
-            sortedTriggerKeys = triggerEntries.sort((a, b) => {
-                const aData = useByTime ? (byTime[a] || {}) : (byClass[a] || {});
-                const bData = useByTime ? (byTime[b] || {}) : (byClass[b] || {});
-
-                const aPct = typeof aData.percentages?.overall === 'number'
-                    ? Math.round(aData.percentages.overall)
-                    : Number.POSITIVE_INFINITY;
-                const bPct = typeof bData.percentages?.overall === 'number'
-                    ? Math.round(bData.percentages.overall)
-                    : Number.POSITIVE_INFINITY;
-                if (aPct !== bPct) {
-                    return aPct - bPct;
+        const frenzySeverityByTimeByDay = data.frenzy_severity_by_time_by_day || {};
+        const previousTrigger = data.previous_trigger || {};
+        const frenzyCellDetailsByTimeByDay = data.frenzy_cell_details_by_time_by_day || {};
+        const byTimeByDay = data.by_time_by_day || {};
+        const severityByTime = {};
+        Object.values(frenzySeverityByTimeByDay).forEach(timesMap => {
+            Object.entries(timesMap || {}).forEach(([timeLabel, severityCell]) => {
+                const avg = Number(severityCell?.avg_severity);
+                const count = Number(severityCell?.frenzy_count || 0);
+                if (!Number.isFinite(avg) || count <= 0) return;
+                if (!severityByTime[timeLabel]) {
+                    severityByTime[timeLabel] = {
+                        severitySum: 0,
+                        frenzyCount: 0
+                    };
                 }
-
-                const aInfra = typeof aData.total_infractions === 'number'
-                    ? aData.total_infractions
-                    : (typeof aData.infractions === 'number' ? aData.infractions : 0);
-                const bInfra = typeof bData.total_infractions === 'number'
-                    ? bData.total_infractions
-                    : (typeof bData.infractions === 'number' ? bData.infractions : 0);
-
-                return bInfra - aInfra;
+                severityByTime[timeLabel].severitySum += avg * count;
+                severityByTime[timeLabel].frenzyCount += count;
             });
+        });
+        const sortedTriggerRows = Object.entries(severityByTime)
+            .map(([timeLabel, agg]) => ({
+                timeLabel,
+                frenzyCount: agg.frenzyCount,
+                avgSeverity: agg.frenzyCount > 0 ? (agg.severitySum / agg.frenzyCount) : null
+            }))
+            .filter(row => row.avgSeverity != null)
+            .sort((a, b) => {
+                if (a.avgSeverity !== b.avgSeverity) return b.avgSeverity - a.avgSeverity;
+                if (a.frenzyCount !== b.frenzyCount) return b.frenzyCount - a.frenzyCount;
+                return String(a.timeLabel).localeCompare(String(b.timeLabel));
+            });
+
+        const hm = overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDay);
+        const severityLabels = {
+            1: 'Para',
+            2: 'Response Team',
+            3: 'Professional',
+            4: 'Administration',
+            5: 'SRO'
+        };
+        let headlineTime = '';
+        let headlineDay = '';
+        if (hm.worst) {
+            headlineTime = hm.worst.timeLabel || '';
+            headlineDay = hm.worst.day || '';
         }
+        const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
+        const metaTriggerDay = hm.triggerDay?.day || headlineDay;
+        const hasPriorTriggerData = Boolean(previousTrigger.time && previousTrigger.day);
+        const previousTriggerTime = hasPriorTriggerData ? previousTrigger.time : 'No prior data';
+        const previousTriggerDay = hasPriorTriggerData ? previousTrigger.day : 'No prior data';
+        const previousCombined = hasPriorTriggerData
+            ? `${previousTriggerTime} on ${previousTriggerDay}`
+            : 'No prior data';
+        const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
+        let heatRows = '';
+        hm.days.forEach(day => {
+            let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
+            hm.timeSlots.forEach(tlabel => {
+                const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
+                const bg = overviewHeatColor(sevCell, hm);
+                const hasSeverity = typeof sevCell?.avg_severity === 'number';
+                const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
+                const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && hasSeverity;
+                let cls = 'overview-heatmap-cell';
+                if (isWorst) cls += ' overview-heatmap-cell--worst';
+                if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
+                let title;
+                if (hasSeverity) {
+                    const avg = Number(sevCell.avg_severity);
+                    const safeAvg = Number.isFinite(avg) ? avg : 0;
+                    const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
+                    const levelName = severityLabels[closest] || '';
+                    const count = sevCell.frenzy_count || 0;
+                    title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'} • Click to drill down`;
+                } else {
+                    title = 'No frenzies recorded • Click to drill down';
+                }
+                row += `<div class="${cls}" style="background:${bg};cursor:pointer;" title="${escapeHtml(title)}" data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"></div>`;
+            });
+            heatRows += row;
+        });
+        if (!heatRows) {
+            heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
+        }
+        const headlineRight = headlineDay
+            ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
+            : escapeHtml(headlineTime || '—');
+        const triggerMetaLines = headlineTime ? `
+            <div class="overview-trigger-meta">
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || '—')}</span></div>
+                <div class="overview-trigger-meta-row overview-trigger-meta-row--sub"><span class="overview-trigger-meta-k">Previously:</span><span class="overview-trigger-meta-v">${escapeHtml(previousTriggerTime)}</span></div>
+                <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || '—')}</span></div>
+                <div class="overview-trigger-meta-row overview-trigger-meta-row--sub"><span class="overview-trigger-meta-k">Previously:</span><span class="overview-trigger-meta-v">${escapeHtml(previousTriggerDay)}</span></div>
+            </div>` : '';
+        const triggerOverviewPanelHtml = `
+            <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
+                <div class="overview-trigger-head">
+                    <div class="overview-trigger-row">
+                        <div class="overview-trigger-hero">${headlineRight}</div>
+                        ${triggerMetaLines}
+                    </div>
+                    <div class="overview-trigger-prev-sub">Previously: ${escapeHtml(previousCombined)}</div>
+                </div>
+                <div class="overview-heatmap" style="--overview-heatmap-col-count:${Math.max(1, hm.timeSlots.length)};">
+                    <div class="overview-heatmap-grid">
+                        <div></div>
+                        ${timeHeaderLabels.map(t => `<div class="overview-heatmap-colhead">${t ? escapeHtml(t) : ''}</div>`).join('')}
+                        ${heatRows}
+                    </div>
+                    <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
+                </div>
+            </div>
+        `;
+        const triggerGraphHtml = `
+            <div class="trigger-times-drill-wrapper">
+                <div class="trigger-times-drilldown-tabs" role="tablist">
+                    <button class="trigger-times-drill-tab active" data-drill-tab="overview" role="tab" aria-selected="true">
+                        <span class="trigger-times-drill-tab-label">Overview</span>
+                    </button>
+                </div>
+                <div class="trigger-times-drilldown-panels">
+                    <div class="trigger-times-drill-tab-panel is-active" data-drill-tab-panel="overview">
+                        ${triggerOverviewPanelHtml}
+                    </div>
+                </div>
+            </div>
+        `;
 
         const card = document.createElement('div');
         card.className = 'dashboard-card trigger-times-card overview-extra-card';
@@ -21725,34 +21875,28 @@ function attachOverviewCardInteractions(container, data) {
 
         let innerHtml = `
             <div class="dashboard-breakdown-card-inner">
-                <div class="dashboard-card-header"><h3 class="dashboard-card-title">Trigger Times</h3></div>
+                <div class="dashboard-card-header">
+                    <h3 class="dashboard-card-title">Trigger Times</h3>
+                    <div class="view-mode-toggle" role="tablist" aria-label="Trigger Times view mode">
+                        <button type="button" class="view-mode-toggle-btn active" data-trigger-times-view="graph" role="tab" aria-selected="true">Graph</button>
+                        <button type="button" class="view-mode-toggle-btn" data-trigger-times-view="table" role="tab" aria-selected="false">Table</button>
+                    </div>
+                </div>
+                <div data-trigger-times-panel="table" hidden>
                 <div class="overview-two-col">`;
 
         // Left column: trigger time/class breakdown list
         innerHtml += `<div>`;
-        if (sortedTriggerKeys.length > 0) {
+        if (sortedTriggerRows.length > 0) {
             innerHtml += `<ul class="dashboard-breakdown-list">`;
-            sortedTriggerKeys.forEach((key) => {
-                const rowData = useByTime ? (byTime[key] || {}) : (byClass[key] || {});
-                const pctOverall = rowData.percentages?.overall ?? '';
-
-                const infractionsCount = typeof rowData.total_infractions === 'number'
-                    ? rowData.total_infractions
-                    : (typeof rowData.infractions === 'number' ? rowData.infractions : 0);
-
-                const displayLabel = key;
-                const topClass = useByTime ? (rowData.top_class || null) : null;
-
+            sortedTriggerRows.forEach((row) => {
                 innerHtml += `<li class="dashboard-breakdown-item">
                     <span class="dashboard-breakdown-name">
-                        <span>
-                            <div>${escapeHtml(displayLabel)}</div>
-                            ${topClass ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${escapeHtml(topClass)}</div>` : ''}
-                        </span>
+                        <span><div>${escapeHtml(row.timeLabel)}</div></span>
                     </span>
                     <span>
-                        <span class="dashboard-breakdown-value">${typeof pctOverall === 'number' ? Math.round(pctOverall) + '%' : '-'}</span>
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Infractions: ${infractionsCount}</div>
+                        <span class="dashboard-breakdown-value">${Number(row.avgSeverity).toFixed(2)}</span>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Frenzies: ${row.frenzyCount}</div>
                     </span>
                 </li>`;
             });
@@ -21766,9 +21910,192 @@ function attachOverviewCardInteractions(container, data) {
         innerHtml += `<div class="overview-detail-container trigger-times-day-of-week" style="margin-top:10px; display:none;"></div>`;
 
         innerHtml += `</div></div>`;
+        innerHtml += `<div data-trigger-times-panel="graph">${triggerGraphHtml}</div>`;
+        innerHtml += `</div>`;
 
         card.innerHTML = innerHtml;
         grid.appendChild(card);
+
+        const tablePanel = card.querySelector('[data-trigger-times-panel="table"]');
+        const graphPanel = card.querySelector('[data-trigger-times-panel="graph"]');
+        const modeButtons = card.querySelectorAll('[data-trigger-times-view]');
+        const drillTabsContainer = graphPanel ? graphPanel.querySelector('.trigger-times-drilldown-tabs') : null;
+        const drillPanelsContainer = graphPanel ? graphPanel.querySelector('.trigger-times-drilldown-panels') : null;
+        const setActiveTriggerDrillTab = (tabName) => {
+            if (!graphPanel) return;
+            const allTabs = graphPanel.querySelectorAll('.trigger-times-drill-tab');
+            const allPanels = graphPanel.querySelectorAll('.trigger-times-drill-tab-panel');
+            allTabs.forEach((tab) => {
+                const isActive = tab.dataset.drillTab === tabName;
+                tab.classList.toggle('active', isActive);
+                tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            allPanels.forEach((panel) => {
+                panel.classList.toggle('is-active', panel.dataset.drillTabPanel === tabName);
+            });
+        };
+        const wireTriggerDrillClicks = () => {
+            if (!graphPanel) return;
+            const allTabs = graphPanel.querySelectorAll('.trigger-times-drill-tab');
+            allTabs.forEach((tab) => {
+                if (tab._triggerDrillWired) return;
+                tab._triggerDrillWired = true;
+                tab.addEventListener('click', (evt) => {
+                    const closeBtn = evt.target.closest('.trigger-times-drill-tab-close');
+                    if (closeBtn) {
+                        evt.stopPropagation();
+                        const tabName = tab.dataset.drillTab;
+                        if (tabName === 'overview') return;
+                        const panel = graphPanel.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+                        if (panel) panel.remove();
+                        tab.remove();
+                        setActiveTriggerDrillTab('overview');
+                        if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                            scheduleMasonryLayoutAfterResize(grid);
+                        }
+                        return;
+                    }
+                    const tabName = tab.dataset.drillTab;
+                    if (!tabName || tab.disabled) return;
+                    setActiveTriggerDrillTab(tabName);
+                });
+            });
+        };
+        const openTriggerCellDrilldown = (day, timeLabel) => {
+            if (!drillTabsContainer || !drillPanelsContainer) return;
+            const tabName = `cell-${day}-${timeLabel}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+            let tab = drillTabsContainer.querySelector(`.trigger-times-drill-tab[data-drill-tab="${tabName}"]`);
+            let panel = drillPanelsContainer.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
+            const sevCell = (frenzySeverityByTimeByDay[day] || {})[timeLabel];
+            const avg = Number(sevCell?.avg_severity);
+            const safeAvg = Number.isFinite(avg) ? avg : 0;
+            const count = Number(sevCell?.frenzy_count || 0);
+            const details = ((frenzyCellDetailsByTimeByDay[day] || {})[timeLabel]) || {};
+            const severityBreakdown = details.severity_breakdown || {};
+            const purposeBreakdown = details.purpose_breakdown || {};
+            if (!tab) {
+                tab = document.createElement('button');
+                tab.className = 'trigger-times-drill-tab';
+                tab.setAttribute('role', 'tab');
+                tab.setAttribute('aria-selected', 'false');
+                tab.dataset.drillTab = tabName;
+                tab.innerHTML = `
+                    <span class="trigger-times-drill-tab-label">${escapeHtml(`${overviewDayInitial(day)} ${timeLabel}`)}</span>
+                    <span class="trigger-times-drill-tab-close" role="button" aria-label="Close">&times;</span>
+                `;
+                drillTabsContainer.appendChild(tab);
+            }
+            if (!panel) {
+                const severityPct = Math.max(0, Math.min(100, (safeAvg / 5) * 100));
+                const levelName = severityLabels[Math.max(1, Math.min(5, Math.round(safeAvg)))] || 'Unspecified';
+                if (count <= 0) {
+                    panel = document.createElement('div');
+                    panel.className = 'trigger-times-drill-tab-panel';
+                    panel.dataset.drillTabPanel = tabName;
+                    panel.innerHTML = `
+                        <div class="overview-detail-container" style="margin-top:0;padding-top:0;border-top:0;">
+                            <h4 style="margin:0 0 10px 0;">${escapeHtml(day)} • ${escapeHtml(timeLabel)}</h4>
+                            <p style="margin:0;color:var(--text-secondary);font-size:0.9rem;">No frenzies recorded for this day/time.</p>
+                        </div>
+                    `;
+                    drillPanelsContainer.appendChild(panel);
+                    wireTriggerDrillClicks();
+                    setActiveTriggerDrillTab(tabName);
+                    if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                        scheduleMasonryLayoutAfterResize(grid);
+                    }
+                    return;
+                }
+                const severityRows = [1, 2, 3, 4, 5].map((level) => {
+                    const levelCount = Number(severityBreakdown[String(level)] || 0);
+                    const levelLabel = severityLabels[level] || `Severity ${level}`;
+                    return `<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);">${level} - ${escapeHtml(levelLabel)}</td><td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${levelCount}</td></tr>`;
+                }).join('');
+                const purposeEntries = Object.entries(purposeBreakdown).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+                const purposeRows = purposeEntries.length
+                    ? purposeEntries.map(([purpose, purposeCount]) => `<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(purpose)}</td><td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${Number(purposeCount || 0)}</td></tr>`).join('')
+                    : `<tr><td colspan="2" style="padding:6px 8px;color:var(--text-secondary);">No purpose data.</td></tr>`;
+                panel = document.createElement('div');
+                panel.className = 'trigger-times-drill-tab-panel';
+                panel.dataset.drillTabPanel = tabName;
+                panel.innerHTML = `
+                    <div class="overview-detail-container" style="margin-top:0;padding-top:0;border-top:0;">
+                        <h4 style="margin:0 0 10px 0;">${escapeHtml(day)} • ${escapeHtml(timeLabel)}</h4>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+                            <div style="font-size:1.15rem;font-weight:700;">Avg Severity ${safeAvg.toFixed(2)}</div>
+                            <div style="font-size:0.85rem;color:var(--text-secondary);">${escapeHtml(levelName)}</div>
+                            <div style="font-size:0.85rem;color:var(--text-secondary);">${count} frenz${count === 1 ? 'y' : 'ies'}</div>
+                        </div>
+                        <div style="width:100%;height:14px;background:#e5e7eb;border-radius:999px;overflow:hidden;">
+                            <div style="height:100%;width:${severityPct.toFixed(1)}%;background:linear-gradient(90deg,rgb(54,158,44),rgb(126,184,81),rgb(188,180,50),rgb(227,170,48),rgb(221,127,41),rgb(187,35,23));"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-secondary);margin-top:4px;">
+                            <span>1 (Para)</span><span>5 (SRO)</span>
+                        </div>
+                        <div class="overview-two-col" style="margin-top:12px;">
+                            <div>
+                                <h4 style="margin:0 0 6px 0;">Frenzies by Severity</h4>
+                                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                                    <thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Severity</th><th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border);">Count</th></tr></thead>
+                                    <tbody>${severityRows}</tbody>
+                                </table>
+                            </div>
+                            <div>
+                                <h4 style="margin:0 0 6px 0;">Frenzy Purpose</h4>
+                                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                                    <thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Purpose</th><th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border);">Count</th></tr></thead>
+                                    <tbody>${purposeRows}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                drillPanelsContainer.appendChild(panel);
+            }
+            wireTriggerDrillClicks();
+            setActiveTriggerDrillTab(tabName);
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+        if (graphPanel) {
+            graphPanel.addEventListener('click', (evt) => {
+                const cell = evt.target.closest('.overview-heatmap-cell[data-trigger-day][data-trigger-time]');
+                if (!cell) return;
+                openTriggerCellDrilldown(cell.dataset.triggerDay || '', cell.dataset.triggerTime || '');
+            });
+            graphPanel.addEventListener('keydown', (evt) => {
+                if (!(evt.key === 'Enter' || evt.key === ' ')) return;
+                const cell = evt.target.closest('.overview-heatmap-cell[data-trigger-day][data-trigger-time]');
+                if (!cell) return;
+                evt.preventDefault();
+                openTriggerCellDrilldown(cell.dataset.triggerDay || '', cell.dataset.triggerTime || '');
+            });
+        }
+        const setTriggerTimesView = (mode) => {
+            const isGraph = mode === 'graph';
+            if (tablePanel) tablePanel.hidden = isGraph;
+            if (graphPanel) graphPanel.hidden = !isGraph;
+            modeButtons.forEach((btn) => {
+                const active = btn.dataset.triggerTimesView === mode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            if (isGraph) {
+                syncOverviewHeatmapColumns(card);
+                syncOverviewTriggerHeroSize(card);
+            }
+        };
+        modeButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                setTriggerTimesView(btn.dataset.triggerTimesView || 'table');
+                if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                    scheduleMasonryLayoutAfterResize(grid);
+                }
+            });
+        });
+        wireTriggerDrillClicks();
+        setTriggerTimesView('graph');
     };
 
     const applySelectionChange = (box, key, { restore = false } = {}) => {

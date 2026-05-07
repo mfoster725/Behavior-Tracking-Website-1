@@ -1529,7 +1529,6 @@
                         <span id="info-frenzy-warning" style="color: #dc3545; font-weight: bold; display: none; margin-left: 10px;">Frenzy?</span>
                     </div>
                 </div>
-
                 <!-- Purposes -->
                 <div class="form-group">
                     <label>Purposes:</label>
@@ -1545,10 +1544,21 @@
                     <input type="number" id="info-duration" min="0" placeholder="Duration in minutes">
                 </div>
 
-                <!-- Results of Behavior -->
+                <!-- Frenzy Notes -->
                 <div class="form-group">
-                    <label for="info-results">Results of Behavior:</label>
-                    <textarea id="info-results" rows="3" placeholder="Enter results..."></textarea>
+                    <label for="info-results">Frenzy Notes:</label>
+                    <textarea id="info-results" rows="3" placeholder="Enter frenzy notes..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="info-severity">Highest Level of Staff Called:</label>
+                    <select id="info-severity">
+                        <option value="">Select severity</option>
+                        <option value="1">1 - Para</option>
+                        <option value="2">2 - Response Team</option>
+                        <option value="3">3 - Professional</option>
+                        <option value="4">4 - Administration</option>
+                        <option value="5">5 - SRO</option>
+                    </select>
                 </div>
             </div>
 
@@ -1896,7 +1906,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc63"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc64"></script>
 </body>
 </html>
 

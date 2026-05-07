@@ -138,6 +138,8 @@ else:
         app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{local_db_path}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 limiter = Limiter(
@@ -698,7 +700,7 @@ class FrenzyEvent(db.Model):
     purpose = db.Column(db.String(100))
     purpose2 = db.Column(db.String(100))
     duration_minutes = db.Column(db.Integer)
-    # Frenzy severity level (1=Para, 2=Professional, 3=Response Team,
+    # Frenzy severity level (1=Para, 2=Response Team, 3=Professional,
     # 4=Administration, 5=SRO). Backfilled to 1 by migrate_frenzy_severity.py.
     severity = db.Column(db.Integer)
 
@@ -3383,10 +3385,20 @@ def summary():
                     sev_map = frenzy_severity_by_time_by_day[day_of_week]
                     bucket = sev_map.get(time_label)
                     if bucket is None:
-                        bucket = {'severity_sum': 0, 'severity_count': 0}
+                        bucket = {
+                            'severity_sum': 0,
+                            'severity_count': 0,
+                            'severity_breakdown': {},
+                            'purpose_breakdown': {},
+                        }
                         sev_map[time_label] = bucket
                     bucket['severity_sum'] += sev_int
                     bucket['severity_count'] += 1
+                    sev_key = str(max(1, min(5, sev_int)))
+                    bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
+                    for purpose_val in (getattr(frenzy, 'purpose', None), getattr(frenzy, 'purpose2', None)):
+                        purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
+                        bucket['purpose_breakdown'][purpose_name] = bucket['purpose_breakdown'].get(purpose_name, 0) + 1
 
             for period in record.periods:
                 sp = int(period.safety_points or 0)
@@ -3563,19 +3575,31 @@ def summary():
 
         # Format frenzy severity per (day, time) cell into average severity.
         frenzy_severity_by_time_by_day_formatted = {}
+        frenzy_cell_details_by_time_by_day = {}
         for day, times_map in frenzy_severity_by_time_by_day.items():
             formatted_sev = {}
+            formatted_details = {}
             for time_label, bucket in times_map.items():
                 count = bucket.get('severity_count') or 0
                 if count <= 0:
                     continue
                 sev_sum = bucket.get('severity_sum') or 0
                 avg_sev = sev_sum / count
+                severity_breakdown = {
+                    str(level): int((bucket.get('severity_breakdown') or {}).get(str(level), 0))
+                    for level in range(1, 6)
+                }
+                purpose_breakdown = dict(sorted((bucket.get('purpose_breakdown') or {}).items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0]))))
                 formatted_sev[time_label] = {
                     'avg_severity': round(avg_sev, 2),
                     'frenzy_count': count,
                 }
+                formatted_details[time_label] = {
+                    'severity_breakdown': severity_breakdown,
+                    'purpose_breakdown': purpose_breakdown,
+                }
             frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
+            frenzy_cell_details_by_time_by_day[day] = formatted_details
 
         return {
             'total_days': len(record_list),
@@ -3601,6 +3625,7 @@ def summary():
             'by_time': by_time_formatted,
             'by_time_by_day': {},
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
+            'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
             'infractions_by_type': {},
         }
     
@@ -3676,10 +3701,20 @@ def summary():
                     sev_map = frenzy_severity_by_time_by_day[day_of_week]
                     bucket = sev_map.get(time_label)
                     if bucket is None:
-                        bucket = {'severity_sum': 0, 'severity_count': 0}
+                        bucket = {
+                            'severity_sum': 0,
+                            'severity_count': 0,
+                            'severity_breakdown': {},
+                            'purpose_breakdown': {},
+                        }
                         sev_map[time_label] = bucket
                     bucket['severity_sum'] += sev_int
                     bucket['severity_count'] += 1
+                    sev_key = str(max(1, min(5, sev_int)))
+                    bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
+                    for purpose_val in (frenzy.purpose, frenzy.purpose2):
+                        purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
+                        bucket['purpose_breakdown'][purpose_name] = bucket['purpose_breakdown'].get(purpose_name, 0) + 1
 
             for period in record.periods:
                 total_safety += period.safety_points
@@ -4358,19 +4393,31 @@ def summary():
 
         # Format frenzy severity per (day, time) cell into average severity.
         frenzy_severity_by_time_by_day_formatted = {}
+        frenzy_cell_details_by_time_by_day = {}
         for day, times_map in frenzy_severity_by_time_by_day.items():
             formatted_sev = {}
+            formatted_details = {}
             for time_label, bucket in times_map.items():
                 count = bucket.get('severity_count') or 0
                 if count <= 0:
                     continue
                 sev_sum = bucket.get('severity_sum') or 0
                 avg_sev = sev_sum / count
+                severity_breakdown = {
+                    str(level): int((bucket.get('severity_breakdown') or {}).get(str(level), 0))
+                    for level in range(1, 6)
+                }
+                purpose_breakdown = dict(sorted((bucket.get('purpose_breakdown') or {}).items(), key=lambda kv: (-int(kv[1] or 0), str(kv[0]))))
                 formatted_sev[time_label] = {
                     'avg_severity': round(avg_sev, 2),
                     'frenzy_count': count,
                 }
+                formatted_details[time_label] = {
+                    'severity_breakdown': severity_breakdown,
+                    'purpose_breakdown': purpose_breakdown,
+                }
             frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
+            frenzy_cell_details_by_time_by_day[day] = formatted_details
 
         # Build per-infraction breakdowns by time of day and day of week
         infractions_by_type = {}
@@ -4409,6 +4456,7 @@ def summary():
             'by_time': by_time_formatted,
             'by_time_by_day': by_time_by_day_formatted,
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
+            'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
             'infractions_by_type': infractions_by_type,
         }
 
@@ -4557,6 +4605,72 @@ def summary():
         trends['has_prior'] = bool(len(prior_dates) >= needed_days)
         return trends
 
+    def extract_top_trigger_from_stats(stats_obj):
+        sev_map_by_day = (stats_obj or {}).get('frenzy_severity_by_time_by_day') or {}
+        weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+        all_times = sorted({t for day_map in sev_map_by_day.values() for t in (day_map or {}).keys()})
+        if not all_times:
+            return {'time': None, 'day': None}
+
+        def best_label(labels, to_cells):
+            winner = None
+            winner_avg = None
+            winner_count = -1
+            for label in labels:
+                total = 0.0
+                count = 0
+                for cell in to_cells(label):
+                    avg = (cell or {}).get('avg_severity')
+                    c = int((cell or {}).get('frenzy_count') or 0)
+                    if avg is None or c <= 0:
+                        continue
+                    try:
+                        avg_n = float(avg)
+                    except (TypeError, ValueError):
+                        continue
+                    total += avg_n * c
+                    count += c
+                if count <= 0:
+                    continue
+                mean = total / count
+                if (
+                    winner_avg is None
+                    or mean > winner_avg
+                    or (mean == winner_avg and count > winner_count)
+                    or (mean == winner_avg and count == winner_count and str(label) < str(winner))
+                ):
+                    winner = label
+                    winner_avg = mean
+                    winner_count = count
+            return winner
+
+        top_time = best_label(
+            all_times,
+            lambda time_label: [(sev_map_by_day.get(day) or {}).get(time_label) for day in weekdays]
+        )
+        top_day = best_label(
+            weekdays,
+            lambda day: [(sev_map_by_day.get(day) or {}).get(time_label) for time_label in all_times]
+        )
+        return {'time': top_time, 'day': top_day}
+
+    def get_prior_window_prev_stats(cur_attendance_records):
+        cur_dates = sorted({r.date for r in (cur_attendance_records or [])}, reverse=True)
+        if not cur_dates:
+            return None
+        all_dates_desc = sorted({r.date for r in all_records_raw}, reverse=True)
+        oldest_cur_date = cur_dates[-1]
+        needed_days = len(cur_dates)
+        prior_dates = [d for d in all_dates_desc if d < oldest_cur_date][:needed_days]
+        if not prior_dates:
+            return None
+        prior_date_set = set(prior_dates)
+        prev_attendance_records = [r for r in all_records_raw if r.date in prior_date_set]
+        if not prev_attendance_records:
+            return None
+        prev_metric_records = [r for r in prev_attendance_records if r.attendance_status != 'excused']
+        return summary_stats_fn(prev_metric_records)
+
     # Filter by period if specified (takes precedence over timeframe)
     if period:
         from datetime import date, timedelta
@@ -4652,12 +4766,14 @@ def summary():
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
+            'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
             'attendance_summary': attendance_summary,
             'attendance_by_day_of_week': attendance_by_day,
         }
         overview_trends = None
+        prev_stats_for_trigger = None
         if period == '30day' and len(unique_dates) > 30:
             previous_dates_set = unique_dates[30:60]
             prev_metric_records = []
@@ -4668,6 +4784,7 @@ def summary():
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
             prev_stats = summary_stats_fn(prev_metric_records)
+            prev_stats_for_trigger = prev_stats
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4689,6 +4806,7 @@ def summary():
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
             prev_stats = summary_stats_fn(prev_metric_records)
+            prev_stats_for_trigger = prev_stats
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4706,8 +4824,10 @@ def summary():
                 attendance_by_day,
                 attendance_records
             )
+            prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records)
         if overview_trends:
             result['overview_trends'] = overview_trends
+        result['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
             result['week_start'] = week_start.isoformat()
@@ -4745,12 +4865,14 @@ def summary():
         attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
 
         overview_trends = None
+        prev_stats_for_trigger = None
         prev_week_start = most_recent_monday - timedelta(days=7)
         prev_week_end = most_recent_sunday - timedelta(days=7)
         prev_metric_records = [r for r in all_records if prev_week_start <= r.date <= prev_week_end]
         prev_attendance_records = [r for r in all_records_raw if prev_week_start <= r.date <= prev_week_end]
         if prev_metric_records or prev_attendance_records:
             prev_stats = summary_stats_fn(prev_metric_records)
+            prev_stats_for_trigger = prev_stats
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4768,6 +4890,7 @@ def summary():
                 attendance_by_day_cur,
                 attendance_records_cur
             )
+            prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records_cur)
 
         weekly_resp = {
             'timeframe': timeframe,
@@ -4789,6 +4912,7 @@ def summary():
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
+            'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'week_start': most_recent_monday.isoformat(),
             'week_end': most_recent_sunday.isoformat(),
@@ -4798,6 +4922,7 @@ def summary():
         }
         if overview_trends:
             weekly_resp['overview_trends'] = overview_trends
+        weekly_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(weekly_resp)
     elif timeframe == '30day':
         # Get unique dates that have data, sorted descending
@@ -4818,6 +4943,7 @@ def summary():
         attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
 
         overview_trends = None
+        prev_stats_for_trigger = None
         if len(unique_dates) > 30:
             previous_dates_set = unique_dates[30:60]
             prev_metric_records = []
@@ -4828,6 +4954,7 @@ def summary():
                     if record.attendance_status != 'excused':
                         prev_metric_records.append(record)
             prev_stats = summary_stats_fn(prev_metric_records)
+            prev_stats_for_trigger = prev_stats
             prev_attendance = compute_attendance_summary(prev_attendance_records)
             prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
             overview_trends = build_overview_trends(
@@ -4845,6 +4972,7 @@ def summary():
                 attendance_by_day_cur,
                 attendance_records_cur
             )
+            prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records_cur)
 
         tf30_resp = {
             'timeframe': timeframe,
@@ -4866,6 +4994,7 @@ def summary():
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
+            'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'available_data_points': available_data_points,
             'has_full_30_days': available_data_points >= 30,
@@ -4875,6 +5004,7 @@ def summary():
         }
         if overview_trends:
             tf30_resp['overview_trends'] = overview_trends
+        tf30_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(tf30_resp)
     elif timeframe == '30day_to_30day':
         # Get unique dates that have data, sorted descending
@@ -5085,6 +5215,7 @@ def summary():
             'by_time': stats.get('by_time', {}),
             'by_time_by_day': stats.get('by_time_by_day', {}),
             'frenzy_severity_by_time_by_day': stats.get('frenzy_severity_by_time_by_day', {}),
+            'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
             'attendance_summary': attendance_summary_all,
@@ -5092,6 +5223,7 @@ def summary():
         }
         if overview_trends_all:
             resp_alltime['overview_trends'] = overview_trends_all
+        resp_alltime['previous_trigger'] = {'time': None, 'day': None}
         return _summary_response(resp_alltime)
 
 
