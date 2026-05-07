@@ -19405,24 +19405,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                 summaryCheckpointOverlay: { checkpoints: checkpoints || [], pointDates: points.map((p) => p.date) },
                 datalabels: { display: false },
                 tooltip: {
-                    backgroundColor: '#ffffff',
-                    borderColor: '#cbd5e1',
-                    borderWidth: 1.5,
-                    cornerRadius: 5,
-                    padding: 9,
-                    titleColor: '#1f2937',
-                    bodyColor: '#4b5563',
-                    titleFont: {
-                        family: 'Inter, sans-serif',
-                        size: 11,
-                        weight: '600'
-                    },
-                    bodyFont: {
-                        family: 'Inter, sans-serif',
-                        size: 11,
-                        weight: '400'
-                    },
-                    displayColors: false,
+                    ...UNIFIED_CHART_TOOLTIP_STYLE,
                     callbacks: {
                         title: (items) => {
                             if (!items || !items.length) return '';
