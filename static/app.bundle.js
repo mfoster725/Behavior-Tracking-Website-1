@@ -6002,15 +6002,20 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             <h3>${formattedDate}</h3>
 
             <div class="edit-point-card-grid" style="margin-top: 20px;">
-                <div class="pc-grid point-card-edit-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 48px 48px 48px 48px 56px;">
-                    <div class="pc-header-cell pc-header-time">Time</div>
-                    <div class="pc-header-cell pc-header-location">Location</div>
-                    <div class="pc-header-cell" data-category="s">S</div>
-                    <div class="pc-header-cell" data-category="t">T</div>
-                    <div class="pc-header-cell" data-category="a">A</div>
-                    <div class="pc-header-cell" data-category="r">R</div>
-                    <div class="pc-header-cell" data-category="i">Info</div>
-                    ${gridRows}
+                <div class="point-card-day-content edit-point-card-day-content">
+                    <div class="pc-grid point-card-edit-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 48px 48px 48px 48px 56px;">
+                        <div class="pc-header-cell pc-header-time">Time</div>
+                        <div class="pc-header-cell pc-header-location">Location</div>
+                        <div class="pc-header-cell" data-category="s">S</div>
+                        <div class="pc-header-cell" data-category="t">T</div>
+                        <div class="pc-header-cell" data-category="a">A</div>
+                        <div class="pc-header-cell" data-category="r">R</div>
+                        <div class="pc-header-cell" data-category="i">Info</div>
+                        ${gridRows}
+                    </div>
+                    <div class="point-card-info-aggregate" id="edit-point-card-info-aggregate">
+                        ${renderPointCardInfoAggregate(record, null)}
+                    </div>
                 </div>
             </div>
 
@@ -6019,8 +6024,15 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             </div>
 
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
-                <button class="btn-primary" onclick="saveEditedPointCard(${record.id}, ${studentId}, '${date}')">Save Changes</button>
-                <button class="btn-secondary" onclick="document.getElementById('edit-point-card-modal').remove()">Cancel</button>
+                <button
+                    type="button"
+                    class="btn-primary edit-point-card-save-btn"
+                    data-record-id="${record.id}"
+                    data-student-id="${studentId}"
+                    data-date="${date}"
+                    onclick="window.saveEditedPointCard && window.saveEditedPointCard(${record.id}, ${studentId}, '${date}')"
+                >Save Changes</button>
+                <button type="button" class="btn-secondary" onclick="document.getElementById('edit-point-card-modal').remove()">Cancel</button>
             </div>
         </div>
     `;
@@ -6029,6 +6041,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     document.body.appendChild(modal);
 
     window.editingPointCardRecord = record;
+    window.editingPointCardOriginalRecord = JSON.parse(JSON.stringify(record));
     window.editingPointCardStudentId = studentId;
     window.editingPointCardStudentName = studentName;
 
@@ -6050,7 +6063,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
                         period: period.time_range,
                         studentName: studentName,
                         info: period.info || '',
-                        periodIndex: periodIndex,
+                        periodIndex: String(periodIndex),
                         isEditPointCard: 'true'
                     }
                 }
@@ -6064,6 +6077,15 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     if (addRowBtn) {
         addRowBtn.addEventListener('click', addPointCardRow);
     }
+
+    const saveBtn = modal.querySelector('.edit-point-card-save-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            saveEditedPointCard(record.id, studentId, date);
+        });
+    }
+
+    initializeEditPointCardDirtyTracking(modal);
 }
 
 function addPointCardRow() {
@@ -6167,7 +6189,7 @@ function addPointCardRow() {
                     period: period.time_range,
                     studentName: studentName,
                     info: period.info || '',
-                    periodIndex: index,
+                    periodIndex: String(index),
                     isEditPointCard: 'true'
                 }
             }
@@ -6176,14 +6198,107 @@ function addPointCardRow() {
     });
     infoCell.appendChild(infoBtn);
     grid.appendChild(infoCell);
+
+    if (modal) {
+        initializeEditPointCardDirtyTracking(modal);
+    }
+    refreshEditPointCardInfoAggregate();
+}
+
+function initializeEditPointCardDirtyTracking(modal) {
+    if (!modal) return;
+    modal.querySelectorAll('.edit-input').forEach((input) => {
+        if (input.dataset.originalValue === undefined) {
+            input.dataset.originalValue = input.value || '';
+        }
+        updateEditPointCardInputDirtyState(input);
+    });
+    if (!modal.dataset.editInputDirtyBound) {
+        const onDirtyChange = (e) => {
+            const input = e.target;
+            if (!input || !input.classList || !input.classList.contains('edit-input')) return;
+            updateEditPointCardInputDirtyState(input);
+            syncEditingPointCardRecordField(input);
+            refreshEditPointCardInfoAggregate();
+        };
+        modal.addEventListener('input', onDirtyChange);
+        modal.addEventListener('change', onDirtyChange);
+        modal.dataset.editInputDirtyBound = 'true';
+    }
+}
+
+function updateEditPointCardInputDirtyState(input) {
+    const cell = input.closest('.pc-cell');
+    if (!cell) return;
+    const originalValue = input.dataset.originalValue || '';
+    const currentValue = input.value || '';
+    const isDirty = currentValue !== originalValue;
+    cell.classList.toggle('pc-cell-dirty', isDirty);
+}
+
+function syncEditingPointCardRecordField(input) {
+    const record = window.editingPointCardRecord;
+    if (!record || !Array.isArray(record.periods)) return;
+    const periodIndex = Number(input.dataset.periodIndex);
+    if (!Number.isInteger(periodIndex) || !record.periods[periodIndex]) return;
+    const category = input.dataset.category;
+    const value = input.value;
+    if (category === 'time_range' || category === 'location') {
+        record.periods[periodIndex][category] = value;
+        return;
+    }
+    if (['safety', 'teamwork', 'accountability', 'relationships'].includes(category)) {
+        record.periods[periodIndex][`${category}_points`] = value === '' ? null : parseInt(value, 10);
+    }
+}
+
+function refreshEditPointCardInfoAggregate() {
+    const aggregate = document.getElementById('edit-point-card-info-aggregate');
+    const record = window.editingPointCardRecord;
+    if (!aggregate || !record) return;
+    aggregate.innerHTML = renderPointCardInfoAggregate(record, null);
+}
+
+function updateEditPointCardInfoDirtyState(periodIndex) {
+    const modal = document.getElementById('edit-point-card-modal');
+    const record = window.editingPointCardRecord;
+    const original = window.editingPointCardOriginalRecord;
+    if (!modal || !record || !Array.isArray(record.periods)) return;
+    const infoButton = modal.querySelector(`.info-btn-small[data-period-index="${periodIndex}"]`);
+    const infoCell = infoButton ? infoButton.closest('.pc-info-cell') : null;
+    if (!infoCell) return;
+    const originalInfo = (original && Array.isArray(original.periods) && original.periods[periodIndex]) ? (original.periods[periodIndex].info || '') : '';
+    const currentInfo = (record.periods[periodIndex] && record.periods[periodIndex].info) ? record.periods[periodIndex].info : '';
+    infoCell.classList.toggle('pc-cell-dirty', currentInfo !== originalInfo);
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
     const modal = document.getElementById('edit-point-card-modal');
     const record = window.editingPointCardRecord;
     
-    if (!record) {
+    if (!record || !modal) {
         showMessage('Error: Record data not found', 'error');
+        return;
+    }
+
+    if (modal.dataset.saving === 'true') {
+        return;
+    }
+    modal.dataset.saving = 'true';
+    const saveButtons = modal.querySelectorAll('.edit-point-card-save-btn');
+    saveButtons.forEach((btn) => {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+    });
+
+    const normalizedStudentId = parseInt(studentId, 10);
+    if (!Number.isFinite(normalizedStudentId)) {
+        showMessage('Error: Invalid student selected', 'error');
+        modal.dataset.saving = 'false';
+        saveButtons.forEach((btn) => {
+            btn.disabled = false;
+            btn.textContent = 'Save Changes';
+        });
         return;
     }
     
@@ -6202,10 +6317,10 @@ async function saveEditedPointCard(recordId, studentId, date) {
         return {
             time_range: (time_range && String(time_range).trim()) ? String(time_range).trim() : (period.time_range || ''),
             location: (location && String(location).trim()) ? String(location).trim() : (period.location || ''),
-            safety_points: safetySelect.value === '' ? null : parseInt(safetySelect.value),
-            teamwork_points: teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value),
-            accountability_points: accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value),
-            relationships_points: relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value),
+            safety_points: !safetySelect || safetySelect.value === '' ? null : parseInt(safetySelect.value),
+            teamwork_points: !teamworkSelect || teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value),
+            accountability_points: !accountabilitySelect || accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value),
+            relationships_points: !relationshipsSelect || relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value),
             points_possible: 4,
             reset: period.reset || false,
             frenzy: period.frenzy || false,
@@ -6224,26 +6339,48 @@ async function saveEditedPointCard(recordId, studentId, date) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                student_id: studentId,
+                student_id: normalizedStudentId,
                 date: date,
+                attendance_status: 'present',
                 present: true,
                 periods: periodsToSave,
-                frenzies: []
+                frenzies: Array.isArray(record.frenzies) ? record.frenzies : []
             })
         });
         
         if (response.ok) {
-            showMessage('Point card data updated successfully!', 'success');
             modal.remove();
+            showMessage('Record saved successfully!', 'success');
             
             // Reload point card data to show changes
-            loadPointCardData();
+            try {
+                await loadPointCardData();
+            } catch (reloadError) {
+                console.error('Error reloading point card data after save:', reloadError);
+            }
         } else {
-            throw new Error('Failed to save changes');
+            let backendError = 'Failed to save changes';
+            try {
+                const errorData = await response.json();
+                if (errorData && (errorData.error || errorData.message)) {
+                    backendError = errorData.error || errorData.message;
+                }
+            } catch (parseError) {
+                const rawText = await response.text();
+                if (rawText && rawText.trim()) {
+                    backendError = rawText.trim();
+                }
+            }
+            throw new Error(backendError);
         }
     } catch (error) {
         console.error('Error saving edited point card:', error);
-        showMessage('Error saving changes. Please try again.', 'error');
+        showMessage(`Error saving changes: ${error.message || 'Please try again.'}`, 'error');
+        modal.dataset.saving = 'false';
+        saveButtons.forEach((btn) => {
+            btn.disabled = false;
+            btn.textContent = 'Save Changes';
+        });
     }
 }
 
@@ -7875,7 +8012,7 @@ async function showInfoModal(event) {
     // Store edit point card context if applicable
     if (button.dataset.isEditPointCard === 'true') {
         modal.dataset.isEditPointCard = 'true';
-        modal.dataset.periodIndex = button.dataset.periodIndex || '';
+        modal.dataset.periodIndex = button.dataset.periodIndex ?? '';
         // Ensure info modal appears above edit point card modal
         modal.style.zIndex = '2000';
     }
@@ -7972,8 +8109,8 @@ function saveInfoModal() {
     
     // If we're in edit point card context, update the editing record
     if (modal.dataset.isEditPointCard === 'true' && window.editingPointCardRecord) {
-        const periodIndex = parseInt(modal.dataset.periodIndex);
-        if (periodIndex !== undefined && window.editingPointCardRecord.periods[periodIndex]) {
+        const periodIndex = Number(modal.dataset.periodIndex);
+        if (Number.isInteger(periodIndex) && window.editingPointCardRecord.periods[periodIndex]) {
             window.editingPointCardRecord.periods[periodIndex].info = infoString;
             
             // Update the button text in the edit modal
@@ -7984,6 +8121,8 @@ function saveInfoModal() {
                     infoButton.textContent = hasInfoData(infoData) ? 'Edit' : 'Add';
                 }
             }
+            updateEditPointCardInfoDirtyState(periodIndex);
+            refreshEditPointCardInfoAggregate();
         }
     }
     
@@ -8507,6 +8646,7 @@ function initStarbucksManagement() {
 window.showInfoModal = showInfoModal;
 window.closeInfoModal = closeInfoModal;
 window.saveInfoModal = saveInfoModal;
+window.saveEditedPointCard = saveEditedPointCard;
 window.showInfoViewPopup = showInfoViewPopup;
 
 // Schedule Management Functions

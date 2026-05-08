@@ -2242,8 +2242,15 @@ def daily_records():
             )
             db.session.add(daily_record)
         
-        # Clear existing periods
-        PeriodRecord.query.filter_by(daily_record_id=daily_record.id).delete()
+        # Clear existing periods safely: delete dependent infractions first to satisfy FK constraints.
+        existing_period_ids = [
+            period_id for (period_id,) in db.session.query(PeriodRecord.id)
+            .filter_by(daily_record_id=daily_record.id)
+            .all()
+        ]
+        if existing_period_ids:
+            Infraction.query.filter(Infraction.period_record_id.in_(existing_period_ids)).delete(synchronize_session=False)
+            PeriodRecord.query.filter(PeriodRecord.id.in_(existing_period_ids)).delete(synchronize_session=False)
         
         # Add periods
         for period_data in data.get('periods', []):
@@ -2263,6 +2270,7 @@ def daily_records():
                 info=period_data.get('info')
             )
             db.session.add(period)
+            db.session.flush()
             
             # Add infractions
             for infraction_data in period_data.get('infractions', []):
