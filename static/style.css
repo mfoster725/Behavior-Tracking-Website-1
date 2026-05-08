@@ -2669,6 +2669,39 @@ table tbody tr:hover {
     color: #fff;
 }
 
+.info-auto-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #e0f2fe;
+    color: #0c4a6e;
+    font-size: 10px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+.info-auto-preview {
+    margin-top: 12px;
+    border: 1px solid #bae6fd;
+    background: #f0f9ff;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.info-auto-preview-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #075985;
+    margin-bottom: 6px;
+}
+
+.info-auto-preview-content {
+    font-size: 12px;
+    color: #0f172a;
+    line-height: 1.35;
+}
+
 .point-card-search input {
     transition: border-color 0.2s;
 }

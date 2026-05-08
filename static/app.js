@@ -6131,10 +6131,38 @@ function parsePointCardInfoData(rawInfo) {
     }
 }
 
-function incrementCount(bucket, key) {
+function incrementCount(bucket, key, amount = 1) {
     const normalizedKey = (key || '').toString().trim();
     if (!normalizedKey) return;
-    bucket[normalizedKey] = (bucket[normalizedKey] || 0) + 1;
+    const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 1;
+    bucket[normalizedKey] = (bucket[normalizedKey] || 0) + safeAmount;
+}
+
+function normalizeInfoItemLabel(item) {
+    if (item === null || item === undefined) return '';
+    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+        return String(item).trim();
+    }
+    if (typeof item === 'object') {
+        const candidateKeys = ['label', 'name', 'value', 'title', 'text', 'description'];
+        for (const key of candidateKeys) {
+            if (item[key] !== undefined && item[key] !== null && String(item[key]).trim()) {
+                return String(item[key]).trim();
+            }
+        }
+    }
+    return '';
+}
+
+function parseInfractionEntry(item) {
+    if (item === null || item === undefined) return { label: '', count: 0 };
+    if (typeof item === 'object') {
+        const label = normalizeInfoItemLabel(item.type ?? item.label ?? item.name ?? item.value ?? item.text ?? item.description);
+        const countRaw = item.count ?? item.qty ?? item.quantity ?? 1;
+        const count = Number.isFinite(Number(countRaw)) ? Math.max(1, Number(countRaw)) : 1;
+        return { label, count };
+    }
+    return { label: normalizeInfoItemLabel(item), count: 1 };
 }
 
 function renderAggregateRow(label, value) {
@@ -6208,12 +6236,15 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         .filter((info) => info && hasInfoData(info));
     const currentPercent = getPointCardAveragePercent(record);
     const previousPercent = previousRecord ? getPointCardAveragePercent(previousRecord) : null;
+    const averagePercentRow = currentPercent !== null
+        ? formatPercentDelta(currentPercent, previousPercent)
+        : '';
 
     if (!infoRows.length) {
         return `
             <div class="point-card-aggregate-card">
                 <h5>Info Insights</h5>
-                ${formatPercentDelta(currentPercent, previousPercent) || renderAggregateMetricRow('Average percent', 0, previousPercent, { suffix: '%', higherIsBetter: true })}
+                ${averagePercentRow}
                 <p class="point-card-aggregate-empty">No info data for this day.</p>
             </div>
         `;
@@ -6231,7 +6262,6 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         frenzy: 0,
         reminders: 0
     };
-    const severityCounts = {};
     const infractionCounts = {};
     const purposeCounts = {};
     const notesList = [];
@@ -6253,7 +6283,6 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         totals.reminders += reminderCount;
 
         if (info.severity !== undefined && info.severity !== null && String(info.severity).trim() !== '') {
-            incrementCount(severityCounts, String(info.severity));
             const severityNumber = Number(info.severity);
             if (Number.isFinite(severityNumber)) {
                 severityValues.push(severityNumber);
@@ -6263,12 +6292,18 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         const infractions = Array.isArray(info.infractions)
             ? info.infractions
             : [info.infraction1, info.infraction2].filter(Boolean);
-        infractions.forEach((inf) => incrementCount(infractionCounts, inf));
+        infractions.forEach((inf) => {
+            const { label, count } = parseInfractionEntry(inf);
+            if (label) incrementCount(infractionCounts, label, count);
+        });
 
         const purposes = Array.isArray(info.purposes)
             ? info.purposes
             : [info.purpose1, info.purpose2].filter(Boolean);
-        purposes.forEach((purpose) => incrementCount(purposeCounts, purpose));
+        purposes.forEach((purpose) => {
+            const label = normalizeInfoItemLabel(purpose);
+            if (label) incrementCount(purposeCounts, label);
+        });
     });
     previousInfoRows.forEach((info) => {
         if (info.notes && String(info.notes).trim()) previousTotals.notes++;
@@ -6278,17 +6313,18 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         previousTotals.reminders += reminderCount;
     });
 
-    const formatTop = (bucket) => {
-        const entries = Object.entries(bucket).sort((a, b) => b[1] - a[1]);
-        if (!entries.length) return 'None';
-        return entries.slice(0, 3).map(([name, count]) => `${name} (${count})`).join(', ');
-    };
     const formatTopSingle = (bucket) => {
         const entries = Object.entries(bucket).sort((a, b) => {
             if (b[1] !== a[1]) return b[1] - a[1];
             return a[0].localeCompare(b[0]);
         });
-        return entries.length ? entries[0][0] : '—';
+        if (!entries.length) return '—';
+        const maxCount = entries[0][1];
+        const ties = entries
+            .filter(([, count]) => count === maxCount)
+            .map(([label]) => label);
+        if (!ties.length) return '—';
+        return ties.map((label) => escapeHtml(label)).join('<br>');
     };
     const formatSeverityAverage = () => {
         if (!severityValues.length) return '—';
@@ -6311,13 +6347,13 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
     return `
         <div class="point-card-aggregate-card">
             <h5>Info Insights</h5>
-            ${formatPercentDelta(currentPercent, previousPercent) || renderAggregateMetricRow('Average percent', 0, previousPercent, { suffix: '%', higherIsBetter: true })}
+            ${averagePercentRow}
             ${renderAggregateMetricRow('Reminders', totals.reminders, previousTotals.reminders, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Resets', totals.reset, previousTotals.reset, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Frenzies', totals.frenzy, previousTotals.frenzy, { higherIsBetter: false })}
             ${renderAggregateTextRow('Severity levels', formatSeverityAverage())}
-            ${renderAggregateTextRow('Top infraction', escapeHtml(formatTopSingle(infractionCounts)))}
-            ${renderAggregateTextRow('Top purpose', escapeHtml(formatTopSingle(purposeCounts)))}
+            ${renderAggregateTextRow('Top purpose', formatTopSingle(purposeCounts))}
+            ${renderAggregateTextRow('Top infraction', formatTopSingle(infractionCounts))}
             ${renderAggregateTextRow('Alt locations', formatAltLocations())}
             ${renderAggregateTextRow('Notes entered', formatNotesEntered())}
         </div>
@@ -6374,7 +6410,9 @@ function showEditPointCardModal(record, studentId, studentName, date) {
 
     let gridRows = '';
     record.periods.forEach((period, index) => {
-        const hasInfo = period.info && period.info.trim() !== '';
+        const parsedInfo = parsePointCardInfoData(period.info || '');
+        const hasInfo = !!(parsedInfo && hasInfoData(parsedInfo));
+        const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
         gridRows += `
             <div class="pc-cell pc-time-cell">${period.time_range}</div>
             <div class="pc-cell pc-location-cell">${period.location}</div>
@@ -6390,7 +6428,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             <div class="pc-cell pc-data-cell" data-category="r" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'relationships', period.relationships_points)}
             </div>
-            <div class="pc-cell pc-info-cell" style="padding: 2px; justify-content: center;">
+            <div class="${infoCellClass}" style="padding: 2px; justify-content: center;">
                 <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${hasInfo ? 'Edit' : 'Add'}</button>
             </div>
         `;
@@ -6699,6 +6737,11 @@ async function saveEditedPointCard(recordId, studentId, date) {
     }
     
     // Collect updated values from the form
+    const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+    const knownLocationsForEditSave = [...new Set([
+        ...defaultLocations,
+        ...record.periods.map((p) => p?.location).filter(Boolean)
+    ])];
     const updatedPeriods = record.periods.map((period, index) => {
         const timeInput = modal.querySelector(`input.edit-input[data-period-index="${index}"][data-category="time_range"]`);
         const locationInput = modal.querySelector(`input.edit-input[data-period-index="${index}"][data-category="location"]`);
@@ -6722,7 +6765,7 @@ async function saveEditedPointCard(recordId, studentId, date) {
             frenzy: period.frenzy || false,
             notes: period.notes || '',
             reminders: period.reminders || '',
-            info: period.info || '',
+            info: normalizeInfoStringFromNotes(period.info || '', knownLocationsForEditSave),
             infractions: period.infractions || []
         };
     });
@@ -8374,11 +8417,13 @@ async function showInfoModal(event) {
         newAddInfractionBtn.addEventListener('click', function() {
             const row = createInfractionRow('', '', false);
             infractionsContainer.appendChild(row);
+            refreshInfoModalAutoPreview();
         });
         
         newAddPurposeBtn.addEventListener('click', function() {
             const row = createPurposeRow('', false);
             purposesContainer.appendChild(row);
+            refreshInfoModalAutoPreview();
         });
     } else {
         newAddInfractionBtn.style.display = 'none';
@@ -8421,6 +8466,10 @@ async function showInfoModal(event) {
         // Ensure info modal appears above edit point card modal
         modal.style.zIndex = '2000';
     }
+
+    updateInfoModalAutoBadges(infoData.auto_from_notes || {});
+    bindInfoModalAutoPreview();
+    refreshInfoModalAutoPreview();
     
     modal.style.display = 'block';
 }
@@ -8453,6 +8502,281 @@ function ensureInfoSeverityControl() {
     return document.getElementById('info-severity');
 }
 
+function countExactPhraseMatches(haystack, phrase) {
+    if (!haystack || !phrase) return 0;
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'gi');
+    const matches = haystack.match(regex);
+    return matches ? matches.length : 0;
+}
+
+function normalizeInfoFromTextFields(infoData, knownLocations = []) {
+    const clone = JSON.parse(JSON.stringify(infoData || {}));
+    const autoFromNotes = {};
+    const textFields = [
+        clone.notes || '',
+        clone.duration || '',
+        clone.results || '',
+        clone.alternate_location || ''
+    ];
+    const corpus = textFields.join('\n').toLowerCase();
+
+    // Infractions: exact keyword matches, merged into infraction rows.
+    const infractions = Array.isArray(clone.infractions) ? [...clone.infractions] : [];
+    INFRACTION_OPTIONS.forEach((infraction) => {
+        const matches = countExactPhraseMatches(corpus, infraction.toLowerCase());
+        if (!matches) return;
+        const existing = infractions.find((item) => String(item?.type || '').trim().toLowerCase() === infraction.toLowerCase());
+        if (existing) {
+            const existingCount = Number(existing.count) || 0;
+            existing.count = String(existingCount + matches);
+        } else {
+            infractions.push({ type: infraction, count: String(matches) });
+        }
+        autoFromNotes.infractions = true;
+    });
+    clone.infractions = infractions;
+
+    // Purposes: exact phrase matches, append when not already selected.
+    const purposes = Array.isArray(clone.purposes) ? [...clone.purposes] : [];
+    PURPOSE_OPTIONS.forEach((purpose) => {
+        const matches = countExactPhraseMatches(corpus, purpose.toLowerCase());
+        if (!matches) return;
+        if (!purposes.some((p) => String(p || '').trim().toLowerCase() === purpose.toLowerCase())) {
+            purposes.push(purpose);
+            autoFromNotes.purposes = true;
+        }
+    });
+    clone.purposes = purposes;
+
+    // Frenzy: exact keywords "frenzy" / "frenzies"
+    if (!clone.frenzy && (countExactPhraseMatches(corpus, 'frenzy') || countExactPhraseMatches(corpus, 'frenzies'))) {
+        clone.frenzy = true;
+        autoFromNotes.frenzy = true;
+    }
+
+    // Reset: exact keyword "reset" only
+    if (!clone.reset && countExactPhraseMatches(corpus, 'reset')) {
+        clone.reset = true;
+        autoFromNotes.reset = true;
+    }
+
+    // Reminders: increment slots in order using exact keyword counts.
+    const reminderMatches = countExactPhraseMatches(corpus, 'reminder') + countExactPhraseMatches(corpus, 'reminders');
+    if (reminderMatches > 0) {
+        const slots = [clone.reminder1, clone.reminder2, clone.reminder3];
+        let toApply = reminderMatches;
+        for (let i = 0; i < slots.length && toApply > 0; i += 1) {
+            if (!slots[i]) {
+                slots[i] = true;
+                toApply -= 1;
+                autoFromNotes.reminders = true;
+            }
+        }
+        [clone.reminder1, clone.reminder2, clone.reminder3] = slots;
+    }
+
+    // Severity: labels only, conflict-safe (skip if existing severity differs).
+    const severityByLabel = {
+        para: 1,
+        'response team': 2,
+        professional: 3,
+        administration: 4,
+        sro: 5
+    };
+    let detectedSeverity = null;
+    Object.entries(severityByLabel).forEach(([label, value]) => {
+        if (detectedSeverity !== null) return;
+        if (countExactPhraseMatches(corpus, label)) {
+            detectedSeverity = value;
+        }
+    });
+    if (detectedSeverity !== null) {
+        if (!clone.severity) {
+            clone.severity = detectedSeverity;
+            autoFromNotes.severity = true;
+        } else if (Number(clone.severity) === detectedSeverity) {
+            autoFromNotes.severity = true;
+        }
+    }
+
+    // Alternate location: known locations only, conflict-safe.
+    const normalizedKnownLocations = (knownLocations || [])
+        .map((loc) => String(loc || '').trim())
+        .filter(Boolean);
+    let detectedLocation = null;
+    normalizedKnownLocations.forEach((location) => {
+        if (detectedLocation) return;
+        if (countExactPhraseMatches(corpus, location.toLowerCase())) {
+            detectedLocation = location;
+        }
+    });
+    if (detectedLocation) {
+        if (!String(clone.alternate_location || '').trim()) {
+            clone.alternate_location = detectedLocation;
+            autoFromNotes.alternate_location = true;
+        } else if (String(clone.alternate_location).trim().toLowerCase() === detectedLocation.toLowerCase()) {
+            autoFromNotes.alternate_location = true;
+        }
+    }
+
+    clone.auto_from_notes = autoFromNotes;
+    return clone;
+}
+
+function updateInfoModalAutoBadges(autoFromNotes) {
+    const clearBadges = () => {
+        document.querySelectorAll('.info-auto-badge').forEach((node) => node.remove());
+    };
+    const attachBadgeToLabel = (inputId) => {
+        const input = document.getElementById(inputId);
+        const label = input ? input.closest('.form-group')?.querySelector('label') : null;
+        if (!label) return;
+        if (label.querySelector('.info-auto-badge')) return;
+        const badge = document.createElement('span');
+        badge.className = 'info-auto-badge';
+        badge.textContent = 'Auto from notes';
+        label.appendChild(badge);
+    };
+
+    clearBadges();
+    if (!autoFromNotes || typeof autoFromNotes !== 'object') return;
+    if (autoFromNotes.infractions) attachBadgeToLabel('infractions-container');
+    if (autoFromNotes.purposes) attachBadgeToLabel('purposes-container');
+    if (autoFromNotes.frenzy) attachBadgeToLabel('info-frenzy');
+    if (autoFromNotes.severity) attachBadgeToLabel('info-severity');
+    if (autoFromNotes.reset) attachBadgeToLabel('info-reset');
+    if (autoFromNotes.reminders) attachBadgeToLabel('info-reminder-1');
+    if (autoFromNotes.alternate_location) attachBadgeToLabel('info-alternate-location');
+}
+
+function getKnownLocationsFromInfoModal() {
+    const locationInput = document.getElementById('info-alternate-location');
+    const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+    let fromDataset = [];
+    if (locationInput?.dataset?.locations) {
+        try {
+            const parsed = JSON.parse(locationInput.dataset.locations);
+            if (Array.isArray(parsed)) fromDataset = parsed;
+        } catch (e) {
+            fromDataset = [];
+        }
+    }
+    return [...new Set([...defaults, ...fromDataset])];
+}
+
+function collectInfoModalDraftData() {
+    const getChecked = (id) => !!document.getElementById(id)?.checked;
+    const getValue = (id) => (document.getElementById(id)?.value || '').trim();
+    const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
+    const severityValue = severityEl ? severityEl.value : '';
+    const draft = {
+        notes: getValue('info-notes'),
+        reminder1: getChecked('info-reminder-1'),
+        reminder2: getChecked('info-reminder-2'),
+        reminder3: getChecked('info-reminder-3'),
+        reset: getChecked('info-reset'),
+        alternate_location: getValue('info-alternate-location'),
+        frenzy: getChecked('info-frenzy'),
+        severity: severityValue ? parseInt(severityValue, 10) : null,
+        duration: getValue('info-duration'),
+        results: getValue('info-results'),
+        infractions: [],
+        purposes: []
+    };
+
+    document.querySelectorAll('#infractions-container .infraction-group').forEach((row) => {
+        const select = row.querySelector('.info-infraction-select');
+        const countInput = row.querySelector('.info-infraction-count');
+        if (select && select.value) {
+            draft.infractions.push({
+                type: select.value,
+                count: countInput?.value || '1'
+            });
+        }
+    });
+    document.querySelectorAll('#purposes-container .purpose-row').forEach((row) => {
+        const select = row.querySelector('.info-purpose-select');
+        if (select && select.value) draft.purposes.push(select.value);
+    });
+    return draft;
+}
+
+function renderInfoModalAutoPreview(normalizedInfo) {
+    const previewBox = document.getElementById('info-auto-preview');
+    const previewContent = document.getElementById('info-auto-preview-content');
+    if (!previewBox || !previewContent) return;
+    const auto = normalizedInfo?.auto_from_notes || {};
+    const lines = [];
+    const severityLabelMap = {
+        1: 'Para',
+        2: 'Response Team',
+        3: 'Professional',
+        4: 'Administration',
+        5: 'SRO'
+    };
+
+    if (auto.infractions && Array.isArray(normalizedInfo.infractions) && normalizedInfo.infractions.length) {
+        const items = normalizedInfo.infractions
+            .map((inf) => `${escapeHtml(inf.type || '')} (${escapeHtml(String(inf.count || 1))})`)
+            .filter(Boolean);
+        if (items.length) lines.push(`<strong>Infractions:</strong> ${items.join(', ')}`);
+    }
+    if (auto.purposes && Array.isArray(normalizedInfo.purposes) && normalizedInfo.purposes.length) {
+        lines.push(`<strong>Purposes:</strong> ${normalizedInfo.purposes.map((p) => escapeHtml(String(p))).join(', ')}`);
+    }
+    if (auto.frenzy && normalizedInfo.frenzy) lines.push('<strong>Frenzy:</strong> Yes');
+    if (auto.severity && normalizedInfo.severity) {
+        const sev = Number(normalizedInfo.severity);
+        const sevLabel = severityLabelMap[sev] ? `${sev} - ${severityLabelMap[sev]}` : String(normalizedInfo.severity);
+        lines.push(`<strong>Severity:</strong> ${escapeHtml(sevLabel)}`);
+    }
+    if (auto.reset && normalizedInfo.reset) lines.push('<strong>Reset:</strong> Yes');
+    if (auto.reminders) {
+        const reminderCount = [normalizedInfo.reminder1, normalizedInfo.reminder2, normalizedInfo.reminder3].filter(Boolean).length;
+        lines.push(`<strong>Reminders:</strong> ${reminderCount}`);
+    }
+    if (auto.alternate_location && normalizedInfo.alternate_location) {
+        lines.push(`<strong>Alt location:</strong> ${escapeHtml(String(normalizedInfo.alternate_location))}`);
+    }
+
+    if (!lines.length) {
+        previewBox.style.display = 'none';
+        previewContent.innerHTML = '';
+        return;
+    }
+    previewContent.innerHTML = lines.join('<br>');
+    previewBox.style.display = 'block';
+}
+
+function refreshInfoModalAutoPreview() {
+    const draft = collectInfoModalDraftData();
+    const knownLocations = getKnownLocationsFromInfoModal();
+    const normalized = normalizeInfoFromTextFields(draft, knownLocations);
+    renderInfoModalAutoPreview(normalized);
+}
+
+function bindInfoModalAutoPreview() {
+    const modal = document.getElementById('info-modal');
+    if (!modal || modal.dataset.autoPreviewBound === 'true') return;
+    const handler = () => refreshInfoModalAutoPreview();
+    modal.addEventListener('input', handler);
+    modal.addEventListener('change', handler);
+    modal.dataset.autoPreviewBound = 'true';
+}
+
+function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
+    if (!infoString || !String(infoString).trim()) return infoString || '';
+    let parsed;
+    try {
+        parsed = JSON.parse(infoString);
+    } catch (e) {
+        parsed = { notes: String(infoString) };
+    }
+    const normalized = normalizeInfoFromTextFields(parsed, knownLocations);
+    return JSON.stringify(normalized);
+}
+
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
     modal.style.display = 'none';
@@ -8470,7 +8794,7 @@ function saveInfoModal() {
     const period = modal.dataset.period;
     
     // Collect all form data
-    const infoData = {
+    let infoData = {
         notes: document.getElementById('info-notes').value,
         reminder1: document.getElementById('info-reminder-1').checked,
         reminder2: document.getElementById('info-reminder-2').checked,
@@ -8512,6 +8836,16 @@ function saveInfoModal() {
         }
     });
     infoData.purposes = purposes;
+
+    // Parse text fields for exact keyword matches and auto-fill related Info values.
+    const knownLocations = (() => {
+        const locationInput = document.getElementById('info-alternate-location');
+        const fromDataset = locationInput?.dataset?.locations ? JSON.parse(locationInput.dataset.locations) : [];
+        const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+        return [...new Set([...(Array.isArray(fromDataset) ? fromDataset : []), ...defaults])];
+    })();
+    infoData = normalizeInfoFromTextFields(infoData, knownLocations);
+    updateInfoModalAutoBadges(infoData.auto_from_notes);
     
     // Convert to JSON string
     const infoString = JSON.stringify(infoData);
@@ -8556,7 +8890,12 @@ function saveInfoModal() {
             if (editModal) {
                 const infoButton = editModal.querySelector(`.info-btn-small[data-period-index="${periodIndex}"]`);
                 if (infoButton) {
-                    infoButton.textContent = hasInfoData(infoData) ? 'Edit' : 'Add';
+                    const hasData = hasInfoData(infoData);
+                    infoButton.textContent = hasData ? 'Edit' : 'Add';
+                    const infoCell = infoButton.closest('.pc-info-cell');
+                    if (infoCell) {
+                        infoCell.classList.toggle('pc-info-cell-has-data', hasData);
+                    }
                 }
             }
             updateEditPointCardInfoDirtyState(periodIndex);
