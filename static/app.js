@@ -18789,18 +18789,22 @@ async function loadSummaryDashboard() {
     }
 }
 
+function classifyInfractionBucket(typeLabel) {
+    const label = String(typeLabel || '');
+    if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) return 'Safety';
+    if (/disrespect/i.test(label)) return 'Safety';
+    if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) return 'Attention';
+    if (/nfd|self\s*control|^task/i.test(label)) return 'Task';
+    if (/lang|volume|myob|personal/i.test(label)) return 'Social';
+    return 'Social';
+}
+
 function bucketInfractionsOverview(infractions) {
     const raw = infractions || {};
     const out = { Safety: 0, Task: 0, Attention: 0, Social: 0 };
     for (const [type, count] of Object.entries(raw)) {
         const n = Number(count) || 0;
-        const label = String(type || '');
-        let bucket = 'Social';
-        if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) bucket = 'Safety';
-        else if (/disrespect/i.test(label)) bucket = 'Safety';
-        else if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) bucket = 'Attention';
-        else if (/nfd|self\s*control|^task/i.test(label)) bucket = 'Task';
-        else if (/lang|volume|myob|personal/i.test(label)) bucket = 'Social';
+        const bucket = classifyInfractionBucket(type);
         out[bucket] += n;
     }
     return out;
@@ -20641,24 +20645,52 @@ function buildOverviewDashboardCardHtml(data) {
     const bucketTotal = bSocial + bTask + bAttention + bSafety;
     const pct = v => (bucketTotal <= 0 ? 0 : Math.round((v / bucketTotal) * 100));
     const donutColors = ['#9333ea', '#2563eb', '#22c55e', '#dc2626'];
+    const infractionLegendItems = [
+        { label: 'Social', value: bSocial, color: donutColors[0] },
+        { label: 'Task', value: bTask, color: donutColors[1] },
+        { label: 'Attention', value: bAttention, color: donutColors[2] },
+        { label: 'Safety', value: bSafety, color: donutColors[3] }
+    ].sort((a, b) => {
+        if (b.value !== a.value) return b.value - a.value;
+        return a.label.localeCompare(b.label);
+    });
     let donutGradient = '';
     if (bucketTotal > 0) {
-        let acc = 0;
+        const donutSizePx = 92;
+        const separatorDeg = (360 / (Math.PI * donutSizePx)) * 2;
+        const featherDeg = 0.18;
+        const halfSep = separatorDeg / 2;
         const segs = [
             { v: bSocial, c: donutColors[0] },
             { v: bTask, c: donutColors[1] },
             { v: bAttention, c: donutColors[2] },
             { v: bSafety, c: donutColors[3] }
         ];
-        const parts = [];
-        segs.forEach(s => {
-            const p = (s.v / bucketTotal) * 100;
-            if (p <= 0) return;
-            const start = acc;
-            acc += p;
-            parts.push(`${s.c} ${start}% ${acc}%`);
-        });
-        donutGradient = parts.length ? `conic-gradient(${parts.join(', ')})` : '#e5e7eb';
+        const activeSegs = segs.filter((s) => s.v > 0);
+        if (activeSegs.length <= 1) {
+            donutGradient = activeSegs.length === 1 ? activeSegs[0].c : '#e5e7eb';
+        } else {
+            let acc = 0;
+            const parts = [];
+            activeSegs.forEach((s) => {
+                const segDeg = (s.v / bucketTotal) * 360;
+                const start = acc;
+                const end = acc + segDeg;
+                const colorStart = Math.min(end, start + halfSep);
+                const colorEnd = Math.max(start, end - halfSep);
+                const innerStart = Math.min(end, colorStart + featherDeg);
+                const innerEnd = Math.max(start, colorEnd - featherDeg);
+                parts.push(
+                    `#ffffff ${start.toFixed(4)}deg ${colorStart.toFixed(4)}deg`,
+                    `rgba(255,255,255,0.35) ${colorStart.toFixed(4)}deg ${innerStart.toFixed(4)}deg`,
+                    `${s.c} ${innerStart.toFixed(4)}deg ${innerEnd.toFixed(4)}deg`,
+                    `rgba(255,255,255,0.35) ${innerEnd.toFixed(4)}deg ${colorEnd.toFixed(4)}deg`,
+                    `#ffffff ${colorEnd.toFixed(4)}deg ${end.toFixed(4)}deg`
+                );
+                acc = end;
+            });
+            donutGradient = `conic-gradient(${parts.join(', ')})`;
+        }
     } else {
         donutGradient = '#e5e7eb';
     }
@@ -20741,6 +20773,29 @@ function buildOverviewDashboardCardHtml(data) {
 
     const trendInf = trends && formatOverviewSignedInt(infDelta);
     const trendRem = trends && formatOverviewSignedInt(remDelta);
+    const rawInfractionsBucketPctDeltas = trends?.infractions_bucket_pct_deltas || {};
+    const rawInfractionsBucketPctCurrent = trends?.infractions_bucket_pct_current || {};
+    const rawInfractionsBucketPctPrevious = trends?.infractions_bucket_pct_previous || {};
+    const infractionsBucketPctDeltas = {};
+    const infractionsBucketPctCurrent = {};
+    const infractionsBucketPctPrevious = {};
+    Object.entries(rawInfractionsBucketPctDeltas).forEach(([k, v]) => {
+        infractionsBucketPctDeltas[String(k || '').trim().toLowerCase()] = Number(v);
+    });
+    Object.entries(rawInfractionsBucketPctCurrent).forEach(([k, v]) => {
+        infractionsBucketPctCurrent[String(k || '').trim().toLowerCase()] = Number(v);
+    });
+    Object.entries(rawInfractionsBucketPctPrevious).forEach(([k, v]) => {
+        infractionsBucketPctPrevious[String(k || '').trim().toLowerCase()] = Number(v);
+    });
+    const getInfractionLegendDeltaClass = (bucketLabel) => {
+        const delta = infractionsBucketPctDeltas[String(bucketLabel || '').trim().toLowerCase()];
+        if (delta == null || Number.isNaN(Number(delta))) return 'is-neutral';
+        const deltaState = overviewTrendDeltaClass('infractions', delta);
+        if (deltaState === 'overview-trend-line-pos') return 'is-good';
+        if (deltaState === 'overview-trend-line-neg') return 'is-bad';
+        return 'is-neutral';
+    };
 
     const trendsBlock = `
         <div class="overview-trends-card" data-overview-key="trends" aria-label="Trends vs prior window">
@@ -20864,13 +20919,12 @@ function buildOverviewDashboardCardHtml(data) {
                 <div class="overview-panel-kicker">Infractions</div>
                 <div class="overview-infractions-body">
                     <ul class="overview-infractions-legend">
-                        <li><span class="dot" style="background:#9333ea"></span>Social ${pct(bSocial)}%</li>
-                        <li><span class="dot" style="background:#2563eb"></span>Task ${pct(bTask)}%</li>
-                        <li><span class="dot" style="background:#22c55e"></span>Attention ${pct(bAttention)}%</li>
-                        <li><span class="dot" style="background:#dc2626"></span>Safety ${pct(bSafety)}%</li>
+                        ${infractionLegendItems.map((item) => (
+                            `<li><span class="dot" style="background:${item.color}"></span><span class="overview-infractions-legend-name">${escapeHtml(item.label)}</span><span class="overview-infractions-legend-pct ${getInfractionLegendDeltaClass(item.label)}">${pct(item.value)}%</span></li>`
+                        )).join('')}
                     </ul>
-                    <div class="overview-donut-wrap">
-                        <div class="overview-donut" style="background:${donutGradient}"></div>
+                        <div class="overview-donut-wrap">
+                            <div class="overview-donut" style="background:${donutGradient}"></div>
                         <div class="overview-donut-center">
                             <div class="overview-donut-total">${totalInfractions}</div>
                             <div class="overview-donut-delta ${overviewTrendDeltaClass('infractions', infDelta)}">${trendInf ? escapeHtml(trendInf) : ''}</div>
@@ -21277,6 +21331,7 @@ function attachOverviewCardInteractions(container, data) {
     };
 
     const STORAGE_KEY = 'summary_overview_selected_stats_v1';
+    const TRENDS_OPEN_STORAGE_KEY = 'summary_overview_trends_open_v1';
 
     let selectionOrder = [];
 
@@ -21299,6 +21354,24 @@ function attachOverviewCardInteractions(container, data) {
             return parsed.filter(k => Object.prototype.hasOwnProperty.call(STAT_KEY_TO_CARD_KEY, k));
         } catch {
             return [];
+        }
+    };
+
+    const persistTrendsOpenState = (isOpen) => {
+        try {
+            window.localStorage.setItem(TRENDS_OPEN_STORAGE_KEY, JSON.stringify(!!isOpen));
+        } catch (e) {
+            console.warn('Unable to persist trends open state:', e);
+        }
+    };
+
+    const loadTrendsOpenState = () => {
+        try {
+            const raw = window.localStorage.getItem(TRENDS_OPEN_STORAGE_KEY);
+            if (raw == null) return null;
+            return JSON.parse(raw) === true;
+        } catch {
+            return null;
         }
     };
 
@@ -23278,10 +23351,11 @@ function attachOverviewCardInteractions(container, data) {
                             </div>`;
                     const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
 
-                    let overviewContent = overviewFirstTimeText;
+                    let overviewTableContent = overviewFirstTimeText;
+                    let overviewGraphContent = overviewFirstTimeText;
 
                     if (infractionKeys.length > 0) {
-                        overviewContent += `
+                        overviewTableContent += `
                             <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
                                 <thead>
                                     <tr>
@@ -23291,14 +23365,119 @@ function attachOverviewCardInteractions(container, data) {
                                 </thead>
                                 <tbody>`;
                         infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
-                            overviewContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
+                            overviewTableContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
                                 <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
                                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${infractions[k]}</span></td>
                             </tr>`;
                         });
-                        overviewContent += `</tbody></table>`;
+                        overviewTableContent += `</tbody></table>`;
+
+                        const categoryOrder = ['Social', 'Task', 'Attention', 'Safety'];
+                        const categoryColors = {
+                            Social: ['#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd'],
+                            Safety: ['#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5'],
+                            Task: ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd'],
+                            Attention: ['#047857', '#059669', '#10b981', '#34d399', '#6ee7b7']
+                        };
+                        const bucketTotals = bucketInfractionsOverview(infractions);
+                        const bucketPctDeltas = data.overview_trends?.infractions_bucket_pct_deltas || {};
+                        const typeDeltas = data.overview_trends?.infractions_type_deltas || {};
+                        const overallTotal = Object.values(bucketTotals).reduce((sum, val) => sum + (Number(val) || 0), 0);
+                        const groupedTypes = { Social: [], Safety: [], Task: [], Attention: [] };
+                        infractionKeys.forEach((type) => {
+                            const bucket = classifyInfractionBucket(type);
+                            groupedTypes[bucket].push({
+                                type,
+                                count: Number(infractions[type]) || 0,
+                                delta: Number(typeDeltas[type] ?? 0)
+                            });
+                        });
+                        Object.values(groupedTypes).forEach((arr) => arr.sort((a, b) => b.count - a.count));
+
+                        overviewGraphContent += `
+                            <div style="display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border);margin:2px 0 10px 0;">
+                                <button type="button" style="border:1px solid var(--border);border-bottom:none;background:var(--bg-surface);padding:4px 10px;border-radius:6px 6px 0 0;font-size:0.82rem;color:var(--text-primary);">Type</button>
+                                <button type="button" disabled style="border:none;background:none;padding:4px 10px;font-size:0.82rem;color:var(--text-secondary);opacity:0.85;">Time</button>
+                                <button type="button" disabled style="border:none;background:none;padding:4px 10px;font-size:0.82rem;color:var(--text-secondary);opacity:0.85;">Day</button>
+                            </div>
+                            <div class="infractions-graph-category-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 16px;margin-top:2px;">
+                        `;
+                        categoryOrder.forEach((category) => {
+                            const bucketCount = Number(bucketTotals[category]) || 0;
+                            const bucketPct = overallTotal > 0 ? Math.round((bucketCount / overallTotal) * 100) : 0;
+                            const bucketDelta = Number(bucketPctDeltas[category] ?? 0);
+                            const bucketDeltaClass = bucketDelta > 0 ? 'is-neg' : bucketDelta < 0 ? 'is-pos' : 'is-muted';
+                            const rows = groupedTypes[category] || [];
+                            const shades = categoryColors[category];
+                            let donutBg = '#e5e7eb';
+                            if (bucketCount > 0) {
+                                const donutSizePx = 92;
+                                const separatorDeg = (360 / (Math.PI * donutSizePx)) * 2;
+                                const featherDeg = 0.18;
+                                const halfSep = separatorDeg / 2;
+                                const activeRows = rows.filter((r) => (Number(r.count) || 0) > 0);
+                                if (activeRows.length <= 1) {
+                                    donutBg = activeRows.length === 1 ? shades[0] : '#e5e7eb';
+                                } else {
+                                    let acc = 0;
+                                    const segs = [];
+                                    activeRows.forEach((row, idx) => {
+                                        const p = (Number(row.count) || 0) / bucketCount * 360;
+                                        if (p <= 0) return;
+                                        const start = acc;
+                                        const end = acc + p;
+                                        const colorStart = Math.min(end, start + halfSep);
+                                        const colorEnd = Math.max(start, end - halfSep);
+                                        const innerStart = Math.min(end, colorStart + featherDeg);
+                                        const innerEnd = Math.max(start, colorEnd - featherDeg);
+                                        const color = shades[idx % shades.length];
+                                        segs.push(
+                                            `#ffffff ${start.toFixed(4)}deg ${colorStart.toFixed(4)}deg`,
+                                            `rgba(255,255,255,0.35) ${colorStart.toFixed(4)}deg ${innerStart.toFixed(4)}deg`,
+                                            `${color} ${innerStart.toFixed(4)}deg ${innerEnd.toFixed(4)}deg`,
+                                            `rgba(255,255,255,0.35) ${innerEnd.toFixed(4)}deg ${colorEnd.toFixed(4)}deg`,
+                                            `#ffffff ${colorEnd.toFixed(4)}deg ${end.toFixed(4)}deg`
+                                        );
+                                        acc = end;
+                                    });
+                                    donutBg = segs.length ? `conic-gradient(${segs.join(', ')})` : '#e5e7eb';
+                                }
+                            }
+                            const listHtml = rows.map((row, idx) => {
+                                const deltaClass = row.delta > 0 ? 'is-neg' : row.delta < 0 ? 'is-pos' : 'is-muted';
+                                const deltaText = row.delta > 0 ? `+${row.delta}` : `${row.delta}`;
+                                return `
+                                    <button type="button" class="dashboard-breakdown-item infractions-graph-item" data-infraction-type="${escapeHtml(row.type)}" style="display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:6px;align-items:start;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:${shades[idx % shades.length]};display:inline-block;margin-top:4px;"></span>
+                                        <span class="dashboard-breakdown-name" style="font-size:0.8rem;color:var(--text-primary);line-height:1.15;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.type)}</span>
+                                        <span style="font-size:0.8rem;white-space:nowrap;line-height:1.1;">
+                                            <span class="dashboard-breakdown-value">${row.count}</span>
+                                            <span class="overview-gauge-small ${deltaClass}" style="margin-left:4px;font-size:0.8rem;">${deltaText}</span>
+                                        </span>
+                                    </button>`;
+                            }).join('');
+                            const listColumns = 1;
+                            overviewGraphContent += `
+                                <div class="infractions-graph-category-card" style="padding:0 2px;">
+                                    <h4 style="margin:0 0 8px 0;font-size:1rem;font-weight:700;text-align:center;line-height:1.1;">${escapeHtml(category)}</h4>
+                                    <div style="display:flex;justify-content:center;margin-bottom:10px;">
+                                        <div class="overview-donut-wrap infractions-graph-donut-wrap">
+                                            <div class="overview-donut" style="background:${donutBg};"></div>
+                                            <div class="overview-donut-center">
+                                                <div class="overview-donut-total infractions-graph-donut-total">${bucketPct}%</div>
+                                                <div class="overview-donut-delta overview-gauge-small ${bucketDeltaClass} infractions-graph-donut-delta">${bucketDelta > 0 ? '+' : ''}${bucketDelta.toFixed(1)}%</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="infractions-graph-category-list" style="display:grid;grid-template-columns:repeat(${listColumns}, minmax(0,1fr));column-gap:12px;row-gap:6px;">
+                                        ${listHtml || `<p style="font-size:0.82rem;color:var(--text-secondary);margin:0;">No data</p>`}
+                                    </div>
+                                </div>`;
+                        });
+                        overviewGraphContent += `</div>`;
                     } else {
-                        overviewContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                        overviewTableContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                        overviewGraphContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
                     }
 
                     const innerHtml = `
@@ -23314,7 +23493,16 @@ function attachOverviewCardInteractions(container, data) {
                             </div>
                             <div class="infractions-tab-panels">
                                 <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
-                                    ${overviewContent}
+                                    <div class="view-mode-toggle" role="tablist" aria-label="Infractions overview view mode">
+                                        <button type="button" class="view-mode-toggle-btn active" data-infractions-view="graph" role="tab" aria-selected="true">Graph</button>
+                                        <button type="button" class="view-mode-toggle-btn" data-infractions-view="table" role="tab" aria-selected="false">Table</button>
+                                    </div>
+                                    <div data-infractions-panel="graph">
+                                        ${overviewGraphContent}
+                                    </div>
+                                    <div data-infractions-panel="table" hidden>
+                                        ${overviewTableContent}
+                                    </div>
                                 </div>
                             </div>
                         </div>`;
@@ -23371,6 +23559,29 @@ function attachOverviewCardInteractions(container, data) {
                     };
 
                     wireTabClicks();
+
+                    const infractionsModeButtons = card.querySelectorAll('[data-infractions-view]');
+                    const infractionsTablePanel = card.querySelector('[data-infractions-panel="table"]');
+                    const infractionsGraphPanel = card.querySelector('[data-infractions-panel="graph"]');
+                    const setInfractionsOverviewView = (mode) => {
+                        const isGraph = mode === 'graph';
+                        if (infractionsTablePanel) infractionsTablePanel.hidden = isGraph;
+                        if (infractionsGraphPanel) infractionsGraphPanel.hidden = !isGraph;
+                        infractionsModeButtons.forEach((btn) => {
+                            const active = btn.dataset.infractionsView === mode;
+                            btn.classList.toggle('active', active);
+                            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+                        });
+                    };
+                    infractionsModeButtons.forEach((btn) => {
+                        btn.addEventListener('click', () => {
+                            setInfractionsOverviewView(btn.dataset.infractionsView || 'graph');
+                            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                                scheduleMasonryLayoutAfterResize(grid);
+                            }
+                        });
+                    });
+                    setInfractionsOverviewView('graph');
 
                     // (i) icon: click shows hint in popover (same text as first-time reminder)
                     card.addEventListener('click', (e) => {
@@ -23561,11 +23772,24 @@ function attachOverviewCardInteractions(container, data) {
     });
 
     if (trendsBox) {
+        const trendsCard = container.querySelector('.dashboard-card[data-summary-card="behavior-trend"]');
+        if (trendsCard) {
+            const storedTrendsOpen = loadTrendsOpenState();
+            if (storedTrendsOpen === true) {
+                trendsCard.classList.remove('overview-card-collapsed');
+            } else {
+                // Default to closed on reload unless user explicitly opened trends.
+                trendsCard.classList.add('overview-card-collapsed');
+            }
+            const isClosed = trendsCard.classList.contains('overview-card-collapsed');
+            trendsBox.classList.toggle('overview-stat-selected', !isClosed);
+        }
         trendsBox.addEventListener('click', () => {
             const trendsCard = container.querySelector('.dashboard-card[data-summary-card="behavior-trend"]');
             if (!trendsCard) return;
             const isClosed = trendsCard.classList.toggle('overview-card-collapsed');
             trendsBox.classList.toggle('overview-stat-selected', !isClosed);
+            persistTrendsOpenState(!isClosed);
             if (!isClosed) {
                 if (typeof trendsCard.scrollIntoView === 'function') {
                     trendsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -23575,8 +23799,6 @@ function attachOverviewCardInteractions(container, data) {
             }
             applySummaryMasonryLayout(grid);
         });
-        // Default state is open.
-        trendsBox.classList.add('overview-stat-selected');
     }
 
     // Restore previously selected overview stats (if any) so that cards

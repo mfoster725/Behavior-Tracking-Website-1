@@ -5566,9 +5566,25 @@ a.dashboard-compare-toggle {
     padding: 8px 10px;
 }
 
+/* Bottom row width balance: Infractions takes ~2/3, Incidents ~1/3. */
+.overview-card--rich .overview-rich-bottom .overview-infractions-panel {
+    flex: 2;
+}
+
+.overview-card--rich .overview-rich-bottom .overview-incidents-panel {
+    flex: 1;
+}
+
 .overview-card--rich .overview-panel-kicker {
     font-size: 0.82rem;
     letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+
+.overview-card--rich .overview-infractions-panel .overview-panel-kicker {
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    color: #64748b;
     margin-bottom: 6px;
 }
 
@@ -5623,6 +5639,11 @@ a.dashboard-compare-toggle {
     margin-bottom: 20px;
 }
 
+/* Keep the same vertical spacing rhythm as the surrounding rich rows. */
+.overview-card--rich .overview-trigger-panel {
+    margin-bottom: 10px;
+}
+
 .overview-card--rich .overview-trigger-sub {
     font-size: 0.82rem;
     margin-bottom: 6px;
@@ -5659,18 +5680,24 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-infractions-body {
-    gap: 7px;
+    gap: 10px;
     flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
 }
 
 .overview-card--rich .overview-infractions-legend {
     font-size: 0.82rem;
-    line-height: 1.1;
+    line-height: 1.15;
+    gap: 6px;
 }
 
 .overview-card--rich .overview-infractions-legend li {
-    gap: 4px;
-    margin-bottom: 4px;
+    display: grid;
+    grid-template-columns: 8px 76px auto;
+    align-items: center;
+    column-gap: 1px;
+    margin-bottom: 0;
 }
 
 .overview-card--rich .overview-infractions-legend .dot {
@@ -5678,22 +5705,66 @@ a.dashboard-compare-toggle {
     height: 6px;
 }
 
+.overview-card--rich .overview-infractions-legend-name {
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.overview-card--rich .overview-infractions-legend-pct {
+    font-weight: 700;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+
+.overview-card--rich .overview-infractions-legend-pct.is-good {
+    color: #16a34a;
+}
+
+.overview-card--rich .overview-infractions-legend-pct.is-bad {
+    color: #dc2626;
+}
+
+.overview-card--rich .overview-infractions-legend-pct.is-neutral {
+    color: #9333ea;
+}
+
 .overview-card--rich .overview-donut-wrap {
-    width: 62px;
-    height: 62px;
+    width: 92px;
+    height: 92px;
+    position: relative;
 }
 
 .overview-card--rich .overview-donut {
-    mask: radial-gradient(farthest-side, transparent calc(50% - 8px), #fff calc(50% - 7px));
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(50% - 8px), #fff calc(50% - 7px));
+    mask: none;
+    -webkit-mask: none;
+    overflow: hidden;
+}
+
+/* Force a solid center so no inner gradient shows through. */
+.overview-card--rich .overview-donut-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 15px;
+    border-radius: 50%;
+    background: #ffffff;
+    z-index: 1;
+}
+
+.overview-card--rich .overview-donut-wrap .overview-donut-center {
+    z-index: 2;
 }
 
 .overview-card--rich .overview-donut-total {
-    font-size: 0.82rem;
+    font-size: 1.2rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0;
 }
 
 .overview-card--rich .overview-donut-delta {
-    font-size: 0.52rem;
+    font-size: 0.78rem;
+    line-height: 1.1;
+    font-weight: 600;
 }
 
 .overview-card--rich .overview-incidents-panel .overview-incidents-bars {
@@ -5740,6 +5811,20 @@ a.dashboard-compare-toggle {
 
     .overview-mini-metrics-muted {
         margin-left: 0;
+    }
+
+    /* Preserve a visible gutter between Trigger Time and the next row. */
+    .overview-card--rich .overview-trigger-panel {
+        margin-bottom: 8px;
+    }
+
+    .overview-card--rich .overview-donut-wrap {
+        width: 84px;
+        height: 84px;
+    }
+
+    .overview-card--rich .overview-donut-total {
+        font-size: 1.05rem;
     }
 }
 
@@ -7922,6 +8007,45 @@ tr[data-aggregate-day-label] {
 
 .infractions-card .dashboard-breakdown-value {
     font-weight: 400;
+}
+
+/* Graph-mode category donuts: mirror overview-card donut styling. */
+.infractions-card .infractions-graph-donut-wrap {
+    width: 92px;
+    height: 92px;
+    position: relative;
+}
+
+.infractions-card .infractions-graph-donut-wrap .overview-donut {
+    mask: none;
+    -webkit-mask: none;
+    overflow: hidden;
+}
+
+.infractions-card .infractions-graph-donut-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 15px;
+    border-radius: 50%;
+    background: #ffffff;
+    z-index: 1;
+}
+
+.infractions-card .infractions-graph-donut-wrap .overview-donut-center {
+    z-index: 2;
+}
+
+.infractions-card .infractions-graph-donut-total {
+    font-size: 1.2rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.infractions-card .infractions-graph-donut-delta {
+    font-size: 0.78rem;
+    line-height: 1.1;
+    font-weight: 600;
 }
 
 /* Infractions category ring graphs (Type tab) */

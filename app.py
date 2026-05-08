@@ -4497,6 +4497,48 @@ def summary():
             d = st.get('infractions') or {}
             return sum(int(v or 0) for v in d.values())
 
+        def classify_infraction_bucket(label):
+            txt = str(label or '').strip().lower()
+            if (
+                'aggression' in txt or
+                'property' in txt or
+                'sexual' in txt or
+                'threat' in txt or
+                txt == 'walk' or
+                'harmful' in txt or
+                'disrespect' in txt
+            ):
+                return 'Safety'
+            if (
+                'off task' in txt or
+                'attention seeking' in txt or
+                'shutdown' in txt or
+                'refusal' in txt
+            ):
+                return 'Attention'
+            if (
+                'nfd' in txt or
+                'self control' in txt or
+                txt.startswith('task')
+            ):
+                return 'Task'
+            if (
+                'lang' in txt or
+                'volume' in txt or
+                'myob' in txt or
+                'personal' in txt
+            ):
+                return 'Social'
+            return 'Social'
+
+        def bucket_infraction_counts(st):
+            buckets = {'Social': 0, 'Task': 0, 'Attention': 0, 'Safety': 0}
+            infractions_map = (st or {}).get('infractions') or {}
+            for inf_type, count in infractions_map.items():
+                bucket = classify_infraction_bucket(inf_type)
+                buckets[bucket] += int(count or 0)
+            return buckets
+
         cur_ai = cur_stats.get('additional_info') or {}
         prev_ai = prev_stats.get('additional_info') or {}
         cur_pct = cur_stats.get('percentages') or {}
@@ -4568,9 +4610,39 @@ def summary():
             float(cur_pct.get('accountability')) - float(prev_pct.get('accountability')), 1)
         star_relationships_delta = None if cur_pct.get('relationships') is None or prev_pct.get('relationships') is None else round(
             float(cur_pct.get('relationships')) - float(prev_pct.get('relationships')), 1)
+        cur_inf_buckets = bucket_infraction_counts(cur_stats)
+        prev_inf_buckets = bucket_infraction_counts(prev_stats)
+        cur_inf_types = (cur_stats.get('infractions') or {})
+        prev_inf_types = (prev_stats.get('infractions') or {})
+        all_infraction_types = set(cur_inf_types.keys()) | set(prev_inf_types.keys())
+        cur_inf_total = sum(int(v or 0) for v in cur_inf_buckets.values())
+        prev_inf_total = sum(int(v or 0) for v in prev_inf_buckets.values())
+        infraction_bucket_deltas = {
+            bucket: int(cur_inf_buckets.get(bucket) or 0) - int(prev_inf_buckets.get(bucket) or 0)
+            for bucket in ('Social', 'Task', 'Attention', 'Safety')
+        }
+        infraction_type_deltas = {
+            str(inf_type): int(cur_inf_types.get(inf_type) or 0) - int(prev_inf_types.get(inf_type) or 0)
+            for inf_type in all_infraction_types
+        }
+        infraction_bucket_pct_current = {}
+        infraction_bucket_pct_previous = {}
+        infraction_bucket_pct_deltas = {}
+        for bucket in ('Social', 'Task', 'Attention', 'Safety'):
+            cur_pct_bucket = (float(cur_inf_buckets.get(bucket) or 0) / float(cur_inf_total) * 100.0) if cur_inf_total > 0 else 0.0
+            prev_pct_bucket = (float(prev_inf_buckets.get(bucket) or 0) / float(prev_inf_total) * 100.0) if prev_inf_total > 0 else 0.0
+            infraction_bucket_pct_current[bucket] = cur_pct_bucket
+            infraction_bucket_pct_previous[bucket] = prev_pct_bucket
+            # Preserve precision so small but real share changes do not collapse to 0.0.
+            infraction_bucket_pct_deltas[bucket] = (cur_pct_bucket - prev_pct_bucket)
 
         return {
             'infractions_delta': inf_total(cur_stats) - inf_total(prev_stats),
+            'infractions_bucket_deltas': infraction_bucket_deltas,
+            'infractions_type_deltas': infraction_type_deltas,
+            'infractions_bucket_pct_current': infraction_bucket_pct_current,
+            'infractions_bucket_pct_previous': infraction_bucket_pct_previous,
+            'infractions_bucket_pct_deltas': infraction_bucket_pct_deltas,
             'reminders_delta': int(cur_ai.get('total_reminders') or 0) - int(prev_ai.get('total_reminders') or 0),
             'resets_delta': int(cur_ai.get('total_resets') or 0) - int(prev_ai.get('total_resets') or 0),
             'present_pct_delta': None if cur_present is None or prev_present is None else round(
@@ -4634,6 +4706,18 @@ def summary():
         # Partial prior window: still useful for day-of-week deltas, but not a full symmetric window.
         trends['has_prior'] = bool(len(prior_dates) >= needed_days)
         return trends
+
+    def log_infraction_bucket_trend_values(trends_obj):
+        if not trends_obj:
+            return
+        cur = trends_obj.get('infractions_bucket_pct_current') or {}
+        prev = trends_obj.get('infractions_bucket_pct_previous') or {}
+        delta = trends_obj.get('infractions_bucket_pct_deltas') or {}
+        ordered = ('Social', 'Task', 'Attention', 'Safety')
+        cur_view = {k: round(float(cur.get(k) or 0.0), 4) for k in ordered}
+        prev_view = {k: round(float(prev.get(k) or 0.0), 4) for k in ordered}
+        delta_view = {k: round(float(delta.get(k) or 0.0), 4) for k in ordered}
+        print(f"[INFRACTION_BUCKET_PCT] current={cur_view} previous={prev_view} delta={delta_view}", flush=True)
 
     def extract_top_trigger_from_stats(stats_obj):
         sev_map_by_day = (stats_obj or {}).get('frenzy_severity_by_time_by_day') or {}
@@ -4857,6 +4941,7 @@ def summary():
             prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records)
         if overview_trends:
             result['overview_trends'] = overview_trends
+            log_infraction_bucket_trend_values(overview_trends)
         result['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
@@ -4952,6 +5037,7 @@ def summary():
         }
         if overview_trends:
             weekly_resp['overview_trends'] = overview_trends
+            log_infraction_bucket_trend_values(overview_trends)
         weekly_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(weekly_resp)
     elif timeframe == '30day':
@@ -5034,6 +5120,7 @@ def summary():
         }
         if overview_trends:
             tf30_resp['overview_trends'] = overview_trends
+            log_infraction_bucket_trend_values(overview_trends)
         tf30_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(tf30_resp)
     elif timeframe == '30day_to_30day':
@@ -5253,6 +5340,7 @@ def summary():
         }
         if overview_trends_all:
             resp_alltime['overview_trends'] = overview_trends_all
+            log_infraction_bucket_trend_values(overview_trends_all)
         resp_alltime['previous_trigger'] = {'time': None, 'day': None}
         return _summary_response(resp_alltime)
 
