@@ -39,9 +39,110 @@ const SCHEDULE_PERIODS = [
 ];
 
 const INFRACTION_TYPES = {
-    general: ['Lang', 'NFD', 'Off Task', 'MYOB', 'Self Control', 'Shutdown', 'Volume', 'Attention Seeking', 'Refusal', 'Personal Space'],
-    harmful: ['Walk', 'Aggression', 'Property Destruction', 'Sexual Reference', 'Threat', 'Disrespectful']
+    social: [
+        { value: 'Language', label: 'Language (lang)', aliases: ['lang'] },
+        { value: 'MYOB', label: 'MYOB', aliases: [] },
+        { value: 'Disrespectful', label: 'Disrespectful', aliases: [] },
+        { value: 'Personal Space', label: 'Personal Space', aliases: [] }
+    ],
+    task: [
+        { value: 'NFD', label: 'NFD (not following directions)', aliases: ['not following directions', 'noncompliance'] },
+        { value: 'Off Task', label: 'Off Task', aliases: [] },
+        { value: 'Refusal', label: 'Refusal', aliases: [] },
+        { value: 'Shutdown', label: 'Shutdown', aliases: [] }
+    ],
+    attention: [
+        { value: 'Volume', label: 'Volume', aliases: [] },
+        { value: 'Attention Seeking', label: 'Attention Seeking', aliases: [] },
+        { value: 'Self Control', label: 'Self Control', aliases: [] },
+        { value: 'Sexual Reference', label: 'Sexual Reference', aliases: [] },
+        { value: 'Inappropriate Comment', label: 'Inappropriate Comment', aliases: ['innapropriate comment'] }
+    ],
+    safety: [
+        { value: 'Walk Out', label: 'Walk Out', aliases: ['walk'] },
+        { value: 'Elopement', label: 'Elopement', aliases: [] },
+        { value: 'Property Destruction', label: 'Property Destruction', aliases: [] },
+        { value: 'Property Misuse', label: 'Property Misuse', aliases: [] },
+        { value: 'Threat', label: 'Threat', aliases: [] },
+        { value: 'Aggression', label: 'Aggression', aliases: [] }
+    ]
 };
+
+const INFRACTION_CATEGORY_LABELS = {
+    social: 'Social',
+    task: 'Task',
+    attention: 'Attention',
+    safety: 'Safety'
+};
+
+const INFRACTION_OPTION_LIST = Object.values(INFRACTION_TYPES).flat();
+const INFRACTION_BUCKET_BY_VALUE = Object.entries(INFRACTION_TYPES).reduce((map, [categoryName, options]) => {
+    const bucketLabel = INFRACTION_CATEGORY_LABELS[categoryName] || categoryName;
+    options.forEach(option => {
+        map.set(option.value, bucketLabel);
+    });
+    return map;
+}, new Map());
+const INFRACTION_CANONICAL_BY_KEY = INFRACTION_OPTION_LIST.reduce((map, option) => {
+    map.set(option.value.toLowerCase(), option.value);
+    map.set(option.label.toLowerCase(), option.value);
+    option.aliases.forEach(alias => map.set(alias.toLowerCase(), option.value));
+    return map;
+}, new Map());
+
+function normalizeInfractionType(type) {
+    if (!type) return '';
+    const normalized = String(type).trim().toLowerCase();
+    return INFRACTION_CANONICAL_BY_KEY.get(normalized) || String(type).trim();
+}
+
+function isInfractionInCategory(type, categoryName) {
+    const canonicalType = normalizeInfractionType(type);
+    return (INFRACTION_TYPES[categoryName] || []).some(option => option.value === canonicalType);
+}
+
+function canonicalizeInfractionCounts(rawCounts = {}) {
+    const aggregated = {};
+    Object.entries(rawCounts || {}).forEach(([type, count]) => {
+        const canonicalType = normalizeInfractionType(type);
+        if (!canonicalType) return;
+        const numericCount = Number(count) || 0;
+        if (numericCount <= 0) return;
+        aggregated[canonicalType] = (aggregated[canonicalType] || 0) + numericCount;
+    });
+    return aggregated;
+}
+
+function canonicalizeInfractionTypeDeltas(rawDeltas = {}) {
+    const aggregated = {};
+    Object.entries(rawDeltas || {}).forEach(([type, delta]) => {
+        const canonicalType = normalizeInfractionType(type);
+        if (!canonicalType) return;
+        aggregated[canonicalType] = (aggregated[canonicalType] || 0) + (Number(delta) || 0);
+    });
+    return aggregated;
+}
+
+function getCanonicalInfractionDetailEntry(infractionsByType = {}, type) {
+    const canonicalType = normalizeInfractionType(type);
+    if (!canonicalType) return null;
+
+    const aggregated = { by_time: {}, by_day_of_week: {} };
+    let hasAnyData = false;
+
+    Object.entries(infractionsByType || {}).forEach(([rawType, entry]) => {
+        if (normalizeInfractionType(rawType) !== canonicalType) return;
+        hasAnyData = true;
+        Object.entries(entry?.by_time || {}).forEach(([label, count]) => {
+            aggregated.by_time[label] = (aggregated.by_time[label] || 0) + (Number(count) || 0);
+        });
+        Object.entries(entry?.by_day_of_week || {}).forEach(([label, count]) => {
+            aggregated.by_day_of_week[label] = (aggregated.by_day_of_week[label] || 0) + (Number(count) || 0);
+        });
+    });
+
+    return hasAnyData ? aggregated : null;
+}
 
 const UNIFIED_CHART_TOOLTIP_STYLE = Object.freeze({
     backgroundColor: '#ffffff',
@@ -3753,16 +3854,16 @@ function addInfraction(button) {
 function addInfractionToCard(list, type = '', count = 1, isGeneral = true, isHarmful = false) {
     const item = document.createElement('div');
     item.className = 'infraction-item';
+    const normalizedType = normalizeInfractionType(type);
     
     item.innerHTML = `
         <select class="infraction-type">
             <option value="">Select Type</option>
-            <optgroup label="General">
-                ${INFRACTION_TYPES.general.map(t => `<option value="${t}" ${type === t && isGeneral ? 'selected' : ''}>${t}</option>`).join('')}
-            </optgroup>
-            <optgroup label="Harmful">
-                ${INFRACTION_TYPES.harmful.map(t => `<option value="${t}" ${type === t && isHarmful ? 'selected' : ''}>${t}</option>`).join('')}
-            </optgroup>
+            ${Object.entries(INFRACTION_TYPES).map(([categoryName, options]) => `
+                <optgroup label="${INFRACTION_CATEGORY_LABELS[categoryName] || categoryName}">
+                    ${options.map(option => `<option value="${option.value}" ${normalizedType === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                </optgroup>
+            `).join('')}
         </select>
         <input type="number" class="infraction-count" value="${count}" min="1" placeholder="Count">
         <button type="button" class="delete-btn" onclick="this.parentElement.remove()">×</button>
@@ -3835,11 +3936,11 @@ async function saveDailyRecord() {
     document.querySelectorAll('.period-card').forEach(card => {
         const infractions = [];
         card.querySelectorAll('.infraction-item').forEach(item => {
-            const type = item.querySelector('.infraction-type').value;
+            const type = normalizeInfractionType(item.querySelector('.infraction-type').value);
             const count = parseInt(item.querySelector('.infraction-count').value) || 1;
             if (type) {
-                const isGeneral = INFRACTION_TYPES.general.includes(type);
-                const isHarmful = INFRACTION_TYPES.harmful.includes(type);
+                const isGeneral = isInfractionInCategory(type, 'social') || isInfractionInCategory(type, 'task') || isInfractionInCategory(type, 'attention');
+                const isHarmful = isInfractionInCategory(type, 'safety');
                 infractions.push({ type, count, is_general: isGeneral, is_harmful: isHarmful });
             }
         });
@@ -6178,13 +6279,15 @@ function renderAggregateMetricRow(label, currentValue, previousValue, options = 
         suffix = '',
         higherIsBetter = true
     } = options;
-    let deltaText = '—';
+    let deltaText = '';
     let deltaClass = 'neutral';
     if (previousValue !== null && previousValue !== undefined) {
         const delta = (Number(currentValue) || 0) - (Number(previousValue) || 0);
-        const sign = delta > 0 ? '+' : '';
-        deltaText = `${sign}${delta}${suffix}`;
-        if (delta !== 0) {
+        if (delta === 0) {
+            deltaText = '—';
+        } else {
+            const sign = delta > 0 ? '+' : '';
+            deltaText = `${sign}${delta}${suffix}`;
             const improved = higherIsBetter ? delta > 0 : delta < 0;
             deltaClass = improved ? 'good' : 'bad';
         }
@@ -6256,12 +6359,20 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         frenzy: 0,
         reminders: 0
     };
-    const previousTotals = {
-        notes: 0,
-        reset: 0,
-        frenzy: 0,
-        reminders: 0
-    };
+    const hasPreviousRecord = previousRecord !== null && previousRecord !== undefined;
+    const previousTotals = hasPreviousRecord
+        ? {
+            notes: 0,
+            reset: 0,
+            frenzy: 0,
+            reminders: 0
+        }
+        : {
+            notes: null,
+            reset: null,
+            frenzy: null,
+            reminders: null
+        };
     const infractionCounts = {};
     const purposeCounts = {};
     const notesList = [];
@@ -7963,11 +8074,7 @@ function showMessage(message, type) {
 }
 
 // Info Modal Functions
-const INFRACTION_OPTIONS = [
-    'Aggression', 'Attention Seeking', 'Disrespectful', 'Language', 'MYOB', 'NFD',
-    'Property Destruction', 'Off Task', 'Personal Space', 'Refusal', 'Self Control',
-    'Sexual Reference', 'Shutdown', 'Threat', 'Volume', 'Walk Out'
-];
+const INFRACTION_OPTIONS = INFRACTION_OPTION_LIST.map((option) => option.value);
 
 const PURPOSE_OPTIONS = [
     'Obtain Peer Attention', 'Obtain Staff Attention', 'Obtain Item/Activity',
@@ -8526,12 +8633,14 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
     INFRACTION_OPTIONS.forEach((infraction) => {
         const matches = countExactPhraseMatches(corpus, infraction.toLowerCase());
         if (!matches) return;
-        const existing = infractions.find((item) => String(item?.type || '').trim().toLowerCase() === infraction.toLowerCase());
+        const existing = infractions.find((item) =>
+            normalizeInfractionType(item?.type) === normalizeInfractionType(infraction)
+        );
         if (existing) {
             const existingCount = Number(existing.count) || 0;
             existing.count = String(existingCount + matches);
         } else {
-            infractions.push({ type: infraction, count: String(matches) });
+            infractions.push({ type: normalizeInfractionType(infraction), count: String(matches) });
         }
         autoFromNotes.infractions = true;
     });
@@ -18790,12 +18899,16 @@ async function loadSummaryDashboard() {
 }
 
 function classifyInfractionBucket(typeLabel) {
+    const canonicalType = normalizeInfractionType(typeLabel);
+    const configuredBucket = INFRACTION_BUCKET_BY_VALUE.get(canonicalType);
+    if (configuredBucket) return configuredBucket;
+
+    // Fallback for legacy labels that may still exist in stored records.
     const label = String(typeLabel || '');
-    if (/aggression|property|sexual|threat|^walk$/i.test(label) || /harmful/i.test(label)) return 'Safety';
-    if (/disrespect/i.test(label)) return 'Safety';
+    if (/aggression|property|sexual|threat|walk|elop/i.test(label) || /harmful/i.test(label)) return 'Safety';
     if (/off\s*task|attention\s*seeking|shutdown|refusal/i.test(label)) return 'Attention';
-    if (/nfd|self\s*control|^task/i.test(label)) return 'Task';
-    if (/lang|volume|myob|personal/i.test(label)) return 'Social';
+    if (/nfd|noncompliance|self\s*control|^task/i.test(label)) return 'Task';
+    if (/lang|volume|myob|personal|disrespect/i.test(label)) return 'Social';
     return 'Social';
 }
 
@@ -18815,6 +18928,94 @@ function formatOverviewSignedInt(n) {
     const v = Number(n);
     if (v > 0) return `+${v}`;
     return String(v);
+}
+
+function buildSegmentedDonutSvg(segments, options = {}) {
+    const sizePx = Math.max(1, Number(options.sizePx) || 92);
+    const ringPx = Math.max(1, Number(options.ringPx) || 15);
+    const gapPx = Math.max(0, Number(options.gapPx) || 2);
+    const total = segments.reduce((sum, s) => sum + (Number(s?.value) || 0), 0);
+    if (total <= 0) return '';
+
+    const cx = 50;
+    const cy = 50;
+    const strokeWidth = (ringPx / sizePx) * 100;
+    const radius = 50 - strokeWidth / 2;
+    const circumferencePx = 2 * Math.PI * (sizePx / 2 - ringPx / 2);
+
+    const positiveSegments = segments
+        .map((seg) => ({ color: seg?.color, value: Number(seg?.value) || 0 }))
+        .filter((seg) => seg.value > 0);
+    if (!positiveSegments.length) return '';
+
+    const rawSweeps = positiveSegments.map((seg) => (seg.value / total) * 100);
+    // Ensure tiny non-zero slices remain wide enough to avoid wedge-like tips
+    // between separators (especially for very small counts like 1).
+    const minVisibleArcPx = Math.max(8, gapPx * 4);
+    const maxMinVisiblePct = 100 / Math.max(1, rawSweeps.length);
+    const minVisiblePct = Math.min(maxMinVisiblePct * 0.9, (minVisibleArcPx / circumferencePx) * 100);
+    const adjustedSweeps = rawSweeps.slice();
+
+    let needed = 0;
+    adjustedSweeps.forEach((sweep, idx) => {
+        if (sweep < minVisiblePct) {
+            needed += (minVisiblePct - sweep);
+            adjustedSweeps[idx] = minVisiblePct;
+        }
+    });
+
+    if (needed > 0) {
+        const donorIndexes = adjustedSweeps
+            .map((sweep, idx) => ({ idx, available: Math.max(0, sweep - minVisiblePct) }))
+            .filter((x) => x.available > 0);
+        const totalAvailable = donorIndexes.reduce((sum, x) => sum + x.available, 0);
+        if (totalAvailable > 0) {
+            donorIndexes.forEach(({ idx, available }) => {
+                const take = needed * (available / totalAvailable);
+                adjustedSweeps[idx] = Math.max(minVisiblePct, adjustedSweeps[idx] - take);
+            });
+        }
+        // Normalize to exactly 100 to avoid seam drift.
+        const adjustedTotal = adjustedSweeps.reduce((sum, x) => sum + x, 0);
+        if (adjustedTotal > 0) {
+            for (let i = 0; i < adjustedSweeps.length; i += 1) {
+                adjustedSweeps[i] = (adjustedSweeps[i] / adjustedTotal) * 100;
+            }
+        }
+    }
+
+    let accPct = 0;
+    const paths = [];
+    const boundaryPcts = [0];
+    positiveSegments.forEach((seg, idx) => {
+        const sweepPct = adjustedSweeps[idx];
+        const dashOffset = -accPct;
+        paths.push(
+            `<circle cx="${cx}" cy="${cy}" r="${radius.toFixed(4)}" fill="none" stroke="${seg.color}" stroke-width="${strokeWidth.toFixed(4)}" stroke-linecap="butt" pathLength="100" stroke-dasharray="${sweepPct.toFixed(4)} ${(100 - sweepPct).toFixed(4)}" stroke-dashoffset="${dashOffset.toFixed(4)}" transform="rotate(-90 50 50)" />`
+        );
+        accPct += sweepPct;
+        boundaryPcts.push(accPct);
+    });
+
+    const baseGapWidthVb = (gapPx / sizePx) * 100;
+    const rectGapWidth = Math.max(0.18, baseGapWidthVb);
+
+    const separatorRects = boundaryPcts
+        .filter((pct) => pct < 99.999)
+        .map((pct) => {
+            const angleDeg = -90 + (pct / 100) * 360;
+            const angleRad = (angleDeg * Math.PI) / 180;
+            const px = cx + radius * Math.cos(angleRad);
+            const py = cy + radius * Math.sin(angleRad);
+            const rectW = strokeWidth + 1.6; // radial span through ring thickness
+            const rectH = rectGapWidth;
+            const x = px - rectW / 2;
+            const y = py - rectH / 2;
+            return `<rect x="${x.toFixed(4)}" y="${y.toFixed(4)}" width="${rectW.toFixed(4)}" height="${rectH.toFixed(4)}" fill="#ffffff" transform="rotate(${angleDeg.toFixed(4)} ${px.toFixed(4)} ${py.toFixed(4)})" />`;
+        });
+
+    // Add a small bleed margin so stroke/separators never clip at outer edges.
+    return `<svg class="overview-donut-svg" viewBox="-1.5 -1.5 103 103" aria-hidden="true">${paths.join('')}${separatorRects.join('')}</svg>`;
 }
 
 function overviewTrendDeltaClass(metric, delta) {
@@ -20655,42 +20856,20 @@ function buildOverviewDashboardCardHtml(data) {
         return a.label.localeCompare(b.label);
     });
     let donutGradient = '';
+    let donutVisualHtml = '';
     if (bucketTotal > 0) {
-        const donutSizePx = 92;
-        const separatorDeg = (360 / (Math.PI * donutSizePx)) * 2;
-        const featherDeg = 0.18;
-        const halfSep = separatorDeg / 2;
         const segs = [
             { v: bSocial, c: donutColors[0] },
             { v: bTask, c: donutColors[1] },
             { v: bAttention, c: donutColors[2] },
             { v: bSafety, c: donutColors[3] }
         ];
+        donutVisualHtml = buildSegmentedDonutSvg(
+            segs.map((s) => ({ value: s.v, color: s.c })),
+            { sizePx: 92, ringPx: 15, gapPx: 2 }
+        );
         const activeSegs = segs.filter((s) => s.v > 0);
-        if (activeSegs.length <= 1) {
-            donutGradient = activeSegs.length === 1 ? activeSegs[0].c : '#e5e7eb';
-        } else {
-            let acc = 0;
-            const parts = [];
-            activeSegs.forEach((s) => {
-                const segDeg = (s.v / bucketTotal) * 360;
-                const start = acc;
-                const end = acc + segDeg;
-                const colorStart = Math.min(end, start + halfSep);
-                const colorEnd = Math.max(start, end - halfSep);
-                const innerStart = Math.min(end, colorStart + featherDeg);
-                const innerEnd = Math.max(start, colorEnd - featherDeg);
-                parts.push(
-                    `#ffffff ${start.toFixed(4)}deg ${colorStart.toFixed(4)}deg`,
-                    `rgba(255,255,255,0.35) ${colorStart.toFixed(4)}deg ${innerStart.toFixed(4)}deg`,
-                    `${s.c} ${innerStart.toFixed(4)}deg ${innerEnd.toFixed(4)}deg`,
-                    `rgba(255,255,255,0.35) ${innerEnd.toFixed(4)}deg ${colorEnd.toFixed(4)}deg`,
-                    `#ffffff ${colorEnd.toFixed(4)}deg ${end.toFixed(4)}deg`
-                );
-                acc = end;
-            });
-            donutGradient = `conic-gradient(${parts.join(', ')})`;
-        }
+        donutGradient = activeSegs.length ? activeSegs[0].c : '#e5e7eb';
     } else {
         donutGradient = '#e5e7eb';
     }
@@ -20924,7 +21103,7 @@ function buildOverviewDashboardCardHtml(data) {
                         )).join('')}
                     </ul>
                         <div class="overview-donut-wrap">
-                            <div class="overview-donut" style="background:${donutGradient}"></div>
+                            ${donutVisualHtml || `<div class="overview-donut" style="background:${donutGradient}"></div>`}
                         <div class="overview-donut-center">
                             <div class="overview-donut-total">${totalInfractions}</div>
                             <div class="overview-donut-delta ${overviewTrendDeltaClass('infractions', infDelta)}">${trendInf ? escapeHtml(trendInf) : ''}</div>
@@ -21938,12 +22117,13 @@ function attachOverviewCardInteractions(container, data) {
 
     const renderInfractionTypeBreakdown = (type, targetOverride) => {
         const infractionsByType = data.infractions_by_type || {};
-        const entry = infractionsByType[type];
+        const canonicalType = normalizeInfractionType(type);
+        const entry = getCanonicalInfractionDetailEntry(infractionsByType, canonicalType);
         const target = targetOverride;
         if (!target) return;
 
         if (!entry) {
-            target.innerHTML = `<p style="color:var(--text-secondary);font-size:0.85rem;">No detailed data for ${escapeHtml(type)}.</p>`;
+            target.innerHTML = `<p style="color:var(--text-secondary);font-size:0.85rem;">No detailed data for ${escapeHtml(canonicalType || type)}.</p>`;
             return;
         }
 
@@ -22014,7 +22194,7 @@ function attachOverviewCardInteractions(container, data) {
             <div class="infractions-drilldown-panels">
                 <div class="infractions-drill-tab-panel is-active" data-drill-tab-panel="overview">
                     <div class="infractions-details-section-header">
-                        <h4 style="margin:0;">${escapeHtml(type)} — When It Occurs</h4>
+                        <h4 style="margin:0;">${escapeHtml(canonicalType || type)} — When It Occurs</h4>
                         ${detailsTitleHintBlock}
                     </div>
                     ${detailsFirstTimeText}
@@ -23337,7 +23517,8 @@ function attachOverviewCardInteractions(container, data) {
                     card.className = 'dashboard-card infractions-card overview-extra-card';
                     card.dataset.overviewCard = 'infractions_card';
 
-                    const infractions = data.infractions || data.additional_info?.infractions || {};
+                    const rawInfractions = data.infractions || data.additional_info?.infractions || {};
+                    const infractions = canonicalizeInfractionCounts(rawInfractions);
                     const infractionKeys = Object.keys(infractions).filter(k => infractions[k] > 0);
 
                     const OVERVIEW_HINT_KEY = 'infractions_overview_click_hint_seen';
@@ -23364,32 +23545,43 @@ function attachOverviewCardInteractions(container, data) {
                                     </tr>
                                 </thead>
                                 <tbody>`;
-                        infractionKeys.sort((a, b) => infractions[b] - infractions[a]).forEach(k => {
+                        infractionKeys.sort((a, b) => (Number(infractions[b]) || 0) - (Number(infractions[a]) || 0)).forEach(k => {
                             overviewTableContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
                                 <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
-                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${infractions[k]}</span></td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${Number(infractions[k]) || 0}</span></td>
                             </tr>`;
                         });
                         overviewTableContent += `</tbody></table>`;
 
                         const categoryOrder = ['Social', 'Task', 'Attention', 'Safety'];
                         const categoryColors = {
-                            Social: ['#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd'],
-                            Safety: ['#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5'],
-                            Task: ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd'],
-                            Attention: ['#047857', '#059669', '#10b981', '#34d399', '#6ee7b7']
+                            // High-contrast ordering (dark <-> light alternation) using the same family colors.
+                            Social: ['#9333ea', '#c084fc', '#e9d5ff', '#b794f9', '#a855f7', '#ddd6fe'],
+                            Task: ['#1c4cd8', '#a0c8fc', '#2460e8', '#74b0f8', '#3870ec', '#60a4f8'],
+                            Attention: ['#047854', '#80cc9c', '#049468', '#60c084', '#34d098', '#50d8a8'],
+                            Safety: ['#b81c1c', '#f8a0a0', '#dc2424', '#f87070', '#c03434', '#e46060']
                         };
                         const bucketTotals = bucketInfractionsOverview(infractions);
                         const bucketPctDeltas = data.overview_trends?.infractions_bucket_pct_deltas || {};
-                        const typeDeltas = data.overview_trends?.infractions_type_deltas || {};
+                        const bucketPctPrevious = data.overview_trends?.infractions_bucket_pct_previous || {};
+                        const rawTypeDeltas = data.overview_trends?.infractions_type_deltas || {};
+                        const typeDeltas = canonicalizeInfractionTypeDeltas(rawTypeDeltas);
                         const overallTotal = Object.values(bucketTotals).reduce((sum, val) => sum + (Number(val) || 0), 0);
                         const groupedTypes = { Social: [], Safety: [], Task: [], Attention: [] };
+                        const hasPreviousBucketValue = (category) => {
+                            if (Object.prototype.hasOwnProperty.call(bucketPctPrevious, category)) return true;
+                            const lower = String(category || '').toLowerCase();
+                            return Object.keys(bucketPctPrevious).some((key) => String(key || '').toLowerCase() === lower);
+                        };
+                        const hasTypeDeltaValue = (type) => Object.keys(rawTypeDeltas)
+                            .some((key) => normalizeInfractionType(key) === type);
                         infractionKeys.forEach((type) => {
                             const bucket = classifyInfractionBucket(type);
                             groupedTypes[bucket].push({
                                 type,
                                 count: Number(infractions[type]) || 0,
-                                delta: Number(typeDeltas[type] ?? 0)
+                                delta: Number(typeDeltas[type] ?? 0),
+                                hasDelta: hasTypeDeltaValue(type)
                             });
                         });
                         Object.values(groupedTypes).forEach((arr) => arr.sort((a, b) => b.count - a.count));
@@ -23402,74 +23594,70 @@ function attachOverviewCardInteractions(container, data) {
                             </div>
                             <div class="infractions-graph-category-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 16px;margin-top:2px;">
                         `;
-                        categoryOrder.forEach((category) => {
+                        const categoriesToRender = categoryOrder.filter((category) => (Number(bucketTotals[category]) || 0) > 0);
+                        categoriesToRender.forEach((category) => {
                             const bucketCount = Number(bucketTotals[category]) || 0;
                             const bucketPct = overallTotal > 0 ? Math.round((bucketCount / overallTotal) * 100) : 0;
                             const bucketDelta = Number(bucketPctDeltas[category] ?? 0);
                             const bucketDeltaClass = bucketDelta > 0 ? 'is-neg' : bucketDelta < 0 ? 'is-pos' : 'is-muted';
+                            const showBucketDelta = hasPreviousBucketValue(category);
                             const rows = groupedTypes[category] || [];
                             const shades = categoryColors[category];
                             let donutBg = '#e5e7eb';
+                            let donutSvg = '';
                             if (bucketCount > 0) {
-                                const donutSizePx = 92;
-                                const separatorDeg = (360 / (Math.PI * donutSizePx)) * 2;
-                                const featherDeg = 0.18;
-                                const halfSep = separatorDeg / 2;
                                 const activeRows = rows.filter((r) => (Number(r.count) || 0) > 0);
-                                if (activeRows.length <= 1) {
-                                    donutBg = activeRows.length === 1 ? shades[0] : '#e5e7eb';
-                                } else {
-                                    let acc = 0;
-                                    const segs = [];
-                                    activeRows.forEach((row, idx) => {
-                                        const p = (Number(row.count) || 0) / bucketCount * 360;
-                                        if (p <= 0) return;
-                                        const start = acc;
-                                        const end = acc + p;
-                                        const colorStart = Math.min(end, start + halfSep);
-                                        const colorEnd = Math.max(start, end - halfSep);
-                                        const innerStart = Math.min(end, colorStart + featherDeg);
-                                        const innerEnd = Math.max(start, colorEnd - featherDeg);
-                                        const color = shades[idx % shades.length];
-                                        segs.push(
-                                            `#ffffff ${start.toFixed(4)}deg ${colorStart.toFixed(4)}deg`,
-                                            `rgba(255,255,255,0.35) ${colorStart.toFixed(4)}deg ${innerStart.toFixed(4)}deg`,
-                                            `${color} ${innerStart.toFixed(4)}deg ${innerEnd.toFixed(4)}deg`,
-                                            `rgba(255,255,255,0.35) ${innerEnd.toFixed(4)}deg ${colorEnd.toFixed(4)}deg`,
-                                            `#ffffff ${colorEnd.toFixed(4)}deg ${end.toFixed(4)}deg`
-                                        );
-                                        acc = end;
-                                    });
-                                    donutBg = segs.length ? `conic-gradient(${segs.join(', ')})` : '#e5e7eb';
-                                }
+                                donutSvg = buildSegmentedDonutSvg(
+                                    activeRows.map((row, idx) => ({ value: row.count, color: shades[idx % shades.length] })),
+                                    { sizePx: 110, ringPx: 18, gapPx: 2 }
+                                );
+                                donutBg = activeRows.length ? shades[0] : '#e5e7eb';
                             }
+                            const useDaysPresentLegendLayout = rows.length > 1;
                             const listHtml = rows.map((row, idx) => {
                                 const deltaClass = row.delta > 0 ? 'is-neg' : row.delta < 0 ? 'is-pos' : 'is-muted';
+                                const deltaLegendClass = row.delta > 0 ? 'delta-negative' : row.delta < 0 ? 'delta-positive' : 'delta-neutral';
                                 const deltaText = row.delta > 0 ? `+${row.delta}` : `${row.delta}`;
+                                if (useDaysPresentLegendLayout) {
+                                    return `
+                                        <button type="button" class="dashboard-breakdown-item infractions-graph-item days-present-legend-item" data-infraction-type="${escapeHtml(row.type)}" style="display:block;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+                                            <div class="days-present-legend-label">
+                                                <span class="days-present-legend-dot" style="background:${shades[idx % shades.length]};"></span>
+                                                <span>${escapeHtml(row.type)}</span>
+                                            </div>
+                                            <div class="days-present-legend-value infractions-legend-value-inline">
+                                                <span class="infractions-legend-count">${row.count}</span>
+                                                ${row.hasDelta ? `<span class="days-present-legend-delta ${deltaLegendClass}">${deltaText}</span>` : ''}
+                                            </div>
+                                        </button>`;
+                                }
                                 return `
                                     <button type="button" class="dashboard-breakdown-item infractions-graph-item" data-infraction-type="${escapeHtml(row.type)}" style="display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:6px;align-items:start;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
                                         <span style="width:8px;height:8px;border-radius:50%;background:${shades[idx % shades.length]};display:inline-block;margin-top:4px;"></span>
                                         <span class="dashboard-breakdown-name" style="font-size:0.8rem;color:var(--text-primary);line-height:1.15;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.type)}</span>
-                                        <span style="font-size:0.8rem;white-space:nowrap;line-height:1.1;">
+                                        <span class="infractions-legend-value-inline" style="font-size:0.8rem;line-height:1.1;">
                                             <span class="dashboard-breakdown-value">${row.count}</span>
-                                            <span class="overview-gauge-small ${deltaClass}" style="margin-left:4px;font-size:0.8rem;">${deltaText}</span>
+                                            ${row.hasDelta ? `<span class="overview-gauge-small ${deltaClass}" style="margin-left:4px;font-size:0.8rem;">${deltaText}</span>` : ''}
                                         </span>
                                     </button>`;
                             }).join('');
-                            const listColumns = 1;
+                            const listClassName = useDaysPresentLegendLayout ? 'days-present-legend' : 'infractions-graph-category-list';
+                            const listStyle = useDaysPresentLegendLayout
+                                ? 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px;row-gap:10px;width:fit-content;margin:0 auto;'
+                                : 'display:grid;grid-template-columns:repeat(1, minmax(0,1fr));column-gap:12px;row-gap:6px;';
                             overviewGraphContent += `
                                 <div class="infractions-graph-category-card" style="padding:0 2px;">
                                     <h4 style="margin:0 0 8px 0;font-size:1rem;font-weight:700;text-align:center;line-height:1.1;">${escapeHtml(category)}</h4>
                                     <div style="display:flex;justify-content:center;margin-bottom:10px;">
                                         <div class="overview-donut-wrap infractions-graph-donut-wrap">
-                                            <div class="overview-donut" style="background:${donutBg};"></div>
+                                            ${donutSvg || `<div class="overview-donut" style="background:${donutBg};"></div>`}
                                             <div class="overview-donut-center">
                                                 <div class="overview-donut-total infractions-graph-donut-total">${bucketPct}%</div>
-                                                <div class="overview-donut-delta overview-gauge-small ${bucketDeltaClass} infractions-graph-donut-delta">${bucketDelta > 0 ? '+' : ''}${bucketDelta.toFixed(1)}%</div>
+                                                ${showBucketDelta ? `<div class="overview-donut-delta overview-gauge-small ${bucketDeltaClass} infractions-graph-donut-delta">${bucketDelta > 0 ? '+' : ''}${bucketDelta.toFixed(1)}%</div>` : ''}
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="infractions-graph-category-list" style="display:grid;grid-template-columns:repeat(${listColumns}, minmax(0,1fr));column-gap:12px;row-gap:6px;">
+                                    <div class="${listClassName}" style="${listStyle}">
                                         ${listHtml || `<p style="font-size:0.82rem;color:var(--text-secondary);margin:0;">No data</p>`}
                                     </div>
                                 </div>`;

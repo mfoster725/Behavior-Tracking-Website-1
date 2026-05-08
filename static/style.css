@@ -4981,6 +4981,12 @@ a.dashboard-compare-toggle {
     color: #64748b;
 }
 
+:root {
+    --delta-trend-pos: #0f766e;
+    --delta-trend-neg: #be123c;
+    --delta-trend-neutral: #64748b;
+}
+
 .overview-mini-metrics {
     display: flex;
     flex-wrap: wrap;
@@ -5434,6 +5440,12 @@ a.dashboard-compare-toggle {
     -webkit-mask: radial-gradient(farthest-side, transparent calc(50% - 14px), #fff calc(50% - 13px));
 }
 
+.overview-donut-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
 .overview-donut-center {
     position: absolute;
     inset: 0;
@@ -5735,19 +5747,14 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-donut {
-    mask: none;
-    -webkit-mask: none;
+    mask: radial-gradient(farthest-side, transparent calc(100% - 15px), #000 calc(100% - 15px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 15px), #000 calc(100% - 15px));
     overflow: hidden;
 }
 
 /* Force a solid center so no inner gradient shows through. */
 .overview-card--rich .overview-donut-wrap::after {
-    content: '';
-    position: absolute;
-    inset: 15px;
-    border-radius: 50%;
-    background: #ffffff;
-    z-index: 1;
+    display: none;
 }
 
 .overview-card--rich .overview-donut-wrap .overview-donut-center {
@@ -8011,24 +8018,19 @@ tr[data-aggregate-day-label] {
 
 /* Graph-mode category donuts: mirror overview-card donut styling. */
 .infractions-card .infractions-graph-donut-wrap {
-    width: 92px;
-    height: 92px;
+    width: 110px;
+    height: 110px;
     position: relative;
 }
 
 .infractions-card .infractions-graph-donut-wrap .overview-donut {
-    mask: none;
-    -webkit-mask: none;
+    mask: radial-gradient(farthest-side, transparent calc(100% - 15px), #000 calc(100% - 15px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 15px), #000 calc(100% - 15px));
     overflow: hidden;
 }
 
 .infractions-card .infractions-graph-donut-wrap::after {
-    content: '';
-    position: absolute;
-    inset: 15px;
-    border-radius: 50%;
-    background: #ffffff;
-    z-index: 1;
+    display: none;
 }
 
 .infractions-card .infractions-graph-donut-wrap .overview-donut-center {
@@ -8046,6 +8048,41 @@ tr[data-aggregate-day-label] {
     font-size: 0.78rem;
     line-height: 1.1;
     font-weight: 600;
+}
+
+/* Infractions card only: soften multi-item legend typography */
+.infractions-card .days-present-legend-label {
+    font-size: 0.78rem;
+    font-weight: 400;
+    align-items: flex-start;
+    font-family: inherit;
+}
+
+.infractions-card .days-present-legend-value {
+    font-size: 0.73rem;
+    font-weight: 400;
+    font-family: inherit;
+}
+
+.infractions-card .infractions-legend-value-inline {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.infractions-card .days-present-legend-value.infractions-legend-value-inline {
+    display: flex;
+    align-items: baseline;
+}
+
+.infractions-card .days-present-legend-dot {
+    margin-top: 2px;
+}
+
+.infractions-card .infractions-graph-category-card,
+.infractions-card .infractions-graph-category-card * {
+    font-family: inherit;
 }
 
 /* Infractions category ring graphs (Type tab) */
@@ -8182,15 +8219,15 @@ tr[data-aggregate-day-label] {
 }
 
 .infractions-ring-center-delta.delta-positive {
-    color: #16A34A; /* green */
+    color: var(--delta-trend-pos);
 }
 
 .infractions-ring-center-delta.delta-negative {
-    color: #DC2626; /* red */
+    color: var(--delta-trend-neg);
 }
 
 .infractions-ring-center-delta.delta-neutral {
-    color: #6B7280; /* muted gray */
+    color: var(--delta-trend-neutral);
 }
 
 .infractions-ring-center-label {
@@ -8346,15 +8383,15 @@ tr[data-aggregate-day-label] {
     max-width: 100%;
 }
 
-/* Color legend deltas (reuse dashboard delta colors) */
+/* Color legend deltas (match Reports overview Trends card palette) */
 .delta-positive {
-    color: #16A34A; /* green */
+    color: var(--delta-trend-pos);
 }
 .delta-negative {
-    color: #DC2626; /* red */
+    color: var(--delta-trend-neg);
 }
 .delta-neutral {
-    color: #6B7280; /* muted gray */
+    color: var(--delta-trend-neutral);
 }
 
 .infractions-ring-legend-empty {
@@ -8513,15 +8550,15 @@ tr[data-aggregate-day-label] {
 }
 
 .overview-infractions-legend-value.delta-positive {
-    color: #16A34A; /* green for decreased share of infractions */
+    color: var(--delta-trend-pos);
 }
 
 .overview-infractions-legend-value.delta-negative {
-    color: #DC2626; /* red for increased share of infractions */
+    color: var(--delta-trend-neg);
 }
 
 .overview-infractions-legend-value.delta-neutral {
-    color: #6B7280; /* muted gray for no change / no prior data */
+    color: var(--delta-trend-neutral);
 }
 
 /* Attendance doughnut in Overview card (Days Present box) */
@@ -8560,15 +8597,15 @@ tr[data-aggregate-day-label] {
 }
 
 .overview-attendance-ring-delta.delta-positive {
-    color: #16A34A;
+    color: var(--delta-trend-pos);
 }
 
 .overview-attendance-ring-delta.delta-negative {
-    color: #DC2626;
+    color: var(--delta-trend-neg);
 }
 
 .overview-attendance-ring-delta.delta-neutral {
-    color: #6B7280;
+    color: var(--delta-trend-neutral);
 }
 
 /* Overview Trends card – small card in header, top-right inline with Overview title */
@@ -8842,15 +8879,15 @@ tr[data-aggregate-day-label] {
 }
 
 .overview-infractions-ring-delta.delta-positive {
-    color: #16A34A;
+    color: var(--delta-trend-pos);
 }
 
 .overview-infractions-ring-delta.delta-negative {
-    color: #DC2626;
+    color: var(--delta-trend-neg);
 }
 
 .overview-infractions-ring-delta.delta-neutral {
-    color: #6B7280;
+    color: var(--delta-trend-neutral);
 }
 
 .overview-infractions-empty {
@@ -9290,11 +9327,11 @@ tr[data-aggregate-day-label] {
 }
 
 .days-present-donut-center-delta.delta-positive {
-    color: #047857;
+    color: var(--delta-trend-pos);
 }
 
 .days-present-donut-center-delta.delta-negative {
-    color: #b91c1c;
+    color: var(--delta-trend-neg);
 }
 
 .days-present-donut-center-day {
@@ -9356,15 +9393,15 @@ tr[data-aggregate-day-label] {
 }
 
 .days-present-legend-delta.delta-positive {
-    color: #047857;
+    color: var(--delta-trend-pos);
 }
 
 .days-present-legend-delta.delta-negative {
-    color: #b91c1c;
+    color: var(--delta-trend-neg);
 }
 
 .days-present-legend-delta.delta-neutral {
-    color: var(--text-secondary);
+    color: var(--delta-trend-neutral);
 }
 
 @media (max-width: 980px) {
@@ -9617,15 +9654,15 @@ tr[data-aggregate-day-label] {
 }
 
 .dashboard-stat-delta.delta-positive {
-    color: #16A34A; /* green */
+    color: var(--delta-trend-pos);
 }
 
 .dashboard-stat-delta.delta-negative {
-    color: #DC2626; /* red */
+    color: var(--delta-trend-neg);
 }
 
 .dashboard-stat-delta.delta-neutral {
-    color: #6B7280; /* muted gray */
+    color: var(--delta-trend-neutral);
 }
 
 /* Chart.js HTML legend (doughnut charts): allow multi-column layout for dense legends */
