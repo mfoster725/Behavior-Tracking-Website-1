@@ -144,6 +144,12 @@ function getCanonicalInfractionDetailEntry(infractionsByType = {}, type) {
     return hasAnyData ? aggregated : null;
 }
 
+function formatInfractionLegendLabel(label) {
+    const words = String(label || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return escapeHtml(String(label || ''));
+    return words.map((word) => escapeHtml(word)).join('<br>');
+}
+
 const UNIFIED_CHART_TOOLTIP_STYLE = Object.freeze({
     backgroundColor: '#ffffff',
     borderColor: '#cbd5e1',
@@ -23557,15 +23563,43 @@ function attachOverviewCardInteractions(container, data) {
                         const categoryColors = {
                             // High-contrast ordering (dark <-> light alternation) using the same family colors.
                             Social: ['#9333ea', '#c084fc', '#e9d5ff', '#b794f9', '#a855f7', '#ddd6fe'],
-                            Task: ['#1c4cd8', '#a0c8fc', '#2460e8', '#74b0f8', '#3870ec', '#60a4f8'],
-                            Attention: ['#047854', '#80cc9c', '#049468', '#60c084', '#34d098', '#50d8a8'],
-                            Safety: ['#b81c1c', '#f8a0a0', '#dc2424', '#f87070', '#c03434', '#e46060']
+                            Task: ['#2563eb', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe', '#eff6ff'],
+                            Attention: ['#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4'],
+                            Safety: ['#dc2626', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2']
                         };
                         const bucketTotals = bucketInfractionsOverview(infractions);
                         const bucketPctDeltas = data.overview_trends?.infractions_bucket_pct_deltas || {};
                         const bucketPctPrevious = data.overview_trends?.infractions_bucket_pct_previous || {};
                         const rawTypeDeltas = data.overview_trends?.infractions_type_deltas || {};
-                        const typeDeltas = canonicalizeInfractionTypeDeltas(rawTypeDeltas);
+                        const parseDeltaValue = (value) => {
+                            if (value == null) return null;
+                            if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+                            if (typeof value === 'string') {
+                                const parsed = Number(value);
+                                return Number.isFinite(parsed) ? parsed : null;
+                            }
+                            if (typeof value === 'object') {
+                                if (Object.prototype.hasOwnProperty.call(value, 'delta')) {
+                                    const parsed = Number(value.delta);
+                                    return Number.isFinite(parsed) ? parsed : null;
+                                }
+                                if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+                                    const parsed = Number(value.value);
+                                    return Number.isFinite(parsed) ? parsed : null;
+                                }
+                            }
+                            return null;
+                        };
+                        const rawTypeDeltaEntries = Object.entries(rawTypeDeltas);
+                        const getTypeDelta = (type) => {
+                            const canonicalType = normalizeInfractionType(type).toLowerCase();
+                            for (const [rawKey, rawValue] of rawTypeDeltaEntries) {
+                                if (normalizeInfractionType(rawKey).toLowerCase() !== canonicalType) continue;
+                                const parsed = parseDeltaValue(rawValue);
+                                if (parsed != null) return parsed;
+                            }
+                            return null;
+                        };
                         const overallTotal = Object.values(bucketTotals).reduce((sum, val) => sum + (Number(val) || 0), 0);
                         const groupedTypes = { Social: [], Safety: [], Task: [], Attention: [] };
                         const hasPreviousBucketValue = (category) => {
@@ -23573,15 +23607,14 @@ function attachOverviewCardInteractions(container, data) {
                             const lower = String(category || '').toLowerCase();
                             return Object.keys(bucketPctPrevious).some((key) => String(key || '').toLowerCase() === lower);
                         };
-                        const hasTypeDeltaValue = (type) => Object.keys(rawTypeDeltas)
-                            .some((key) => normalizeInfractionType(key) === type);
                         infractionKeys.forEach((type) => {
                             const bucket = classifyInfractionBucket(type);
+                            const deltaValue = getTypeDelta(type);
                             groupedTypes[bucket].push({
                                 type,
                                 count: Number(infractions[type]) || 0,
-                                delta: Number(typeDeltas[type] ?? 0),
-                                hasDelta: hasTypeDeltaValue(type)
+                                delta: deltaValue,
+                                hasDelta: deltaValue != null
                             });
                         });
                         Object.values(groupedTypes).forEach((arr) => arr.sort((a, b) => b.count - a.count));
@@ -23615,15 +23648,15 @@ function attachOverviewCardInteractions(container, data) {
                             }
                             const useDaysPresentLegendLayout = rows.length > 1;
                             const listHtml = rows.map((row, idx) => {
-                                const deltaClass = row.delta > 0 ? 'is-neg' : row.delta < 0 ? 'is-pos' : 'is-muted';
-                                const deltaLegendClass = row.delta > 0 ? 'delta-negative' : row.delta < 0 ? 'delta-positive' : 'delta-neutral';
-                                const deltaText = row.delta > 0 ? `+${row.delta}` : `${row.delta}`;
+                                const deltaClass = row.hasDelta ? (row.delta > 0 ? 'is-neg' : row.delta < 0 ? 'is-pos' : 'is-muted') : 'is-muted';
+                                const deltaLegendClass = row.hasDelta ? (row.delta > 0 ? 'delta-negative' : row.delta < 0 ? 'delta-positive' : 'delta-neutral') : 'delta-neutral';
+                                const deltaText = row.hasDelta ? (row.delta >= 0 ? `+${row.delta}` : `${row.delta}`) : '';
                                 if (useDaysPresentLegendLayout) {
                                     return `
                                         <button type="button" class="dashboard-breakdown-item infractions-graph-item days-present-legend-item" data-infraction-type="${escapeHtml(row.type)}" style="display:block;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
                                             <div class="days-present-legend-label">
                                                 <span class="days-present-legend-dot" style="background:${shades[idx % shades.length]};"></span>
-                                                <span>${escapeHtml(row.type)}</span>
+                                                <span>${formatInfractionLegendLabel(row.type)}</span>
                                             </div>
                                             <div class="days-present-legend-value infractions-legend-value-inline">
                                                 <span class="infractions-legend-count">${row.count}</span>
@@ -23641,9 +23674,12 @@ function attachOverviewCardInteractions(container, data) {
                                         </span>
                                     </button>`;
                             }).join('');
-                            const listClassName = useDaysPresentLegendLayout ? 'days-present-legend' : 'infractions-graph-category-list';
+                            /* Own container class so global `.days-present-legend:has(5+)` never forces 3 cols here */
+                            const listClassName = useDaysPresentLegendLayout
+                                ? `infractions-type-legend${category === 'Task' ? ' infractions-type-legend--task-tight' : ''}`
+                                : 'infractions-graph-category-list';
                             const listStyle = useDaysPresentLegendLayout
-                                ? 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px;row-gap:10px;width:fit-content;margin:0 auto;'
+                                ? 'display:grid;row-gap:10px;width:100%;max-width:100%;margin:0 auto;align-items:start;'
                                 : 'display:grid;grid-template-columns:repeat(1, minmax(0,1fr));column-gap:12px;row-gap:6px;';
                             overviewGraphContent += `
                                 <div class="infractions-graph-category-card" style="padding:0 2px;">

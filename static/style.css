@@ -8056,12 +8056,15 @@ tr[data-aggregate-day-label] {
     font-weight: 400;
     align-items: flex-start;
     font-family: inherit;
+    gap: 5px;
 }
 
 .infractions-card .days-present-legend-value {
     font-size: 0.73rem;
     font-weight: 400;
     font-family: inherit;
+    /* Type-tab legend overrides indent so values line up with label text (see .infractions-type-legend) */
+    margin-left: 0;
 }
 
 .infractions-card .infractions-legend-value-inline {
@@ -8076,8 +8079,88 @@ tr[data-aggregate-day-label] {
     align-items: baseline;
 }
 
+.infractions-card .days-present-legend-item {
+    display: grid;
+    grid-template-rows: auto auto;
+    align-content: start;
+    min-width: 0;
+    max-width: 100%;
+}
+
 .infractions-card .days-present-legend-dot {
     margin-top: 2px;
+}
+
+.infractions-card .days-present-legend-label span {
+    line-height: 1.05;
+}
+
+.infractions-card .infractions-graph-category-card {
+    min-width: 0;
+    overflow: visible;
+}
+
+/* Infractions graph legend: global .dashboard-breakdown-item is a 2-col grid (label | value)
+   meant for table rows; legend buttons need vertical stacking so labels can wrap. */
+.infractions-card .infractions-type-legend .dashboard-breakdown-item.infractions-graph-item {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    padding: 6px 0;
+    border-bottom: none;
+    grid-template-columns: none;
+    column-gap: 0;
+    align-items: stretch;
+}
+
+/* Isolated from `.days-present-legend` so attendance’s :has(5+) → 3 columns never applies
+   inside these narrow quadrant cells (3 cols caused label/value overlap). */
+.infractions-card .infractions-type-legend {
+    --infractions-legend-bullet: 10px;
+    --infractions-legend-label-gap: 5px;
+    --infractions-legend-text-indent: calc(var(--infractions-legend-bullet) + var(--infractions-legend-label-gap));
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 10px;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Count + delta align with the first character of the label, not the bullet column */
+.infractions-card .infractions-type-legend .days-present-legend-value {
+    margin-left: var(--infractions-legend-text-indent);
+    max-width: calc(100% - var(--infractions-legend-text-indent));
+}
+
+/* Task: pull legend columns closer — content-sized columns, centered */
+.infractions-card .infractions-type-legend--task-tight {
+    grid-template-columns: max-content max-content;
+    column-gap: 10px;
+    justify-content: center;
+}
+
+.infractions-card .infractions-type-legend .days-present-legend-label {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.infractions-card .infractions-type-legend .days-present-legend-label > span:last-child {
+    display: block;
+    min-width: 0;
+    flex: 1 1 auto;
+    /* Only explicit <br> from formatInfractionLegendLabel — no soft wrapping */
+    white-space: pre;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+@media (max-width: 560px) {
+    .infractions-card .infractions-type-legend:not(.infractions-type-legend--task-tight) {
+        grid-template-columns: 1fr;
+    }
 }
 
 .infractions-card .infractions-graph-category-card,

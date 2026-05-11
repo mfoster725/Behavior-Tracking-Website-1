@@ -33,7 +33,8 @@ import sys
 import random
 import argparse
 import json
-from datetime import date, timedelta
+import uuid
+from datetime import date, timedelta, datetime
 from decimal import Decimal
 from werkzeug.security import generate_password_hash
 
@@ -61,11 +62,27 @@ STANDARD_PERIODS = [
 ]
 
 INFRACTION_TYPES_GENERAL = [
-    "Lang", "NFD", "Off Task", "MYOB", "Self Control", "Shutdown",
-    "Volume", "Attention Seeking", "Refusal", "Personal Space",
+    "Language",
+    "MYOB",
+    "Disrespectful",
+    "Personal Space",
+    "NFD",
+    "Off Task",
+    "Refusal",
+    "Shutdown",
+    "Volume",
+    "Attention Seeking",
+    "Self Control",
+    "Sexual Reference",
+    "Inappropriate Comment",
 ]
 INFRACTION_TYPES_HARMFUL = [
-    "Walk", "Aggression", "Property Destruction", "Sexual Reference", "Threat", "Disrespectful",
+    "Walk Out",
+    "Elopement",
+    "Property Destruction",
+    "Property Misuse",
+    "Threat",
+    "Aggression",
 ]
 
 FRENZY_PURPOSES = ["Sensory", "Escape", "Attention", "Tangible", "Unknown"]
@@ -113,17 +130,14 @@ def random_star_value(profile: str) -> int:
     return 0
 
 
-def generate_school_days(count=100, end_date=None):
-    """Generate `count` weekdays (Mon–Fri) going backwards from end_date (default: today)."""
-    if end_date is None:
-        end_date = date.today()
+def generate_school_days_between(start_date, end_date):
+    """Generate weekdays (Mon–Fri) in [start_date, end_date]."""
     days = []
-    d = end_date
-    while len(days) < count:
-        if d.weekday() < 5:  # Monday=0 .. Friday=4
+    d = start_date
+    while d <= end_date:
+        if d.weekday() < 5:
             days.append(d)
-        d -= timedelta(days=1)
-    days.reverse()
+        d += timedelta(days=1)
     return days
 
 
@@ -132,6 +146,8 @@ def main():
     parser.add_argument("--db", default=None, help="SQLite path (default: instance/behavior_tracking_test.db)")
     parser.add_argument("--clear", action="store_true", help="Drop and recreate tables before seeding")
     parser.add_argument("--use-main", action="store_true", help="Use main app DB (instance/behavior_tracking.db)")
+    parser.add_argument("--start-date", default="2025-09-05", help="Seed start date YYYY-MM-DD (default: 2025-09-05)")
+    parser.add_argument("--end-date", default=None, help="Seed end date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
 
     root = os.path.dirname(os.path.abspath(__file__))
@@ -161,7 +177,11 @@ def main():
 
         num_students = 40
         num_staff = 40
-        num_days = 100
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").date() if args.end_date else date.today()
+        if start_date > end_date:
+            raise ValueError("start-date must be on or before end-date")
+        seed_tag = datetime.now().strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
 
         # ----- Students -----
         print("Creating", num_students, "students...")
@@ -169,7 +189,7 @@ def main():
         for i in range(1, num_students + 1):
             s = Student(
                 name=f"Test Student {i}",
-                email=f"student{i}@test.example",
+                email=f"student{i}-{seed_tag}@test.example",
                 grade=random.choice(["9", "10", "11", "12"]),
                 card_color=None,  # will be assigned based on performance profile
             )
@@ -237,14 +257,25 @@ def main():
         for i in range(1, num_staff + 1):
             role = "admin" if i == 1 else "staff"
             designation = designation_cycle[(i - 1) % len(designation_cycle)]
-            u = User(
-                name=f"Staff Member {i}",
-                username=f"staff{i}",
-                password_hash=generate_password_hash("test123"),
-                role=role,
-                designation=designation,
-            )
-            db.session.add(u)
+            username = f"staff{i}"
+            # Reuse the same simple username across reseeds (without --clear) so the
+            # printed "staff1..staff40" hint stays accurate and unique-constraint
+            # collisions don't blow up the seed.
+            u = User.query.filter_by(username=username).first()
+            if u is None:
+                u = User(
+                    name=f"Staff Member {i}",
+                    username=username,
+                    password_hash=generate_password_hash("test123"),
+                    role=role,
+                    designation=designation,
+                )
+                db.session.add(u)
+            else:
+                u.name = f"Staff Member {i}"
+                u.password_hash = generate_password_hash("test123")
+                u.role = role
+                u.designation = designation
             staff_users.append(u)
         db.session.flush()
 
@@ -253,7 +284,7 @@ def main():
         for idx, s in enumerate(students, start=1):
             su = User(
                 name=s.name,
-                username=f"student{idx}",
+                username=f"student{idx}-{seed_tag}",
                 password_hash=generate_password_hash("test123"),
                 role="student",
                 student_id=s.id,
@@ -352,13 +383,14 @@ def main():
 
         db.session.flush()
 
-        # ----- 100 school days -----
-        school_days = generate_school_days(num_days)
+        # ----- School days in requested date range -----
+        school_days = generate_school_days_between(start_date, end_date)
         print("Generating", len(school_days), "school days from", school_days[0], "to", school_days[-1])
 
         total_periods_created = 0
         total_infractions = 0
         total_frenzy_events = 0
+        seeded_period_records = []
 
         for day_date in school_days:
             day_of_week = day_date.strftime("%A")
@@ -431,6 +463,7 @@ def main():
                     db.session.add(pr)
                     db.session.flush()
                     total_periods_created += 1
+                    seeded_period_records.append(pr.id)
 
                     # Random infractions (0–2 per period, ~20% of periods)
                     if random.random() < 0.20:
@@ -467,10 +500,36 @@ def main():
                 print("  Committed through", day_date)
 
         db.session.commit()
+
+        # Guarantee every configured infraction appears at least once.
+        all_types = INFRACTION_TYPES_GENERAL + INFRACTION_TYPES_HARMFUL
+        existing_types = {
+            row[0]
+            for row in db.session.query(Infraction.infraction_type)
+            .filter(Infraction.infraction_type.in_(all_types))
+            .distinct()
+            .all()
+        }
+        missing_types = [t for t in all_types if t not in existing_types]
+        if missing_types and seeded_period_records:
+            print(f"Adding guaranteed infractions for missing types: {', '.join(missing_types)}")
+            for idx, inf_type in enumerate(missing_types):
+                pr_id = seeded_period_records[idx % len(seeded_period_records)]
+                is_harmful = inf_type in INFRACTION_TYPES_HARMFUL
+                db.session.add(Infraction(
+                    period_record_id=pr_id,
+                    infraction_type=inf_type,
+                    count=1,
+                    is_general=not is_harmful,
+                    is_harmful=is_harmful,
+                ))
+                total_infractions += 1
+            db.session.commit()
+
         print("Done.")
         print("  Students:", num_students)
         print("  Staff:", num_staff)
-        print("  School days:", num_days)
+        print("  School days:", len(school_days))
         print("  Period records (STAR filled 0–2 per box):", total_periods_created)
         print("  Infractions:", total_infractions)
         print("  Frenzy events (FrenzyEvent):", total_frenzy_events)
