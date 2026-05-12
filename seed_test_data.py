@@ -87,6 +87,12 @@ INFRACTION_TYPES_HARMFUL = [
 
 FRENZY_PURPOSES = ["Sensory", "Escape", "Attention", "Tangible", "Unknown"]
 FRENZY_RESULTS = ["Redirected", "De-escalated", "Room clear", "Recovery", "Unknown"]
+# Roughly matches typical production mix (lower levels more common).
+FRENZY_SEVERITY_WEIGHTS = (35, 21, 12, 5, 2)
+
+
+def random_frenzy_severity():
+    return random.choices(range(1, 6), weights=FRENZY_SEVERITY_WEIGHTS, k=1)[0]
 
 
 def random_star_value(profile: str) -> int:
@@ -491,6 +497,7 @@ def main():
                         purpose2=random.choice(FRENZY_PURPOSES) if random.random() < 0.5 else None,
                         duration_minutes=random.randint(1, 30),
                         result=random.choice(FRENZY_RESULTS),
+                        severity=random_frenzy_severity(),
                     )
                     db.session.add(fe)
                     total_frenzy_events += 1

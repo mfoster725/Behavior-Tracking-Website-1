@@ -5907,15 +5907,347 @@ a.dashboard-compare-toggle {
 
 /* Infractions card: back button, title, (i) icon */
 .infractions-card-header {
-    justify-content: flex-start;
-    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
     overflow: visible;
 }
 .infractions-card-header-left {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    min-width: 0;
 }
+.infractions-overview-header-view-toggle {
+    flex-shrink: 0;
+}
+.infractions-card .infractions-overview-breakdown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin: 2px 0 10px 0;
+}
+.infractions-card .infractions-overview-breakdown-tab {
+    position: relative;
+    background: none;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+}
+.infractions-card .infractions-overview-breakdown-tab:hover {
+    color: var(--text-primary);
+}
+.infractions-card .infractions-overview-breakdown-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+.infractions-card .infractions-breakdown-graph-panel > .infractions-graph-category-grid {
+    margin-top: 2px;
+}
+
+/* Detail-only tab row (no Overview tab): show when at least one infraction drill tab exists */
+.infractions-card .infractions-tabs--detail-only:not([hidden]) {
+    margin-bottom: 10px;
+}
+
+/* Time breakdown: horizontal stacked bars (STAR Performance bar style + reference chart) */
+.infractions-card .infractions-hstar-chart {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 6px;
+}
+.infractions-card .infractions-hstar-body {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 14px;
+    row-gap: 12px;
+    align-items: center;
+}
+.infractions-card .infractions-hstar-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748b;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-align: right;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.infractions-card .infractions-hstar-slot {
+    position: relative;
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+}
+.infractions-card .infractions-hstar-bar-row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+}
+.infractions-card .infractions-hstar-bar {
+    height: 26px;
+    min-width: 4px;
+    max-width: 100%;
+    /* Square on the leading (left) edge; rounded on the trailing edge */
+    border-radius: 0 10px 10px 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    /* Opaque track so 2px gutters and grid lines behind the row never show through */
+    background: var(--bg-surface);
+}
+.infractions-card .infractions-hstar-segments {
+    display: block;
+    position: relative;
+    height: 100%;
+    width: 100%;
+    background: var(--bg-surface);
+    pointer-events: auto;
+}
+/* Single gradient layer + transparent hit zones (avoids flex subpixel gap mismatch). */
+.infractions-card .infractions-hstar-barsheet {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+}
+.infractions-card .infractions-hstar-barsheet--interactive {
+    pointer-events: auto;
+    cursor: default;
+}
+.infractions-card .infractions-hstar-seg-hit {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    box-sizing: border-box;
+    cursor: default;
+    pointer-events: auto;
+    background: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+}
+.infractions-card .infractions-hstar-count {
+    font-size: 12px;
+    font-weight: 400;
+    color: #64748b;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.infractions-card .infractions-hstar-x-spacer {
+    min-height: 1px;
+}
+.infractions-card .infractions-hstar-x-axis {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 6px;
+    margin-top: 2px;
+    border-top: 1px solid rgba(100, 116, 139, 0.35);
+    font-size: 11px;
+    font-weight: 400;
+    color: #64748b;
+}
+
+/* Day breakdown: vertical stacked bars (STAR-style rounded tops) */
+.infractions-card .infractions-vbar-chart-wrap {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 6px;
+}
+.infractions-card .infractions-vbar-chart {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 200px;
+    padding: 12px 10px 10px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    border: 1px solid rgba(100, 116, 139, 0.25);
+}
+.infractions-card .infractions-vbar-col {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+    max-width: 56px;
+}
+.infractions-card .infractions-vbar-count {
+    font-size: 12px;
+    font-weight: 400;
+    color: #64748b;
+    margin-bottom: 6px;
+    min-height: 1.2em;
+    white-space: nowrap;
+}
+.infractions-card .infractions-vbar-stack {
+    display: block;
+    position: relative;
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 53px;
+    min-height: 160px;
+    /* Rounded on top only; bottom sits flush (square) on the baseline */
+    border-radius: 10px 10px 0 0;
+    overflow: hidden;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    background: var(--bg-elevated);
+    pointer-events: auto;
+}
+.infractions-card .infractions-vbar-barsheet {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+}
+.infractions-card .infractions-vbar-barsheet--interactive {
+    pointer-events: auto;
+    cursor: default;
+}
+.infractions-card .infractions-vbar-seg-hit {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    box-sizing: border-box;
+    z-index: 1;
+    cursor: default;
+    pointer-events: auto;
+    background: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+}
+.infractions-card .infractions-vbar-label {
+    margin-top: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748b;
+    text-align: center;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.infractions-card .infractions-bar-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin-top: 0;
+    margin-bottom: 14px;
+    font-size: 12px;
+    font-weight: 400;
+    color: #64748b;
+}
+.infractions-card .infractions-bar-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    cursor: default;
+}
+
+/* Infractions chart hover (JS: wireInfractionsChartHoverTips reads data-ictip) */
+#infractions-chart-hover-tip.infractions-chart-hover-tip {
+    position: fixed;
+    z-index: 10050;
+    max-width: min(380px, calc(100vw - 20px));
+    padding: 9px 11px;
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 400;
+    color: #0f172a;
+    background: #ffffff;
+    border: 1px solid rgba(100, 116, 139, 0.4);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(15, 23, 42, 0.14);
+    pointer-events: none;
+    display: none;
+    box-sizing: border-box;
+}
+.infractions-card .infractions-bar-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+.infractions-card .infractions-bar-legend-swatch--round {
+    border-radius: 50%;
+}
+.infractions-card .infractions-bar-legend-swatch--tip {
+    cursor: help;
+}
+
+/* =========================================================================
+   BEGIN: Infractions Time/Day chart compact UI
+   REVERT: (1) In static/app.js set INFRACTIONS_CHART_COMPACT_UI = false (search that symbol).
+           (2) Delete this whole block through "END: Infractions Time/Day chart compact UI".
+   ========================================================================= */
+.infractions-card.infractions-chart-ui-compact .infractions-bar-legend {
+    display: none !important;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-hstar-chart,
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-chart-wrap {
+    margin-top: 2px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-hstar-body {
+    row-gap: 7px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-hstar-slot {
+    min-height: 24px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-hstar-bar {
+    height: 20px;
+    border-radius: 0 7px 7px 0;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-chart {
+    gap: 4px;
+    min-height: 176px;
+    padding: 10px 6px 8px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-col {
+    max-width: 44px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-stack {
+    max-width: 40px;
+    min-height: 140px;
+    border-radius: 7px 7px 0 0;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-count {
+    margin-bottom: 4px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-vbar-label {
+    margin-top: 5px;
+}
+/* END: Infractions Time/Day chart compact UI */
+
 .infractions-back-btn {
     display: inline-flex;
     align-items: center;
@@ -8021,6 +8353,10 @@ tr[data-aggregate-day-label] {
     width: 110px;
     height: 110px;
     position: relative;
+}
+
+.infractions-card .infractions-graph-donut-wrap .overview-donut-svg {
+    pointer-events: auto;
 }
 
 .infractions-card .infractions-graph-donut-wrap .overview-donut {

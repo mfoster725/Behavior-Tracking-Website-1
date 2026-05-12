@@ -18170,6 +18170,296 @@ const STAR_CHART_BAR_COLORS = [
     '#ffcc00'  // relationships
 ];
 
+/** Rounded-axis ceiling for small bar charts (matches Chart.js-style “nice” ticks). */
+function niceCeilingAxisMax(maxValue) {
+    const v = Math.max(0, Number(maxValue) || 0);
+    if (v <= 0) return 1;
+    const exp = Math.floor(Math.log10(v));
+    const f = v / 10 ** exp;
+    const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+    return nf * 10 ** exp;
+}
+
+function infractionBarSegmentTitle(cat, infCount, rowInfTotal, contextPhrase) {
+    const pctInfHere = rowInfTotal > 0 ? Math.round((infCount / rowInfTotal) * 1000) / 10 : 0;
+    const ctx = contextPhrase || 'in this view';
+    return `${cat}: ${infCount} infractions (${pctInfHere}% of infractions ${ctx})`;
+}
+
+function escapeTitleAttr(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+}
+
+/** Tooltip for a donut slice in the infractions Type tab. */
+function infractionDonutSliceTitle(typeLabel, infCount, bucketCount, categoryName) {
+    const pctInf = bucketCount > 0 ? Math.round((infCount / bucketCount) * 1000) / 10 : 0;
+    return `${typeLabel}: ${infCount} infractions (${pctInf}% of ${categoryName} infractions)`;
+}
+
+/** Tooltip for bar-chart legend swatches (per category, whole period). */
+function infractionCategoryLegendTitle(cat, infBucketCount, totalInfractions) {
+    const pctI = totalInfractions > 0 ? Math.round((infBucketCount / totalInfractions) * 1000) / 10 : 0;
+    return `${cat}: ${infBucketCount} infractions (${pctI}% of all infractions)`;
+}
+
+/** Encode tooltip copy for a `data-ictip` attribute (HTML / inline SVG). */
+function encodeInfractionsChartTipDataAttr(text) {
+    try {
+        return encodeURIComponent(String(text || ''));
+    } catch {
+        return '';
+    }
+}
+
+function decodeInfractionsChartTipDataAttr(raw) {
+    if (raw == null || raw === '') return '';
+    try {
+        return decodeURIComponent(String(raw));
+    } catch {
+        return '';
+    }
+}
+
+const INFRACTION_BAR_GAP_PX = 2;
+
+function buildInfractionBarTracksheetGradient(orientation, gradientEntries, rowTotal, gapPx, gapCss) {
+    const k = gradientEntries.length;
+    if (!k || !rowTotal) return 'none';
+    const g = (k - 1) * gapPx;
+    const parts = [];
+    let sumBefore = 0;
+    for (let i = 0; i < k; i += 1) {
+        const { n, color } = gradientEntries[i];
+        const sumAfter = sumBefore + n;
+        const start = `calc((100% - ${g}px) * ${sumBefore} / ${rowTotal} + ${i * gapPx}px)`;
+        const end = `calc((100% - ${g}px) * ${sumAfter} / ${rowTotal} + ${i * gapPx}px)`;
+        parts.push(`${color} ${start}, ${color} ${end}`);
+        if (i < k - 1) {
+            const gapEnd = `calc((100% - ${g}px) * ${sumAfter} / ${rowTotal} + ${(i + 1) * gapPx}px)`;
+            parts.push(`${gapCss} ${end}, ${gapCss} ${gapEnd}`);
+        }
+        sumBefore = sumAfter;
+    }
+    const dir = orientation === 'v' ? 'to top' : 'to right';
+    return `linear-gradient(${dir}, ${parts.join(', ')})`;
+}
+
+function syncInfractionBarSegmentContainer(seg) {
+    if (!seg || !seg.dataset) return;
+    const orient = seg.dataset.infractionBar;
+    if (orient !== 'h' && orient !== 'v') return;
+    const rowTotal = Number(seg.dataset.ibT) || 0;
+    const nsRaw = seg.dataset.ibNs || '';
+    const csRaw = seg.dataset.ibCs || '';
+    const counts = nsRaw.split(',').map((x) => Number(x) || 0);
+    const colors = csRaw.split(',').map((x) => {
+        try {
+            return decodeURIComponent(String(x || ''));
+        } catch {
+            return '';
+        }
+    });
+    if (!counts.length || counts.length !== colors.length || !rowTotal) return;
+    const gradientEntries = counts.map((n, i) => ({ n, color: colors[i] || '#94a3b8' }));
+    const gapCss = orient === 'v' ? 'var(--bg-elevated)' : 'var(--bg-surface)';
+    const gradient = buildInfractionBarTracksheetGradient(orient, gradientEntries, rowTotal, INFRACTION_BAR_GAP_PX, gapCss);
+    const layersSel = orient === 'h' ? '.infractions-hstar-barsheet--layers' : '.infractions-vbar-barsheet--layers';
+    const layers = seg.querySelector(layersSel);
+    if (layers) {
+        layers.style.backgroundImage = gradient;
+    }
+    const hitSel = orient === 'h' ? '.infractions-hstar-seg-hit' : '.infractions-vbar-seg-hit';
+    const hits = seg.querySelectorAll(hitSel);
+    const g = (counts.length - 1) * INFRACTION_BAR_GAP_PX;
+    let sumBefore = 0;
+    hits.forEach((hit, i) => {
+        const n = counts[i] || 0;
+        if (orient === 'h') {
+            hit.style.left = `calc((100% - ${g}px) * ${sumBefore} / ${rowTotal} + ${i * INFRACTION_BAR_GAP_PX}px)`;
+            hit.style.width = `calc((100% - ${g}px) * ${n} / ${rowTotal})`;
+            hit.style.top = '0';
+            hit.style.bottom = '0';
+        } else {
+            hit.style.bottom = `calc((100% - ${g}px) * ${sumBefore} / ${rowTotal} + ${i * INFRACTION_BAR_GAP_PX}px)`;
+            hit.style.height = `calc((100% - ${g}px) * ${n} / ${rowTotal})`;
+            hit.style.left = '0';
+            hit.style.right = '0';
+            hit.style.width = '100%';
+        }
+        sumBefore += n;
+    });
+}
+
+function attachInfractionBarPixelLayout(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    root.querySelectorAll('[data-infraction-bar]').forEach(syncInfractionBarSegmentContainer);
+}
+
+function scheduleInfractionBarPixelLayout(root) {
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => attachInfractionBarPixelLayout(root));
+    } else {
+        attachInfractionBarPixelLayout(root);
+    }
+}
+
+/**
+ * Show a fixed-position tooltip on hover for elements carrying `data-ictip` (URL-encoded text).
+ * Native `title` is often invisible on thin SVG strokes and very narrow flex segments.
+ */
+function wireInfractionsChartHoverTips(hostEl) {
+    if (!hostEl || hostEl.nodeType !== 1 || typeof hostEl.addEventListener !== 'function') return;
+    if (hostEl._infractionsChartTipsWired) return;
+    hostEl._infractionsChartTipsWired = true;
+
+    /** Wait before showing; require pointer to still be on the target (reduces accidental popups). */
+    const HOVER_INTENT_MS = 420;
+
+    const getTipEl = () => {
+        let el = document.getElementById('infractions-chart-hover-tip');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'infractions-chart-hover-tip';
+            el.className = 'infractions-chart-hover-tip';
+            el.setAttribute('role', 'tooltip');
+            el.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(el);
+        }
+        return el;
+    };
+
+    const hideTip = () => {
+        const tip = document.getElementById('infractions-chart-hover-tip');
+        if (tip) {
+            tip.style.display = 'none';
+            tip.textContent = '';
+            tip.setAttribute('aria-hidden', 'true');
+        }
+    };
+
+    const positionTip = (tip, clientX, clientY) => {
+        tip.style.display = 'block';
+        tip.style.position = 'fixed';
+        tip.style.left = '0px';
+        tip.style.top = '0px';
+        const margin = 14;
+        const offset = 12;
+        let left = clientX + offset;
+        let top = clientY + margin;
+        const rect = tip.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (left + rect.width > vw - 8) left = Math.max(8, vw - rect.width - 8);
+        if (top + rect.height > vh - 8) top = Math.max(8, vh - rect.height - 8);
+        if (left < 8) left = 8;
+        if (top < 8) top = 8;
+        tip.style.left = `${Math.round(left)}px`;
+        tip.style.top = `${Math.round(top)}px`;
+    };
+
+    const showTip = (text, clientX, clientY) => {
+        const tip = getTipEl();
+        tip.textContent = text;
+        tip.setAttribute('aria-hidden', 'false');
+        positionTip(tip, clientX, clientY);
+    };
+
+    const tipTargetFromEvent = (e) => {
+        const raw = e.target;
+        const el = raw && raw.nodeType === 1 ? raw : raw && raw.parentElement;
+        return el && el.closest ? el.closest('[data-ictip]') : null;
+    };
+
+    let lastClientX = 0;
+    let lastClientY = 0;
+    let hoverIntentTimer = null;
+    let pendingTipEl = null;
+    let pendingTipText = '';
+
+    const clearHoverIntent = () => {
+        if (hoverIntentTimer) {
+            clearTimeout(hoverIntentTimer);
+            hoverIntentTimer = null;
+        }
+        pendingTipEl = null;
+        pendingTipText = '';
+    };
+
+    hostEl.addEventListener(
+        'mousemove',
+        (e) => {
+            lastClientX = e.clientX;
+            lastClientY = e.clientY;
+            const tip = document.getElementById('infractions-chart-hover-tip');
+            if (!tip || tip.style.display === 'none') return;
+            const t = tipTargetFromEvent(e);
+            if (!t || !hostEl.contains(t)) {
+                hideTip();
+                return;
+            }
+            positionTip(tip, e.clientX, e.clientY);
+        },
+        { passive: true }
+    );
+
+    hostEl.addEventListener('mouseover', (e) => {
+        lastClientX = e.clientX;
+        lastClientY = e.clientY;
+        const t = tipTargetFromEvent(e);
+        clearHoverIntent();
+        if (!t || !hostEl.contains(t)) {
+            hideTip();
+            return;
+        }
+        const text = decodeInfractionsChartTipDataAttr(t.getAttribute('data-ictip'));
+        if (!text) {
+            hideTip();
+            return;
+        }
+        pendingTipEl = t;
+        pendingTipText = text;
+        if (typeof window._ictipDismissNonce !== 'number') window._ictipDismissNonce = 0;
+        const scheduledNonce = window._ictipDismissNonce;
+        hoverIntentTimer = setTimeout(() => {
+            hoverIntentTimer = null;
+            if (scheduledNonce !== window._ictipDismissNonce) {
+                clearHoverIntent();
+                return;
+            }
+            if (!pendingTipEl || !pendingTipText) return;
+            if (!pendingTipEl.isConnected) {
+                clearHoverIntent();
+                return;
+            }
+            let probe = document.elementFromPoint(lastClientX, lastClientY);
+            if (probe && probe.nodeType !== 1) probe = probe.parentElement;
+            if (!probe || !hostEl.contains(probe)) return;
+            if (probe !== pendingTipEl && !pendingTipEl.contains(probe)) return;
+            showTip(pendingTipText, lastClientX, lastClientY);
+            clearHoverIntent();
+        }, HOVER_INTENT_MS);
+    });
+
+    hostEl.addEventListener('mouseleave', () => {
+        clearHoverIntent();
+        hideTip();
+    });
+
+    if (!window._infractionsChartTipGlobalDismiss) {
+        window._infractionsChartTipGlobalDismiss = true;
+        const dismiss = () => {
+            if (typeof window._ictipDismissNonce !== 'number') window._ictipDismissNonce = 0;
+            window._ictipDismissNonce++;
+            hideTip();
+        };
+        window.addEventListener('blur', dismiss);
+        document.addEventListener('scroll', dismiss, true);
+    }
+}
+
 // ---- State ----
 let dashboardState = {
     summary: { studentId: null, studentName: null, staffId: null, staffName: null, period: '30day', compareMode: false, customStart: null, customEnd: null },
@@ -18950,7 +19240,11 @@ function buildSegmentedDonutSvg(segments, options = {}) {
     const circumferencePx = 2 * Math.PI * (sizePx / 2 - ringPx / 2);
 
     const positiveSegments = segments
-        .map((seg) => ({ color: seg?.color, value: Number(seg?.value) || 0 }))
+        .map((seg) => ({
+            color: seg?.color,
+            value: Number(seg?.value) || 0,
+            title: seg?.title
+        }))
         .filter((seg) => seg.value > 0);
     if (!positiveSegments.length) return '';
 
@@ -18996,8 +19290,11 @@ function buildSegmentedDonutSvg(segments, options = {}) {
     positiveSegments.forEach((seg, idx) => {
         const sweepPct = adjustedSweeps[idx];
         const dashOffset = -accPct;
+        const ictipAttr = seg.title
+            ? ` data-ictip="${encodeInfractionsChartTipDataAttr(seg.title)}"`
+            : '';
         paths.push(
-            `<circle cx="${cx}" cy="${cy}" r="${radius.toFixed(4)}" fill="none" stroke="${seg.color}" stroke-width="${strokeWidth.toFixed(4)}" stroke-linecap="butt" pathLength="100" stroke-dasharray="${sweepPct.toFixed(4)} ${(100 - sweepPct).toFixed(4)}" stroke-dashoffset="${dashOffset.toFixed(4)}" transform="rotate(-90 50 50)" />`
+            `<circle cx="${cx}" cy="${cy}" r="${radius.toFixed(4)}" fill="none" stroke="${seg.color}" stroke-width="${strokeWidth.toFixed(4)}" stroke-linecap="butt" pathLength="100" stroke-dasharray="${sweepPct.toFixed(4)} ${(100 - sweepPct).toFixed(4)}" stroke-dashoffset="${dashOffset.toFixed(4)}" transform="rotate(-90 50 50)" pointer-events="stroke"${ictipAttr}></circle>`
         );
         accPct += sweepPct;
         boundaryPcts.push(accPct);
@@ -19017,7 +19314,7 @@ function buildSegmentedDonutSvg(segments, options = {}) {
             const rectH = rectGapWidth;
             const x = px - rectW / 2;
             const y = py - rectH / 2;
-            return `<rect x="${x.toFixed(4)}" y="${y.toFixed(4)}" width="${rectW.toFixed(4)}" height="${rectH.toFixed(4)}" fill="#ffffff" transform="rotate(${angleDeg.toFixed(4)} ${px.toFixed(4)} ${py.toFixed(4)})" />`;
+            return `<rect x="${x.toFixed(4)}" y="${y.toFixed(4)}" width="${rectW.toFixed(4)}" height="${rectH.toFixed(4)}" fill="#ffffff" pointer-events="none" transform="rotate(${angleDeg.toFixed(4)} ${px.toFixed(4)} ${py.toFixed(4)})" />`;
         });
 
     // Add a small bleed margin so stroke/separators never clip at outer edges.
@@ -19113,6 +19410,17 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         if (a.infractions !== b.infractions) return a.infractions - b.infractions;
         return `${a.day}|${a.timeLabel}`.localeCompare(`${b.day}|${b.timeLabel}`);
     };
+    // Coolest-cell ties: higher STAR %, then fewer infractions, then fewer frenzies, then stable order.
+    // (coolRank already ensures no-frenzy cells beat any cell with frenzies.)
+    const compareCoolestTie = (a, b) => {
+        const rankStar = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : -Infinity);
+        const rsA = rankStar(a.starPercent);
+        const rsB = rankStar(b.starPercent);
+        if (rsA !== rsB) return rsB - rsA;
+        if (a.infractions !== b.infractions) return a.infractions - b.infractions;
+        if (a.frenzyCount !== b.frenzyCount) return a.frenzyCount - b.frenzyCount;
+        return `${a.day}|${a.timeLabel}`.localeCompare(`${b.day}|${b.timeLabel}`);
+    };
     const compareTriggerAggregate = (a, b) => {
         if (a.avgSeverity !== b.avgSeverity) return a.avgSeverity - b.avgSeverity;
         if (a.frenzyCount !== b.frenzyCount) return a.frenzyCount - b.frenzyCount;
@@ -19179,7 +19487,7 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
             }
             // A cell with no frenzies is cooler than any cell with frenzies.
             const coolRank = avg == null ? -1 : avg;
-            if (coolRank < bestSev || (coolRank === bestSev && (!best || compareHeatTie(best, observedCell) > 0))) {
+            if (coolRank < bestSev || (coolRank === bestSev && (!best || compareCoolestTie(best, observedCell) > 0))) {
                 bestSev = coolRank;
                 best = observedCell;
             }
@@ -19726,6 +20034,13 @@ async function fetchSummaryTrendCheckpoints(rangeOverride) {
     return response.json();
 }
 
+/** Average STAR % line on Reports → Trends; checkpoint fallback when no card color. */
+const SUMMARY_TREND_STAR_LINE = '#6b8eb8';
+/** Area fill under Average STAR % line. */
+const SUMMARY_TREND_STAR_FILL = 'rgba(107, 142, 184, 0.11)';
+/** Tick and axis title color (matches :root --text-primary). */
+const SUMMARY_TREND_CHART_AXIS_TEXT = '#1C1917';
+
 function renderSummaryCheckpointList(checkpoints) {
     const listEl = document.getElementById('summary-trends-checkpoint-list');
     if (!listEl) return;
@@ -19736,7 +20051,7 @@ function renderSummaryCheckpointList(checkpoints) {
     const sorted = checkpoints.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     listEl.innerHTML = sorted.map((cp) => `
         <div class="summary-checkpoint-item">
-            <span class="summary-checkpoint-swatch" style="background:${escapeHtml(cp.color || '#64748b')}"></span>
+            <span class="summary-checkpoint-swatch" style="background:${escapeHtml(cp.color || SUMMARY_TREND_STAR_LINE)}"></span>
             <span class="summary-checkpoint-date">${escapeHtml(formatTrendDateLabel(cp.date))}</span>
             <span class="summary-checkpoint-type">${escapeHtml(summaryCheckpointTypeLabels[cp.checkpoint_type] || cp.checkpoint_type || 'Checkpoint')}</span>
             <div class="summary-checkpoint-details">
@@ -20061,7 +20376,7 @@ function createCheckpointOverlayPlugin() {
             }
             for (let sortedIndex = 0; sortedIndex < sortedCheckpointMeta.length; sortedIndex++) {
                 const { cp, x } = sortedCheckpointMeta[sortedIndex];
-                const color = cp.color || '#64748b';
+                const color = cp.color || SUMMARY_TREND_STAR_LINE;
                 const labelText = (cp.label || '').slice(0, 26);
                 drawCheckpointLine(x, lineTopY, color);
                 drawCheckpointDot(x, dotY, color);
@@ -20139,7 +20454,7 @@ function createCheckpointOverlayPlugin() {
                 ctx.shadowBlur = 6;
                 ctx.shadowOffsetY = 2;
                 ctx.fillStyle = '#ffffff';
-                ctx.strokeStyle = hovered.color || '#64748b';
+                ctx.strokeStyle = hovered.color || SUMMARY_TREND_STAR_LINE;
                 ctx.lineWidth = 1.5;
                 if (typeof ctx.roundRect === 'function') {
                     ctx.beginPath();
@@ -20239,12 +20554,12 @@ function renderSummaryTrendChart(points, checkpoints) {
     const starData = points.map(p => p.starPercent);
     const TREND_COLORS = {
         frenzy: {
-            line: '#be123c',
-            fill: 'rgba(190, 18, 60, 0.22)'
+            line: '#c96a74',
+            fill: 'rgba(201, 106, 116, 0.16)'
         },
         star: {
-            line: '#0f766e',
-            fill: 'rgba(15, 118, 110, 0.18)'
+            line: SUMMARY_TREND_STAR_LINE,
+            fill: SUMMARY_TREND_STAR_FILL
         }
     };
     const gradientFill = (context, rgbaTop) => {
@@ -20345,16 +20660,38 @@ function renderSummaryTrendChart(points, checkpoints) {
                 yFrenzy: {
                     position: 'left',
                     beginAtZero: true,
-                    title: { display: true, text: 'Number of Frenzies', color: TREND_COLORS.frenzy.line },
-                    grid: { display: false }
+                    title: {
+                        display: true,
+                        text: 'Number of Frenzies',
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT,
+                        font: { size: 12, weight: '500' }
+                    },
+                    grid: { display: false },
+                    border: {
+                        display: true,
+                        color: 'rgba(28, 25, 23, 0.18)'
+                    },
+                    ticks: {
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT
+                    }
                 },
                 yStar: {
                     position: 'right',
                     beginAtZero: true,
                     max: 100,
-                    title: { display: true, text: 'Average STAR %', color: TREND_COLORS.star.line },
+                    title: {
+                        display: true,
+                        text: 'Average STAR %',
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT,
+                        font: { size: 12, weight: '500' }
+                    },
                     grid: { display: false },
+                    border: {
+                        display: true,
+                        color: 'rgba(28, 25, 23, 0.18)'
+                    },
                     ticks: {
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT,
                         callback: (value) => `${value}%`
                     }
                 },
@@ -20362,11 +20699,13 @@ function renderSummaryTrendChart(points, checkpoints) {
                     grid: {
                         display: true,
                         drawOnChartArea: true,
-                        drawTicks: true
+                        drawTicks: true,
+                        color: 'rgba(28, 25, 23, 0.08)'
                     },
                     ticks: {
                         autoSkip: false,
                         maxRotation: 0,
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT,
                         callback(value, index) {
                             return index % 5 === 0 ? this.getLabelForValue(value) : '';
                         }
@@ -20379,6 +20718,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                     align: 'start',
                     labels: {
                         font: { size: 13 },
+                        color: SUMMARY_TREND_CHART_AXIS_TEXT,
                         usePointStyle: true,
                         pointStyle: 'rect',
                         pointStyleWidth: 13,
@@ -20414,10 +20754,10 @@ function renderSummaryTrendChart(points, checkpoints) {
                             el.style.position = 'absolute';
                             el.style.pointerEvents = 'none';
                             el.style.background = '#ffffff';
-                            el.style.border = '1.5px solid #cbd5e1';
+                            el.style.border = '1.5px solid #E7E5E0';
                             el.style.borderRadius = '5px';
                             el.style.padding = '9px';
-                            el.style.color = '#4b5563';
+                            el.style.color = SUMMARY_TREND_CHART_AXIS_TEXT;
                             el.style.fontFamily = 'Inter, sans-serif';
                             el.style.fontSize = '11px';
                             el.style.fontWeight = '400';
@@ -20466,16 +20806,18 @@ function renderSummaryTrendChart(points, checkpoints) {
                                 if (prev) {
                                     const delta = currentCount - (prev.frenzyCount || 0);
                                     if (delta !== 0) {
-                                        deltaHtml = buildDeltaHtml(delta, delta > 0 ? '#dc2626' : '#16a34a', '');
+                                        deltaHtml = buildDeltaHtml(delta, delta > 0 ? TREND_COLORS.frenzy.line : '#16a34a', '');
                                     }
                                 }
                                 if (point && point.isAggregated && (point.peakFrenzyCount || 0) > 0) {
                                     valueText += ` (peak ${formatTrendDateLabel(point.peakFrenzyDate)}: ${point.peakFrenzyCount})`;
                                 }
                             }
-                            return `<div>${escapeHtml(valueText)}${deltaHtml}</div>`;
+                            const rowColor = isStar ? TREND_COLORS.star.line : '';
+                            const rowStyle = rowColor ? ` style="color:${rowColor}"` : '';
+                            return `<div${rowStyle}>${escapeHtml(valueText)}${deltaHtml}</div>`;
                         }).join('');
-                        el.innerHTML = `<div style="color:#1f2937;font-weight:600;margin-bottom:4px;">${escapeHtml(titleText)}</div>${linesHtml}`;
+                        el.innerHTML = `<div style="color:${SUMMARY_TREND_CHART_AXIS_TEXT};font-weight:600;margin-bottom:4px;">${escapeHtml(titleText)}</div>${linesHtml}`;
                         const canvasRect = chart.canvas.getBoundingClientRect();
                         const parentRect = parentEl.getBoundingClientRect();
                         const canvasLeftInParent = canvasRect.left - parentRect.left;
@@ -23520,7 +23862,11 @@ function attachOverviewCardInteractions(container, data) {
             // Toggle Infractions card; details are shown when a row is selected
             const opened = toggleExtraCard('infractions_card', () => {
                     const card = document.createElement('div');
-                    card.className = 'dashboard-card infractions-card overview-extra-card';
+                    /** Compact Time/Day bar charts: set false and remove BEGIN/END block in style.css to revert. */
+                    const INFRACTIONS_CHART_COMPACT_UI = true;
+                    card.className = `dashboard-card infractions-card overview-extra-card${
+                        INFRACTIONS_CHART_COMPACT_UI ? ' infractions-chart-ui-compact' : ''
+                    }`;
                     card.dataset.overviewCard = 'infractions_card';
 
                     const rawInfractions = data.infractions || data.additional_info?.infractions || {};
@@ -23538,11 +23884,15 @@ function attachOverviewCardInteractions(container, data) {
                             </div>`;
                     const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
 
-                    let overviewTableContent = overviewFirstTimeText;
-                    let overviewGraphContent = overviewFirstTimeText;
+                    let typeModeTableHtml = '';
+                    let timeModeTableHtml = '';
+                    let dayModeTableHtml = '';
+                    let typeModeGraphHtml = '';
+                    let timeModeGraphHtml = '';
+                    let dayModeGraphHtml = '';
 
                     if (infractionKeys.length > 0) {
-                        overviewTableContent += `
+                        typeModeTableHtml = `
                             <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
                                 <thead>
                                     <tr>
@@ -23552,12 +23902,12 @@ function attachOverviewCardInteractions(container, data) {
                                 </thead>
                                 <tbody>`;
                         infractionKeys.sort((a, b) => (Number(infractions[b]) || 0) - (Number(infractions[a]) || 0)).forEach(k => {
-                            overviewTableContent += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
+                            typeModeTableHtml += `<tr class="dashboard-breakdown-item" data-infraction-type="${escapeHtml(k)}" style="cursor:pointer;">
                                 <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(k)}</td>
                                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${Number(infractions[k]) || 0}</span></td>
                             </tr>`;
                         });
-                        overviewTableContent += `</tbody></table>`;
+                        typeModeTableHtml += `</tbody></table>`;
 
                         const categoryOrder = ['Social', 'Task', 'Attention', 'Safety'];
                         const categoryColors = {
@@ -23619,12 +23969,7 @@ function attachOverviewCardInteractions(container, data) {
                         });
                         Object.values(groupedTypes).forEach((arr) => arr.sort((a, b) => b.count - a.count));
 
-                        overviewGraphContent += `
-                            <div style="display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border);margin:2px 0 10px 0;">
-                                <button type="button" style="border:1px solid var(--border);border-bottom:none;background:var(--bg-surface);padding:4px 10px;border-radius:6px 6px 0 0;font-size:0.82rem;color:var(--text-primary);">Type</button>
-                                <button type="button" disabled style="border:none;background:none;padding:4px 10px;font-size:0.82rem;color:var(--text-secondary);opacity:0.85;">Time</button>
-                                <button type="button" disabled style="border:none;background:none;padding:4px 10px;font-size:0.82rem;color:var(--text-secondary);opacity:0.85;">Day</button>
-                            </div>
+                        typeModeGraphHtml += `
                             <div class="infractions-graph-category-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 16px;margin-top:2px;">
                         `;
                         const categoriesToRender = categoryOrder.filter((category) => (Number(bucketTotals[category]) || 0) > 0);
@@ -23638,22 +23983,28 @@ function attachOverviewCardInteractions(container, data) {
                             const shades = categoryColors[category];
                             let donutBg = '#e5e7eb';
                             let donutSvg = '';
-                            if (bucketCount > 0) {
-                                const activeRows = rows.filter((r) => (Number(r.count) || 0) > 0);
+                            const activeRows = rows.filter((r) => (Number(r.count) || 0) > 0);
+                            if (bucketCount > 0 && activeRows.length > 0) {
                                 donutSvg = buildSegmentedDonutSvg(
-                                    activeRows.map((row, idx) => ({ value: row.count, color: shades[idx % shades.length] })),
+                                    activeRows.map((row, idx) => ({
+                                        value: row.count,
+                                        color: shades[idx % shades.length],
+                                        title: infractionDonutSliceTitle(row.type, row.count, bucketCount, category)
+                                    })),
                                     { sizePx: 110, ringPx: 18, gapPx: 2 }
                                 );
                                 donutBg = activeRows.length ? shades[0] : '#e5e7eb';
                             }
                             const useDaysPresentLegendLayout = rows.length > 1;
                             const listHtml = rows.map((row, idx) => {
+                                const rowFrenzyTip = infractionDonutSliceTitle(row.type, row.count, bucketCount, category);
+                                const rowChartTipAttr = ` data-ictip="${encodeInfractionsChartTipDataAttr(rowFrenzyTip)}"`;
                                 const deltaClass = row.hasDelta ? (row.delta > 0 ? 'is-neg' : row.delta < 0 ? 'is-pos' : 'is-muted') : 'is-muted';
                                 const deltaLegendClass = row.hasDelta ? (row.delta > 0 ? 'delta-negative' : row.delta < 0 ? 'delta-positive' : 'delta-neutral') : 'delta-neutral';
                                 const deltaText = row.hasDelta ? (row.delta >= 0 ? `+${row.delta}` : `${row.delta}`) : '';
                                 if (useDaysPresentLegendLayout) {
                                     return `
-                                        <button type="button" class="dashboard-breakdown-item infractions-graph-item days-present-legend-item" data-infraction-type="${escapeHtml(row.type)}" style="display:block;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+                                        <button type="button" class="dashboard-breakdown-item infractions-graph-item days-present-legend-item" data-infraction-type="${escapeHtml(row.type)}"${rowChartTipAttr} style="display:block;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
                                             <div class="days-present-legend-label">
                                                 <span class="days-present-legend-dot" style="background:${shades[idx % shades.length]};"></span>
                                                 <span>${formatInfractionLegendLabel(row.type)}</span>
@@ -23665,7 +24016,7 @@ function attachOverviewCardInteractions(container, data) {
                                         </button>`;
                                 }
                                 return `
-                                    <button type="button" class="dashboard-breakdown-item infractions-graph-item" data-infraction-type="${escapeHtml(row.type)}" style="display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:6px;align-items:start;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+                                    <button type="button" class="dashboard-breakdown-item infractions-graph-item" data-infraction-type="${escapeHtml(row.type)}"${rowChartTipAttr} style="display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:6px;align-items:start;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
                                         <span style="width:8px;height:8px;border-radius:50%;background:${shades[idx % shades.length]};display:inline-block;margin-top:4px;"></span>
                                         <span class="dashboard-breakdown-name" style="font-size:0.8rem;color:var(--text-primary);line-height:1.15;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.type)}</span>
                                         <span class="infractions-legend-value-inline" style="font-size:0.8rem;line-height:1.1;">
@@ -23681,7 +24032,7 @@ function attachOverviewCardInteractions(container, data) {
                             const listStyle = useDaysPresentLegendLayout
                                 ? 'display:grid;row-gap:10px;width:100%;max-width:100%;margin:0 auto;align-items:start;'
                                 : 'display:grid;grid-template-columns:repeat(1, minmax(0,1fr));column-gap:12px;row-gap:6px;';
-                            overviewGraphContent += `
+                            typeModeGraphHtml += `
                                 <div class="infractions-graph-category-card" style="padding:0 2px;">
                                     <h4 style="margin:0 0 8px 0;font-size:1rem;font-weight:700;text-align:center;line-height:1.1;">${escapeHtml(category)}</h4>
                                     <div style="display:flex;justify-content:center;margin-bottom:10px;">
@@ -23698,45 +24049,352 @@ function attachOverviewCardInteractions(container, data) {
                                     </div>
                                 </div>`;
                         });
-                        overviewGraphContent += `</div>`;
+                        typeModeGraphHtml += `</div>`;
+
+                        const scheduleOrder = new Map(SCHEDULE_PERIODS.map((t, i) => [t, i]));
+                        const getOverviewTimeSlots = () => {
+                            const byTimeApi = data.by_time || {};
+                            const slots = [];
+                            Object.entries(byTimeApi).forEach(([label, bucket]) => {
+                                const total = Number(bucket?.total_infractions) || 0;
+                                if (total <= 0) return;
+                                slots.push({ label, total, infractions: bucket?.infractions || {} });
+                            });
+                            if (!slots.length) {
+                                const merged = {};
+                                Object.entries(data.infractions_by_type || {}).forEach(([rawType, entry]) => {
+                                    Object.entries(entry?.by_time || {}).forEach(([label, count]) => {
+                                        const n = Number(count) || 0;
+                                        if (n <= 0) return;
+                                        if (!merged[label]) merged[label] = {};
+                                        merged[label][rawType] = (merged[label][rawType] || 0) + n;
+                                    });
+                                });
+                                Object.entries(merged).forEach(([label, infMap]) => {
+                                    const total = Object.values(infMap).reduce((s, v) => s + (Number(v) || 0), 0);
+                                    if (total > 0) slots.push({ label, total, infractions: infMap });
+                                });
+                            }
+                            slots.sort((a, b) => {
+                                const ia = scheduleOrder.has(a.label) ? scheduleOrder.get(a.label) : 999;
+                                const ib = scheduleOrder.has(b.label) ? scheduleOrder.get(b.label) : 999;
+                                if (ia !== ib) return ia - ib;
+                                return String(a.label).localeCompare(String(b.label));
+                            });
+                            return slots;
+                        };
+                        const timeSlots = getOverviewTimeSlots();
+                        timeSlots.sort((a, b) => {
+                            if (b.total !== a.total) return b.total - a.total;
+                            const ia = scheduleOrder.has(a.label) ? scheduleOrder.get(a.label) : 999;
+                            const ib = scheduleOrder.has(b.label) ? scheduleOrder.get(b.label) : 999;
+                            return ia - ib;
+                        });
+                        const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                        const dayInfractionsByDay = {};
+                        const dayTotalFallback = {};
+                        Object.entries(data.infractions_by_type || {}).forEach(([rawType, entry]) => {
+                            Object.entries(entry?.by_day_of_week || {}).forEach(([day, count]) => {
+                                const n = Number(count) || 0;
+                                if (n <= 0) return;
+                                if (!dayInfractionsByDay[day]) dayInfractionsByDay[day] = {};
+                                dayInfractionsByDay[day][rawType] = (dayInfractionsByDay[day][rawType] || 0) + n;
+                            });
+                        });
+                        const byDayApi = data.by_day_of_week || {};
+                        dayOrder.forEach((day) => {
+                            if (dayInfractionsByDay[day] && Object.keys(dayInfractionsByDay[day]).length) return;
+                            const total = Number(byDayApi[day]?.total_infractions) || 0;
+                            if (total <= 0) return;
+                            dayTotalFallback[day] = total;
+                        });
+
+                        const infractionBarShade = (cat) => {
+                            const arr = categoryColors[cat];
+                            if (!arr || !arr.length) return '#94a3b8';
+                            return arr.length >= 2 ? arr[1] : arr[0];
+                        };
+
+                        const infractionBarHorizontalHitsHtml = (hitEntries) => {
+                            if (!hitEntries || !hitEntries.length) return '';
+                            return hitEntries
+                                .map((e) => {
+                                    const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
+                                    return `<div class="infractions-hstar-seg-hit"${d}></div>`;
+                                })
+                                .join('');
+                        };
+                        const infractionBarVerticalHitsHtml = (hitEntries) => {
+                            if (!hitEntries || !hitEntries.length) return '';
+                            return hitEntries
+                                .map((e) => {
+                                    const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
+                                    return `<div class="infractions-vbar-seg-hit"${d}></div>`;
+                                })
+                                .join('');
+                        };
+
+                        const barLegendHtml = `
+                            <div class="infractions-bar-legend" aria-label="Infraction groups">
+                                ${categoryOrder
+                                    .map((cat) => {
+                                        const legTipRaw = infractionCategoryLegendTitle(
+                                            cat,
+                                            Number(bucketTotals[cat]) || 0,
+                                            overallTotal
+                                        );
+                                        const legData = encodeInfractionsChartTipDataAttr(legTipRaw);
+                                        return `
+                                <span class="infractions-bar-legend-item">
+                                    <span class="infractions-bar-legend-swatch infractions-bar-legend-swatch--round infractions-bar-legend-swatch--tip" style="background:${infractionBarShade(cat)}" data-ictip="${legData}"></span>
+                                    ${escapeHtml(cat)}
+                                </span>`;
+                                    })
+                                    .join('')}
+                            </div>`;
+
+                        if (!timeSlots.length) {
+                            timeModeGraphHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No infraction data by time of day for this period.</p>`;
+                            timeModeTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No infraction data by time of day for this period.</p>`;
+                        } else {
+                            const maxTimeTotal = Math.max(...timeSlots.map((s) => s.total), 1);
+                            const axisMax = niceCeilingAxisMax(maxTimeTotal);
+                            const tickDivisions = 5;
+                            const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) =>
+                                Math.round((axisMax * i) / tickDivisions)
+                            );
+                            const timeRowsHtml = timeSlots
+                                .map((slot) => {
+                                    const bucketed = bucketInfractionsOverview(slot.infractions);
+                                    const barPct = axisMax > 0 ? Math.min(100, (slot.total / axisMax) * 100) : 0;
+                                    const timeSegEntries = categoryOrder
+                                        .map((cat) => {
+                                            const n = Number(bucketed[cat]) || 0;
+                                            if (!n || !slot.total) return null;
+                                            return { cat, n };
+                                        })
+                                        .filter(Boolean);
+                                    const rowT = slot.total;
+                                    const gradientEntries = timeSegEntries.map(({ cat, n }) => ({
+                                        n,
+                                        color: infractionBarShade(cat),
+                                    }));
+                                    const hitEntries = timeSegEntries.map(({ cat, n }) => {
+                                        const tipRaw = infractionBarSegmentTitle(cat, n, rowT, 'at this time of day');
+                                        return {
+                                            n,
+                                            dataEnc: encodeInfractionsChartTipDataAttr(tipRaw),
+                                        };
+                                    });
+                                    const segMetaH =
+                                        gradientEntries.length > 0
+                                            ? ` data-infraction-bar="h" data-ib-t="${rowT}" data-ib-ns="${gradientEntries.map((e) => e.n).join(',')}" data-ib-cs="${gradientEntries.map((e) => encodeURIComponent(e.color)).join(',')}"`
+                                            : '';
+                                    const greyTimeTipRaw =
+                                        slot.total > 0
+                                            ? `Breakdown unavailable: ${slot.total} infractions at this time of day`
+                                            : '';
+                                    const greyTimeData = greyTimeTipRaw ? encodeInfractionsChartTipDataAttr(greyTimeTipRaw) : '';
+                                    const greyTimeAttrs = greyTimeTipRaw && greyTimeData ? ` data-ictip="${greyTimeData}"` : '';
+                                    const segsInner =
+                                        gradientEntries.length > 0
+                                            ? `<div class="infractions-hstar-barsheet infractions-hstar-barsheet--layers" aria-hidden="true"></div>${infractionBarHorizontalHitsHtml(hitEntries)}`
+                                            : slot.total > 0
+                                              ? `<div class="infractions-hstar-barsheet infractions-hstar-barsheet--interactive" style="background:#94a3b8"${greyTimeAttrs}></div>`
+                                              : '';
+                                    return `
+                                <div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
+                                <div class="infractions-hstar-slot">
+                                    <div class="infractions-hstar-bar-row">
+                                        <div class="infractions-hstar-bar" style="width:${barPct}%">
+                                            <div class="infractions-hstar-segments"${segMetaH}>${segsInner}</div>
+                                        </div>
+                                        <span class="infractions-hstar-count">${slot.total}</span>
+                                    </div>
+                                </div>`;
+                                })
+                                .join('');
+                            const xTicksHtml = tickLabels.map((n) => `<span>${n}</span>`).join('');
+                            timeModeGraphHtml = `<div class="infractions-hstar-chart">
+                                ${barLegendHtml}
+                                <div class="infractions-hstar-body">
+                                    ${timeRowsHtml}
+                                    <div class="infractions-hstar-x-spacer" aria-hidden="true"></div>
+                                    <div class="infractions-hstar-x-axis">${xTicksHtml}</div>
+                                </div>
+                            </div>`;
+                            timeModeTableHtml = `
+                            <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Time</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                            timeSlots.forEach((slot) => {
+                                timeModeTableHtml += `<tr>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slot.total}</span></td>
+                            </tr>`;
+                            });
+                            timeModeTableHtml += `</tbody></table>`;
+                        }
+
+                        const dayKeysOrdered = dayOrder.filter((d) => {
+                            const inf = dayInfractionsByDay[d];
+                            if (inf && Object.keys(inf).length > 0) return true;
+                            return (Number(dayTotalFallback[d]) || 0) > 0;
+                        });
+                        if (!dayKeysOrdered.length) {
+                            dayModeGraphHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No infraction data by day of week for this period.</p>`;
+                            dayModeTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No infraction data by day of week for this period.</p>`;
+                        } else {
+                            const dayColsHtml = dayKeysOrdered
+                                .map((day) => {
+                                    const infMap = dayInfractionsByDay[day] || {};
+                                    const fall = Number(dayTotalFallback[day]) || 0;
+                                    const dbTotal = Object.keys(infMap).length
+                                        ? Object.values(infMap).reduce((s, v) => s + (Number(v) || 0), 0)
+                                        : fall;
+                                    const bucketed = Object.keys(infMap).length
+                                        ? bucketInfractionsOverview(infMap)
+                                        : null;
+                                    const daySegEntries = bucketed
+                                        ? categoryOrder
+                                              .map((cat) => {
+                                                  const n = Number(bucketed[cat]) || 0;
+                                                  if (!n || !dbTotal) return null;
+                                                  return { cat, n };
+                                              })
+                                              .filter(Boolean)
+                                        : [];
+                                    const gradientEntries = daySegEntries.map(({ cat, n }) => ({
+                                        n,
+                                        color: infractionBarShade(cat),
+                                    }));
+                                    const hitEntries = daySegEntries.map(({ cat, n }) => {
+                                        const tipRaw = infractionBarSegmentTitle(cat, n, dbTotal, 'on this weekday');
+                                        return {
+                                            n,
+                                            dataEnc: encodeInfractionsChartTipDataAttr(tipRaw),
+                                        };
+                                    });
+                                    const segMetaV =
+                                        gradientEntries.length > 0
+                                            ? ` data-infraction-bar="v" data-ib-t="${dbTotal}" data-ib-ns="${gradientEntries.map((e) => e.n).join(',')}" data-ib-cs="${gradientEntries.map((e) => encodeURIComponent(e.color)).join(',')}"`
+                                            : '';
+                                    const greyTipRaw =
+                                        dbTotal > 0
+                                            ? `Total: ${dbTotal} infractions on ${day} (category breakdown not available)`
+                                            : '';
+                                    const greyData = greyTipRaw ? encodeInfractionsChartTipDataAttr(greyTipRaw) : '';
+                                    const segsInner =
+                                        gradientEntries.length > 0
+                                            ? `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--layers" aria-hidden="true"></div>${infractionBarVerticalHitsHtml(hitEntries)}`
+                                            : dbTotal > 0
+                                              ? `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--interactive" style="background:#94a3b8"${greyData ? ` data-ictip="${greyData}"` : ''}></div>`
+                                              : '';
+                                    return `
+                                <div class="infractions-vbar-col">
+                                    <div class="infractions-vbar-count">${dbTotal}</div>
+                                    <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
+                                    <div class="infractions-vbar-label">${escapeHtml(day)}</div>
+                                </div>`;
+                                })
+                                .join('');
+                            dayModeGraphHtml = `<div class="infractions-vbar-chart-wrap">${barLegendHtml}<div class="infractions-vbar-chart">${dayColsHtml}</div></div>`;
+                            dayModeTableHtml = `
+                            <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+                                <thead>
+                                    <tr>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Day</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                            dayKeysOrdered.forEach((day) => {
+                                const infMap = dayInfractionsByDay[day] || {};
+                                const fall = Number(dayTotalFallback[day]) || 0;
+                                const dbTotal = Object.keys(infMap).length
+                                    ? Object.values(infMap).reduce((s, v) => s + (Number(v) || 0), 0)
+                                    : fall;
+                                dayModeTableHtml += `<tr>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(day)}</td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${dbTotal}</span></td>
+                            </tr>`;
+                            });
+                            dayModeTableHtml += `</tbody></table>`;
+                        }
                     } else {
-                        overviewTableContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
-                        overviewGraphContent += `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                        const emptyMsg = `<p style="color:var(--text-secondary);font-size:0.875rem;">No infractions for this period.</p>`;
+                        typeModeTableHtml = emptyMsg;
+                        timeModeTableHtml = emptyMsg;
+                        dayModeTableHtml = emptyMsg;
+                        typeModeGraphHtml = emptyMsg;
+                        timeModeGraphHtml = emptyMsg;
+                        dayModeGraphHtml = emptyMsg;
                     }
+
+                    const overviewBreakdownTabsHtml = `
+                            <div class="infractions-overview-breakdown-tabs" role="tablist" aria-label="Group infractions">
+                                <button type="button" class="infractions-overview-breakdown-tab active" data-infractions-overview-breakdown="type" role="tab" aria-selected="true">Type</button>
+                                <button type="button" class="infractions-overview-breakdown-tab" data-infractions-overview-breakdown="time" role="tab" aria-selected="false">Time</button>
+                                <button type="button" class="infractions-overview-breakdown-tab" data-infractions-overview-breakdown="day" role="tab" aria-selected="false">Day</button>
+                            </div>`;
+                    const overviewTabBody = `${overviewFirstTimeText}${overviewBreakdownTabsHtml}
+                            <div data-infractions-panel="graph">
+                                <div data-infractions-breakdown-panel="type">${typeModeGraphHtml}</div>
+                                <div data-infractions-breakdown-panel="time" hidden>${timeModeGraphHtml}</div>
+                                <div data-infractions-breakdown-panel="day" hidden>${dayModeGraphHtml}</div>
+                            </div>
+                            <div data-infractions-panel="table" hidden>
+                                <div data-infractions-breakdown-panel="type">${typeModeTableHtml}</div>
+                                <div data-infractions-breakdown-panel="time" hidden>${timeModeTableHtml}</div>
+                                <div data-infractions-breakdown-panel="day" hidden>${dayModeTableHtml}</div>
+                            </div>`;
 
                     const innerHtml = `
                         <div class="dashboard-breakdown-card-inner">
                             <div class="dashboard-card-header infractions-card-header">
-                                <h3 class="dashboard-card-title">Infractions</h3>
-                                ${overviewTitleHintBlock}
-                            </div>
-                            <div class="infractions-tabs" role="tablist">
-                                <button class="infractions-tab active" data-tab="overview" role="tab" aria-selected="true">
-                                    <span class="infractions-tab-label">Overview</span>
-                                </button>
-                            </div>
-                            <div class="infractions-tab-panels">
-                                <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
+                                <div class="infractions-card-header-left">
+                                    <h3 class="dashboard-card-title">Infractions</h3>
+                                    ${overviewTitleHintBlock}
+                                </div>
+                                <div class="infractions-overview-header-view-toggle">
                                     <div class="view-mode-toggle" role="tablist" aria-label="Infractions overview view mode">
                                         <button type="button" class="view-mode-toggle-btn active" data-infractions-view="graph" role="tab" aria-selected="true">Graph</button>
                                         <button type="button" class="view-mode-toggle-btn" data-infractions-view="table" role="tab" aria-selected="false">Table</button>
                                     </div>
-                                    <div data-infractions-panel="graph">
-                                        ${overviewGraphContent}
-                                    </div>
-                                    <div data-infractions-panel="table" hidden>
-                                        ${overviewTableContent}
-                                    </div>
+                                </div>
+                            </div>
+                            <div class="infractions-tabs infractions-tabs--detail-only" role="tablist" hidden></div>
+                            <div class="infractions-tab-panels">
+                                <div class="infractions-tab-panel infractions-tab-overview is-active" data-tab-panel="overview">
+                                    ${overviewTabBody}
                                 </div>
                             </div>
                         </div>`;
 
                     card.innerHTML = innerHtml;
                     grid.appendChild(card);
+                    wireInfractionsChartHoverTips(card);
+                    attachInfractionBarPixelLayout(card);
 
                     // Tab behavior within the Infractions card
                     const tabsContainer = card.querySelector('.infractions-tabs');
                     const panelsContainer = card.querySelector('.infractions-tab-panels');
+
+                    const overviewHeaderToggle = card.querySelector('.infractions-overview-header-view-toggle');
+                    const syncInfractionsTabsRow = () => {
+                        if (!tabsContainer) return;
+                        const n = tabsContainer.querySelectorAll('.infractions-tab').length;
+                        tabsContainer.hidden = n === 0;
+                    };
+                    const syncInfractionsHeaderChrome = () => {
+                        const onOverview = !!card.querySelector('.infractions-tab-panel.infractions-tab-overview.is-active');
+                        if (overviewHeaderToggle) overviewHeaderToggle.hidden = !onOverview;
+                    };
 
                     const setActiveTab = (tabName) => {
                         const allTabs = card.querySelectorAll('.infractions-tab');
@@ -23749,6 +24407,8 @@ function attachOverviewCardInteractions(container, data) {
                         allPanels.forEach(panel => {
                             panel.classList.toggle('is-active', panel.dataset.tabPanel === tabName);
                         });
+                        syncInfractionsHeaderChrome();
+                        syncInfractionsTabsRow();
                     };
 
                     const wireTabClicks = () => {
@@ -23784,6 +24444,37 @@ function attachOverviewCardInteractions(container, data) {
 
                     wireTabClicks();
 
+                    const syncInfractionsBreakdownPanels = (mode) => {
+                        ['graph', 'table'].forEach((kind) => {
+                            const host = card.querySelector(`[data-infractions-panel="${kind}"]`);
+                            if (!host) return;
+                            host.querySelectorAll('[data-infractions-breakdown-panel]').forEach((panel) => {
+                                const match = panel.dataset.infractionsBreakdownPanel === mode;
+                                panel.hidden = !match;
+                            });
+                        });
+                        card.querySelectorAll('[data-infractions-overview-breakdown]').forEach((btn) => {
+                            const active = btn.dataset.infractionsOverviewBreakdown === mode;
+                            btn.classList.toggle('active', active);
+                            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+                        });
+                        scheduleInfractionBarPixelLayout(card);
+                    };
+                    card.querySelectorAll('[data-infractions-overview-breakdown]').forEach((btn) => {
+                        btn.addEventListener('click', () => {
+                            const mode = btn.dataset.infractionsOverviewBreakdown;
+                            if (!mode) return;
+                            syncInfractionsBreakdownPanels(mode);
+                            scheduleInfractionBarPixelLayout(card);
+                            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                                scheduleMasonryLayoutAfterResize(grid);
+                            }
+                        });
+                    });
+                    syncInfractionsBreakdownPanels('type');
+                    syncInfractionsHeaderChrome();
+                    syncInfractionsTabsRow();
+
                     const infractionsModeButtons = card.querySelectorAll('[data-infractions-view]');
                     const infractionsTablePanel = card.querySelector('[data-infractions-panel="table"]');
                     const infractionsGraphPanel = card.querySelector('[data-infractions-panel="graph"]');
@@ -23796,10 +24487,12 @@ function attachOverviewCardInteractions(container, data) {
                             btn.classList.toggle('active', active);
                             btn.setAttribute('aria-selected', active ? 'true' : 'false');
                         });
+                        scheduleInfractionBarPixelLayout(card);
                     };
                     infractionsModeButtons.forEach((btn) => {
                         btn.addEventListener('click', () => {
                             setInfractionsOverviewView(btn.dataset.infractionsView || 'graph');
+                            scheduleInfractionBarPixelLayout(card);
                             if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                                 scheduleMasonryLayoutAfterResize(grid);
                             }
@@ -23886,6 +24579,7 @@ function attachOverviewCardInteractions(container, data) {
                                     <span class="infractions-tab-close" aria-label="Close" role="button">&times;</span>
                                 `;
                                 tabsContainer.appendChild(infTab);
+                                syncInfractionsTabsRow();
 
                                 // Create its panel
                                 const panel = document.createElement('div');

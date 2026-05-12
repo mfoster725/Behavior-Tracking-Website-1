@@ -701,8 +701,8 @@ class FrenzyEvent(db.Model):
     purpose2 = db.Column(db.String(100))
     duration_minutes = db.Column(db.Integer)
     # Frenzy severity level (1=Para, 2=Response Team, 3=Professional,
-    # 4=Administration, 5=SRO). Backfilled to 1 by migrate_frenzy_severity.py.
-    severity = db.Column(db.Integer)
+    # 4=Administration, 5=SRO). Default 1 so inserts never leave NULL (heatmap).
+    severity = db.Column(db.Integer, default=1)
 
     # Result/outcome
     result = db.Column(db.String(100))
@@ -2286,6 +2286,15 @@ def daily_records():
         # Add frenzy events
         FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete()
         for frenzy_data in data.get('frenzies', []):
+            sev_raw = frenzy_data.get('severity')
+            sev_int = None
+            if sev_raw is not None and sev_raw != '':
+                try:
+                    sev_int = int(sev_raw)
+                except (TypeError, ValueError):
+                    sev_int = None
+            if sev_int is not None:
+                sev_int = max(1, min(5, sev_int))
             frenzy = FrenzyEvent(
                 daily_record_id=daily_record.id,
                 time_range=frenzy_data.get('time_range'),
@@ -2293,7 +2302,8 @@ def daily_records():
                 purpose=frenzy_data.get('purpose'),
                 purpose2=frenzy_data.get('purpose2'),
                 duration_minutes=frenzy_data.get('duration_minutes'),
-                result=frenzy_data.get('result')
+                result=frenzy_data.get('result'),
+                severity=sev_int if sev_int is not None else 1,
             )
             db.session.add(frenzy)
         

@@ -1,14 +1,32 @@
 """
 Ensure frenzy_events.severity exists and backfill NULL severities to 1 (Para).
 
-SQLite: instance/behavior_tracking.db unless DATABASE_URL is set (PostgreSQL).
-Optional: python migrate_frenzy_severity.py --db path/to/custom.db
+SQLite: same default path as app.py (LOCALAPPDATA/BehaviorTracking first,
+then instance/behavior_tracking.db). Use --db for an explicit file.
+PostgreSQL: set DATABASE_URL.
 """
 import argparse
 import os
 import sys
 
 from migrate_add_student_id_index import normalize_database_url  # reuse URL + SSL helpers
+
+
+def default_sqlite_behavior_tracking_path():
+    """Match app.py local SQLite resolution so migrations hit the DB Flask uses."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    instance_path = os.path.join(project_root, "instance")
+    local_appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    default_local_db_dir = os.path.join(local_appdata, "BehaviorTracking")
+    local_db_dir = os.environ.get("LOCAL_DB_DIR", default_local_db_dir)
+    legacy_db_path = os.path.join(instance_path, "behavior_tracking.db")
+    local_db_path = os.path.join(local_db_dir, "behavior_tracking.db")
+
+    if os.path.isfile(local_db_path):
+        return local_db_path
+    if os.path.isfile(legacy_db_path):
+        return legacy_db_path
+    return local_db_path
 
 
 def sqlite_main(db_path):
@@ -74,9 +92,7 @@ def main():
         postgres_main(normalize_database_url(database_url))
         return
 
-    instance_path = os.path.join(os.path.dirname(__file__), "instance")
-    db_file = os.path.join(instance_path, "behavior_tracking.db")
-    sqlite_main(db_file)
+    sqlite_main(default_sqlite_behavior_tracking_path())
 
 
 if __name__ == "__main__":
