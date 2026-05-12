@@ -6209,6 +6209,7 @@ a.dashboard-compare-toggle {
    BEGIN: Infractions Time/Day chart compact UI
    REVERT: (1) In static/app.js set INFRACTIONS_CHART_COMPACT_UI = false (search that symbol).
            (2) Delete this whole block through "END: Infractions Time/Day chart compact UI".
+   Hides: category legend, Time row labels (left), Day weekday labels (under bars).
    ========================================================================= */
 .infractions-card.infractions-chart-ui-compact .infractions-bar-legend {
     display: none !important;
@@ -6218,7 +6219,12 @@ a.dashboard-compare-toggle {
     margin-top: 2px;
 }
 .infractions-card.infractions-chart-ui-compact .infractions-hstar-body {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
     row-gap: 7px;
+}
+.infractions-card.infractions-chart-ui-compact .infractions-hstar-label {
+    display: none !important;
 }
 .infractions-card.infractions-chart-ui-compact .infractions-hstar-slot {
     min-height: 24px;
@@ -6244,7 +6250,8 @@ a.dashboard-compare-toggle {
     margin-bottom: 4px;
 }
 .infractions-card.infractions-chart-ui-compact .infractions-vbar-label {
-    margin-top: 5px;
+    display: none !important;
+    margin-top: 0;
 }
 /* END: Infractions Time/Day chart compact UI */
 
