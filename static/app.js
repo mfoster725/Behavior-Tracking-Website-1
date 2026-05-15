@@ -123,6 +123,205 @@ function canonicalizeInfractionTypeDeltas(rawDeltas = {}) {
     return aggregated;
 }
 
+/** Match Python `norm_slot_label` in build_overview_trends (dash/spacing). */
+function normalizeOverviewTrendLabel(s) {
+    let t = String(s || '').trim().toLowerCase();
+    t = t.replace(/\u2013/g, '-').replace(/\u2014/g, '-').replace(/\u2212/g, '-');
+    t = t.replace(/\s*-\s*/g, '-');
+    t = t.replace(/\s+/g, ' ');
+    return t.trim();
+}
+
+function formatInfractionCountDeltaHtml(delta) {
+    if (delta == null || !Number.isFinite(delta)) {
+        return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">—</span>';
+    }
+    const dClass = delta > 0 ? 'is-neg' : delta < 0 ? 'is-pos' : 'is-muted';
+    const text = delta >= 0 ? `+${delta}` : `${delta}`;
+    return `<span class="infractions-count-delta overview-gauge-small ${dClass}" title="Change vs prior period">${escapeHtml(text)}</span>`;
+}
+
+function buildOverviewAssocDeltaGetter(rawAssocDeltas) {
+    const canon = canonicalizeInfractionTypeDeltas(rawAssocDeltas || {});
+    return (type, curTotal) => {
+        const key = normalizeInfractionType(type);
+        if (key && Object.prototype.hasOwnProperty.call(canon, key)) {
+            const n = Number(canon[key]);
+            if (Number.isFinite(n)) return n;
+        }
+        if (rawAssocDeltas && Object.prototype.hasOwnProperty.call(rawAssocDeltas, type)) {
+            const direct = Number(rawAssocDeltas[type]);
+            if (Number.isFinite(direct)) return direct;
+        }
+        return null;
+    };
+}
+
+function normalizeOverviewKeyedTotals(totalsByLabel) {
+    const out = {};
+    Object.entries(totalsByLabel || {}).forEach(([label, total]) => {
+        const nk = normalizeOverviewTrendLabel(label);
+        if (!nk) return;
+        out[nk] = (out[nk] || 0) + (Number(total) || 0);
+    });
+    return out;
+}
+
+/** Shared chart/table config for Reminders and Resets overview detail cards (same UI, different metric). */
+const REM_RES_KIND_CONFIG = Object.freeze({
+    reminders: {
+        key: 'reminders',
+        label: 'Reminders',
+        countField: 'total_reminders',
+        assocKey: 'infractions_for_reminders',
+        trendsPrefix: 'reminders',
+        barColor: '#e87a1e',
+        cardModifier: 'overview-remres-card--reminders',
+    },
+    resets: {
+        key: 'resets',
+        label: 'Resets',
+        countField: 'total_resets',
+        assocKey: 'infractions_for_resets',
+        trendsPrefix: 'resets',
+        barColor: '#1e293b',
+        cardModifier: 'overview-remres-card--resets',
+    },
+});
+
+function getRemResKindConfig(mode) {
+    return REM_RES_KIND_CONFIG[mode] || null;
+}
+
+function remResCountsFromStatsSlice(statsSlice, kind) {
+    const cfg = getRemResKindConfig(kind);
+    if (!cfg) return { time: {}, day: {}, assoc: {} };
+    const field = cfg.countField;
+    const assocKey = cfg.assocKey;
+    const time = {};
+    Object.entries(statsSlice?.by_time || {}).forEach(([label, bucket]) => {
+        const n = Number(bucket?.[field]) || 0;
+        if (n > 0) time[label] = n;
+    });
+    const day = {};
+    Object.entries(statsSlice?.by_day_of_week || {}).forEach(([label, bucket]) => {
+        const n = Number(bucket?.[field]) || 0;
+        if (n > 0) day[label] = n;
+    });
+    const assoc = { ...(statsSlice?.additional_info?.[assocKey] || {}) };
+    return { time, day, assoc };
+}
+
+function buildRemResOverviewDeltaGetters(data, kind) {
+    const cfg = getRemResKindConfig(kind);
+    if (!cfg) {
+        const noop = () => null;
+        return { getTimeDelta: noop, getDayDelta: noop, getAssocDelta: noop };
+    }
+    const prefix = cfg.trendsPrefix;
+    const ot = data?.overview_trends;
+    const rawTimeDeltas = ot?.[`${prefix}_deltas_by_time`] || {};
+    const rawDayDeltas = ot?.[`${prefix}_deltas_by_day_of_week`] || {};
+    const rawAssocDeltas = ot?.[`${prefix}_assoc_deltas`] || {};
+
+    let prevTimeTotalsNorm =
+        ot != null && typeof ot === 'object'
+            ? (ot[`${prefix}_previous_time_totals_normalized`] ?? {})
+            : null;
+    let prevDayTotalsNorm =
+        ot != null && typeof ot === 'object'
+            ? (ot[`${prefix}_previous_day_totals_normalized`] ?? {})
+            : null;
+
+    const prevStats = data?.overview_previous_stats || ot?.overview_previous_stats;
+    const countsFromPrev = prevStats ? remResCountsFromStatsSlice(prevStats, kind) : null;
+    if (countsFromPrev) {
+        if (!prevTimeTotalsNorm || !Object.keys(prevTimeTotalsNorm).length) {
+            prevTimeTotalsNorm = normalizeOverviewKeyedTotals(countsFromPrev.time);
+        }
+        if (!prevDayTotalsNorm || !Object.keys(prevDayTotalsNorm).length) {
+            prevDayTotalsNorm = normalizeOverviewKeyedTotals(countsFromPrev.day);
+        }
+    }
+
+    const timeDeltaNorm = {};
+    Object.entries(rawTimeDeltas).forEach(([k, v]) => {
+        const n = Number(v);
+        if (Number.isFinite(n)) timeDeltaNorm[normalizeOverviewTrendLabel(k)] = n;
+    });
+    const dayDeltaNorm = {};
+    Object.entries(rawDayDeltas).forEach(([k, v]) => {
+        const n = Number(v);
+        if (Number.isFinite(n)) dayDeltaNorm[normalizeOverviewTrendLabel(k)] = n;
+    });
+
+    const getTimeDelta = (label, curTotal) => {
+        if (Object.prototype.hasOwnProperty.call(rawTimeDeltas, label)) {
+            const n = Number(rawTimeDeltas[label]);
+            if (Number.isFinite(n)) return n;
+        }
+        const fromMap = timeDeltaNorm[normalizeOverviewTrendLabel(label)];
+        if (Number.isFinite(fromMap)) return fromMap;
+        if (
+            prevTimeTotalsNorm &&
+            typeof prevTimeTotalsNorm === 'object' &&
+            Number.isFinite(Number(curTotal))
+        ) {
+            const prevN = Number(prevTimeTotalsNorm[normalizeOverviewTrendLabel(label)] ?? 0);
+            if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    const getDayDelta = (label, curTotal) => {
+        if (Object.prototype.hasOwnProperty.call(rawDayDeltas, label)) {
+            const n = Number(rawDayDeltas[label]);
+            if (Number.isFinite(n)) return n;
+        }
+        const fromMap = dayDeltaNorm[normalizeOverviewTrendLabel(label)];
+        if (Number.isFinite(fromMap)) return fromMap;
+        if (
+            prevDayTotalsNorm &&
+            typeof prevDayTotalsNorm === 'object' &&
+            Number.isFinite(Number(curTotal))
+        ) {
+            const prevN = Number(prevDayTotalsNorm[normalizeOverviewTrendLabel(label)] ?? 0);
+            if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    const assocDeltaCanon = canonicalizeInfractionTypeDeltas(rawAssocDeltas);
+    const getAssocDelta = (type, curTotal) => {
+        const key = normalizeInfractionType(type);
+        if (key && Object.prototype.hasOwnProperty.call(assocDeltaCanon, key)) {
+            const n = Number(assocDeltaCanon[key]);
+            if (Number.isFinite(n)) return n;
+        }
+        if (rawAssocDeltas && Object.prototype.hasOwnProperty.call(rawAssocDeltas, type)) {
+            const direct = Number(rawAssocDeltas[type]);
+            if (Number.isFinite(direct)) return direct;
+        }
+        if (countsFromPrev && Number.isFinite(Number(curTotal))) {
+            let prevN = 0;
+            if (key && countsFromPrev.assoc[key] != null) {
+                prevN = Number(countsFromPrev.assoc[key]) || 0;
+            } else {
+                Object.entries(countsFromPrev.assoc).forEach(([rawType, cnt]) => {
+                    if (normalizeInfractionType(rawType) === key) prevN += Number(cnt) || 0;
+                });
+                if (!key && countsFromPrev.assoc[type] != null) {
+                    prevN = Number(countsFromPrev.assoc[type]) || 0;
+                }
+            }
+            return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    return { getTimeDelta, getDayDelta, getAssocDelta };
+}
+
 function getCanonicalInfractionDetailEntry(infractionsByType = {}, type) {
     const canonicalType = normalizeInfractionType(type);
     if (!canonicalType) return null;
@@ -18180,6 +18379,14 @@ function niceCeilingAxisMax(maxValue) {
     return nf * 10 ** exp;
 }
 
+/** Short weekday label for vertical day-of-week bar charts (tables keep full names). */
+function formatVbarDayLabel(dayLabel) {
+    const s = String(dayLabel || '').trim();
+    if (!s) return '';
+    if (s.length <= 3) return s;
+    return s.slice(0, 3);
+}
+
 function infractionBarSegmentTitle(cat, infCount, rowInfTotal, contextPhrase) {
     const pctInfHere = rowInfTotal > 0 ? Math.round((infCount / rowInfTotal) * 1000) / 10 : 0;
     const ctx = contextPhrase || 'in this view';
@@ -18221,6 +18428,28 @@ function decodeInfractionsChartTipDataAttr(raw) {
     } catch {
         return '';
     }
+}
+
+/** Transparent hit strips for horizontal infraction-style bar rows (data-ictip tooltips). */
+function infractionBarHorizontalHitsHtml(hitEntries) {
+    if (!hitEntries || !hitEntries.length) return '';
+    return hitEntries
+        .map((e) => {
+            const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
+            return `<div class="infractions-hstar-seg-hit"${d}></div>`;
+        })
+        .join('');
+}
+
+/** Transparent hit strips for vertical infraction-style bar columns. */
+function infractionBarVerticalHitsHtml(hitEntries) {
+    if (!hitEntries || !hitEntries.length) return '';
+    return hitEntries
+        .map((e) => {
+            const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
+            return `<div class="infractions-vbar-seg-hit"${d}></div>`;
+        })
+        .join('');
 }
 
 const INFRACTION_BAR_GAP_PX = 2;
@@ -18378,6 +18607,7 @@ function wireInfractionsChartHoverTips(hostEl) {
     let hoverIntentTimer = null;
     let pendingTipEl = null;
     let pendingTipText = '';
+    let pendingIntentNonce = 0;
 
     const clearHoverIntent = () => {
         if (hoverIntentTimer) {
@@ -18423,6 +18653,7 @@ function wireInfractionsChartHoverTips(hostEl) {
         pendingTipText = text;
         if (typeof window._ictipDismissNonce !== 'number') window._ictipDismissNonce = 0;
         const scheduledNonce = window._ictipDismissNonce;
+        pendingIntentNonce = scheduledNonce;
         hoverIntentTimer = setTimeout(() => {
             hoverIntentTimer = null;
             if (scheduledNonce !== window._ictipDismissNonce) {
@@ -18451,8 +18682,7 @@ function wireInfractionsChartHoverTips(hostEl) {
     if (!window._infractionsChartTipGlobalDismiss) {
         window._infractionsChartTipGlobalDismiss = true;
         const dismiss = () => {
-            if (typeof window._ictipDismissNonce !== 'number') window._ictipDismissNonce = 0;
-            window._ictipDismissNonce++;
+            clearHoverIntent();
             hideTip();
         };
         window.addEventListener('blur', dismiss);
@@ -19710,6 +19940,7 @@ function buildOverviewHeatmapColumnLabels(timeSlots, frenzySeverityByTimeByDay, 
 }
 
 let summaryTrendsChartInstance = null;
+let summaryTrendVisualViewportHandler = null;
 let currentSummaryCheckpointData = [];
 let currentSummaryTrendStudentIds = [];
 
@@ -20035,9 +20266,9 @@ async function fetchSummaryTrendCheckpoints(rangeOverride) {
 }
 
 /** Average STAR % line on Reports → Trends; checkpoint fallback when no card color. */
-const SUMMARY_TREND_STAR_LINE = '#6b8eb8';
+const SUMMARY_TREND_STAR_LINE = '#4a8eff';
 /** Area fill under Average STAR % line. */
-const SUMMARY_TREND_STAR_FILL = 'rgba(107, 142, 184, 0.11)';
+const SUMMARY_TREND_STAR_FILL = 'rgba(74, 142, 255, 0.16)';
 /** Tick and axis title color (matches :root --text-primary). */
 const SUMMARY_TREND_CHART_AXIS_TEXT = '#1C1917';
 
@@ -20545,6 +20776,10 @@ function renderSummaryTrendChart(points, checkpoints) {
     body.innerHTML = '<div class="behavior-trend-chart-wrap"><canvas id="summary-trends-chart-canvas" aria-label="Trends chart" role="img"></canvas></div>';
     const canvas = document.getElementById('summary-trends-chart-canvas');
     if (!canvas || typeof Chart === 'undefined') return;
+    if (window.visualViewport && summaryTrendVisualViewportHandler) {
+        window.visualViewport.removeEventListener('resize', summaryTrendVisualViewportHandler);
+        summaryTrendVisualViewportHandler = null;
+    }
     if (summaryTrendsChartInstance) {
         summaryTrendsChartInstance.destroy();
         summaryTrendsChartInstance = null;
@@ -20561,15 +20796,6 @@ function renderSummaryTrendChart(points, checkpoints) {
             line: SUMMARY_TREND_STAR_LINE,
             fill: SUMMARY_TREND_STAR_FILL
         }
-    };
-    const gradientFill = (context, rgbaTop) => {
-        const chart = context.chart;
-        const { ctx, chartArea } = chart;
-        if (!chartArea) return rgbaTop;
-        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        gradient.addColorStop(0, rgbaTop);
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        return gradient;
     };
     const makeLegendSwatch = (lineColor, fillTopRgba) => {
         const swatch = document.createElement('canvas');
@@ -20614,48 +20840,248 @@ function renderSummaryTrendChart(points, checkpoints) {
             legend.__gapPatched = true;
         }
     };
+    const boundedFillPlugin = {
+        id: 'summaryTrendBoundedFills',
+        beforeDatasetsDraw(chart) {
+            const metaF = chart.getDatasetMeta(0);
+            const metaS = chart.getDatasetMeta(1);
+            const { ctx, chartArea } = chart;
+            const yFrenzy = chart.scales.yFrenzy;
+            if (!metaF?.data?.length || !metaS?.data?.length || !chartArea || !yFrenzy) return;
+
+            const ptsF = metaF.data;
+            const ptsS = metaS.data;
+            const n = Math.min(ptsF.length, ptsS.length);
+
+            // Use meta pixel coords directly — these are the exact same coords Chart.js strokes,
+            // so fills and strokes are pixel-perfect and can never produce gaps between them.
+            const ptF = (i) => {
+                const p = ptsF[i];
+                if (!p || p.skip || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+                return { x: p.x, y: p.y };
+            };
+            const ptS = (i) => {
+                const p = ptsS[i];
+                if (!p || p.skip || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+                return { x: p.x, y: p.y };
+            };
+
+            const plotBottom = Math.max(chartArea.bottom, yFrenzy.getPixelForValue(0));
+
+            const segSegIx = (ax, ay, bx, by, cx, cy, dx, dy) => {
+                const rx = bx - ax, ry = by - ay;
+                const sx = dx - cx, sy = dy - cy;
+                const denom = rx * sy - ry * sx;
+                if (Math.abs(denom) < 1e-9) return null;
+                const qx = cx - ax, qy = cy - ay;
+                const t = (qx * sy - qy * sx) / denom;
+                const u = (qx * ry - qy * rx) / denom;
+                if (t < -1e-4 || t > 1 + 1e-4 || u < -1e-4 || u > 1 + 1e-4) return null;
+                const tc = Math.max(0, Math.min(1, t));
+                return { x: ax + tc * rx, y: ay + tc * ry };
+            };
+
+            const vGrad = (topRgba) => {
+                const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                g.addColorStop(0, topRgba);
+                g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                return g;
+            };
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+            ctx.clip();
+
+            // --- Red: single closed polygon along frenzy line → baseline ---
+            {
+                ctx.beginPath();
+                let started = false, firstX = null, lastX = null;
+                for (let i = 0; i < n; i++) {
+                    const p = ptF(i);
+                    if (!p) continue;
+                    if (!started) { ctx.moveTo(p.x, p.y); started = true; firstX = p.x; }
+                    else ctx.lineTo(p.x, p.y);
+                    lastX = p.x;
+                }
+                if (started) {
+                    ctx.lineTo(lastX, plotBottom);
+                    ctx.lineTo(firstX, plotBottom);
+                    ctx.closePath();
+                    ctx.fillStyle = vGrad(TREND_COLORS.frenzy.fill);
+                    ctx.fill();
+                }
+            }
+
+            // --- Blue: each contiguous "STAR above frenzies" region is ONE closed polygon ---
+            // Splitting regions into a run + separate crossing-triangle causes a shared edge
+            // between two fill calls; antialiasing always leaves a hairline on that edge.
+            // Fix: fold the intersection vertex ix directly into the region polygon so
+            // there is exactly one ctx.fill() per region and zero internal shared edges.
+            const gStar = vGrad(TREND_COLORS.star.fill);
+
+            // regTop/regBot accumulate STAR and frenzy vertices L→R for the active region.
+            // They are flushed as a single polygon (top L→R, bottom R→L, close).
+            let inReg = false;
+            let regTop = [];
+            let regBot = [];
+
+            const flushRegion = () => {
+                if (!inReg || regTop.length < 2) { inReg = false; regTop = []; regBot = []; return; }
+                ctx.beginPath();
+                ctx.moveTo(regTop[0].x, regTop[0].y);
+                for (let k = 1; k < regTop.length; k++) ctx.lineTo(regTop[k].x, regTop[k].y);
+                for (let k = regBot.length - 1; k >= 0; k--) ctx.lineTo(regBot[k].x, regBot[k].y);
+                ctx.closePath();
+                ctx.fillStyle = gStar;
+                ctx.fill();
+                inReg = false; regTop = []; regBot = [];
+            };
+
+            for (let i = 0; i < n - 1; i++) {
+                const s0 = ptS(i), s1 = ptS(i + 1);
+                const f0 = ptF(i), f1 = ptF(i + 1);
+                if (!s0 || !s1 || !f0 || !f1) {
+                    flushRegion(); continue;
+                }
+                const above0 = s0.y < f0.y;   // STAR higher on screen (lower y) at left end
+                const above1 = s1.y < f1.y;   // STAR higher on screen (lower y) at right end
+
+                if (!inReg) {
+                    if (above0 && above1) {
+                        // Fully above: start region at the left data point
+                        regTop = [s0, s1]; regBot = [f0, f1]; inReg = true;
+                    } else if (!above0 && above1) {
+                        // Entry crossing: region begins at the intersection inside this segment
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop = [ix, s1]; regBot = [ix, f1]; inReg = true; }
+                    } else if (above0 && !above1) {
+                        // Tiny region: starts above at left, exits within this segment
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop = [s0, ix]; regBot = [f0, ix]; inReg = true; flushRegion(); }
+                    }
+                    // !above0 && !above1: fully below this segment — nothing to do
+                } else {
+                    // In a region (above0 is true because the previous segment's above1 was true)
+                    if (above1) {
+                        // Continue: extend right endpoint
+                        regTop.push(s1); regBot.push(f1);
+                    } else {
+                        // Exit: STAR crosses below frenzy — close region at the intersection
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop.push(ix); regBot.push(ix); }
+                        flushRegion();
+                    }
+                }
+            }
+            flushRegion();
+
+            ctx.restore();
+        }
+    };
+    /** Vertical guides at each x: from plot bottom up to the visually higher of the two lines (smaller pixel y). */
+    const summaryTrendVLinePlugin = {
+        id: 'summaryTrendDataVLines',
+        beforeDatasetsDraw(chart) {
+            const metaF = chart.getDatasetMeta(0);
+            const metaS = chart.getDatasetMeta(1);
+            const { ctx, chartArea } = chart;
+            if (!metaF?.data?.length || !metaS?.data?.length || !chartArea) return;
+            const ptsF = metaF.data;
+            const ptsS = metaS.data;
+            const n = Math.min(ptsF.length, ptsS.length);
+
+            const scale = Math.max(1e-6, Math.abs(ctx.getTransform().a));
+            const hairline = 0.75 / scale;
+            const vlineStroke = 'rgba(28, 25, 23, 0.18)';
+
+            ctx.save();
+            ctx.strokeStyle = vlineStroke;
+            ctx.lineWidth = hairline;
+            for (let i = 0; i < n; i++) {
+                const a = ptsF[i];
+                const b = ptsS[i];
+                const x =
+                    (a && !a.skip && Number.isFinite(a.x) ? a.x : null) ??
+                    (b && !b.skip && Number.isFinite(b.x) ? b.x : null);
+                if (x == null) continue;
+                const ys = [];
+                if (a && !a.skip && Number.isFinite(a.y)) ys.push(a.y);
+                if (b && !b.skip && Number.isFinite(b.y)) ys.push(b.y);
+                if (!ys.length) continue;
+                const yTop = Math.min(...ys);
+                const top = Math.max(chartArea.top, Math.min(yTop, chartArea.bottom));
+                const xSnap = Math.round(x * scale) / scale;
+                ctx.beginPath();
+                ctx.moveTo(xSnap, chartArea.bottom);
+                ctx.lineTo(xSnap, top);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    };
     summaryTrendsChartInstance = new Chart(canvas, {
         type: 'line',
         data: {
             labels,
+            // Chart.js draws sorted metas from last index down to 0; lower `order` is sorted first
+            // and drawn last (on top). STAR order 0 keeps the blue stroke above the red stroke.
+            // tension: 0 — straight segments so custom fills match the lines (smooth curves left gaps).
             datasets: [
                 {
                     label: 'Number of Frenzies',
                     data: frenzyData,
+                    order: 1,
                     yAxisID: 'yFrenzy',
                     borderColor: TREND_COLORS.frenzy.line,
-                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.frenzy.fill),
-                    fill: true,
+                    backgroundColor: 'transparent',
+                    fill: false,
                     borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
+                    tension: 0,
                     pointRadius: 4,
-                    pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
                     pointBorderColor: TREND_COLORS.frenzy.line,
                     pointBorderWidth: 2,
-                    tension: 0.4
+                    pointHoverRadius: 5,
+                    pointHitRadius: 18,
+                    pointHoverBackgroundColor: '#ffffff',
+                    pointHoverBorderColor: TREND_COLORS.frenzy.line,
+                    pointHoverBorderWidth: 2
                 },
                 {
                     label: 'Average STAR %',
                     data: starData,
+                    order: 0,
                     yAxisID: 'yStar',
                     borderColor: TREND_COLORS.star.line,
-                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.star.fill),
-                    fill: true,
+                    backgroundColor: 'transparent',
+                    fill: false,
                     borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
+                    tension: 0,
                     pointRadius: 4,
-                    pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
                     pointBorderColor: TREND_COLORS.star.line,
                     pointBorderWidth: 2,
-                    tension: 0.4
+                    pointHoverRadius: 5,
+                    pointHitRadius: 18,
+                    pointHoverBackgroundColor: '#ffffff',
+                    pointHoverBorderColor: TREND_COLORS.star.line,
+                    pointHoverBorderWidth: 2
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            devicePixelRatio: typeof window !== 'undefined' && window.devicePixelRatio
+                ? Math.min(window.devicePixelRatio, 3)
+                : 1,
+            elements: {
+                line: {
+                    borderJoinStyle: 'round',
+                    borderCapStyle: 'round'
+                }
+            },
             scales: {
                 yFrenzy: {
                     position: 'left',
@@ -20697,10 +21123,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                 },
                 x: {
                     grid: {
-                        display: true,
-                        drawOnChartArea: true,
-                        drawTicks: true,
-                        color: 'rgba(28, 25, 23, 0.08)'
+                        display: false
                     },
                     ticks: {
                         autoSkip: false,
@@ -20785,7 +21208,12 @@ function renderSummaryTrendChart(points, checkpoints) {
                             const sign = delta > 0 ? '+' : '-';
                             return ` <span style="color:${color};font-weight:600;">${sign}${Math.abs(delta)}${suffix}</span>`;
                         };
-                        const linesHtml = tooltip.dataPoints.map((dp) => {
+                        const tipPoints = [...tooltip.dataPoints].sort((a, b) => {
+                            if (a.dataset.yAxisID === 'yFrenzy' && b.dataset.yAxisID === 'yStar') return -1;
+                            if (a.dataset.yAxisID === 'yStar' && b.dataset.yAxisID === 'yFrenzy') return 1;
+                            return 0;
+                        });
+                        const linesHtml = tipPoints.map((dp) => {
                             const y = dp.parsed.y;
                             const isStar = dp.dataset.yAxisID === 'yStar';
                             let valueText;
@@ -20837,8 +21265,14 @@ function renderSummaryTrendChart(points, checkpoints) {
                 }
             }
         },
-        plugins: [checkpointPlugin, legendBottomGapPlugin]
+        plugins: [boundedFillPlugin, summaryTrendVLinePlugin, checkpointPlugin, legendBottomGapPlugin]
     });
+    if (typeof window !== 'undefined' && window.visualViewport) {
+        summaryTrendVisualViewportHandler = () => {
+            if (summaryTrendsChartInstance) summaryTrendsChartInstance.resize();
+        };
+        window.visualViewport.addEventListener('resize', summaryTrendVisualViewportHandler);
+    }
     const grid = body.closest('.dashboard-card-grid');
     if (grid) scheduleMasonryLayoutAfterResize(grid);
 }
@@ -21905,9 +22339,24 @@ function attachOverviewCardInteractions(container, data) {
     const getExtraCard = (cardKey) =>
         grid.querySelector(`.overview-extra-card[data-overview-card="${cardKey}"]`);
 
+    const tearDownRemResChartsIfAny = (card) => {
+        if (!card) return;
+        const list = card._remResCharts;
+        if (!Array.isArray(list) || !list.length) return;
+        list.forEach((ch) => {
+            try {
+                ch.destroy();
+            } catch (e) {
+                /* ignore */
+            }
+        });
+        card._remResCharts = [];
+    };
+
     const removeExtraCard = (cardKey) => {
         const existing = getExtraCard(cardKey);
         if (existing && existing.parentNode) {
+            tearDownRemResChartsIfAny(existing);
             existing.parentNode.removeChild(existing);
         }
     };
@@ -21934,6 +22383,7 @@ function attachOverviewCardInteractions(container, data) {
                 sk => STAT_KEY_TO_CARD_KEY[sk] === cardKey
             );
             if (!statKey || !selectionOrder.includes(statKey)) {
+                tearDownRemResChartsIfAny(card);
                 card.parentNode && card.parentNode.removeChild(card);
             }
         });
@@ -21948,6 +22398,16 @@ function attachOverviewCardInteractions(container, data) {
         }
         buildFn();
         return true;
+    };
+
+    const syncIncidentsPanelSelectedState = () => {
+        const panel = overviewCard.querySelector('.overview-incidents-panel');
+        if (!panel) return;
+        const anyOpen = !!getExtraCard('reminders') || !!getExtraCard('resets');
+        panel.classList.toggle('overview-stat-selected', anyOpen);
+        overviewCard.querySelectorAll('.overview-incident-bar-col').forEach((col) => {
+            col.classList.remove('overview-stat-selected');
+        });
     };
 
     const buildDaysPresentCard = () => {
@@ -22871,88 +23331,268 @@ function attachOverviewCardInteractions(container, data) {
     };
 
     const renderReminderOrResetDetails = (mode) => {
-        const label = mode === 'reminders' ? 'Reminders' : 'Resets';
-        const assocKey = mode === 'reminders' ? 'infractions_for_reminders' : 'infractions_for_resets';
-        const assocMap = data.additional_info?.[assocKey] || {};
+        const cfg = getRemResKindConfig(mode);
+        if (!cfg) return;
+
+        const label = cfg.label;
+        const assocMap = data.additional_info?.[cfg.assocKey] || {};
         const entries = Object.entries(assocMap).sort((a, b) => b[1] - a[1]);
         const byTime = data.by_time || {};
         const byDay = data.by_day_of_week || {};
+        const scheduleOrder = new Map(SCHEDULE_PERIODS.map((t, i) => [t, i]));
+        const { getTimeDelta, getDayDelta, getAssocDelta } = buildRemResOverviewDeltaGetters(data, cfg.key);
+
+        const countForTimeSlot = (labelTime) => {
+            const tdata = byTime[labelTime] || {};
+            return Number(tdata[cfg.countField]) || 0;
+        };
+
+        const timeSlots = Object.keys(byTime)
+            .map((labelTime) => ({ labelTime, count: countForTimeSlot(labelTime) }))
+            .filter((r) => r.count > 0)
+            .sort((a, b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                const ia = scheduleOrder.has(a.labelTime) ? scheduleOrder.get(a.labelTime) : 999;
+                const ib = scheduleOrder.has(b.labelTime) ? scheduleOrder.get(b.labelTime) : 999;
+                if (ia !== ib) return ia - ib;
+                return String(a.labelTime).localeCompare(String(b.labelTime));
+            });
+
+        const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const dayIndex = new Map(dayOrder.map((d, i) => [d, i]));
+        const daySlots = [];
+        dayOrder.forEach((dayLabel) => {
+            const ddata = byDay[dayLabel] || {};
+            const count = Number(ddata[cfg.countField]) || 0;
+            if (count > 0) daySlots.push({ dayLabel, count });
+        });
+        Object.keys(byDay)
+            .filter((k) => !dayIndex.has(k))
+            .forEach((dayLabel) => {
+                const ddata = byDay[dayLabel] || {};
+                const count = Number(ddata[cfg.countField]) || 0;
+                if (count > 0) daySlots.push({ dayLabel, count });
+            });
+        daySlots.sort((a, b) => {
+            const ia = dayIndex.has(a.dayLabel) ? dayIndex.get(a.dayLabel) : 100;
+            const ib = dayIndex.has(b.dayLabel) ? dayIndex.get(b.dayLabel) : 100;
+            if (ia !== ib) return ia - ib;
+            return String(a.dayLabel).localeCompare(String(b.dayLabel));
+        });
 
         let timeRows = '';
-        Object.entries(byTime)
-            .map(([labelTime, tdata]) => {
-                const count = mode === 'reminders'
-                    ? (tdata.total_reminders || 0)
-                    : (tdata.total_resets || 0);
-                return { labelTime, count };
-            })
-            .filter(r => r.count)
-            .sort((a, b) => b.count - a.count)
-            .forEach(({ labelTime, count }) => {
-                timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td></tr>`;
-            });
+        timeSlots.forEach(({ labelTime, count }) => {
+            timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getTimeDelta(labelTime, count))}</td></tr>`;
+        });
 
         let dayRows = '';
-        Object.entries(byDay)
-            .map(([dayLabel, ddata]) => {
-                const count = mode === 'reminders'
-                    ? (ddata.total_reminders || 0)
-                    : (ddata.total_resets || 0);
-                return { dayLabel, count };
-            })
-            .filter(r => r.count)
-            .sort((a, b) => b.count - a.count)
-            .forEach(({ dayLabel, count }) => {
-                dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td></tr>`;
-            });
+        daySlots.forEach(({ dayLabel, count }) => {
+            dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getDayDelta(dayLabel, count))}</td></tr>`;
+        });
 
         let infraRows = '';
         entries.forEach(([t, count]) => {
-            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td></tr>`;
+            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getAssocDelta(t, count))}</td></tr>`;
         });
 
-        const key = mode === 'reminders' ? 'reminders' : 'resets';
+        const infraSlots = entries
+            .filter(([, c]) => (Number(c) || 0) > 0)
+            .map(([name, count]) => ({ label: String(name), count: Number(count) || 0 }));
+
+        const timeEmptyMsg = `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`;
+        const dayEmptyMsg = `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`;
+        const infraEmptyMsg = `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`;
+
+        const key = cfg.key;
+        const barColor = cfg.barColor;
+        const barColorEnc = encodeURIComponent(barColor);
+
+        const buildRemResHstarGraph = (slots, tipForSlot, getDeltaForSlot) => {
+            if (!slots.length) return '';
+            const maxTotal = Math.max(...slots.map((s) => s.count), 1);
+            const axisMax = niceCeilingAxisMax(maxTotal);
+            const tickDivisions = 5;
+            const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) =>
+                Math.round((axisMax * i) / tickDivisions)
+            );
+            const rowsHtml = slots
+                .map((slot) => {
+                    const rowT = slot.count;
+                    const barPct = axisMax > 0 ? Math.min(100, (rowT / axisMax) * 100) : 0;
+                    const tipRaw = tipForSlot(slot);
+                    const hitEntries = [{ n: rowT, dataEnc: encodeInfractionsChartTipDataAttr(tipRaw) }];
+                    const segMetaH = ` data-infraction-bar="h" data-ib-t="${rowT}" data-ib-ns="${rowT}" data-ib-cs="${barColorEnc}"`;
+                    const segsInner = `<div class="infractions-hstar-barsheet infractions-hstar-barsheet--layers" aria-hidden="true"></div>${infractionBarHorizontalHitsHtml(hitEntries)}`;
+                    return `
+                <div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
+                <div class="infractions-hstar-slot">
+                    <div class="infractions-hstar-bar-row">
+                        <div class="infractions-hstar-bar" style="width:${barPct}%">
+                            <div class="infractions-hstar-segments"${segMetaH}>${segsInner}</div>
+                        </div>
+                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${rowT}</span>${formatInfractionCountDeltaHtml(getDeltaForSlot(slot))}</span>
+                    </div>
+                </div>`;
+                })
+                .join('');
+            const xTicksHtml = tickLabels.map((n) => `<span>${n}</span>`).join('');
+            return `<div class="infractions-hstar-chart">
+                <div class="infractions-hstar-body">
+                    ${rowsHtml}
+                    <div class="infractions-hstar-x-spacer" aria-hidden="true"></div>
+                    <div class="infractions-hstar-x-axis">${xTicksHtml}</div>
+                </div>
+            </div>`;
+        };
+
+        const timeGraphBlock = timeSlots.length
+            ? buildRemResHstarGraph(
+                timeSlots.map((s) => ({ label: s.labelTime, count: s.count })),
+                (slot) => `${label}: ${slot.count} at ${slot.label}`,
+                (slot) => getTimeDelta(slot.label, slot.count)
+            )
+            : timeEmptyMsg;
+
+        let dayGraphBlock = dayEmptyMsg;
+        if (daySlots.length) {
+            const dayColsHtml = daySlots
+                .map((slot) => {
+                    const dbTotal = slot.count;
+                    const tipRaw = `${label}: ${dbTotal} on ${slot.dayLabel}`;
+                    const hitEntries = [{ n: dbTotal, dataEnc: encodeInfractionsChartTipDataAttr(tipRaw) }];
+                    const segMetaV = ` data-infraction-bar="v" data-ib-t="${dbTotal}" data-ib-ns="${dbTotal}" data-ib-cs="${barColorEnc}"`;
+                    const segsInner = `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--layers" aria-hidden="true"></div>${infractionBarVerticalHitsHtml(hitEntries)}`;
+                    return `
+                <div class="infractions-vbar-col">
+                    <div class="infractions-vbar-count infractions-vbar-count--stacked">
+                        <span class="infractions-vbar-count-num">${dbTotal}</span>
+                        ${formatInfractionCountDeltaHtml(getDayDelta(slot.dayLabel, dbTotal))}
+                    </div>
+                    <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
+                    <div class="infractions-vbar-label-slot" title="${escapeHtml(slot.dayLabel)}"><span class="infractions-vbar-label">${escapeHtml(formatVbarDayLabel(slot.dayLabel))}</span></div>
+                </div>`;
+                })
+                .join('');
+            dayGraphBlock = `<div class="infractions-vbar-chart-wrap"><div class="infractions-vbar-chart">${dayColsHtml}</div></div>`;
+        }
+
+        const infraGraphBlock = infraSlots.length
+            ? buildRemResHstarGraph(
+                infraSlots,
+                (slot) => `${label}: ${slot.count} — ${slot.label}`,
+                (slot) => getAssocDelta(slot.label, slot.count)
+            )
+            : infraEmptyMsg;
+
+        const remResDeltaTh = '<th title="Change vs prior period">Δ</th>';
+        const timeTableBlock = timeRows
+            ? `<table class="overview-remres-table"><thead><tr><th>Time</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${timeRows}</tbody></table>`
+            : timeEmptyMsg;
+        const dayTableBlock = dayRows
+            ? `<table class="overview-remres-table"><thead><tr><th>Day</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${dayRows}</tbody></table>`
+            : dayEmptyMsg;
+        const infraTableBlock = infraRows
+            ? `<table class="overview-remres-table"><thead><tr><th>Infraction</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${infraRows}</tbody></table>`
+            : infraEmptyMsg;
+
         removeExtraCard(key);
         const card = document.createElement('div');
-        card.className = 'dashboard-card full-width overview-extra-card';
+        card.className = `dashboard-card full-width overview-extra-card overview-remres-card ${cfg.cardModifier}`;
         card.dataset.overviewCard = key;
+        card.style.setProperty('--remres-bar-color', barColor);
         card.innerHTML = `
-        <div class="dashboard-card-header">
-        <h3 class="dashboard-card-title">${label} — When & What</h3>
-        </div>
-        <div class="dashboard-card-body overview-detail-container">
-        <div class="overview-two-col" style="margin-bottom:12px;">
-                    <div>
-                        <h4>By Time of Day</h4>
-                        ${timeRows ? `
-                            <table>
-                                <thead><tr><th>Time</th><th>Count</th></tr></thead>
-                                <tbody>${timeRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`}
+            <div class="dashboard-card-header overview-remres-card-header">
+                <div class="overview-remres-card-header-left">
+                    <h3 class="dashboard-card-title">${label} — When & What</h3>
+                </div>
+                <div class="overview-remres-header-view-toggle">
+                    <div class="view-mode-toggle" role="tablist" aria-label="${escapeHtml(label)} view mode">
+                        <button type="button" class="view-mode-toggle-btn active" data-rr-view="graph" role="tab" aria-selected="true">Graph</button>
+                        <button type="button" class="view-mode-toggle-btn" data-rr-view="table" role="tab" aria-selected="false">Table</button>
                     </div>
-                    <div>
-                        <h4>By Day of Week</h4>
-                        ${dayRows ? `
-                            <table>
-                                <thead><tr><th>Day</th><th>Count</th></tr></thead>
-                                <tbody>${dayRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`}
-                    </div>
-                    <div>
-                        <h4>${label} — Connected Infractions</h4>
-                        ${infraRows ? `
-                            <table>
-                                <thead><tr><th>Infraction</th><th>Count</th></tr></thead>
-                                <tbody>${infraRows}</tbody>
-                            </table>` :
-                            `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`}
-                    </div>
+                </div>
+            </div>
+            <div class="dashboard-card-body overview-detail-container">
+                <div class="overview-remres-breakdown-tabs" role="tablist" aria-label="${escapeHtml(label)} breakdown">
+                    <button type="button" class="overview-remres-breakdown-tab active" data-rr-tab="time" role="tab" aria-selected="true">Time</button>
+                    <button type="button" class="overview-remres-breakdown-tab" data-rr-tab="day" role="tab" aria-selected="false">Day</button>
+                    <button type="button" class="overview-remres-breakdown-tab" data-rr-tab="infractions" role="tab" aria-selected="false">Infractions</button>
+                </div>
+                <div data-rr-host="graph">
+                    <div data-rr-section="time">${timeGraphBlock}</div>
+                    <div data-rr-section="day" hidden>${dayGraphBlock}</div>
+                    <div data-rr-section="infractions" hidden>${infraGraphBlock}</div>
+                </div>
+                <div data-rr-host="table" hidden>
+                    <div data-rr-section="time">${timeTableBlock}</div>
+                    <div data-rr-section="day" hidden>${dayTableBlock}</div>
+                    <div data-rr-section="infractions" hidden>${infraTableBlock}</div>
                 </div>
             </div>
         `;
         grid.appendChild(card);
+        if (typeof wireInfractionsChartHoverTips === 'function') {
+            wireInfractionsChartHoverTips(card);
+        }
+
+        const syncRrBreakdown = (tabMode) => {
+            card.querySelectorAll('[data-rr-host]').forEach((host) => {
+                host.querySelectorAll('[data-rr-section]').forEach((panel) => {
+                    const match = panel.getAttribute('data-rr-section') === tabMode;
+                    panel.hidden = !match;
+                });
+            });
+            card.querySelectorAll('[data-rr-tab]').forEach((btn) => {
+                const active = btn.getAttribute('data-rr-tab') === tabMode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            scheduleInfractionBarPixelLayout(card);
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+
+        const setRrView = (viewMode) => {
+            const isGraph = viewMode === 'graph';
+            const graphHost = card.querySelector('[data-rr-host="graph"]');
+            const tableHost = card.querySelector('[data-rr-host="table"]');
+            if (graphHost) graphHost.hidden = !isGraph;
+            if (tableHost) tableHost.hidden = isGraph;
+            card.querySelectorAll('[data-rr-view]').forEach((btn) => {
+                const active = btn.getAttribute('data-rr-view') === viewMode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            scheduleInfractionBarPixelLayout(card);
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        };
+
+        card.querySelectorAll('[data-rr-tab]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const tabMode = btn.getAttribute('data-rr-tab');
+                if (!tabMode) return;
+                syncRrBreakdown(tabMode);
+            });
+        });
+        card.querySelectorAll('[data-rr-view]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const vm = btn.getAttribute('data-rr-view');
+                if (!vm) return;
+                setRrView(vm);
+            });
+        });
+        syncRrBreakdown('time');
+        setRrView('graph');
+
+        requestAnimationFrame(() => {
+            scheduleInfractionBarPixelLayout(card);
+            if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                scheduleMasonryLayoutAfterResize(grid);
+            }
+        });
     };
 
     const toggleTriggerTimesDayTable = () => {
@@ -23862,11 +24502,7 @@ function attachOverviewCardInteractions(container, data) {
             // Toggle Infractions card; details are shown when a row is selected
             const opened = toggleExtraCard('infractions_card', () => {
                     const card = document.createElement('div');
-                    /** Compact Time/Day bar charts: set false and remove BEGIN/END block in style.css to revert. */
-                    const INFRACTIONS_CHART_COMPACT_UI = true;
-                    card.className = `dashboard-card infractions-card overview-extra-card${
-                        INFRACTIONS_CHART_COMPACT_UI ? ' infractions-chart-ui-compact' : ''
-                    }`;
+                    card.className = 'dashboard-card infractions-card overview-extra-card';
                     card.dataset.overviewCard = 'infractions_card';
 
                     const rawInfractions = data.infractions || data.additional_info?.infractions || {};
@@ -23892,6 +24528,77 @@ function attachOverviewCardInteractions(container, data) {
                     let dayModeGraphHtml = '';
 
                     if (infractionKeys.length > 0) {
+                        const ot = data.overview_trends;
+                        const infractionsDeltasByTimeRaw = ot?.infractions_deltas_by_time || {};
+                        const infractionsDeltasByDayRaw = ot?.infractions_deltas_by_day_of_week || {};
+                        const prevTimeTotalsNorm =
+                            ot != null && typeof ot === 'object'
+                                ? (ot.infractions_previous_time_totals_normalized ?? {})
+                                : null;
+                        const prevDayTotalsNorm =
+                            ot != null && typeof ot === 'object'
+                                ? (ot.infractions_previous_day_totals_normalized ?? {})
+                                : null;
+                        /** Match Python `norm_slot_label` in build_overview_trends (dash/spacing). */
+                        const normalizeInfTrendKey = (s) => {
+                            let t = String(s || '').trim().toLowerCase();
+                            t = t.replace(/\u2013/g, '-').replace(/\u2014/g, '-').replace(/\u2212/g, '-');
+                            t = t.replace(/\s*-\s*/g, '-');
+                            t = t.replace(/\s+/g, ' ');
+                            return t.trim();
+                        };
+                        const infTimeDeltaNorm = {};
+                        Object.entries(infractionsDeltasByTimeRaw).forEach(([k, v]) => {
+                            const n = Number(v);
+                            if (Number.isFinite(n)) infTimeDeltaNorm[normalizeInfTrendKey(k)] = n;
+                        });
+                        const infDayDeltaNorm = {};
+                        Object.entries(infractionsDeltasByDayRaw).forEach(([k, v]) => {
+                            const n = Number(v);
+                            if (Number.isFinite(n)) infDayDeltaNorm[normalizeInfTrendKey(k)] = n;
+                        });
+                        const getInfTimeDelta = (label, curTotal) => {
+                            if (Object.prototype.hasOwnProperty.call(infractionsDeltasByTimeRaw, label)) {
+                                const n = Number(infractionsDeltasByTimeRaw[label]);
+                                if (Number.isFinite(n)) return n;
+                            }
+                            const fromMap = infTimeDeltaNorm[normalizeInfTrendKey(label)];
+                            if (Number.isFinite(fromMap)) return fromMap;
+                            if (
+                                prevTimeTotalsNorm &&
+                                typeof prevTimeTotalsNorm === 'object' &&
+                                Number.isFinite(Number(curTotal))
+                            ) {
+                                const prevN = Number(prevTimeTotalsNorm[normalizeInfTrendKey(label)] ?? 0);
+                                if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+                            }
+                            return null;
+                        };
+                        const getInfDayDelta = (day, curTotal) => {
+                            if (Object.prototype.hasOwnProperty.call(infractionsDeltasByDayRaw, day)) {
+                                const n = Number(infractionsDeltasByDayRaw[day]);
+                                if (Number.isFinite(n)) return n;
+                            }
+                            const fromMap = infDayDeltaNorm[normalizeInfTrendKey(day)];
+                            if (Number.isFinite(fromMap)) return fromMap;
+                            if (
+                                prevDayTotalsNorm &&
+                                typeof prevDayTotalsNorm === 'object' &&
+                                Number.isFinite(Number(curTotal))
+                            ) {
+                                const prevN = Number(prevDayTotalsNorm[normalizeInfTrendKey(day)] ?? 0);
+                                if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+                            }
+                            return null;
+                        };
+                        const formatInfractionCountDeltaHtml = (delta) => {
+                            if (delta == null || !Number.isFinite(delta)) {
+                                return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">—</span>';
+                            }
+                            const dClass = delta > 0 ? 'is-neg' : delta < 0 ? 'is-pos' : 'is-muted';
+                            const text = delta >= 0 ? `+${delta}` : `${delta}`;
+                            return `<span class="infractions-count-delta overview-gauge-small ${dClass}" title="Change vs prior period">${escapeHtml(text)}</span>`;
+                        };
                         typeModeTableHtml = `
                             <table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
                                 <thead>
@@ -23918,9 +24625,9 @@ function attachOverviewCardInteractions(container, data) {
                             Safety: ['#dc2626', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2']
                         };
                         const bucketTotals = bucketInfractionsOverview(infractions);
-                        const bucketPctDeltas = data.overview_trends?.infractions_bucket_pct_deltas || {};
-                        const bucketPctPrevious = data.overview_trends?.infractions_bucket_pct_previous || {};
-                        const rawTypeDeltas = data.overview_trends?.infractions_type_deltas || {};
+                        const bucketPctDeltas = ot?.infractions_bucket_pct_deltas || {};
+                        const bucketPctPrevious = ot?.infractions_bucket_pct_previous || {};
+                        const rawTypeDeltas = ot?.infractions_type_deltas || {};
                         const parseDeltaValue = (value) => {
                             if (value == null) return null;
                             if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -24115,25 +24822,6 @@ function attachOverviewCardInteractions(container, data) {
                             return arr.length >= 2 ? arr[1] : arr[0];
                         };
 
-                        const infractionBarHorizontalHitsHtml = (hitEntries) => {
-                            if (!hitEntries || !hitEntries.length) return '';
-                            return hitEntries
-                                .map((e) => {
-                                    const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
-                                    return `<div class="infractions-hstar-seg-hit"${d}></div>`;
-                                })
-                                .join('');
-                        };
-                        const infractionBarVerticalHitsHtml = (hitEntries) => {
-                            if (!hitEntries || !hitEntries.length) return '';
-                            return hitEntries
-                                .map((e) => {
-                                    const d = e.dataEnc ? ` data-ictip="${e.dataEnc}"` : '';
-                                    return `<div class="infractions-vbar-seg-hit"${d}></div>`;
-                                })
-                                .join('');
-                        };
-
                         const barLegendHtml = `
                             <div class="infractions-bar-legend" aria-label="Infraction groups">
                                 ${categoryOrder
@@ -24209,7 +24897,7 @@ function attachOverviewCardInteractions(container, data) {
                                         <div class="infractions-hstar-bar" style="width:${barPct}%">
                                             <div class="infractions-hstar-segments"${segMetaH}>${segsInner}</div>
                                         </div>
-                                        <span class="infractions-hstar-count">${slot.total}</span>
+                                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${slot.total}</span>${formatInfractionCountDeltaHtml(getInfTimeDelta(slot.label, slot.total))}</span>
                                     </div>
                                 </div>`;
                                 })
@@ -24229,6 +24917,7 @@ function attachOverviewCardInteractions(container, data) {
                                     <tr>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Time</th>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);" title="Change in total infractions vs prior period">Δ</th>
                                     </tr>
                                 </thead>
                                 <tbody>`;
@@ -24236,6 +24925,7 @@ function attachOverviewCardInteractions(container, data) {
                                 timeModeTableHtml += `<tr>
                                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
                                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slot.total}</span></td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${formatInfractionCountDeltaHtml(getInfTimeDelta(slot.label, slot.total))}</td>
                             </tr>`;
                             });
                             timeModeTableHtml += `</tbody></table>`;
@@ -24297,9 +24987,12 @@ function attachOverviewCardInteractions(container, data) {
                                               : '';
                                     return `
                                 <div class="infractions-vbar-col">
-                                    <div class="infractions-vbar-count">${dbTotal}</div>
+                                    <div class="infractions-vbar-count infractions-vbar-count--stacked">
+                                        <span class="infractions-vbar-count-num">${dbTotal}</span>
+                                        ${formatInfractionCountDeltaHtml(getInfDayDelta(day, dbTotal))}
+                                    </div>
                                     <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
-                                    <div class="infractions-vbar-label">${escapeHtml(day)}</div>
+                                    <div class="infractions-vbar-label-slot" title="${escapeHtml(day)}"><span class="infractions-vbar-label">${escapeHtml(formatVbarDayLabel(day))}</span></div>
                                 </div>`;
                                 })
                                 .join('');
@@ -24321,7 +25014,12 @@ function attachOverviewCardInteractions(container, data) {
                                     : fall;
                                 dayModeTableHtml += `<tr>
                                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(day)}</td>
-                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${dbTotal}</span></td>
+                                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">
+                                    <div class="infractions-breakdown-value-stack">
+                                        <span class="dashboard-breakdown-value">${dbTotal}</span>
+                                        ${formatInfractionCountDeltaHtml(getInfDayDelta(day, dbTotal))}
+                                    </div>
+                                </td>
                             </tr>`;
                             });
                             dayModeTableHtml += `</tbody></table>`;
@@ -24636,7 +25334,7 @@ function attachOverviewCardInteractions(container, data) {
                 removeExtraCard('reminders');
                 selectionOrder = selectionOrder.filter(k => k !== 'reminders');
             }
-            box.classList.toggle('overview-stat-selected', opened);
+            syncIncidentsPanelSelectedState();
         } else if (key === 'resets') {
             const opened = !getExtraCard('resets');
             if (opened) {
@@ -24647,7 +25345,7 @@ function attachOverviewCardInteractions(container, data) {
                 removeExtraCard('resets');
                 selectionOrder = selectionOrder.filter(k => k !== 'resets');
             }
-            box.classList.toggle('overview-stat-selected', opened);
+            syncIncidentsPanelSelectedState();
         } else if (key === 'trigger_times') {
             // Trigger Times: create/toggle the Trigger Times card and show day-of-week breakdown
             const opened = toggleExtraCard('trigger_times', buildTriggerTimesCard);
@@ -24688,6 +25386,38 @@ function attachOverviewCardInteractions(container, data) {
             applySelectionChange(box, key, { restore: false });
         });
     });
+
+    const incidentsPanel = overviewCard.querySelector('.overview-incidents-panel');
+    if (incidentsPanel) {
+        incidentsPanel.addEventListener('click', (e) => {
+            if (e.target.closest('.overview-incident-bar-col')) return;
+
+            const remindersOpen = !!getExtraCard('reminders');
+            const resetsOpen = !!getExtraCard('resets');
+            const bothOpen = remindersOpen && resetsOpen;
+
+            if (bothOpen) {
+                removeExtraCard('reminders');
+                removeExtraCard('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders' && k !== 'resets');
+            } else {
+                if (!remindersOpen) {
+                    renderReminderOrResetDetails('reminders');
+                    selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+                    selectionOrder.push('reminders');
+                }
+                if (!resetsOpen) {
+                    renderReminderOrResetDetails('resets');
+                    selectionOrder = selectionOrder.filter(k => k !== 'resets');
+                    selectionOrder.push('resets');
+                }
+            }
+            syncIncidentsPanelSelectedState();
+            reorderExtraCards();
+            persistSelectionOrder();
+            applySummaryMasonryLayout(grid);
+        });
+    }
 
     if (trendsBox) {
         const trendsCard = container.querySelector('.dashboard-card[data-summary-card="behavior-trend"]');
@@ -24731,6 +25461,7 @@ function attachOverviewCardInteractions(container, data) {
         });
         reorderExtraCards();
     }
+    syncIncidentsPanelSelectedState();
 
     // Apply layout whenever overview interactions are (re)wired
     applySummaryMasonryLayout(grid);

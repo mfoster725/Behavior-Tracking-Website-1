@@ -4496,6 +4496,8 @@ a.dashboard-compare-toggle {
 #summary-trends-chart-canvas {
     width: 100%;
     height: 100%;
+    /* Let the browser scale the backing store smoothly when zooming */
+    image-rendering: auto;
 }
 
 .summary-trends-checkpoint-list {
@@ -5479,6 +5481,9 @@ a.dashboard-compare-toggle {
 .overview-incident-bar-col {
     flex: 1;
     max-width: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
     cursor: pointer;
 }
@@ -5492,27 +5497,31 @@ a.dashboard-compare-toggle {
 
 .overview-incident-bar-track {
     height: 100px;
-    background: #ece8df;
+    background: color-mix(in srgb, var(--text-primary) 5.5%, var(--bg-elevated));
+    border: 1px solid var(--border);
     border-radius: 8px;
     display: flex;
     align-items: flex-end;
     overflow: hidden;
     margin: 0 auto;
     width: 100%;
+    box-sizing: border-box;
 }
 
 .overview-incident-bar-fill {
     width: 100%;
     border-radius: 8px 8px 0 0;
     transition: height 0.25s ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
+/* Reminder: reference orange; reset: near-black from palette */
 .overview-incident-bar-fill--reminder {
-    background: linear-gradient(180deg, #5eead4, #14b8a6);
+    background: #e87a1e;
 }
 
 .overview-incident-bar-fill--reset {
-    background: linear-gradient(180deg, #cbd5e1, #475569);
+    background: var(--text-primary);
 }
 
 .overview-incident-label {
@@ -5520,8 +5529,11 @@ a.dashboard-compare-toggle {
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: #64748b;
+    color: var(--text-secondary);
     margin-top: 10px;
+    text-align: center;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* Compact top-right Reports overview card, matching the saved mockup. */
@@ -5585,6 +5597,28 @@ a.dashboard-compare-toggle {
 
 .overview-card--rich .overview-rich-bottom .overview-incidents-panel {
     flex: 1;
+}
+
+.overview-incidents-panel {
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.overview-incidents-panel:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.overview-incidents-panel.overview-stat-selected {
+    background-color: var(--bg-surface);
+    border-color: var(--accent);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
+}
+
+.overview-incidents-panel .overview-incident-bar-col.overview-stat-selected {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
 }
 
 .overview-card--rich .overview-panel-kicker {
@@ -5954,25 +5988,169 @@ a.dashboard-compare-toggle {
     margin-top: 2px;
 }
 
+/* Summary overview — Reminders / Resets detail card (graph + breakdown tabs) */
+.overview-remres-card--reminders {
+    --remres-bar-color: #e87a1e;
+    --remres-tab-accent: #e87a1e;
+}
+.overview-remres-card--resets {
+    --remres-bar-color: #1e293b;
+    --remres-tab-accent: var(--text-primary);
+}
+.overview-remres-card--reminders .overview-remres-breakdown-tab.active,
+.overview-remres-card--resets .overview-remres-breakdown-tab.active {
+    box-shadow: inset 0 2px 0 var(--remres-tab-accent);
+}
+.overview-remres-card .overview-remres-card-header {
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    overflow: visible;
+}
+.overview-remres-card .overview-remres-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+.overview-remres-card .overview-remres-header-view-toggle {
+    flex-shrink: 0;
+}
+.overview-remres-card .overview-remres-breakdown-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin: 2px 0 10px 0;
+}
+.overview-remres-card .overview-remres-breakdown-tab {
+    position: relative;
+    background: none;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+}
+.overview-remres-card .overview-remres-breakdown-tab:hover {
+    color: var(--text-primary);
+}
+.overview-remres-card .overview-remres-breakdown-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-color: var(--border);
+    border-bottom: 1px solid var(--bg-surface);
+}
+.overview-remres-card .overview-remres-chart-wrap {
+    min-height: 220px;
+    height: 240px;
+    margin-top: 4px;
+}
+.overview-remres-card .overview-remres-chart-wrap--infra {
+    min-height: 260px;
+    height: min(420px, 55vh);
+    max-height: 480px;
+}
+.overview-remres-card .overview-remres-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.overview-remres-card .overview-remres-table th,
+.overview-remres-card .overview-remres-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+.overview-remres-card .overview-remres-table th {
+    background: var(--bg-elevated);
+    font-weight: 600;
+}
+.overview-remres-card .overview-remres-table th:nth-child(2),
+.overview-remres-card .overview-remres-table th:nth-child(3),
+.overview-remres-card .overview-remres-table td:nth-child(2),
+.overview-remres-card .overview-remres-table td:nth-child(3) {
+    text-align: right;
+}
+
+/* Full masonry column width; graphs fill the card body (no horizontal overflow). */
+.dashboard-card.overview-extra-card.overview-remres-card {
+    width: 100%;
+    max-width: 100%;
+    display: block;
+}
+
+.dashboard-card.overview-extra-card.overview-remres-card .overview-detail-container {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow-x: visible;
+}
+
+.dashboard-card.overview-extra-card.overview-remres-card .dashboard-card-body.overview-detail-container > [data-rr-host="graph"] {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    box-sizing: border-box;
+}
+
+.dashboard-card.overview-extra-card.overview-remres-card .dashboard-card-body.overview-detail-container > [data-rr-host="graph"] > [data-rr-section] {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.dashboard-card.overview-extra-card.overview-remres-card .infractions-hstar-chart,
+.dashboard-card.overview-extra-card.overview-remres-card .infractions-vbar-chart-wrap,
+.dashboard-card.overview-extra-card.overview-remres-card .overview-remres-chart-wrap,
+.dashboard-card.overview-extra-card.infractions-card .infractions-vbar-chart-wrap,
+.dashboard-card.overview-extra-card.infractions-card .infractions-vbar-chart {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Time labels: avoid 140px ellipsis clipping the start of right-aligned period text */
+.dashboard-card.overview-extra-card.overview-remres-card .infractions-hstar-body {
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    column-gap: 12px;
+}
+
+.dashboard-card.overview-extra-card.overview-remres-card .infractions-hstar-label {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+}
+
 /* Detail-only tab row (no Overview tab): show when at least one infraction drill tab exists */
 .infractions-card .infractions-tabs--detail-only:not([hidden]) {
     margin-bottom: 10px;
 }
 
 /* Time breakdown: horizontal stacked bars (STAR Performance bar style + reference chart) */
-.infractions-card .infractions-hstar-chart {
+.infractions-card .infractions-hstar-chart,
+.overview-remres-card .infractions-hstar-chart {
     width: 100%;
     max-width: 100%;
     margin-top: 6px;
 }
-.infractions-card .infractions-hstar-body {
+.infractions-card .infractions-hstar-body,
+.overview-remres-card .infractions-hstar-body {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: 14px;
     row-gap: 12px;
     align-items: center;
 }
-.infractions-card .infractions-hstar-label {
+.infractions-card .infractions-hstar-label,
+.overview-remres-card .infractions-hstar-label {
     font-size: 12px;
     font-weight: 500;
     color: #64748b;
@@ -5983,13 +6161,15 @@ a.dashboard-compare-toggle {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.infractions-card .infractions-hstar-slot {
+.infractions-card .infractions-hstar-slot,
+.overview-remres-card .infractions-hstar-slot {
     position: relative;
     min-height: 30px;
     display: flex;
     align-items: center;
 }
-.infractions-card .infractions-hstar-bar-row {
+.infractions-card .infractions-hstar-bar-row,
+.overview-remres-card .infractions-hstar-bar-row {
     position: relative;
     z-index: 1;
     display: flex;
@@ -5998,7 +6178,8 @@ a.dashboard-compare-toggle {
     width: 100%;
     min-width: 0;
 }
-.infractions-card .infractions-hstar-bar {
+.infractions-card .infractions-hstar-bar,
+.overview-remres-card .infractions-hstar-bar {
     height: 26px;
     min-width: 4px;
     max-width: 100%;
@@ -6012,7 +6193,8 @@ a.dashboard-compare-toggle {
     /* Opaque track so 2px gutters and grid lines behind the row never show through */
     background: var(--bg-surface);
 }
-.infractions-card .infractions-hstar-segments {
+.infractions-card .infractions-hstar-segments,
+.overview-remres-card .infractions-hstar-segments {
     display: block;
     position: relative;
     height: 100%;
@@ -6021,7 +6203,8 @@ a.dashboard-compare-toggle {
     pointer-events: auto;
 }
 /* Single gradient layer + transparent hit zones (avoids flex subpixel gap mismatch). */
-.infractions-card .infractions-hstar-barsheet {
+.infractions-card .infractions-hstar-barsheet,
+.overview-remres-card .infractions-hstar-barsheet {
     position: absolute;
     inset: 0;
     z-index: 0;
@@ -6029,11 +6212,13 @@ a.dashboard-compare-toggle {
     background-repeat: no-repeat;
     background-size: 100% 100%;
 }
-.infractions-card .infractions-hstar-barsheet--interactive {
+.infractions-card .infractions-hstar-barsheet--interactive,
+.overview-remres-card .infractions-hstar-barsheet--interactive {
     pointer-events: auto;
     cursor: default;
 }
-.infractions-card .infractions-hstar-seg-hit {
+.infractions-card .infractions-hstar-seg-hit,
+.overview-remres-card .infractions-hstar-seg-hit {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -6046,17 +6231,40 @@ a.dashboard-compare-toggle {
     outline: none;
     box-shadow: none;
 }
-.infractions-card .infractions-hstar-count {
+.infractions-card .infractions-hstar-count,
+.overview-remres-card .infractions-hstar-count {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: nowrap;
     font-size: 12px;
     font-weight: 400;
     color: #64748b;
     white-space: nowrap;
     flex-shrink: 0;
 }
-.infractions-card .infractions-hstar-x-spacer {
+.infractions-card .infractions-hstar-count-num,
+.overview-remres-card .infractions-hstar-count-num {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.infractions-card .infractions-count-delta,
+.overview-remres-card .infractions-count-delta {
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1;
+}
+.infractions-card .infractions-count-delta--muted,
+.overview-remres-card .infractions-count-delta--muted {
+    color: #94a3b8;
+    font-weight: 400;
+}
+.infractions-card .infractions-hstar-x-spacer,
+.overview-remres-card .infractions-hstar-x-spacer {
     min-height: 1px;
 }
-.infractions-card .infractions-hstar-x-axis {
+.infractions-card .infractions-hstar-x-axis,
+.overview-remres-card .infractions-hstar-x-axis {
     display: flex;
     justify-content: space-between;
     padding-top: 6px;
@@ -6068,46 +6276,114 @@ a.dashboard-compare-toggle {
 }
 
 /* Day breakdown: vertical stacked bars (STAR-style rounded tops) */
-.infractions-card .infractions-vbar-chart-wrap {
+.infractions-card .infractions-vbar-chart-wrap,
+.overview-remres-card .infractions-vbar-chart-wrap {
     width: 100%;
     max-width: 100%;
     margin-top: 6px;
-}
-.infractions-card .infractions-vbar-chart {
-    display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: 8px;
-    min-height: 200px;
-    padding: 12px 10px 10px;
-    border-radius: 8px;
-    background: var(--bg-elevated);
-    border: 1px solid rgba(100, 116, 139, 0.25);
-}
-.infractions-card .infractions-vbar-col {
-    flex: 1 1 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-width: 0;
-    max-width: 56px;
+    justify-content: flex-start;
+    gap: 0;
 }
-.infractions-card .infractions-vbar-count {
+.infractions-card .infractions-vbar-chart-wrap > .infractions-bar-legend {
+    width: 100%;
+    align-self: stretch;
+}
+.infractions-card .infractions-vbar-chart,
+.overview-remres-card .infractions-vbar-chart {
+    --vbar-stack-height: 188px;
+    --vbar-col-width: 6.5ch;
+    --vbar-chart-min-height: 246px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 12px;
+    width: max-content;
+    max-width: 100%;
+    min-height: var(--vbar-chart-min-height);
+    padding: 12px 10px 14px;
+    border-radius: 8px;
+    background: var(--bg-surface);
+    border: none;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.infractions-card .infractions-vbar-col,
+.overview-remres-card .infractions-vbar-col {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-rows: auto var(--vbar-stack-height) auto;
+    justify-items: stretch;
+    align-content: end;
+    width: var(--vbar-col-width);
+    min-width: var(--vbar-col-width);
+    max-width: var(--vbar-col-width);
+    min-height: 0;
+    box-sizing: border-box;
+}
+.infractions-card .infractions-vbar-col .infractions-vbar-count,
+.overview-remres-card .infractions-vbar-col .infractions-vbar-count {
+    grid-row: 1;
+    justify-self: center;
+    max-width: none;
+}
+.infractions-card .infractions-vbar-col .infractions-vbar-stack,
+.overview-remres-card .infractions-vbar-col .infractions-vbar-stack {
+    grid-row: 2;
+}
+.infractions-card .infractions-vbar-col .infractions-vbar-label-slot,
+.overview-remres-card .infractions-vbar-col .infractions-vbar-label-slot {
+    grid-row: 3;
+}
+.infractions-card .infractions-vbar-count,
+.overview-remres-card .infractions-vbar-count {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: center;
+    align-self: center;
+    gap: 6px;
+    flex-wrap: nowrap;
     font-size: 12px;
     font-weight: 400;
     color: #64748b;
     margin-bottom: 6px;
     min-height: 1.2em;
     white-space: nowrap;
+    max-width: none;
 }
-.infractions-card .infractions-vbar-stack {
+.infractions-card .infractions-vbar-count-num,
+.overview-remres-card .infractions-vbar-count-num {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.infractions-card .infractions-vbar-count--stacked,
+.overview-remres-card .infractions-vbar-count--stacked {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    white-space: normal;
+}
+.infractions-card .infractions-breakdown-value-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    line-height: 1.2;
+}
+.infractions-card .infractions-vbar-stack,
+.overview-remres-card .infractions-vbar-stack {
     display: block;
     position: relative;
-    flex: 1 1 auto;
     width: 100%;
-    max-width: 53px;
-    min-height: 160px;
-    /* Rounded on top only; bottom sits flush (square) on the baseline */
+    max-width: 100%;
+    min-width: 0;
+    height: var(--vbar-stack-height);
+    min-height: var(--vbar-stack-height);
+    max-height: var(--vbar-stack-height);
+    margin-bottom: 0;
     border-radius: 10px 10px 0 0;
     overflow: hidden;
     border: none;
@@ -6115,8 +6391,10 @@ a.dashboard-compare-toggle {
     outline: none;
     background: var(--bg-elevated);
     pointer-events: auto;
+    box-sizing: border-box;
 }
-.infractions-card .infractions-vbar-barsheet {
+.infractions-card .infractions-vbar-barsheet,
+.overview-remres-card .infractions-vbar-barsheet {
     position: absolute;
     inset: 0;
     z-index: 0;
@@ -6124,11 +6402,13 @@ a.dashboard-compare-toggle {
     background-repeat: no-repeat;
     background-size: 100% 100%;
 }
-.infractions-card .infractions-vbar-barsheet--interactive {
+.infractions-card .infractions-vbar-barsheet--interactive,
+.overview-remres-card .infractions-vbar-barsheet--interactive {
     pointer-events: auto;
     cursor: default;
 }
-.infractions-card .infractions-vbar-seg-hit {
+.infractions-card .infractions-vbar-seg-hit,
+.overview-remres-card .infractions-vbar-seg-hit {
     position: absolute;
     left: 0;
     right: 0;
@@ -6142,17 +6422,29 @@ a.dashboard-compare-toggle {
     outline: none;
     box-shadow: none;
 }
-.infractions-card .infractions-vbar-label {
+/* Abbreviated weekday labels (Mon, Wed, …); column width matches widest label (Wed) */
+.infractions-card .infractions-vbar-label-slot,
+.overview-remres-card .infractions-vbar-label-slot {
+    width: 100%;
     margin-top: 8px;
-    font-size: 12px;
+    justify-self: stretch;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+.infractions-card .infractions-vbar-label-slot .infractions-vbar-label,
+.overview-remres-card .infractions-vbar-label-slot .infractions-vbar-label {
+    display: block;
+    margin: 0;
+    padding: 0;
+    font-size: 11px;
     font-weight: 500;
     color: #64748b;
-    text-align: center;
-    line-height: 1.15;
+    line-height: 1.2;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
+    text-align: center;
 }
 
 .infractions-card .infractions-bar-legend {
@@ -6201,60 +6493,6 @@ a.dashboard-compare-toggle {
 .infractions-card .infractions-bar-legend-swatch--round {
     border-radius: 50%;
 }
-.infractions-card .infractions-bar-legend-swatch--tip {
-    cursor: help;
-}
-
-/* =========================================================================
-   BEGIN: Infractions Time/Day chart compact UI
-   REVERT: (1) In static/app.js set INFRACTIONS_CHART_COMPACT_UI = false (search that symbol).
-           (2) Delete this whole block through "END: Infractions Time/Day chart compact UI".
-   Hides: category legend, Time row labels (left), Day weekday labels (under bars).
-   ========================================================================= */
-.infractions-card.infractions-chart-ui-compact .infractions-bar-legend {
-    display: none !important;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-hstar-chart,
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-chart-wrap {
-    margin-top: 2px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-hstar-body {
-    grid-template-columns: minmax(0, 1fr);
-    column-gap: 0;
-    row-gap: 7px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-hstar-label {
-    display: none !important;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-hstar-slot {
-    min-height: 24px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-hstar-bar {
-    height: 20px;
-    border-radius: 0 7px 7px 0;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-chart {
-    gap: 4px;
-    min-height: 176px;
-    padding: 10px 6px 8px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-col {
-    max-width: 44px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-stack {
-    max-width: 40px;
-    min-height: 140px;
-    border-radius: 7px 7px 0 0;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-count {
-    margin-bottom: 4px;
-}
-.infractions-card.infractions-chart-ui-compact .infractions-vbar-label {
-    display: none !important;
-    margin-top: 0;
-}
-/* END: Infractions Time/Day chart compact UI */
-
 .infractions-back-btn {
     display: inline-flex;
     align-items: center;

@@ -2853,6 +2853,58 @@ def api_checkpoint_item(checkpoint_id):
     )
     return jsonify(_serialize_checkpoint(checkpoint))
 
+def _record_attendance_status_norm(record):
+    """Normalize attendance_status using the same fallback as summary()."""
+    return record.attendance_status or ('present' if record.present else 'unexcused')
+
+
+def _unique_dates_present_school_days(all_records_raw):
+    """Most recent first: calendar days where the student was marked present (true 'school days' for behavior)."""
+    return sorted(
+        {r.date for r in all_records_raw if _record_attendance_status_norm(r) == 'present'},
+        reverse=True,
+    )
+
+
+def _unique_dates_star_school_days(all_records):
+    """Most recent first: non-excused metric days (present + unexcused) used for the STAR % window."""
+    return sorted({r.date for r in all_records}, reverse=True)
+
+
+def _records_star_stats_zero_unexcused(all_records, star_date_set):
+    """STAR window includes unexcused days, but they contribute 0 STAR points (no periods / frenzies in the rollup)."""
+    rows = []
+    for r in all_records:
+        if r.date not in star_date_set:
+            continue
+        st = _record_attendance_status_norm(r)
+        if st == 'unexcused':
+            rows.append(
+                SimpleNamespace(
+                    id=r.id,
+                    student_id=getattr(r, 'student_id', None),
+                    date=r.date,
+                    day_of_week=r.day_of_week,
+                    attendance_status=st,
+                    present=getattr(r, 'present', None),
+                    periods=[],
+                    frenzies=[],
+                )
+            )
+        else:
+            rows.append(r)
+    return rows
+
+
+def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
+    """Infractions / frenzies / by-time use present-day window; STAR % uses present+unexcused with unexcused at 0%."""
+    out = dict(stats_behavior)
+    if stats_star:
+        out['percentages'] = dict(stats_star.get('percentages') or {})
+        out['totals'] = dict(stats_star.get('totals') or {})
+    return out
+
+
 @app.route('/api/summary', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
@@ -4500,6 +4552,22 @@ def summary():
             'infractions_by_type': infractions_by_type,
         }
 
+    def _overview_previous_stats_payload(prev_stats):
+        """Slim prior-window stats for client-side reminder/reset breakdown deltas."""
+        if not prev_stats:
+            return None
+        ai = prev_stats.get('additional_info') or {}
+        return {
+            'by_time': prev_stats.get('by_time') or {},
+            'by_day_of_week': prev_stats.get('by_day_of_week') or {},
+            'additional_info': {
+                'total_reminders': int(ai.get('total_reminders') or 0),
+                'total_resets': int(ai.get('total_resets') or 0),
+                'infractions_for_reminders': dict(ai.get('infractions_for_reminders') or {}),
+                'infractions_for_resets': dict(ai.get('infractions_for_resets') or {}),
+            },
+        }
+
     def build_overview_trends(cur_stats, prev_stats, cur_attendance, prev_attendance, cur_attendance_by_day=None, prev_attendance_by_day=None):
         """Numeric deltas vs an equal-length prior window (e.g. previous 30 school days)."""
 
@@ -4612,6 +4680,169 @@ def summary():
             prev_stats.get('by_day_of_week') or {}
         )
 
+        def norm_slot_label(label):
+            """Align time/day labels across API vs merged infractions keys (spacing, dash style)."""
+            if label is None:
+                return ''
+            s = str(label).strip().lower()
+            s = s.replace('\u2013', '-').replace('\u2014', '-').replace('\u2212', '-')
+            s = re.sub(r'\s*-\s*', '-', s)
+            s = re.sub(r'\s+', ' ', s)
+            return s.strip()
+
+        def enrich_delta_map_norm_aliases(delta_map):
+            """Add normalized-key entries so minor label differences still resolve."""
+            base = dict(delta_map or {})
+            for k, v in list(base.items()):
+                nk = norm_slot_label(k)
+                if nk and nk not in base:
+                    base[nk] = int(v)
+            return base
+
+        def infraction_time_display_totals(st):
+            """Same aggregation as static/app.js getOverviewTimeSlots (by_time vs merged by_time)."""
+            by_time = st.get('by_time') or {}
+            slots = {}
+            for label, bucket in by_time.items():
+                total = int((bucket or {}).get('total_infractions') or 0)
+                if total > 0:
+                    slots[label] = total
+            if not slots:
+                merged = {}
+                for _t, entry in (st.get('infractions_by_type') or {}).items():
+                    for label, cnt in (entry.get('by_time') or {}).items():
+                        n = int(cnt or 0)
+                        if n <= 0:
+                            continue
+                        merged[label] = merged.get(label, 0) + n
+                for label, total in merged.items():
+                    if total > 0:
+                        slots[label] = total
+            return slots
+
+        def infraction_day_display_totals(st):
+            """Same counts as infractions overview day chart (types first, else by_day_of_week totals)."""
+            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            from_types = {d: 0 for d in day_order}
+            for _t, entry in (st.get('infractions_by_type') or {}).items():
+                for day, cnt in (entry.get('by_day_of_week') or {}).items():
+                    n = int(cnt or 0)
+                    if n <= 0:
+                        continue
+                    if day in from_types:
+                        from_types[day] += n
+            by_day = st.get('by_day_of_week') or {}
+            out = {}
+            for day in day_order:
+                typ_total = int(from_types.get(day) or 0)
+                if typ_total > 0:
+                    out[day] = typ_total
+                    continue
+                bkt = by_day.get(day) or {}
+                bt = int(bkt.get('total_infractions') or 0)
+                if bt > 0:
+                    out[day] = bt
+            return out
+
+        def build_infraction_display_delta_map(cur_totals, prev_totals):
+            labels = set(cur_totals.keys()) | set(prev_totals.keys())
+            return {
+                lbl: int(cur_totals.get(lbl, 0)) - int(prev_totals.get(lbl, 0))
+                for lbl in labels
+            }
+
+        cur_time_tot = infraction_time_display_totals(cur_stats)
+        prev_time_tot = infraction_time_display_totals(prev_stats)
+        infractions_deltas_by_time = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_time_tot, prev_time_tot)
+        )
+
+        cur_day_tot = infraction_day_display_totals(cur_stats)
+        prev_day_tot = infraction_day_display_totals(prev_stats)
+        infractions_deltas_by_day_of_week = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_day_tot, prev_day_tot)
+        )
+
+        def rem_res_time_totals(st, count_field):
+            out = {}
+            for label, bucket in (st.get('by_time') or {}).items():
+                total = int((bucket or {}).get(count_field) or 0)
+                if total > 0:
+                    out[label] = total
+            return out
+
+        def rem_res_day_totals(st, count_field):
+            out = {}
+            for day, bucket in (st.get('by_day_of_week') or {}).items():
+                total = int((bucket or {}).get(count_field) or 0)
+                if total > 0:
+                    out[day] = total
+            return out
+
+        def rem_res_assoc_totals(st, assoc_key):
+            assoc = (st.get('additional_info') or {}).get(assoc_key) or {}
+            return {
+                str(k): int(v or 0)
+                for k, v in assoc.items()
+                if int(v or 0) > 0
+            }
+
+        def build_previous_totals_normalized(prev_totals):
+            out = {}
+            for lbl, tot in (prev_totals or {}).items():
+                nk = norm_slot_label(lbl)
+                if nk:
+                    out[nk] = out.get(nk, 0) + int(tot)
+            return out
+
+        cur_rem_time = rem_res_time_totals(cur_stats, 'total_reminders')
+        prev_rem_time = rem_res_time_totals(prev_stats, 'total_reminders')
+        reminders_deltas_by_time = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_rem_time, prev_rem_time)
+        )
+
+        cur_rem_day = rem_res_day_totals(cur_stats, 'total_reminders')
+        prev_rem_day = rem_res_day_totals(prev_stats, 'total_reminders')
+        reminders_deltas_by_day_of_week = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_rem_day, prev_rem_day)
+        )
+
+        cur_rem_assoc = rem_res_assoc_totals(cur_stats, 'infractions_for_reminders')
+        prev_rem_assoc = rem_res_assoc_totals(prev_stats, 'infractions_for_reminders')
+        reminders_assoc_deltas = build_infraction_display_delta_map(cur_rem_assoc, prev_rem_assoc)
+
+        cur_rst_time = rem_res_time_totals(cur_stats, 'total_resets')
+        prev_rst_time = rem_res_time_totals(prev_stats, 'total_resets')
+        resets_deltas_by_time = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_rst_time, prev_rst_time)
+        )
+
+        cur_rst_day = rem_res_day_totals(cur_stats, 'total_resets')
+        prev_rst_day = rem_res_day_totals(prev_stats, 'total_resets')
+        resets_deltas_by_day_of_week = enrich_delta_map_norm_aliases(
+            build_infraction_display_delta_map(cur_rst_day, prev_rst_day)
+        )
+
+        cur_rst_assoc = rem_res_assoc_totals(cur_stats, 'infractions_for_resets')
+        prev_rst_assoc = rem_res_assoc_totals(prev_stats, 'infractions_for_resets')
+        resets_assoc_deltas = build_infraction_display_delta_map(cur_rst_assoc, prev_rst_assoc)
+
+        infractions_previous_time_totals_normalized = {}
+        for lbl, tot in prev_time_tot.items():
+            nk = norm_slot_label(lbl)
+            if nk:
+                infractions_previous_time_totals_normalized[nk] = (
+                    infractions_previous_time_totals_normalized.get(nk, 0) + int(tot)
+                )
+
+        infractions_previous_day_totals_normalized = {}
+        for lbl, tot in prev_day_tot.items():
+            nk = norm_slot_label(lbl)
+            if nk:
+                infractions_previous_day_totals_normalized[nk] = (
+                    infractions_previous_day_totals_normalized.get(nk, 0) + int(tot)
+                )
+
         star_safety_delta = None if cur_pct.get('safety') is None or prev_pct.get('safety') is None else round(
             float(cur_pct.get('safety')) - float(prev_pct.get('safety')), 1)
         star_teamwork_delta = None if cur_pct.get('teamwork') is None or prev_pct.get('teamwork') is None else round(
@@ -4674,6 +4905,21 @@ def summary():
             'day_of_week_absence_deltas': day_of_week_absence_deltas,
             'star_deltas_by_time': by_time_star_deltas,
             'star_deltas_by_day_of_week': by_day_star_deltas,
+            'infractions_deltas_by_time': infractions_deltas_by_time,
+            'infractions_deltas_by_day_of_week': infractions_deltas_by_day_of_week,
+            'infractions_previous_time_totals_normalized': infractions_previous_time_totals_normalized,
+            'infractions_previous_day_totals_normalized': infractions_previous_day_totals_normalized,
+            'reminders_deltas_by_time': reminders_deltas_by_time,
+            'reminders_deltas_by_day_of_week': reminders_deltas_by_day_of_week,
+            'reminders_assoc_deltas': reminders_assoc_deltas,
+            'reminders_previous_time_totals_normalized': build_previous_totals_normalized(prev_rem_time),
+            'reminders_previous_day_totals_normalized': build_previous_totals_normalized(prev_rem_day),
+            'resets_deltas_by_time': resets_deltas_by_time,
+            'resets_deltas_by_day_of_week': resets_deltas_by_day_of_week,
+            'resets_assoc_deltas': resets_assoc_deltas,
+            'resets_previous_time_totals_normalized': build_previous_totals_normalized(prev_rst_time),
+            'resets_previous_day_totals_normalized': build_previous_totals_normalized(prev_rst_day),
+            'overview_previous_stats': _overview_previous_stats_payload(prev_stats),
             'has_prior': True,
         }
 
@@ -4693,11 +4939,25 @@ def summary():
         oldest_cur_date = cur_dates[-1]
         needed_days = len(cur_dates)
         prior_dates = [d for d in all_dates_desc if d < oldest_cur_date][:needed_days]
-        if not prior_dates:
-            return None
 
         prior_date_set = set(prior_dates)
         prev_attendance_records = [r for r in all_records_raw if r.date in prior_date_set]
+        if not prior_dates:
+            # No calendar days before the oldest day in this window: compare to empty prior baseline.
+            prev_stats = summary_stats_fn([])
+            prev_attendance = compute_attendance_summary([])
+            prev_attendance_by_day = compute_attendance_by_day_of_week([])
+            trends = build_overview_trends(
+                cur_stats,
+                prev_stats,
+                cur_attendance,
+                prev_attendance,
+                cur_attendance_by_day,
+                prev_attendance_by_day,
+            )
+            trends['has_prior'] = False
+            return trends
+
         if not prev_attendance_records:
             return None
 
@@ -4716,6 +4976,56 @@ def summary():
         # Partial prior window: still useful for day-of-week deltas, but not a full symmetric window.
         trends['has_prior'] = bool(len(prior_dates) >= needed_days)
         return trends
+
+    def build_overview_trends_30day_school_windows(
+        cur_stats, cur_attendance, cur_attendance_by_day, ud_present, ud_star
+    ):
+        """Trends vs the *previous* 30 present / 30 STAR school-day windows (same slices as merged stats).
+
+        Never uses calendar-day fallback before the oldest in-window day (that often had no rows and
+        looked like 0 prior infractions).
+        """
+        n_prior_present_days = max(0, len(ud_present) - 30)
+        has_full_symmetric_prior = n_prior_present_days >= 30
+        if len(ud_present) > 30:
+            prev_present_dates = set(ud_present[30:60])
+            prev_star_dates = set(ud_star[30:60])
+            prev_metric_records = [r for r in all_records if r.date in prev_present_dates]
+            prev_rs_star = _records_star_stats_zero_unexcused(all_records, prev_star_dates)
+            prev_stats = _merge_30day_behavior_and_star_stats(
+                summary_stats_fn(prev_metric_records),
+                summary_stats_fn(prev_rs_star),
+            )
+            prev_attendance_records = [
+                r for r in all_records_raw if r.date in prev_present_dates
+            ]
+            prev_attendance = compute_attendance_summary(prev_attendance_records)
+            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
+            trends = build_overview_trends(
+                cur_stats,
+                prev_stats,
+                cur_attendance,
+                prev_attendance,
+                cur_attendance_by_day,
+                prev_attendance_by_day,
+            )
+            trends['has_prior'] = has_full_symmetric_prior
+            return trends, prev_stats
+
+        empty_prev = _merge_30day_behavior_and_star_stats(
+            summary_stats_fn([]),
+            summary_stats_fn(_records_star_stats_zero_unexcused(all_records, set())),
+        )
+        trends = build_overview_trends(
+            cur_stats,
+            empty_prev,
+            cur_attendance,
+            compute_attendance_summary([]),
+            cur_attendance_by_day,
+            compute_attendance_by_day_of_week([]),
+        )
+        trends['has_prior'] = False
+        return trends, empty_prev
 
     def log_infraction_bucket_trend_values(trends_obj):
         if not trends_obj:
@@ -4818,18 +5128,17 @@ def summary():
                     if record.attendance_status != 'excused':
                         metric_records.append(record)
         elif period == '30day':
-            # Get unique dates that have data, sorted descending
-            unique_dates = sorted(set([r.date for r in all_records_raw]), reverse=True)
-            # Take the first 30 dates
-            selected_dates = unique_dates[:30]
-            # Track actual number of data points used
-            available_data_points = len(selected_dates)
-            # Filter records to only those dates
+            # 30 "school days" for behavior = 30 most recent present days.
+            # STAR % uses the 30 most recent non-excused days (present + unexcused); unexcused days count as 0% STAR.
+            ud_star = _unique_dates_star_school_days(all_records)
+            ud_present = _unique_dates_present_school_days(all_records_raw)
+            unique_dates = ud_present
+            selected_dates = set(ud_present[:30])
+            available_data_points = min(30, len(ud_present))
             for record in all_records_raw:
                 if record.date in selected_dates:
                     attendance_records.append(record)
-                    if record.attendance_status != 'excused':
-                        metric_records.append(record)
+            metric_records = [r for r in all_records if r.date in selected_dates]
         else:
             for record in all_records_raw:
                 record_school_year = get_school_year_for_date(record.date)
@@ -4867,7 +5176,14 @@ def summary():
                         metric_records.append(record)
         
         # Calculate single summary for period
-        stats = summary_stats_fn(metric_records)
+        if period == '30day':
+            star_dates_cur = set(ud_star[:30])
+            rs_star = _records_star_stats_zero_unexcused(all_records, star_dates_cur)
+            stats_behavior = summary_stats_fn(metric_records)
+            stats_star = summary_stats_fn(rs_star)
+            stats = _merge_30day_behavior_and_star_stats(stats_behavior, stats_star)
+        else:
+            stats = summary_stats_fn(metric_records)
         attendance_summary = compute_attendance_summary(attendance_records)
         attendance_by_day = compute_attendance_by_day_of_week(attendance_records)
         result = {
@@ -4898,26 +5214,13 @@ def summary():
         }
         overview_trends = None
         prev_stats_for_trigger = None
-        if period == '30day' and len(unique_dates) > 30:
-            previous_dates_set = unique_dates[30:60]
-            prev_metric_records = []
-            prev_attendance_records = []
-            for record in all_records_raw:
-                if record.date in previous_dates_set:
-                    prev_attendance_records.append(record)
-                    if record.attendance_status != 'excused':
-                        prev_metric_records.append(record)
-            prev_stats = summary_stats_fn(prev_metric_records)
-            prev_stats_for_trigger = prev_stats
-            prev_attendance = compute_attendance_summary(prev_attendance_records)
-            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
-            overview_trends = build_overview_trends(
+        if period == '30day':
+            overview_trends, prev_stats_for_trigger = build_overview_trends_30day_school_windows(
                 stats,
-                prev_stats,
                 attendance_summary,
-                prev_attendance,
                 attendance_by_day,
-                prev_attendance_by_day
+                ud_present,
+                ud_star,
             )
         elif period == 'weekly' and week_start and week_end:
             prev_week_start = week_start - timedelta(days=7)
@@ -4941,17 +5244,23 @@ def summary():
                 attendance_by_day,
                 prev_attendance_by_day
             )
-        if not overview_trends:
+        if not overview_trends and period != '30day':
             overview_trends = build_overview_trends_from_prior_window(
                 stats,
                 attendance_summary,
                 attendance_by_day,
                 attendance_records
             )
+        if prev_stats_for_trigger is None and period != '30day':
             prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records)
         if overview_trends:
             result['overview_trends'] = overview_trends
             log_infraction_bucket_trend_values(overview_trends)
+            prev_payload = overview_trends.get('overview_previous_stats')
+            if not prev_payload and prev_stats_for_trigger:
+                prev_payload = _overview_previous_stats_payload(prev_stats_for_trigger)
+            if prev_payload:
+                result['overview_previous_stats'] = prev_payload
         result['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         # Add metadata for weekly and 30-day periods
         if period == 'weekly' and week_start and week_end:
@@ -5015,7 +5324,8 @@ def summary():
                 attendance_by_day_cur,
                 attendance_records_cur
             )
-            prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records_cur)
+            if prev_stats_for_trigger is None:
+                prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records_cur)
 
         weekly_resp = {
             'timeframe': timeframe,
@@ -5048,57 +5358,46 @@ def summary():
         if overview_trends:
             weekly_resp['overview_trends'] = overview_trends
             log_infraction_bucket_trend_values(overview_trends)
+            prev_payload = overview_trends.get('overview_previous_stats')
+            if not prev_payload and prev_stats_for_trigger:
+                prev_payload = _overview_previous_stats_payload(prev_stats_for_trigger)
+            if prev_payload:
+                weekly_resp['overview_previous_stats'] = prev_payload
         weekly_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(weekly_resp)
     elif timeframe == '30day':
-        # Get unique dates that have data, sorted descending
-        unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
-        # Track number of available data points
-        total_available_data_points = len(unique_dates)
-        # Take the first 30 dates
-        selected_dates = unique_dates[:30]
-        # Track actual number of data points used
-        available_data_points = len(selected_dates)
-        # Filter records to only those dates
-        records = [r for r in all_records if r.date in selected_dates]
-        print(f"After 30 day filtering: {len(records)} records from {len(selected_dates)} unique dates")
-        # Calculate single summary
-        stats = summary_stats_fn(records)
-        attendance_records_cur = [r for r in all_records_raw if r.date in selected_dates]
+        # Timeframe "30 School Days" (top-left): behavior metrics use the 30 most recent *present* days.
+        # STAR % uses the 30 most recent non-excused days (present + unexcused); unexcused days = 0% STAR.
+        ud_star = _unique_dates_star_school_days(all_records)
+        ud_present = _unique_dates_present_school_days(all_records_raw)
+        total_available_data_points = len(ud_present)
+        selected_present_dates = set(ud_present[:30])
+        selected_star_dates = set(ud_star[:30])
+        available_data_points = min(30, len(ud_present))
+
+        records_behavior = [r for r in all_records if r.date in selected_present_dates]
+        rs_star = _records_star_stats_zero_unexcused(all_records, selected_star_dates)
+        stats_behavior = summary_stats_fn(records_behavior)
+        stats_star = summary_stats_fn(rs_star)
+        stats = _merge_30day_behavior_and_star_stats(stats_behavior, stats_star)
+        print(
+            f"After 30 school days: present_dates={len(selected_present_dates)}, "
+            f"star_dates={len(selected_star_dates)}, metric_records={len(records_behavior)}"
+        )
+
+        attendance_records_cur = [
+            r for r in all_records_raw if r.date in selected_present_dates
+        ]
         attendance_summary_cur = compute_attendance_summary(attendance_records_cur)
         attendance_by_day_cur = compute_attendance_by_day_of_week(attendance_records_cur)
 
-        overview_trends = None
-        prev_stats_for_trigger = None
-        if len(unique_dates) > 30:
-            previous_dates_set = unique_dates[30:60]
-            prev_metric_records = []
-            prev_attendance_records = []
-            for record in all_records_raw:
-                if record.date in previous_dates_set:
-                    prev_attendance_records.append(record)
-                    if record.attendance_status != 'excused':
-                        prev_metric_records.append(record)
-            prev_stats = summary_stats_fn(prev_metric_records)
-            prev_stats_for_trigger = prev_stats
-            prev_attendance = compute_attendance_summary(prev_attendance_records)
-            prev_attendance_by_day = compute_attendance_by_day_of_week(prev_attendance_records)
-            overview_trends = build_overview_trends(
-                stats,
-                prev_stats,
-                attendance_summary_cur,
-                prev_attendance,
-                attendance_by_day_cur,
-                prev_attendance_by_day
-            )
-        if not overview_trends:
-            overview_trends = build_overview_trends_from_prior_window(
-                stats,
-                attendance_summary_cur,
-                attendance_by_day_cur,
-                attendance_records_cur
-            )
-            prev_stats_for_trigger = get_prior_window_prev_stats(attendance_records_cur)
+        overview_trends, prev_stats_for_trigger = build_overview_trends_30day_school_windows(
+            stats,
+            attendance_summary_cur,
+            attendance_by_day_cur,
+            ud_present,
+            ud_star,
+        )
 
         tf30_resp = {
             'timeframe': timeframe,
@@ -5131,42 +5430,48 @@ def summary():
         if overview_trends:
             tf30_resp['overview_trends'] = overview_trends
             log_infraction_bucket_trend_values(overview_trends)
+            prev_payload = overview_trends.get('overview_previous_stats')
+            if not prev_payload and prev_stats_for_trigger:
+                prev_payload = _overview_previous_stats_payload(prev_stats_for_trigger)
+            if prev_payload:
+                tf30_resp['overview_previous_stats'] = prev_payload
         tf30_resp['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_for_trigger) if prev_stats_for_trigger else {'time': None, 'day': None}
         return _summary_response(tf30_resp)
     elif timeframe == '30day_to_30day':
-        # Get unique dates that have data, sorted descending
-        unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
-        total_available_dates = len(unique_dates)
-        
-        # Take first 30 dates for "Most Recent 30 Days"
-        most_recent_dates = unique_dates[:30]
-        # Take next 30 dates for "Previous 30 Days"
-        previous_dates = unique_dates[30:60] if len(unique_dates) > 30 else []
-        
-        # Track data points for each period
-        most_recent_data_points = len(most_recent_dates)
-        previous_data_points = len(previous_dates)
-        
-        # Filter records for each period
-        most_recent_records = [r for r in all_records if r.date in most_recent_dates]
-        previous_records = [r for r in all_records if r.date in previous_dates]
-        
-        # Calculate stats for each period
-        most_recent_stats = summary_stats_fn(most_recent_records)
-        previous_stats = summary_stats_fn(previous_records)
-        
-        # Add data points info to each period's stats
+        ud_star = _unique_dates_star_school_days(all_records)
+        ud_present = _unique_dates_present_school_days(all_records_raw)
+        total_available_dates = len(ud_present)
+
+        most_recent_dates_p = set(ud_present[:30])
+        previous_dates_p = set(ud_present[30:60]) if len(ud_present) > 30 else set()
+        most_recent_star_dates = set(ud_star[:30])
+        previous_star_dates = set(ud_star[30:60]) if len(ud_star) > 30 else set()
+
+        most_recent_data_points = min(30, len(ud_present[:30]))
+        previous_data_points = min(30, len(ud_present[30:60])) if len(ud_present) > 30 else 0
+
+        most_recent_records = [r for r in all_records if r.date in most_recent_dates_p]
+        previous_records = [r for r in all_records if r.date in previous_dates_p]
+
+        most_recent_stats = _merge_30day_behavior_and_star_stats(
+            summary_stats_fn(most_recent_records),
+            summary_stats_fn(_records_star_stats_zero_unexcused(all_records, most_recent_star_dates)),
+        )
+        previous_stats = _merge_30day_behavior_and_star_stats(
+            summary_stats_fn(previous_records),
+            summary_stats_fn(_records_star_stats_zero_unexcused(all_records, previous_star_dates)),
+        )
+
         most_recent_stats['available_data_points'] = most_recent_data_points
         most_recent_stats['has_full_30_days'] = most_recent_data_points >= 30
         previous_stats['available_data_points'] = previous_data_points
         previous_stats['has_full_30_days'] = previous_data_points >= 30
-        
-        # Build comparison data
+
         comparison_data = {
             'Most Recent 30 Days': most_recent_stats,
             'Previous 30 Days': previous_stats
         }
-        
+
         return _summary_response({
             'timeframe': timeframe,
             'comparison_mode': True,
@@ -5348,10 +5653,16 @@ def summary():
             'attendance_summary': attendance_summary_all,
             'attendance_by_day_of_week': attendance_by_day_all,
         }
+        prev_stats_alltime = get_prior_window_prev_stats(attendance_records_all)
         if overview_trends_all:
             resp_alltime['overview_trends'] = overview_trends_all
             log_infraction_bucket_trend_values(overview_trends_all)
-        resp_alltime['previous_trigger'] = {'time': None, 'day': None}
+            prev_payload = overview_trends_all.get('overview_previous_stats')
+            if not prev_payload and prev_stats_alltime:
+                prev_payload = _overview_previous_stats_payload(prev_stats_alltime)
+            if prev_payload:
+                resp_alltime['overview_previous_stats'] = prev_payload
+        resp_alltime['previous_trigger'] = extract_top_trigger_from_stats(prev_stats_alltime) if prev_stats_alltime else {'time': None, 'day': None}
         return _summary_response(resp_alltime)
 
 
@@ -5449,23 +5760,33 @@ def case_manager_comparison():
         if team_member.student_id:
             case_manager_students[cm_name].append(team_member.student_id)
     
-    # Filter records by timeframe
-    all_records = DailyRecord.query.all()
-    
+    # Filter records by timeframe (raw includes excused for present-day detection)
+    cm_records_raw = DailyRecord.query.all()
+
     # Filter out excused records
     filtered_records = []
-    for record in all_records:
+    for record in cm_records_raw:
         if not record.attendance_status:
             record.attendance_status = 'present' if record.present else 'unexcused'
             db.session.commit()
         if record.attendance_status != 'excused':
             filtered_records.append(record)
-    
+
+    # 30 school days: behavior/infractions = last 30 present days; STAR = last 30 non-excused
+    # (unexcused in STAR window contributes 0 points), same as /api/summary.
+    cm30_selected_present = cm30_selected_star = None
+    if timeframe == '30day':
+        ud_present_cm = _unique_dates_present_school_days(cm_records_raw)
+        ud_star_cm = _unique_dates_star_school_days(filtered_records)
+        cm30_selected_present = set(ud_present_cm[:30])
+        cm30_selected_star = set(ud_star_cm[:30])
+        cm30_date_union = cm30_selected_present | cm30_selected_star
+
     # Apply timeframe filtering
     today = date.today()
     current_school_year = get_school_year_for_date(today)
     timeframe_filtered_records = []
-    
+
     if timeframe == 'weekly':
         from datetime import timedelta
         days_since_monday = today.weekday()
@@ -5473,9 +5794,7 @@ def case_manager_comparison():
         most_recent_sunday = most_recent_monday + timedelta(days=6)
         timeframe_filtered_records = [r for r in filtered_records if most_recent_monday <= r.date <= most_recent_sunday]
     elif timeframe == '30day':
-        unique_dates = sorted(set([r.date for r in filtered_records]), reverse=True)
-        selected_dates = unique_dates[:30]
-        timeframe_filtered_records = [r for r in filtered_records if r.date in selected_dates]
+        timeframe_filtered_records = [r for r in filtered_records if r.date in cm30_date_union]
     elif timeframe == 'current_year':
         timeframe_filtered_records = [r for r in filtered_records if get_school_year_for_date(r.date) == current_school_year]
     elif timeframe == 'quarter1':
@@ -5518,23 +5837,40 @@ def case_manager_comparison():
         unique_dates = set()
         
         # Aggregate STAR data and infractions
+        use_30_school_day_rules = cm30_selected_present is not None
         for record in cm_records:
+            st = _record_attendance_status_norm(record)
             unique_students.add(record.student_id)
-            unique_dates.add(record.date)
-            
+            if use_30_school_day_rules:
+                if record.date in cm30_selected_present and st == 'present':
+                    unique_dates.add(record.date)
+            else:
+                unique_dates.add(record.date)
+
+            count_star_points = (not use_30_school_day_rules) or (
+                record.date in cm30_selected_star and st == 'present'
+            )
+            count_infractions_here = (not use_30_school_day_rules) or (
+                record.date in cm30_selected_present and st == 'present'
+            )
+
             for period in record.periods:
-                total_safety += period.safety_points
-                total_teamwork += period.teamwork_points
-                total_accountability += period.accountability_points
-                total_relationships += period.relationships_points
-                total_possible += period.points_possible
-                
+                if count_star_points:
+                    total_safety += period.safety_points
+                    total_teamwork += period.teamwork_points
+                    total_accountability += period.accountability_points
+                    total_relationships += period.relationships_points
+                    total_possible += period.points_possible
+
+                if not count_infractions_here:
+                    continue
+
                 # Count infractions from period.infractions relationship
                 for infraction in period.infractions:
                     if infraction.infraction_type not in infractions:
                         infractions[infraction.infraction_type] = 0
                     infractions[infraction.infraction_type] += infraction.count
-                
+
                 # Extract infractions from Info column JSON data
                 if period.info:
                     try:
@@ -6783,7 +7119,9 @@ def frenzy_stats():
         selectinload(DailyRecord.periods).selectinload(PeriodRecord.infractions),
         selectinload(DailyRecord.frenzies),
     ).all()
-    
+    # Keep a handle to all rows (including excused) for 30 "present school day" windows.
+    frenzy_records_raw = all_records
+
     # Filter out excused records (they should be saved but excluded from calculations).
     # Do not commit inside this read endpoint; treat missing attendance_status in-memory.
     filtered_records = []
@@ -6791,11 +7129,11 @@ def frenzy_stats():
         # Backfill attendance status in-memory for consistent calculations.
         if not record.attendance_status:
             record.attendance_status = 'present' if record.present else 'unexcused'
-        
+
         # Exclude excused records from calculations
         if record.attendance_status != 'excused':
             filtered_records.append(record)
-    
+
     all_records = filtered_records
     
     # Helper function to check if a date is in a month-day range (handles year boundaries)
@@ -7012,14 +7350,15 @@ def frenzy_stats():
         available_data_points = None
         
         if period == '30day':
-            # Get unique dates that have data, sorted descending
-            unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
-            # Take the first 30 dates
-            selected_dates = unique_dates[:30]
-            # Track actual number of data points used
+            # Last 30 calendar days on which this cohort had at least one present row (same as /api/summary behavior metrics).
+            ud_present = _unique_dates_present_school_days(frenzy_records_raw)
+            selected_dates = ud_present[:30]
             available_data_points = len(selected_dates)
-            # Filter records to only those dates
-            filtered_records = [r for r in all_records if r.date in selected_dates]
+            selected_date_set = set(selected_dates)
+            filtered_records = [
+                r for r in all_records
+                if r.date in selected_date_set and _record_attendance_status_norm(r) == 'present'
+            ]
         else:
             for record in all_records:
                 record_school_year = get_school_year_for_date(record.date)
@@ -7075,30 +7414,35 @@ def frenzy_stats():
     
     # Filter by timeframe and handle comparison modes
     if timeframe == '30day':
-        # Get unique dates that have data, sorted descending
-        unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
-        # Track number of available data points
-        total_available_data_points = len(unique_dates)
-        # Take the first 30 dates
-        selected_dates = unique_dates[:30]
-        # Track actual number of data points used
+        ud_present = _unique_dates_present_school_days(frenzy_records_raw)
+        selected_dates = ud_present[:30]
         available_data_points = len(selected_dates)
-        # Filter records to only those dates
-        records = [r for r in all_records if r.date in selected_dates]
+        selected_date_set = set(selected_dates)
+        records = [
+            r for r in all_records
+            if r.date in selected_date_set and _record_attendance_status_norm(r) == 'present'
+        ]
         stats = calculate_frenzy_stats(records)
         stats['comparison_mode'] = False
         stats['available_data_points'] = available_data_points
         stats['has_full_30_days'] = available_data_points >= 30
         return _frenzy_response(stats)
     elif timeframe == '30day_to_30day':
-        unique_dates = sorted(set([r.date for r in all_records]), reverse=True)
-        total_available_dates = len(unique_dates)
-        most_recent_dates = unique_dates[:30]
-        previous_dates = unique_dates[30:60] if len(unique_dates) > 30 else []
+        ud_present = _unique_dates_present_school_days(frenzy_records_raw)
+        total_available_dates = len(ud_present)
+        most_recent_dates = ud_present[:30]
+        previous_dates = ud_present[30:60] if len(ud_present) > 30 else []
         most_recent_data_points = len(most_recent_dates)
         previous_data_points = len(previous_dates)
-        most_recent_records = [r for r in all_records if r.date in most_recent_dates]
-        previous_records = [r for r in all_records if r.date in previous_dates]
+        mr_set, pr_set = set(most_recent_dates), set(previous_dates)
+        most_recent_records = [
+            r for r in all_records
+            if r.date in mr_set and _record_attendance_status_norm(r) == 'present'
+        ]
+        previous_records = [
+            r for r in all_records
+            if r.date in pr_set and _record_attendance_status_norm(r) == 'present'
+        ]
         most_recent_stats = calculate_frenzy_stats(most_recent_records)
         previous_stats = calculate_frenzy_stats(previous_records)
         most_recent_stats['available_data_points'] = most_recent_data_points
