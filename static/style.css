@@ -739,6 +739,7 @@ table tbody tr:hover {
     margin-bottom: 1.5rem;
 }
 
+#daily-grid-container .grid-controls,
 #students-grid-container .grid-header {
     position: sticky;
     top: 0;
@@ -795,7 +796,7 @@ table tbody tr:hover {
     flex-wrap: wrap;
     gap: 1.25rem;
     align-items: flex-end;
-    margin-bottom: 20px;
+    margin-bottom: 1.5rem;
     padding: 0;
 }
 
@@ -842,52 +843,6 @@ table tbody tr:hover {
 
 .daily-selector .daily-managed-by-me-label input[type="checkbox"] {
     cursor: pointer;
-}
-
-.daily-selector .daily-entry-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-shrink: 0;
-}
-
-.daily-selector .daily-entry-actions .btn-primary {
-    background: var(--accent);
-    color: #fff;
-    border: 1px solid var(--accent);
-    padding: 0.5rem 1.25rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    letter-spacing: 0.01em;
-}
-
-.daily-selector .daily-entry-actions .btn-primary:hover {
-    background: var(--accent-hover);
-    border-color: var(--accent-hover);
-    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
-}
-
-.daily-selector .daily-entry-actions .btn-secondary {
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    border: 1px solid var(--border-strong);
-}
-
-.daily-selector .daily-entry-actions .btn-secondary:hover {
-    background: var(--bg-elevated);
-    border-color: var(--border-strong);
-}
-
-#entry-view #daily-grid-container {
-    margin-top: 0;
-}
-
-#entry-view #daily-grid-container .daily-grid {
-    margin-top: 0;
-}
-
-#entry-view #daily-grid-container .daily-staff-filter-title {
-    margin-bottom: 0.5rem;
 }
 
 /* Attendance dropdown styling (match global corner radius) */
