@@ -386,6 +386,7 @@ let allStudents = [];
 let editParentLinkedStudentIds = [];
 let filteredStudentsForPeriod = []; // Students filtered by staff member and period for period entry view
 let allStaffMembers = []; // Store staff users for team member dropdowns
+let allStudentUsers = []; // Student users from User Management (includes team_members)
 let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
@@ -9475,8 +9476,7 @@ function initStarbucksManagement() {
             debounceTimer = setTimeout(async () => {
                 const q = input.value.trim().toLowerCase();
                 if (!q) {
-                    dropdown.classList.remove('active');
-                    dropdown.innerHTML = '';
+                    mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                     return;
                 }
 
@@ -9504,20 +9504,32 @@ function initStarbucksManagement() {
                 }).slice(0, 12);
 
                 if (!matches.length) {
-                    dropdown.classList.remove('active');
-                    dropdown.innerHTML = '';
+                    mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                     return;
                 }
 
-                dropdown.innerHTML = matches.map(item => {
+                const frag = document.createDocumentFragment();
+                matches.forEach(item => {
                     const label = item.name || item.username || '';
                     const meta = type === 'staff' ? (item.designation || item.role || '') : '';
-                    return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
-                        <span class="search-label">${escapeHtml(label)}</span>
-                        ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
-                    </div>`;
-                }).join('');
-                dropdown.classList.add('active');
+                    const div = document.createElement('div');
+                    div.className = 'dashboard-search-option';
+                    div.dataset.id = String(item.id);
+                    div.dataset.name = label;
+                    div.dataset.type = type;
+                    const labelSpan = document.createElement('span');
+                    labelSpan.className = 'search-label';
+                    labelSpan.textContent = label;
+                    div.appendChild(labelSpan);
+                    if (meta) {
+                        const metaSpan = document.createElement('span');
+                        metaSpan.className = 'search-meta';
+                        metaSpan.textContent = meta;
+                        div.appendChild(metaSpan);
+                    }
+                    frag.appendChild(div);
+                });
+                mountAutocompleteDropdown(dropdown, frag, input);
             }, 150);
         });
 
@@ -9526,7 +9538,7 @@ function initStarbucksManagement() {
             if (!opt) return;
             const name = opt.dataset.name || '';
             input.value = name;
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
 
             if (type === 'student' && staffSearchInput) {
                 staffSearchInput.value = '';
@@ -9550,18 +9562,18 @@ function initStarbucksManagement() {
 
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#starbucks-section')) {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             }
         });
 
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 return;
             }
             if (e.key === 'Enter') {
                 e.preventDefault();
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 if (type === 'student' && staffSearchInput) {
                     staffSearchInput.value = '';
                 } else if (type === 'staff' && studentSearchInput) {
@@ -9984,6 +9996,37 @@ function renderTeacherSchedule() {
     });
 }
 
+/**
+ * Mount autocomplete options from a DocumentFragment.
+ * Count nodes before appendChild(frag) — the fragment is emptied when mounted.
+ * Supports marketplace-combobox (.is-open), dashboard (.active), or display:block.
+ * Pass an input element as shouldShow to only open when that input is focused.
+ */
+function mountAutocompleteDropdown(dropdown, frag, shouldShow) {
+    if (!dropdown) return 0;
+    var count = frag ? frag.childNodes.length : 0;
+    dropdown.innerHTML = '';
+    if (frag && count) {
+        dropdown.appendChild(frag);
+    }
+    var open = false;
+    if (shouldShow && typeof shouldShow === 'object' && shouldShow.nodeType === 1) {
+        open = document.activeElement === shouldShow;
+    } else {
+        open = !!shouldShow;
+    }
+    var show = open && count > 0;
+    if (dropdown.classList.contains('marketplace-combobox-dropdown')) {
+        dropdown.style.removeProperty('display');
+        dropdown.classList.toggle('is-open', show);
+    } else if (dropdown.classList.contains('dashboard-search-dropdown')) {
+        dropdown.classList.toggle('active', show);
+    } else {
+        dropdown.style.display = show ? 'block' : 'none';
+    }
+    return count;
+}
+
 function setupStaffAutocomplete(input) {
     if (!input) return;
     
@@ -10011,12 +10054,12 @@ function setupStaffAutocomplete(input) {
     // Show dropdown with filtered options
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option, index) => {
             const item = document.createElement('div');
             item.className = 'staff-autocomplete-item';
@@ -10032,18 +10075,18 @@ function setupStaffAutocomplete(input) {
                 selectedIndex = index;
                 updateHighlight();
             });
-            dropdown.appendChild(item);
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
+
+        mountAutocompleteDropdown(dropdown, frag, input);
+        isDropdownVisible = document.activeElement === input && options.length > 0;
         selectedIndex = -1;
         updateHighlight();
     };
-    
+
     // Hide dropdown
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
         selectedIndex = -1;
     };
@@ -10332,23 +10375,23 @@ function setupDailySearchAutocomplete(input) {
     // Show dropdown with filtered options
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option, index) => {
             const item = document.createElement('div');
             item.className = 'daily-search-autocomplete-item';
-            
+
             const labelSpan = document.createElement('span');
             labelSpan.className = 'item-label';
             labelSpan.textContent = option.type === 'student' ? 'Student:' : 'Staff:';
-            
+
             const nameSpan = document.createElement('span');
             nameSpan.textContent = option.name;
-            
+
             item.appendChild(labelSpan);
             item.appendChild(nameSpan);
             item.dataset.value = option.name;
@@ -10372,22 +10415,22 @@ function setupDailySearchAutocomplete(input) {
                 selectedIndex = index;
                 updateHighlight();
             });
-            dropdown.appendChild(item);
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
+
+        mountAutocompleteDropdown(dropdown, frag, input);
+        isDropdownVisible = document.activeElement === input && options.length > 0;
         selectedIndex = -1;
         updateHighlight();
     };
-    
+
     // Hide dropdown
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
         selectedIndex = -1;
     };
-    
+
     // Update highlighted item
     const updateHighlight = () => {
         const items = dropdown.querySelectorAll('.daily-search-autocomplete-item');
@@ -10900,8 +10943,29 @@ async function loadUserPreferences() {
         const data = await response.json();
         userPreferences = data || {};
         applyUserManagementSectionVisibility();
+        syncClientTimezonePreference();
     } catch (error) {
         console.error('Error loading user preferences:', error);
+    }
+}
+
+/** Remember the browser's local timezone (matches the user's location/clock, not server UTC). */
+async function syncClientTimezonePreference() {
+    const tz = getClientTimezone();
+    if (!tz) return;
+    window.clientTimezone = tz;
+    const existing = userPreferences || {};
+    if (existing.clientTimezone === tz) return;
+    const newPrefs = { ...existing, clientTimezone: tz };
+    userPreferences = newPrefs;
+    try {
+        await fetch('/api/user/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newPrefs)
+        });
+    } catch (error) {
+        console.warn('Failed to save client timezone preference:', error);
     }
 }
 
@@ -11127,6 +11191,7 @@ async function loadUsers() {
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
         const studentUsers = users.filter(u => u.role === 'student');
+        allStudentUsers = studentUsers;
         
         // Helper: safe string for sorting (treat null/undefined as empty, case-insensitive)
         const sortKey = (value) => (value || '').toString().toLowerCase();
@@ -11217,18 +11282,18 @@ async function loadUsers() {
         } else {
             const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
-                adminFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
+                adminFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user), false));
             });
             adminTbody.appendChild(adminFrag);
         }
         
         // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
-            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
             const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
-                staffFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
+                staffFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user), true));
             });
             staffTbody.appendChild(staffFrag);
         }
@@ -11329,7 +11394,7 @@ async function loadUsers() {
     }
 }
 
-function createAdminStaffRow(user, displayRole) {
+function createAdminStaffRow(user, displayRole, isStaffTable) {
     const row = document.createElement('tr');
     row.dataset.userId = user.id;
     
@@ -11363,6 +11428,13 @@ function createAdminStaffRow(user, displayRole) {
         <td><strong>${name}</strong></td>
         <td style="font-weight: 500; color: ${user.role === 'admin' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
         <td>${user.username}</td>
+        ${isStaffTable ? `
+        <td>
+            <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;"
+                onclick="showCaseloadForUser(${user.id}, '${user.username.replace(/'/g, "\\'")}', ${userName})">
+                Show Caseload
+            </button>
+        </td>` : ''}
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
                 <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
@@ -11375,6 +11447,105 @@ function createAdminStaffRow(user, displayRole) {
     `;
     
     return row;
+}
+
+function studentUserHasStaffMember(studentUser, staffIdentifiers) {
+    if (!studentUser || !studentUser.team_members || !staffIdentifiers.length) return false;
+    const tm = studentUser.team_members;
+    const roleFields = ['case_manager', 'practitioner', 'professional', 'group_leader', 'paraprofessional'];
+    const normalize = (value) => (value == null ? '' : String(value)).trim().toLowerCase();
+    const matchesValue = (value) => {
+        const key = normalize(value);
+        return key && staffIdentifiers.includes(key);
+    };
+    return roleFields.some((field) => {
+        const entry = tm[field];
+        if (!entry) return false;
+        const values = Array.isArray(entry) ? entry : [entry];
+        return values.some(matchesValue);
+    });
+}
+
+function showCaseloadForUser(userId, username, displayName) {
+    try {
+        const staffUser = (allStaffMembers || []).find((u) => u.id === userId);
+        const staffIdentifiers = [];
+        for (const val of [staffUser?.name, staffUser?.username, displayName, username]) {
+            const key = (val == null ? '' : String(val)).trim().toLowerCase();
+            if (key && !staffIdentifiers.includes(key)) staffIdentifiers.push(key);
+        }
+        if (staffIdentifiers.length === 0) {
+            showMessage('Could not resolve staff member for caseload lookup.', 'error');
+            return;
+        }
+
+        const studentSource = Array.isArray(allStudentUsers) && allStudentUsers.length > 0
+            ? allStudentUsers
+            : [];
+        if (studentSource.length === 0) {
+            showMessage('No current students loaded. Open User Management or refresh users first.', 'info');
+            return;
+        }
+
+        const caseload = studentSource.filter((s) => studentUserHasStaffMember(s, staffIdentifiers));
+
+        const modal = document.getElementById('caseload-modal');
+        const titleEl = document.getElementById('caseload-modal-title');
+        const bodyEl = document.getElementById('caseload-modal-body');
+
+        if (!modal || !titleEl || !bodyEl) {
+            console.warn('Caseload modal elements not found in DOM.');
+            const count = caseload.length;
+            if (count === 0) {
+                showMessage(`No students currently assigned to ${displayName || username || 'this staff member'}.`, 'info');
+            } else {
+                const names = caseload.map(s => s.name || s.student_name || `Student #${s.id}`).join(', ');
+                showMessage(`Students for ${displayName || username}: ${names}`, 'info');
+            }
+            return;
+        }
+
+        const safeDisplayName = (displayName || staffUser?.name || staffUser?.username || username || '').toString();
+        titleEl.textContent = `Caseload for ${safeDisplayName}`;
+
+        if (caseload.length === 0) {
+            bodyEl.innerHTML = `<p style="margin: 0;">No students currently have this staff member assigned in the current students table.</p>`;
+        } else {
+            const rowsHtml = caseload.map(student => {
+                const studentName = escapeHtml(student.name || student.student_name || student.username || `Student #${student.id}`);
+                const grade = escapeHtml(student.grade || '-');
+                const cardColor = student.card_color || '-';
+                const cardColorDisplay = cardColor === '-' ? '-' : (cardColor.charAt(0).toUpperCase() + cardColor.slice(1));
+                return `
+                    <tr>
+                        <td><strong>${studentName}</strong></td>
+                        <td>${grade}</td>
+                        <td>${cardColorDisplay}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            bodyEl.innerHTML = `
+                <table class="users-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Student</th>
+                            <th style="text-align: left;">Grade</th>
+                            <th style="text-align: left;">Card</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        modal.style.display = 'block';
+    } catch (e) {
+        console.error('Error showing caseload:', e);
+        showMessage('Error loading caseload. Please try again.', 'error');
+    }
 }
 
 function createStudentRow(user) {
@@ -12639,7 +12810,7 @@ function setupEditParentAddStudentCombobox() {
     function render() {
         const query = input.value.trim();
         const list = filterStudentsByName(pool(), query);
-        dropdown.innerHTML = '';
+        const frag = document.createDocumentFragment();
         list.forEach(student => {
             const name = student.name || `Student ${student.id}`;
             const div = document.createElement('div');
@@ -12649,16 +12820,15 @@ function setupEditParentAddStudentCombobox() {
             div.style.cssText = 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;';
             div.textContent = name;
             div.addEventListener('click', () => selectStudent(student.id, name));
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
-        dropdown.style.display = list.length ? 'block' : 'none';
+        mountAutocompleteDropdown(dropdown, frag, input);
     }
 
     function selectStudent(id, name) {
         hidden.value = id;
         input.value = name;
-        dropdown.style.display = 'none';
-        dropdown.innerHTML = '';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
     }
 
     input.addEventListener('focus', () => render());
@@ -12671,8 +12841,7 @@ function setupEditParentAddStudentCombobox() {
     });
     input.addEventListener('blur', () => {
         setTimeout(() => {
-            dropdown.style.display = 'none';
-            dropdown.innerHTML = '';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }, 200);
     });
 }
@@ -15665,6 +15834,88 @@ function getMarketplaceImageSrc(url) {
     return u;
 }
 
+function formatMarketplaceHiddenRuleLabel(rule) {
+    if (!rule) return '';
+    if (rule.label) return rule.label;
+    var type = rule.hidden_type;
+    var value = rule.value || '';
+    if (type === 'student') {
+        var sid = parseInt(value, 10);
+        var student = (allStudents || []).find(function (s) { return s.id === sid; });
+        var name = student ? (student.name || student.initials || ('Student ' + sid)) : ('Student #' + value);
+        return 'Student: ' + name;
+    }
+    if (type === 'card_color') {
+        return 'Card color: ' + value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+    }
+    if (type === 'grade_section') {
+        return 'Grade section: ' + value;
+    }
+    return value;
+}
+
+function buildMarketplaceHiddenInfoHtml(rules) {
+    if (!rules || !rules.length) return '';
+    var items = rules.map(function (r) {
+        return '<li>' + String(formatMarketplaceHiddenRuleLabel(r)).replace(/</g, '&lt;') + '</li>';
+    }).join('');
+    return '<div class="marketplace-hidden-info-title">Hidden from</div>' +
+        '<ul class="marketplace-hidden-info-list">' + items + '</ul>';
+}
+
+function renderMarketplaceHiddenRulesBox(containerEl, rules, options) {
+    if (!containerEl) return;
+    options = options || {};
+    if (!rules || !rules.length) {
+        containerEl.style.display = 'none';
+        containerEl.innerHTML = '';
+        return;
+    }
+    var itemsHtml = rules.map(function (r) {
+        var label = formatMarketplaceHiddenRuleLabel(r);
+        var removeBtn = options.removable
+            ? '<button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:2px 8px; font-size:11px; flex-shrink:0;" data-rule-id="' + r.id + '">Remove</button>'
+            : '';
+        return '<li style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
+            '<span>' + String(label).replace(/</g, '&lt;') + '</span>' + removeBtn + '</li>';
+    }).join('');
+    containerEl.innerHTML = '<div class="marketplace-hidden-info-title">Hidden from</div><ul class="marketplace-hidden-info-list">' + itemsHtml + '</ul>';
+    containerEl.style.display = 'block';
+    if (options.removable && options.onRemove) {
+        containerEl.querySelectorAll('.marketplace-unhide-remove-rule').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                options.onRemove(parseInt(btn.getAttribute('data-rule-id'), 10));
+            });
+        });
+    }
+}
+
+function resetMarketplaceHideFormFields(keepType) {
+    document.getElementById('marketplace-hide-student-id').value = '';
+    document.getElementById('marketplace-hide-student-search').value = '';
+    document.getElementById('marketplace-hide-card-color').value = '';
+    document.getElementById('marketplace-hide-grade').value = '';
+    if (keepType !== 'student') {
+        document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
+        document.getElementById('marketplace-hide-value-student').style.display = 'none';
+        document.getElementById('marketplace-hide-value-color').style.display = 'none';
+        document.getElementById('marketplace-hide-value-grade').style.display = 'none';
+    }
+}
+
+function refreshMarketplaceHideModalRules(itemId) {
+    var rulesEl = document.getElementById('marketplace-hide-current-rules');
+    if (!rulesEl || !itemId) return;
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (rules) {
+            var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+            if (item) item.hidden_rules = rules;
+            renderMarketplaceHiddenRulesBox(rulesEl, rules);
+        });
+}
+
 function renderMarketplaceCatalog(items) {
     var grid = document.getElementById('marketplace-items-grid');
     if (!grid) return;
@@ -15685,8 +15936,8 @@ function renderMarketplaceCatalog(items) {
             ? '<button type="button" class="btn-primary marketplace-card-add-btn" style="padding:6px 12px; font-size:13px;" data-item-id="' + item.id + '" data-item-name="' + (item.name || '').replace(/"/g, '&quot;') + '" data-item-price="' + item.price + '">Add to cart</button>'
             : '';
         var staffBtns = '';
+        var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
         if (isStaffOrAdmin) {
-            var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
             staffBtns = '<div class="marketplace-item-staff-actions" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">' +
                 (hasHidden
                     ? '<button type="button" class="marketplace-btn-unhide btn-secondary" style="padding:4px 10px; font-size:12px;" data-item-id="' + item.id + '">Unhide / Manage</button>'
@@ -15845,7 +16096,7 @@ function loadMarketplacePOApprovals() {
                 return '<div style="border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; margin-bottom:10px; background:var(--bg-surface);">' +
                     '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' — $' + Number(o.item_price).toFixed(2) + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">Student: ' + (o.student_name || '').replace(/</g, '&lt;') + '</div>' +
-                    '<div style="font-size:13px; color:#64748b;">' + (o.created_at ? new Date(o.created_at).toLocaleString() : '') + '</div>' +
+                    '<div style="font-size:13px; color:#64748b;">' + formatApiDateTime(o.created_at) + '</div>' +
                     '<div style="margin-top:10px; display:flex; gap:8px; align-items:center;">' +
                     '<button type="button" class="btn-primary" style="padding:6px 12px;" data-po-approve="' + o.id + '">Fulfill</button>' +
                     '<button type="button" class="btn-secondary" style="padding:6px 12px;" data-po-deny="' + o.id + '">Deny</button>' +
@@ -16157,13 +16408,7 @@ function renderMarketplaceAddItemCaseManagerDropdown() {
         div.textContent = label;
         frag.appendChild(div);
     });
-    dropdown.innerHTML = '';
-    dropdown.appendChild(frag);
-    if (frag.childNodes.length > 0) {
-        dropdown.classList.add('is-open');
-    } else {
-        dropdown.classList.remove('is-open');
-    }
+    mountAutocompleteDropdown(dropdown, frag, input);
 }
 
 function openMarketplaceAddItemModal() {
@@ -16188,10 +16433,13 @@ function openMarketplaceAddItemModal() {
     priceIn.value = '';
     marketplaceAddItemSelected = [];
     if (caseManagerInput) caseManagerInput.value = '';
+    if (caseManagerDropdown) mountAutocompleteDropdown(caseManagerDropdown, document.createDocumentFragment(), false);
     if (typeInput) typeInput.value = '';
     if (typeIdHidden) typeIdHidden.value = '';
+    if (typeDropdown) mountAutocompleteDropdown(typeDropdown, document.createDocumentFragment(), false);
     if (catInput) catInput.value = '';
     if (catIdHidden) catIdHidden.value = '';
+    if (catDropdown) mountAutocompleteDropdown(catDropdown, document.createDocumentFragment(), false);
     if (imgIn) imgIn.value = '';
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
     // Build options: School-wide (admin only) then case managers
@@ -16279,9 +16527,7 @@ function openMarketplaceAddItemModal() {
             addDiv.textContent = 'Add "' + q + '"';
             frag.appendChild(addDiv);
         }
-        typeDropdown.innerHTML = '';
-        typeDropdown.appendChild(frag);
-        typeDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && typeInput === document.activeElement);
+        mountAutocompleteDropdown(typeDropdown, frag, typeInput === document.activeElement);
     }
     function renderCatDropdown() {
         if (!catDropdown || !catInput) return;
@@ -16304,9 +16550,7 @@ function openMarketplaceAddItemModal() {
             addDiv.textContent = 'Add "' + q + '"';
             frag.appendChild(addDiv);
         }
-        catDropdown.innerHTML = '';
-        catDropdown.appendChild(frag);
-        catDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && catInput === document.activeElement);
+        mountAutocompleteDropdown(catDropdown, frag, catInput === document.activeElement);
     }
     function setupTypeCombobox() {
         if (!typeInput || !typeIdHidden || !typeDropdown) return;
@@ -16502,6 +16746,7 @@ function openMarketplaceHideModal(itemId) {
     document.getElementById('marketplace-hide-grade').value = '';
     var errEl = document.getElementById('marketplace-hide-error');
     if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    refreshMarketplaceHideModalRules(itemId);
     if (modal) modal.style.display = 'block';
 }
 function closeMarketplaceHideModal() {
@@ -16511,7 +16756,11 @@ function closeMarketplaceHideModal() {
 }
 function submitMarketplaceHide() {
     var itemId = marketplaceHideModalItemId;
-    if (!itemId) return;
+    var errEl = document.getElementById('marketplace-hide-error');
+    if (!itemId) {
+        if (errEl) { errEl.textContent = 'No item selected. Close and try again.'; errEl.style.display = 'block'; }
+        return;
+    }
     var typeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
     var type = null;
     typeRadios.forEach(function (r) { if (r.checked) type = r.value; });
@@ -16528,7 +16777,6 @@ function submitMarketplaceHide() {
     } else {
         document.getElementById('marketplace-hide-error').textContent = 'Choose one: specific student, card color, or grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return;
     }
-    var errEl = document.getElementById('marketplace-hide-error');
     errEl.style.display = 'none';
     fetch('/api/marketplace-items/' + itemId + '/hidden-rules', {
         method: 'POST',
@@ -16538,13 +16786,50 @@ function submitMarketplaceHide() {
         .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
         .then(function (res) {
             if (res.ok || (res.data && res.data.id)) {
-                closeMarketplaceHideModal();
                 loadMarketplaceCatalog();
+                fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
+                    .then(function (r) { return r.ok ? r.json() : []; })
+                    .then(function (rules) {
+                        var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+                        if (item) item.hidden_rules = rules;
+                        refreshMarketplaceHideModalRules(itemId);
+                        resetMarketplaceHideFormFields(type);
+                        if (type === 'student') {
+                            var studentRadio = document.querySelector('input[name="marketplace-hide-type"][value="student"]');
+                            if (studentRadio) {
+                                studentRadio.checked = true;
+                                document.getElementById('marketplace-hide-value-student').style.display = 'block';
+                            }
+                        }
+                        if (errEl) {
+                            errEl.style.display = 'block';
+                            errEl.style.background = '#F0FDF4';
+                            errEl.style.border = '1px solid #BBF7D0';
+                            errEl.style.color = '#166534';
+                            errEl.textContent = 'Rule added. Select another student or close when done.';
+                            setTimeout(function () {
+                                if (errEl.textContent === 'Rule added. Select another student or close when done.') {
+                                    errEl.style.display = 'none';
+                                    errEl.style.background = '#fef2f2';
+                                    errEl.style.border = '1px solid #fecaca';
+                                    errEl.style.color = '#dc2626';
+                                }
+                            }, 3000);
+                        }
+                    });
             } else {
+                errEl.style.background = '#fef2f2';
+                errEl.style.border = '1px solid #fecaca';
+                errEl.style.color = '#dc2626';
                 errEl.textContent = (res.data && res.data.error) || 'Failed to add rule.'; errEl.style.display = 'block';
             }
         })
-        .catch(function () { errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block'; });
+        .catch(function () {
+            errEl.style.background = '#fef2f2';
+            errEl.style.border = '1px solid #fecaca';
+            errEl.style.color = '#dc2626';
+            errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block';
+        });
 }
 
 var marketplaceUnhideModalItemId = null;
@@ -16554,22 +16839,12 @@ function openMarketplaceUnhideModal(itemId) {
     var modal = document.getElementById('marketplace-unhide-modal');
     var nameEl = document.getElementById('marketplace-unhide-item-name');
     if (nameEl) nameEl.textContent = item ? item.name : '';
-    var listEl = document.getElementById('marketplace-unhide-rules-list');
-    if (!listEl) { if (modal) modal.style.display = 'block'; return; }
-    listEl.innerHTML = '';
+    var rulesEl = document.getElementById('marketplace-unhide-current-rules');
     var rules = (item && item.hidden_rules) ? item.hidden_rules : [];
-    if (!rules.length) {
-        listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
-    } else {
-        rules.forEach(function (r) {
-            var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
-            var li = document.createElement('li');
-            li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-            li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-            listEl.appendChild(li);
-            li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
-        });
-    }
+    renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+        removable: true,
+        onRemove: function (ruleId) { removeMarketplaceHiddenRule(itemId, ruleId); }
+    });
     if (modal) modal.style.display = 'block';
 }
 function closeMarketplaceUnhideModal() {
@@ -16587,49 +16862,36 @@ function removeMarketplaceHiddenRule(itemId, ruleId) {
                     .then(function (rules) {
                         var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
                         if (item) item.hidden_rules = rules;
-                        var listEl = document.getElementById('marketplace-unhide-rules-list');
-                        if (!listEl) return;
-                        listEl.innerHTML = '';
                         if (!rules.length) {
-                            listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
                             closeMarketplaceUnhideModal();
-                        } else {
-                            rules.forEach(function (r) {
-                                var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
-                                var li = document.createElement('li');
-                                li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-                                li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-                                listEl.appendChild(li);
-                                li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
-                            });
+                            return;
                         }
+                        var rulesEl = document.getElementById('marketplace-unhide-current-rules');
+                        renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+                            removable: true,
+                            onRemove: function (rid) { removeMarketplaceHiddenRule(itemId, rid); }
+                        });
                     });
             }
         });
 }
 function refreshMarketplaceUnhideModalList() {
     if (marketplaceUnhideModalItemId == null) return;
-    fetch('/api/marketplace-items/' + marketplaceUnhideModalItemId + '/hidden-rules')
+    var itemId = marketplaceUnhideModalItemId;
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
         .then(function (r) { return r.ok ? r.json() : []; })
         .then(function (rules) {
-            var item = marketplaceCatalog.find(function (x) { return x.id === marketplaceUnhideModalItemId; });
+            var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
             if (item) item.hidden_rules = rules;
-            var listEl = document.getElementById('marketplace-unhide-rules-list');
-            if (!listEl) return;
-            listEl.innerHTML = '';
             if (!rules.length) {
-                listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
                 closeMarketplaceUnhideModal();
-            } else {
-                rules.forEach(function (r) {
-                    var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
-                    var li = document.createElement('li');
-                    li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-                    li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-                    listEl.appendChild(li);
-                    li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(marketplaceUnhideModalItemId, r.id); });
-                });
+                return;
             }
+            var rulesEl = document.getElementById('marketplace-unhide-current-rules');
+            renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+                removable: true,
+                onRemove: function (ruleId) { removeMarketplaceHiddenRule(itemId, ruleId); }
+            });
         });
 }
 
@@ -16733,9 +16995,8 @@ function setupMarketplaceStudentSearch() {
     if (!searchInput || !dropdown) return;
     var list = [];
     function showDropdown(items) {
-        dropdown.innerHTML = '';
-        dropdown.style.display = 'block';
-        items.slice(0, 15).forEach(function (s) {
+        var frag = document.createDocumentFragment();
+        (items || []).slice(0, 15).forEach(function (s) {
             var div = document.createElement('div');
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
@@ -16744,14 +17005,15 @@ function setupMarketplaceStudentSearch() {
                 e.preventDefault();
                 selectMarketplaceStudent(s.student_id);
                 searchInput.value = div.textContent;
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 // When a marketplace student search is committed, clear "managed by me" so it does not persist across searches.
                 if (managedByMe && managedByMe.checked) {
                     managedByMe.checked = false;
                 }
             });
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
     }
     function loadList() {
         var params = new URLSearchParams();
@@ -16765,7 +17027,7 @@ function setupMarketplaceStudentSearch() {
     }
     searchInput.addEventListener('input', loadList);
     searchInput.addEventListener('focus', function () { if (list.length) showDropdown(list); else loadList(); });
-    document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) dropdown.style.display = 'none'; });
+    document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false); });
     if (managedByMe) managedByMe.addEventListener('change', loadList);
 }
 
@@ -16798,13 +17060,8 @@ function setupBankStudentSearch() {
     }
 
     function showDropdown(items) {
-        dropdown.innerHTML = '';
-        if (!items || !items.length) {
-            dropdown.style.display = 'none';
-            return;
-        }
-        dropdown.style.display = 'block';
-        items.slice(0, 15).forEach(function (s) {
+        var frag = document.createDocumentFragment();
+        (items || []).slice(0, 15).forEach(function (s) {
             var div = document.createElement('div');
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
@@ -16814,7 +17071,7 @@ function setupBankStudentSearch() {
                 e.preventDefault();
                 currentBankStudentId = s.student_id;
                 searchInput.value = label;
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 if (noMsg) noMsg.style.display = 'none';
                 setSectionsVisible(true);
                 // When a bank-account student search is committed, clear "managed by me" so it does not persist across searches.
@@ -16823,8 +17080,9 @@ function setupBankStudentSearch() {
                 }
                 loadBankAccount(s.student_id);
             });
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
     }
 
     function loadList() {
@@ -16840,7 +17098,7 @@ function setupBankStudentSearch() {
             })
             .catch(function () {
                 list = [];
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             });
     }
 
@@ -16851,7 +17109,7 @@ function setupBankStudentSearch() {
     });
     document.addEventListener('click', function (e) {
         if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }
     });
     if (managedByMe) managedByMe.addEventListener('change', loadList);
@@ -16981,8 +17239,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hideStudentSearch && hideStudentDropdown && hideStudentId) {
             var hideStudentList = [];
             function showHideStudentDropdown(items) {
-                hideStudentDropdown.innerHTML = '';
-                hideStudentDropdown.style.display = 'block';
+                var frag = document.createDocumentFragment();
                 (items || []).slice(0, 15).forEach(function (s) {
                     var div = document.createElement('div');
                     div.className = 'bank-search-autocomplete-item';
@@ -16993,15 +17250,16 @@ document.addEventListener('DOMContentLoaded', function () {
                         var sid = s.student_id != null ? s.student_id : s.id;
                         hideStudentId.value = String(sid);
                         hideStudentSearch.value = s.student_name || s.name || '';
-                        hideStudentDropdown.style.display = 'none';
+                        mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false);
                     });
-                    hideStudentDropdown.appendChild(div);
+                    frag.appendChild(div);
                 });
+                mountAutocompleteDropdown(hideStudentDropdown, frag, true);
             }
             hideStudentSearch.addEventListener('input', function () {
                 var q = hideStudentSearch.value.trim();
                 hideStudentId.value = '';
-                if (!q) { hideStudentDropdown.style.display = 'none'; return; }
+                if (!q) { mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false); return; }
                 var params = new URLSearchParams({ q: q });
                 fetch('/api/bank-account/search?' + params.toString()).then(function (r) { return r.ok ? r.json() : []; }).then(function (data) {
                     hideStudentList = data;
@@ -17013,7 +17271,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 else if (hideStudentSearch.value.trim()) hideStudentSearch.dispatchEvent(new Event('input'));
             });
             document.addEventListener('click', function (e) {
-                if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) hideStudentDropdown.style.display = 'none';
+                if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false);
             });
         }
         var unhideClose = document.getElementById('marketplace-unhide-modal-close');
@@ -17025,8 +17283,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (unhideModal) unhideModal.addEventListener('click', function (e) { if (e.target === unhideModal) closeMarketplaceUnhideModal(); });
         if (unhideAddMore) unhideAddMore.addEventListener('click', function () {
             if (marketplaceUnhideModalItemId != null) {
+                var itemId = marketplaceUnhideModalItemId;
                 closeMarketplaceUnhideModal();
-                openMarketplaceHideModal(marketplaceUnhideModalItemId);
+                openMarketplaceHideModal(itemId);
             }
         });
         var editClose = document.getElementById('marketplace-edit-item-modal-close');
@@ -17744,7 +18003,7 @@ function renderTransactions(transactions) {
     // Render in a compact, table-like list similar to Accounts UI
     const rows = transactions
         .slice()
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .sort((a, b) => (parseApiUtcDateTime(b.created_at) || 0) - (parseApiUtcDateTime(a.created_at) || 0))
         .map(t => {
             const isDeposit = t.type === 'deposit';
             const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
@@ -17753,7 +18012,7 @@ function renderTransactions(transactions) {
             return `
                 <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
                     <div style="flex:1; min-width:0;">
-                        <div style="font-size:13px; color:#0f172a;">${new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        <div style="font-size:13px; color:#0f172a;">${formatApiDateTime(t.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                         <div style="font-size:13px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.description || ''}</div>
                     </div>
                     <div style="width:110px; text-align:right; font-size:13px; color:#64748b;">
@@ -17861,42 +18120,42 @@ function setupBankAccountSearch() {
     
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option) => {
             const item = document.createElement('div');
             item.className = 'bank-search-autocomplete-item';
             item.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;';
             item.innerHTML = `<span style="font-weight: 600;">${option.type === 'student' ? 'Student:' : 'Staff:'}</span> ${option.name}`;
-            
+
             item.addEventListener('click', () => {
                 searchInput.value = option.name;
                 hideDropdown();
                 searchInput.dispatchEvent(new Event('input', { bubbles: true }));
             });
-            
-            dropdown.appendChild(item);
+
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
+
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
         isDropdownVisible = true;
     };
-    
+
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
     };
-    
+
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value;
         const options = filterOptions(query);
         showDropdown(options);
     });
-    
+
     searchInput.addEventListener('blur', () => {
         setTimeout(() => hideDropdown(), 200);
     });
@@ -18763,7 +19022,7 @@ function setupDashboardSearch(prefix, type) {
         debounceTimer = setTimeout(async () => {
             const q = input.value.trim().toLowerCase();
             if (q.length < 1) {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
                 const st = dashboardState[pageKey] || {};
                 if (type === 'student') {
@@ -18801,16 +19060,32 @@ function setupDashboardSearch(prefix, type) {
                 const uname = (item.username || '').toLowerCase();
                 return name.includes(q) || uname.includes(q);
             }).slice(0, 12);
-            if (matches.length === 0) { dropdown.classList.remove('active'); return; }
-            dropdown.innerHTML = matches.map(item => {
+            if (matches.length === 0) {
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            matches.forEach(item => {
                 const label = item.name || item.username;
                 const meta = type === 'staff' ? (item.designation || item.role || '') : '';
-                return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
-                    <span class="search-label">${escapeHtml(label)}</span>
-                    ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
-                </div>`;
-            }).join('');
-            dropdown.classList.add('active');
+                const div = document.createElement('div');
+                div.className = 'dashboard-search-option';
+                div.dataset.id = String(item.id);
+                div.dataset.name = label;
+                div.dataset.type = type;
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'search-label';
+                labelSpan.textContent = label;
+                div.appendChild(labelSpan);
+                if (meta) {
+                    const metaSpan = document.createElement('span');
+                    metaSpan.className = 'search-meta';
+                    metaSpan.textContent = meta;
+                    div.appendChild(metaSpan);
+                }
+                frag.appendChild(div);
+            });
+            mountAutocompleteDropdown(dropdown, frag, input);
         }, 150);
     });
 
@@ -18821,7 +19096,7 @@ function setupDashboardSearch(prefix, type) {
         if (id == null) return;
         const name = opt.dataset.name;
         input.value = name;
-        dropdown.classList.remove('active');
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         const page = prefix.replace('-student', '').replace('-staff', '');
         const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
         if (type === 'student') {
@@ -18864,13 +19139,13 @@ function setupDashboardSearch(prefix, type) {
 
     document.addEventListener('click', (e) => {
         if (!e.target.closest(`#${prefix}-${type}-search-wrap`)) {
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }
     });
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             return;
         }
 
@@ -18893,7 +19168,7 @@ function setupDashboardSearch(prefix, type) {
             const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
 
             input.value = name;
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
 
             if (type === 'student') {
                 dashboardState[pageKey].studentId = id;
@@ -20271,6 +20546,31 @@ function parseIsoDateLocal(isoDate) {
     const [year, month, day] = normalized.split('-').map(Number);
     if (!year || !month || !day) return null;
     return new Date(year, month - 1, day);
+}
+
+/** Parse API datetimes stored as UTC (naive ISO or with Z) into a Date for local display. */
+function parseApiUtcDateTime(iso) {
+    if (iso == null || iso === '') return null;
+    const s = String(iso).trim();
+    if (!s) return null;
+    if (/[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+    if (s.indexOf('T') !== -1) return new Date(s + 'Z');
+    return new Date(s + 'T00:00:00Z');
+}
+
+/** Format API UTC timestamps in the user's local timezone (browser locale). */
+function formatApiDateTime(iso, options) {
+    const d = parseApiUtcDateTime(iso);
+    if (!d || Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, options || { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function getClientTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (e) {
+        return '';
+    }
 }
 
 function normalizeDateKey(value) {

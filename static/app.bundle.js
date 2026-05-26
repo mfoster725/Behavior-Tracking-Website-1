@@ -1,4 +1,4 @@
-/* static/app.bundle.js — synced mirror of static/app.js (same content below this line). */
+/* static/app.bundle.js � synced mirror of static/app.js (same content below this line). */
 // Standard time periods
 const STANDARD_PERIODS = [
     { time: 'AM Bus', location: 'Bus' },
@@ -122,6 +122,205 @@ function canonicalizeInfractionTypeDeltas(rawDeltas = {}) {
         aggregated[canonicalType] = (aggregated[canonicalType] || 0) + (Number(delta) || 0);
     });
     return aggregated;
+}
+
+/** Match Python `norm_slot_label` in build_overview_trends (dash/spacing). */
+function normalizeOverviewTrendLabel(s) {
+    let t = String(s || '').trim().toLowerCase();
+    t = t.replace(/\u2013/g, '-').replace(/\u2014/g, '-').replace(/\u2212/g, '-');
+    t = t.replace(/\s*-\s*/g, '-');
+    t = t.replace(/\s+/g, ' ');
+    return t.trim();
+}
+
+function formatInfractionCountDeltaHtml(delta) {
+    if (delta == null || !Number.isFinite(delta)) {
+        return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">—</span>';
+    }
+    const dClass = delta > 0 ? 'is-neg' : delta < 0 ? 'is-pos' : 'is-muted';
+    const text = delta >= 0 ? `+${delta}` : `${delta}`;
+    return `<span class="infractions-count-delta overview-gauge-small ${dClass}" title="Change vs prior period">${escapeHtml(text)}</span>`;
+}
+
+function buildOverviewAssocDeltaGetter(rawAssocDeltas) {
+    const canon = canonicalizeInfractionTypeDeltas(rawAssocDeltas || {});
+    return (type, curTotal) => {
+        const key = normalizeInfractionType(type);
+        if (key && Object.prototype.hasOwnProperty.call(canon, key)) {
+            const n = Number(canon[key]);
+            if (Number.isFinite(n)) return n;
+        }
+        if (rawAssocDeltas && Object.prototype.hasOwnProperty.call(rawAssocDeltas, type)) {
+            const direct = Number(rawAssocDeltas[type]);
+            if (Number.isFinite(direct)) return direct;
+        }
+        return null;
+    };
+}
+
+function normalizeOverviewKeyedTotals(totalsByLabel) {
+    const out = {};
+    Object.entries(totalsByLabel || {}).forEach(([label, total]) => {
+        const nk = normalizeOverviewTrendLabel(label);
+        if (!nk) return;
+        out[nk] = (out[nk] || 0) + (Number(total) || 0);
+    });
+    return out;
+}
+
+/** Shared chart/table config for Reminders and Resets overview detail cards (same UI, different metric). */
+const REM_RES_KIND_CONFIG = Object.freeze({
+    reminders: {
+        key: 'reminders',
+        label: 'Reminders',
+        countField: 'total_reminders',
+        assocKey: 'infractions_for_reminders',
+        trendsPrefix: 'reminders',
+        barColor: '#e87a1e',
+        cardModifier: 'overview-remres-card--reminders',
+    },
+    resets: {
+        key: 'resets',
+        label: 'Resets',
+        countField: 'total_resets',
+        assocKey: 'infractions_for_resets',
+        trendsPrefix: 'resets',
+        barColor: '#1e293b',
+        cardModifier: 'overview-remres-card--resets',
+    },
+});
+
+function getRemResKindConfig(mode) {
+    return REM_RES_KIND_CONFIG[mode] || null;
+}
+
+function remResCountsFromStatsSlice(statsSlice, kind) {
+    const cfg = getRemResKindConfig(kind);
+    if (!cfg) return { time: {}, day: {}, assoc: {} };
+    const field = cfg.countField;
+    const assocKey = cfg.assocKey;
+    const time = {};
+    Object.entries(statsSlice?.by_time || {}).forEach(([label, bucket]) => {
+        const n = Number(bucket?.[field]) || 0;
+        if (n > 0) time[label] = n;
+    });
+    const day = {};
+    Object.entries(statsSlice?.by_day_of_week || {}).forEach(([label, bucket]) => {
+        const n = Number(bucket?.[field]) || 0;
+        if (n > 0) day[label] = n;
+    });
+    const assoc = { ...(statsSlice?.additional_info?.[assocKey] || {}) };
+    return { time, day, assoc };
+}
+
+function buildRemResOverviewDeltaGetters(data, kind) {
+    const cfg = getRemResKindConfig(kind);
+    if (!cfg) {
+        const noop = () => null;
+        return { getTimeDelta: noop, getDayDelta: noop, getAssocDelta: noop };
+    }
+    const prefix = cfg.trendsPrefix;
+    const ot = data?.overview_trends;
+    const rawTimeDeltas = ot?.[`${prefix}_deltas_by_time`] || {};
+    const rawDayDeltas = ot?.[`${prefix}_deltas_by_day_of_week`] || {};
+    const rawAssocDeltas = ot?.[`${prefix}_assoc_deltas`] || {};
+
+    let prevTimeTotalsNorm =
+        ot != null && typeof ot === 'object'
+            ? (ot[`${prefix}_previous_time_totals_normalized`] ?? {})
+            : null;
+    let prevDayTotalsNorm =
+        ot != null && typeof ot === 'object'
+            ? (ot[`${prefix}_previous_day_totals_normalized`] ?? {})
+            : null;
+
+    const prevStats = data?.overview_previous_stats || ot?.overview_previous_stats;
+    const countsFromPrev = prevStats ? remResCountsFromStatsSlice(prevStats, kind) : null;
+    if (countsFromPrev) {
+        if (!prevTimeTotalsNorm || !Object.keys(prevTimeTotalsNorm).length) {
+            prevTimeTotalsNorm = normalizeOverviewKeyedTotals(countsFromPrev.time);
+        }
+        if (!prevDayTotalsNorm || !Object.keys(prevDayTotalsNorm).length) {
+            prevDayTotalsNorm = normalizeOverviewKeyedTotals(countsFromPrev.day);
+        }
+    }
+
+    const timeDeltaNorm = {};
+    Object.entries(rawTimeDeltas).forEach(([k, v]) => {
+        const n = Number(v);
+        if (Number.isFinite(n)) timeDeltaNorm[normalizeOverviewTrendLabel(k)] = n;
+    });
+    const dayDeltaNorm = {};
+    Object.entries(rawDayDeltas).forEach(([k, v]) => {
+        const n = Number(v);
+        if (Number.isFinite(n)) dayDeltaNorm[normalizeOverviewTrendLabel(k)] = n;
+    });
+
+    const getTimeDelta = (label, curTotal) => {
+        if (Object.prototype.hasOwnProperty.call(rawTimeDeltas, label)) {
+            const n = Number(rawTimeDeltas[label]);
+            if (Number.isFinite(n)) return n;
+        }
+        const fromMap = timeDeltaNorm[normalizeOverviewTrendLabel(label)];
+        if (Number.isFinite(fromMap)) return fromMap;
+        if (
+            prevTimeTotalsNorm &&
+            typeof prevTimeTotalsNorm === 'object' &&
+            Number.isFinite(Number(curTotal))
+        ) {
+            const prevN = Number(prevTimeTotalsNorm[normalizeOverviewTrendLabel(label)] ?? 0);
+            if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    const getDayDelta = (label, curTotal) => {
+        if (Object.prototype.hasOwnProperty.call(rawDayDeltas, label)) {
+            const n = Number(rawDayDeltas[label]);
+            if (Number.isFinite(n)) return n;
+        }
+        const fromMap = dayDeltaNorm[normalizeOverviewTrendLabel(label)];
+        if (Number.isFinite(fromMap)) return fromMap;
+        if (
+            prevDayTotalsNorm &&
+            typeof prevDayTotalsNorm === 'object' &&
+            Number.isFinite(Number(curTotal))
+        ) {
+            const prevN = Number(prevDayTotalsNorm[normalizeOverviewTrendLabel(label)] ?? 0);
+            if (Number.isFinite(prevN)) return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    const assocDeltaCanon = canonicalizeInfractionTypeDeltas(rawAssocDeltas);
+    const getAssocDelta = (type, curTotal) => {
+        const key = normalizeInfractionType(type);
+        if (key && Object.prototype.hasOwnProperty.call(assocDeltaCanon, key)) {
+            const n = Number(assocDeltaCanon[key]);
+            if (Number.isFinite(n)) return n;
+        }
+        if (rawAssocDeltas && Object.prototype.hasOwnProperty.call(rawAssocDeltas, type)) {
+            const direct = Number(rawAssocDeltas[type]);
+            if (Number.isFinite(direct)) return direct;
+        }
+        if (countsFromPrev && Number.isFinite(Number(curTotal))) {
+            let prevN = 0;
+            if (key && countsFromPrev.assoc[key] != null) {
+                prevN = Number(countsFromPrev.assoc[key]) || 0;
+            } else {
+                Object.entries(countsFromPrev.assoc).forEach(([rawType, cnt]) => {
+                    if (normalizeInfractionType(rawType) === key) prevN += Number(cnt) || 0;
+                });
+                if (!key && countsFromPrev.assoc[type] != null) {
+                    prevN = Number(countsFromPrev.assoc[type]) || 0;
+                }
+            }
+            return Number(curTotal) - prevN;
+        }
+        return null;
+    };
+
+    return { getTimeDelta, getDayDelta, getAssocDelta };
 }
 
 function getCanonicalInfractionDetailEntry(infractionsByType = {}, type) {
@@ -9277,8 +9476,7 @@ function initStarbucksManagement() {
             debounceTimer = setTimeout(async () => {
                 const q = input.value.trim().toLowerCase();
                 if (!q) {
-                    dropdown.classList.remove('active');
-                    dropdown.innerHTML = '';
+                    mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                     return;
                 }
 
@@ -9306,20 +9504,32 @@ function initStarbucksManagement() {
                 }).slice(0, 12);
 
                 if (!matches.length) {
-                    dropdown.classList.remove('active');
-                    dropdown.innerHTML = '';
+                    mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                     return;
                 }
 
-                dropdown.innerHTML = matches.map(item => {
+                const frag = document.createDocumentFragment();
+                matches.forEach(item => {
                     const label = item.name || item.username || '';
                     const meta = type === 'staff' ? (item.designation || item.role || '') : '';
-                    return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
-                        <span class="search-label">${escapeHtml(label)}</span>
-                        ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
-                    </div>`;
-                }).join('');
-                dropdown.classList.add('active');
+                    const div = document.createElement('div');
+                    div.className = 'dashboard-search-option';
+                    div.dataset.id = String(item.id);
+                    div.dataset.name = label;
+                    div.dataset.type = type;
+                    const labelSpan = document.createElement('span');
+                    labelSpan.className = 'search-label';
+                    labelSpan.textContent = label;
+                    div.appendChild(labelSpan);
+                    if (meta) {
+                        const metaSpan = document.createElement('span');
+                        metaSpan.className = 'search-meta';
+                        metaSpan.textContent = meta;
+                        div.appendChild(metaSpan);
+                    }
+                    frag.appendChild(div);
+                });
+                mountAutocompleteDropdown(dropdown, frag, input);
             }, 150);
         });
 
@@ -9328,7 +9538,7 @@ function initStarbucksManagement() {
             if (!opt) return;
             const name = opt.dataset.name || '';
             input.value = name;
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
 
             if (type === 'student' && staffSearchInput) {
                 staffSearchInput.value = '';
@@ -9352,18 +9562,18 @@ function initStarbucksManagement() {
 
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#starbucks-section')) {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             }
         });
 
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 return;
             }
             if (e.key === 'Enter') {
                 e.preventDefault();
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 if (type === 'student' && staffSearchInput) {
                     staffSearchInput.value = '';
                 } else if (type === 'staff' && studentSearchInput) {
@@ -9786,6 +9996,37 @@ function renderTeacherSchedule() {
     });
 }
 
+/**
+ * Mount autocomplete options from a DocumentFragment.
+ * Count nodes before appendChild(frag) — the fragment is emptied when mounted.
+ * Supports marketplace-combobox (.is-open), dashboard (.active), or display:block.
+ * Pass an input element as shouldShow to only open when that input is focused.
+ */
+function mountAutocompleteDropdown(dropdown, frag, shouldShow) {
+    if (!dropdown) return 0;
+    var count = frag ? frag.childNodes.length : 0;
+    dropdown.innerHTML = '';
+    if (frag && count) {
+        dropdown.appendChild(frag);
+    }
+    var open = false;
+    if (shouldShow && typeof shouldShow === 'object' && shouldShow.nodeType === 1) {
+        open = document.activeElement === shouldShow;
+    } else {
+        open = !!shouldShow;
+    }
+    var show = open && count > 0;
+    if (dropdown.classList.contains('marketplace-combobox-dropdown')) {
+        dropdown.style.removeProperty('display');
+        dropdown.classList.toggle('is-open', show);
+    } else if (dropdown.classList.contains('dashboard-search-dropdown')) {
+        dropdown.classList.toggle('active', show);
+    } else {
+        dropdown.style.display = show ? 'block' : 'none';
+    }
+    return count;
+}
+
 function setupStaffAutocomplete(input) {
     if (!input) return;
     
@@ -9813,12 +10054,12 @@ function setupStaffAutocomplete(input) {
     // Show dropdown with filtered options
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option, index) => {
             const item = document.createElement('div');
             item.className = 'staff-autocomplete-item';
@@ -9834,18 +10075,18 @@ function setupStaffAutocomplete(input) {
                 selectedIndex = index;
                 updateHighlight();
             });
-            dropdown.appendChild(item);
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
+
+        mountAutocompleteDropdown(dropdown, frag, input);
+        isDropdownVisible = document.activeElement === input && options.length > 0;
         selectedIndex = -1;
         updateHighlight();
     };
-    
+
     // Hide dropdown
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
         selectedIndex = -1;
     };
@@ -10134,23 +10375,23 @@ function setupDailySearchAutocomplete(input) {
     // Show dropdown with filtered options
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option, index) => {
             const item = document.createElement('div');
             item.className = 'daily-search-autocomplete-item';
-            
+
             const labelSpan = document.createElement('span');
             labelSpan.className = 'item-label';
             labelSpan.textContent = option.type === 'student' ? 'Student:' : 'Staff:';
-            
+
             const nameSpan = document.createElement('span');
             nameSpan.textContent = option.name;
-            
+
             item.appendChild(labelSpan);
             item.appendChild(nameSpan);
             item.dataset.value = option.name;
@@ -10174,22 +10415,22 @@ function setupDailySearchAutocomplete(input) {
                 selectedIndex = index;
                 updateHighlight();
             });
-            dropdown.appendChild(item);
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
-        isDropdownVisible = true;
+
+        mountAutocompleteDropdown(dropdown, frag, input);
+        isDropdownVisible = document.activeElement === input && options.length > 0;
         selectedIndex = -1;
         updateHighlight();
     };
-    
+
     // Hide dropdown
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
         selectedIndex = -1;
     };
-    
+
     // Update highlighted item
     const updateHighlight = () => {
         const items = dropdown.querySelectorAll('.daily-search-autocomplete-item');
@@ -12441,7 +12682,7 @@ function setupEditParentAddStudentCombobox() {
     function render() {
         const query = input.value.trim();
         const list = filterStudentsByName(pool(), query);
-        dropdown.innerHTML = '';
+        const frag = document.createDocumentFragment();
         list.forEach(student => {
             const name = student.name || `Student ${student.id}`;
             const div = document.createElement('div');
@@ -12451,16 +12692,15 @@ function setupEditParentAddStudentCombobox() {
             div.style.cssText = 'padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;';
             div.textContent = name;
             div.addEventListener('click', () => selectStudent(student.id, name));
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
-        dropdown.style.display = list.length ? 'block' : 'none';
+        mountAutocompleteDropdown(dropdown, frag, input);
     }
 
     function selectStudent(id, name) {
         hidden.value = id;
         input.value = name;
-        dropdown.style.display = 'none';
-        dropdown.innerHTML = '';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
     }
 
     input.addEventListener('focus', () => render());
@@ -12473,8 +12713,7 @@ function setupEditParentAddStudentCombobox() {
     });
     input.addEventListener('blur', () => {
         setTimeout(() => {
-            dropdown.style.display = 'none';
-            dropdown.innerHTML = '';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }, 200);
     });
 }
@@ -15467,6 +15706,37 @@ function getMarketplaceImageSrc(url) {
     return u;
 }
 
+function formatMarketplaceHiddenRuleLabel(rule) {
+    if (!rule) return '';
+    if (rule.label) return rule.label;
+    var type = rule.hidden_type;
+    var value = rule.value || '';
+    if (type === 'student') {
+        var sid = parseInt(value, 10);
+        var student = (allStudents || []).find(function (s) { return s.id === sid; });
+        var name = student ? (student.name || student.initials || ('Student ' + sid)) : ('Student #' + value);
+        return 'Student: ' + name;
+    }
+    if (type === 'card_color') {
+        return 'Card color: ' + value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+    }
+    if (type === 'grade_section') {
+        return 'Grade section: ' + value;
+    }
+    return value;
+}
+
+function buildMarketplaceHiddenInfoHtml(rules) {
+    if (!rules || !rules.length) return '';
+    var items = rules.map(function (r) {
+        return '<li>' + String(formatMarketplaceHiddenRuleLabel(r)).replace(/</g, '&lt;') + '</li>';
+    }).join('');
+    return '<div class="marketplace-hidden-info">' +
+        '<div class="marketplace-hidden-info-title">Hidden from</div>' +
+        '<ul class="marketplace-hidden-info-list">' + items + '</ul>' +
+        '</div>';
+}
+
 function renderMarketplaceCatalog(items) {
     var grid = document.getElementById('marketplace-items-grid');
     if (!grid) return;
@@ -15487,8 +15757,8 @@ function renderMarketplaceCatalog(items) {
             ? '<button type="button" class="btn-primary marketplace-card-add-btn" style="padding:6px 12px; font-size:13px;" data-item-id="' + item.id + '" data-item-name="' + (item.name || '').replace(/"/g, '&quot;') + '" data-item-price="' + item.price + '">Add to cart</button>'
             : '';
         var staffBtns = '';
+        var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
         if (isStaffOrAdmin) {
-            var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
             staffBtns = '<div class="marketplace-item-staff-actions" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">' +
                 (hasHidden
                     ? '<button type="button" class="marketplace-btn-unhide btn-secondary" style="padding:4px 10px; font-size:12px;" data-item-id="' + item.id + '">Unhide / Manage</button>'
@@ -15502,13 +15772,14 @@ function renderMarketplaceCatalog(items) {
                 '<button type="button" class="marketplace-btn-delete btn-secondary" style="padding:4px 10px; font-size:12px; color:#dc2626;" data-item-id="' + item.id + '">Delete</button>' +
                 '</div>';
         }
+        var hiddenInfoHtml = (isStaffOrAdmin && hasHidden) ? buildMarketplaceHiddenInfoHtml(item.hidden_rules) : '';
         return '<div class="marketplace-item-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
             imgHtml +
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
             '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
             '<div style="display:flex; justify-content:space-between; align-items:center;">' +
             '<span style="font-weight:700; color:var(--accent);">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
-            '</div>' + staffBtns + adminBtns + '</div>';
+            '</div>' + hiddenInfoHtml + staffBtns + adminBtns + '</div>';
     }).join('');
     grid.querySelectorAll('.marketplace-item-card').forEach(function (card) {
         card.addEventListener('click', function (e) {
@@ -15959,13 +16230,7 @@ function renderMarketplaceAddItemCaseManagerDropdown() {
         div.textContent = label;
         frag.appendChild(div);
     });
-    dropdown.innerHTML = '';
-    dropdown.appendChild(frag);
-    if (frag.childNodes.length > 0) {
-        dropdown.classList.add('is-open');
-    } else {
-        dropdown.classList.remove('is-open');
-    }
+    mountAutocompleteDropdown(dropdown, frag, input);
 }
 
 function openMarketplaceAddItemModal() {
@@ -15990,10 +16255,13 @@ function openMarketplaceAddItemModal() {
     priceIn.value = '';
     marketplaceAddItemSelected = [];
     if (caseManagerInput) caseManagerInput.value = '';
+    if (caseManagerDropdown) mountAutocompleteDropdown(caseManagerDropdown, document.createDocumentFragment(), false);
     if (typeInput) typeInput.value = '';
     if (typeIdHidden) typeIdHidden.value = '';
+    if (typeDropdown) mountAutocompleteDropdown(typeDropdown, document.createDocumentFragment(), false);
     if (catInput) catInput.value = '';
     if (catIdHidden) catIdHidden.value = '';
+    if (catDropdown) mountAutocompleteDropdown(catDropdown, document.createDocumentFragment(), false);
     if (imgIn) imgIn.value = '';
     var isAdmin = window.currentUser && window.currentUser.role === 'admin';
     // Build options: School-wide (admin only) then case managers
@@ -16081,9 +16349,7 @@ function openMarketplaceAddItemModal() {
             addDiv.textContent = 'Add "' + q + '"';
             frag.appendChild(addDiv);
         }
-        typeDropdown.innerHTML = '';
-        typeDropdown.appendChild(frag);
-        typeDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && typeInput === document.activeElement);
+        mountAutocompleteDropdown(typeDropdown, frag, typeInput === document.activeElement);
     }
     function renderCatDropdown() {
         if (!catDropdown || !catInput) return;
@@ -16106,9 +16372,7 @@ function openMarketplaceAddItemModal() {
             addDiv.textContent = 'Add "' + q + '"';
             frag.appendChild(addDiv);
         }
-        catDropdown.innerHTML = '';
-        catDropdown.appendChild(frag);
-        catDropdown.classList.toggle('is-open', frag.childNodes.length > 0 && catInput === document.activeElement);
+        mountAutocompleteDropdown(catDropdown, frag, catInput === document.activeElement);
     }
     function setupTypeCombobox() {
         if (!typeInput || !typeIdHidden || !typeDropdown) return;
@@ -16364,7 +16628,7 @@ function openMarketplaceUnhideModal(itemId) {
         listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
     } else {
         rules.forEach(function (r) {
-            var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
+            var label = formatMarketplaceHiddenRuleLabel(r);
             var li = document.createElement('li');
             li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
             li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
@@ -16397,7 +16661,7 @@ function removeMarketplaceHiddenRule(itemId, ruleId) {
                             closeMarketplaceUnhideModal();
                         } else {
                             rules.forEach(function (r) {
-                                var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
+                                var label = formatMarketplaceHiddenRuleLabel(r);
                                 var li = document.createElement('li');
                                 li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
                                 li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
@@ -16424,7 +16688,7 @@ function refreshMarketplaceUnhideModalList() {
                 closeMarketplaceUnhideModal();
             } else {
                 rules.forEach(function (r) {
-                    var label = r.hidden_type === 'student' ? 'Student ' + r.value : r.hidden_type === 'card_color' ? 'Card color: ' + r.value : 'Grade section: ' + r.value;
+                    var label = formatMarketplaceHiddenRuleLabel(r);
                     var li = document.createElement('li');
                     li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
                     li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
@@ -16535,9 +16799,8 @@ function setupMarketplaceStudentSearch() {
     if (!searchInput || !dropdown) return;
     var list = [];
     function showDropdown(items) {
-        dropdown.innerHTML = '';
-        dropdown.style.display = 'block';
-        items.slice(0, 15).forEach(function (s) {
+        var frag = document.createDocumentFragment();
+        (items || []).slice(0, 15).forEach(function (s) {
             var div = document.createElement('div');
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
@@ -16546,14 +16809,15 @@ function setupMarketplaceStudentSearch() {
                 e.preventDefault();
                 selectMarketplaceStudent(s.student_id);
                 searchInput.value = div.textContent;
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 // When a marketplace student search is committed, clear "managed by me" so it does not persist across searches.
                 if (managedByMe && managedByMe.checked) {
                     managedByMe.checked = false;
                 }
             });
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
     }
     function loadList() {
         var params = new URLSearchParams();
@@ -16567,7 +16831,7 @@ function setupMarketplaceStudentSearch() {
     }
     searchInput.addEventListener('input', loadList);
     searchInput.addEventListener('focus', function () { if (list.length) showDropdown(list); else loadList(); });
-    document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) dropdown.style.display = 'none'; });
+    document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false); });
     if (managedByMe) managedByMe.addEventListener('change', loadList);
 }
 
@@ -16600,13 +16864,8 @@ function setupBankStudentSearch() {
     }
 
     function showDropdown(items) {
-        dropdown.innerHTML = '';
-        if (!items || !items.length) {
-            dropdown.style.display = 'none';
-            return;
-        }
-        dropdown.style.display = 'block';
-        items.slice(0, 15).forEach(function (s) {
+        var frag = document.createDocumentFragment();
+        (items || []).slice(0, 15).forEach(function (s) {
             var div = document.createElement('div');
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
@@ -16616,7 +16875,7 @@ function setupBankStudentSearch() {
                 e.preventDefault();
                 currentBankStudentId = s.student_id;
                 searchInput.value = label;
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 if (noMsg) noMsg.style.display = 'none';
                 setSectionsVisible(true);
                 // When a bank-account student search is committed, clear "managed by me" so it does not persist across searches.
@@ -16625,8 +16884,9 @@ function setupBankStudentSearch() {
                 }
                 loadBankAccount(s.student_id);
             });
-            dropdown.appendChild(div);
+            frag.appendChild(div);
         });
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
     }
 
     function loadList() {
@@ -16642,7 +16902,7 @@ function setupBankStudentSearch() {
             })
             .catch(function () {
                 list = [];
-                dropdown.style.display = 'none';
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             });
     }
 
@@ -16653,7 +16913,7 @@ function setupBankStudentSearch() {
     });
     document.addEventListener('click', function (e) {
         if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }
     });
     if (managedByMe) managedByMe.addEventListener('change', loadList);
@@ -16783,8 +17043,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hideStudentSearch && hideStudentDropdown && hideStudentId) {
             var hideStudentList = [];
             function showHideStudentDropdown(items) {
-                hideStudentDropdown.innerHTML = '';
-                hideStudentDropdown.style.display = 'block';
+                var frag = document.createDocumentFragment();
                 (items || []).slice(0, 15).forEach(function (s) {
                     var div = document.createElement('div');
                     div.className = 'bank-search-autocomplete-item';
@@ -16795,15 +17054,16 @@ document.addEventListener('DOMContentLoaded', function () {
                         var sid = s.student_id != null ? s.student_id : s.id;
                         hideStudentId.value = String(sid);
                         hideStudentSearch.value = s.student_name || s.name || '';
-                        hideStudentDropdown.style.display = 'none';
+                        mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false);
                     });
-                    hideStudentDropdown.appendChild(div);
+                    frag.appendChild(div);
                 });
+                mountAutocompleteDropdown(hideStudentDropdown, frag, hideStudentSearch);
             }
             hideStudentSearch.addEventListener('input', function () {
                 var q = hideStudentSearch.value.trim();
                 hideStudentId.value = '';
-                if (!q) { hideStudentDropdown.style.display = 'none'; return; }
+                if (!q) { mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false); return; }
                 var params = new URLSearchParams({ q: q });
                 fetch('/api/bank-account/search?' + params.toString()).then(function (r) { return r.ok ? r.json() : []; }).then(function (data) {
                     hideStudentList = data;
@@ -16815,7 +17075,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 else if (hideStudentSearch.value.trim()) hideStudentSearch.dispatchEvent(new Event('input'));
             });
             document.addEventListener('click', function (e) {
-                if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) hideStudentDropdown.style.display = 'none';
+                if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false);
             });
         }
         var unhideClose = document.getElementById('marketplace-unhide-modal-close');
@@ -17663,42 +17923,42 @@ function setupBankAccountSearch() {
     
     const showDropdown = (options) => {
         if (!options || options.length === 0) {
-            dropdown.style.display = 'none';
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             isDropdownVisible = false;
             return;
         }
-        
-        dropdown.innerHTML = '';
+
+        const frag = document.createDocumentFragment();
         options.forEach((option) => {
             const item = document.createElement('div');
             item.className = 'bank-search-autocomplete-item';
             item.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;';
             item.innerHTML = `<span style="font-weight: 600;">${option.type === 'student' ? 'Student:' : 'Staff:'}</span> ${option.name}`;
-            
+
             item.addEventListener('click', () => {
                 searchInput.value = option.name;
                 hideDropdown();
                 searchInput.dispatchEvent(new Event('input', { bubbles: true }));
             });
-            
-            dropdown.appendChild(item);
+
+            frag.appendChild(item);
         });
-        
-        dropdown.style.display = 'block';
+
+        mountAutocompleteDropdown(dropdown, frag, searchInput);
         isDropdownVisible = true;
     };
-    
+
     const hideDropdown = () => {
-        dropdown.style.display = 'none';
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         isDropdownVisible = false;
     };
-    
+
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value;
         const options = filterOptions(query);
         showDropdown(options);
     });
-    
+
     searchInput.addEventListener('blur', () => {
         setTimeout(() => hideDropdown(), 200);
     });
@@ -18181,6 +18441,14 @@ function niceCeilingAxisMax(maxValue) {
     return nf * 10 ** exp;
 }
 
+/** Short weekday label for vertical day-of-week bar charts (tables keep full names). */
+function formatVbarDayLabel(dayLabel) {
+    const s = String(dayLabel || '').trim();
+    if (!s) return '';
+    if (s.length <= 3) return s;
+    return s.slice(0, 3);
+}
+
 function infractionBarSegmentTitle(cat, infCount, rowInfTotal, contextPhrase) {
     const pctInfHere = rowInfTotal > 0 ? Math.round((infCount / rowInfTotal) * 1000) / 10 : 0;
     const ctx = contextPhrase || 'in this view';
@@ -18557,7 +18825,7 @@ function setupDashboardSearch(prefix, type) {
         debounceTimer = setTimeout(async () => {
             const q = input.value.trim().toLowerCase();
             if (q.length < 1) {
-                dropdown.classList.remove('active');
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
                 const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
                 const st = dashboardState[pageKey] || {};
                 if (type === 'student') {
@@ -18595,16 +18863,32 @@ function setupDashboardSearch(prefix, type) {
                 const uname = (item.username || '').toLowerCase();
                 return name.includes(q) || uname.includes(q);
             }).slice(0, 12);
-            if (matches.length === 0) { dropdown.classList.remove('active'); return; }
-            dropdown.innerHTML = matches.map(item => {
+            if (matches.length === 0) {
+                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            matches.forEach(item => {
                 const label = item.name || item.username;
                 const meta = type === 'staff' ? (item.designation || item.role || '') : '';
-                return `<div class="dashboard-search-option" data-id="${item.id}" data-name="${label}" data-type="${type}">
-                    <span class="search-label">${escapeHtml(label)}</span>
-                    ${meta ? `<span class="search-meta">${escapeHtml(meta)}</span>` : ''}
-                </div>`;
-            }).join('');
-            dropdown.classList.add('active');
+                const div = document.createElement('div');
+                div.className = 'dashboard-search-option';
+                div.dataset.id = String(item.id);
+                div.dataset.name = label;
+                div.dataset.type = type;
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'search-label';
+                labelSpan.textContent = label;
+                div.appendChild(labelSpan);
+                if (meta) {
+                    const metaSpan = document.createElement('span');
+                    metaSpan.className = 'search-meta';
+                    metaSpan.textContent = meta;
+                    div.appendChild(metaSpan);
+                }
+                frag.appendChild(div);
+            });
+            mountAutocompleteDropdown(dropdown, frag, input);
         }, 150);
     });
 
@@ -18615,7 +18899,7 @@ function setupDashboardSearch(prefix, type) {
         if (id == null) return;
         const name = opt.dataset.name;
         input.value = name;
-        dropdown.classList.remove('active');
+        mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         const page = prefix.replace('-student', '').replace('-staff', '');
         const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
         if (type === 'student') {
@@ -18658,13 +18942,13 @@ function setupDashboardSearch(prefix, type) {
 
     document.addEventListener('click', (e) => {
         if (!e.target.closest(`#${prefix}-${type}-search-wrap`)) {
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }
     });
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
             return;
         }
 
@@ -18687,7 +18971,7 @@ function setupDashboardSearch(prefix, type) {
             const pageKey = prefix.startsWith('summary') ? 'summary' : 'frenzy';
 
             input.value = name;
-            dropdown.classList.remove('active');
+            mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
 
             if (type === 'student') {
                 dashboardState[pageKey].studentId = id;
@@ -19180,13 +19464,48 @@ async function loadSummaryDashboard() {
     if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
     params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
     params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+    params.push('lite=true');
 
     const url = '/api/summary?' + params.join('&');
 
     try {
         const fetchStart = performance.now();
-        const response = await fetch(url, { signal: activeAbortController.signal });
-        const data = await response.json();
+        const response = await fetch(url, {
+            signal: activeAbortController.signal,
+            credentials: 'same-origin',
+            redirect: 'manual',
+        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const rawText = await response.text();
+        const isHtmlBody = /^\s*</.test(rawText);
+        const titleMatch = isHtmlBody ? rawText.match(/<title>([^<]*)<\/title>/i) : null;
+        if (
+            response.type === 'opaqueredirect' ||
+            response.status === 0 ||
+            response.status === 302 || response.status === 301 ||
+            response.status === 303 || response.status === 307 || response.status === 308
+        ) {
+            throw new Error('Session expired. Please refresh the page and log in again.');
+        }
+        if (response.status === 401) {
+            throw new Error('Session expired. Please refresh the page and log in again.');
+        }
+        if (!response.ok || !contentType.includes('application/json')) {
+            let serverMsg;
+            if (isHtmlBody) {
+                if (response.status === 502 || response.status === 504) {
+                    serverMsg = 'Summary request timed out on the server. Try a shorter timeframe (e.g. 30 School Days).';
+                } else if (titleMatch && /redirect/i.test(titleMatch[1])) {
+                    serverMsg = 'Session expired. Please refresh the page and log in again.';
+                } else {
+                    serverMsg = `Server returned HTML instead of JSON (HTTP ${response.status}${titleMatch ? ': ' + titleMatch[1] : ''})`;
+                }
+            } else {
+                serverMsg = rawText.slice(0, 200);
+            }
+            throw new Error(serverMsg || `Request failed (${response.status})`);
+        }
+        const data = JSON.parse(rawText);
         if (requestToken !== summaryLoadRequestToken) return;
         const fetchMs = performance.now() - fetchStart;
         window.currentSummaryData = data;
@@ -19386,14 +19705,66 @@ function collectOverviewTimeSlots(byTimeByDay) {
     return arr;
 }
 
+const OVERVIEW_HEATMAP_NO_DATA_BG = '#e2e8f0';
+
+function overviewHeatmapCellHasStarData(fallbackCell) {
+    if (!fallbackCell || typeof fallbackCell !== 'object') return false;
+    if (Number(fallbackCell.total_days || 0) > 0) return true;
+    const overall = fallbackCell.percentages?.overall;
+    return typeof overall === 'number' && Number.isFinite(overall);
+}
+
+function buildOverviewHeatmapRowsHtml(frenzySeverityByTimeByDay, byTimeByDay, hm, severityLabels, options = {}) {
+    const interactive = !!options.interactive;
+    let heatRows = '';
+    hm.days.forEach((day) => {
+        let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
+        hm.timeSlots.forEach((tlabel) => {
+            const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
+            const fallbackCell = (byTimeByDay[day] || {})[tlabel];
+            const hasSeverity = typeof sevCell?.avg_severity === 'number';
+            const hasStarData = overviewHeatmapCellHasStarData(fallbackCell);
+            const noData = !hasSeverity && !hasStarData;
+            const bg = noData ? OVERVIEW_HEATMAP_NO_DATA_BG : overviewHeatColor(sevCell, hm);
+            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && !noData;
+            let cls = 'overview-heatmap-cell';
+            if (noData) cls += ' overview-heatmap-cell--nodata';
+            if (isWorst) cls += ' overview-heatmap-cell--worst';
+            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
+            let title;
+            if (hasSeverity) {
+                const avg = Number(sevCell.avg_severity);
+                const safeAvg = Number.isFinite(avg) ? avg : 0;
+                const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
+                const levelName = severityLabels[closest] || '';
+                const count = sevCell.frenzy_count || 0;
+                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
+                if (interactive) title += ' • Click to drill down';
+            } else if (noData) {
+                title = 'No point card or frenzy data';
+                if (interactive) title += ' • Click to drill down';
+            } else {
+                title = interactive ? 'No frenzies recorded • Click to drill down' : 'No frenzies';
+            }
+            const dataAttrs = interactive
+                ? ` data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"`
+                : '';
+            const styleExtras = interactive ? ';cursor:pointer;' : '';
+            row += `<div class="${cls}" style="background:${bg}${styleExtras}" title="${escapeHtml(title)}"${dataAttrs}></div>`;
+        });
+        heatRows += row;
+    });
+    return heatRows;
+}
+
 function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    // Build the column set from period data (so rows always have cells),
-    // and merge in any extra slots that only appear in frenzy severity data.
+    // Always show the full school-day schedule; merge in any extra slots from data.
     const fallbackSlots = collectOverviewTimeSlots(byTimeByDayFallback || {});
     const severitySlots = collectOverviewTimeSlots(frenzySeverityByTimeByDay || {});
-    const timeSlots = fallbackSlots.slice();
-    severitySlots.forEach(slot => {
+    const timeSlots = SCHEDULE_PERIODS.slice();
+    [...fallbackSlots, ...severitySlots].forEach((slot) => {
         if (!timeSlots.includes(slot)) timeSlots.push(slot);
     });
     const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -19409,13 +19780,6 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         });
     });
     const showBusColumns = hasAmBusData || hasPmBusData;
-    if (!showBusColumns) {
-        for (let i = timeSlots.length - 1; i >= 0; i--) {
-            const slot = normalize(timeSlots[i]);
-            if (slot.includes('am') && slot.includes('bus')) timeSlots.splice(i, 1);
-            else if (slot.includes('pm') && slot.includes('bus')) timeSlots.splice(i, 1);
-        }
-    }
     const tieStarPercent = (cell) => {
         const v = cell?.percentages?.overall;
         return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -19489,6 +19853,7 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
             const sevCell = sevMap[timeLabel];
             const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
             const fallbackCell = fallbackMap[timeLabel] || {};
+            const hasStarData = overviewHeatmapCellHasStarData(fallbackCell);
             const observedCell = {
                 day,
                 timeLabel,
@@ -19496,7 +19861,8 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
                 avg,
                 frenzyCount: Number(sevCell?.frenzy_count || 0),
                 starPercent: tieStarPercent(fallbackCell),
-                infractions: tieInfractions(fallbackCell)
+                infractions: tieInfractions(fallbackCell),
+                hasStarData
             };
             observedCells.push(observedCell);
             if (avg != null) {
@@ -19509,7 +19875,8 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
                     worst = observedCell;
                 }
             }
-            // A cell with no frenzies is cooler than any cell with frenzies.
+            // No-frenzy cells with STAR data are coolest; empty cells are excluded from best.
+            if (avg == null && !hasStarData) return;
             const coolRank = avg == null ? -1 : avg;
             if (coolRank < bestSev || (coolRank === bestSev && (!best || compareCoolestTie(best, observedCell) > 0))) {
                 bestSev = coolRank;
@@ -19734,6 +20101,7 @@ function buildOverviewHeatmapColumnLabels(timeSlots, frenzySeverityByTimeByDay, 
 }
 
 let summaryTrendsChartInstance = null;
+let summaryTrendVisualViewportHandler = null;
 let currentSummaryCheckpointData = [];
 let currentSummaryTrendStudentIds = [];
 
@@ -20569,6 +20937,10 @@ function renderSummaryTrendChart(points, checkpoints) {
     body.innerHTML = '<div class="behavior-trend-chart-wrap"><canvas id="summary-trends-chart-canvas" aria-label="Trends chart" role="img"></canvas></div>';
     const canvas = document.getElementById('summary-trends-chart-canvas');
     if (!canvas || typeof Chart === 'undefined') return;
+    if (window.visualViewport && summaryTrendVisualViewportHandler) {
+        window.visualViewport.removeEventListener('resize', summaryTrendVisualViewportHandler);
+        summaryTrendVisualViewportHandler = null;
+    }
     if (summaryTrendsChartInstance) {
         summaryTrendsChartInstance.destroy();
         summaryTrendsChartInstance = null;
@@ -20585,15 +20957,6 @@ function renderSummaryTrendChart(points, checkpoints) {
             line: SUMMARY_TREND_STAR_LINE,
             fill: SUMMARY_TREND_STAR_FILL
         }
-    };
-    const gradientFill = (context, rgbaTop) => {
-        const chart = context.chart;
-        const { ctx, chartArea } = chart;
-        if (!chartArea) return rgbaTop;
-        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        gradient.addColorStop(0, rgbaTop);
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        return gradient;
     };
     const makeLegendSwatch = (lineColor, fillTopRgba) => {
         const swatch = document.createElement('canvas');
@@ -20638,50 +21001,248 @@ function renderSummaryTrendChart(points, checkpoints) {
             legend.__gapPatched = true;
         }
     };
+    const boundedFillPlugin = {
+        id: 'summaryTrendBoundedFills',
+        beforeDatasetsDraw(chart) {
+            const metaF = chart.getDatasetMeta(0);
+            const metaS = chart.getDatasetMeta(1);
+            const { ctx, chartArea } = chart;
+            const yFrenzy = chart.scales.yFrenzy;
+            if (!metaF?.data?.length || !metaS?.data?.length || !chartArea || !yFrenzy) return;
+
+            const ptsF = metaF.data;
+            const ptsS = metaS.data;
+            const n = Math.min(ptsF.length, ptsS.length);
+
+            // Use meta pixel coords directly — these are the exact same coords Chart.js strokes,
+            // so fills and strokes are pixel-perfect and can never produce gaps between them.
+            const ptF = (i) => {
+                const p = ptsF[i];
+                if (!p || p.skip || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+                return { x: p.x, y: p.y };
+            };
+            const ptS = (i) => {
+                const p = ptsS[i];
+                if (!p || p.skip || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+                return { x: p.x, y: p.y };
+            };
+
+            const plotBottom = Math.max(chartArea.bottom, yFrenzy.getPixelForValue(0));
+
+            const segSegIx = (ax, ay, bx, by, cx, cy, dx, dy) => {
+                const rx = bx - ax, ry = by - ay;
+                const sx = dx - cx, sy = dy - cy;
+                const denom = rx * sy - ry * sx;
+                if (Math.abs(denom) < 1e-9) return null;
+                const qx = cx - ax, qy = cy - ay;
+                const t = (qx * sy - qy * sx) / denom;
+                const u = (qx * ry - qy * rx) / denom;
+                if (t < -1e-4 || t > 1 + 1e-4 || u < -1e-4 || u > 1 + 1e-4) return null;
+                const tc = Math.max(0, Math.min(1, t));
+                return { x: ax + tc * rx, y: ay + tc * ry };
+            };
+
+            const vGrad = (topRgba) => {
+                const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                g.addColorStop(0, topRgba);
+                g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                return g;
+            };
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+            ctx.clip();
+
+            // --- Red: single closed polygon along frenzy line → baseline ---
+            {
+                ctx.beginPath();
+                let started = false, firstX = null, lastX = null;
+                for (let i = 0; i < n; i++) {
+                    const p = ptF(i);
+                    if (!p) continue;
+                    if (!started) { ctx.moveTo(p.x, p.y); started = true; firstX = p.x; }
+                    else ctx.lineTo(p.x, p.y);
+                    lastX = p.x;
+                }
+                if (started) {
+                    ctx.lineTo(lastX, plotBottom);
+                    ctx.lineTo(firstX, plotBottom);
+                    ctx.closePath();
+                    ctx.fillStyle = vGrad(TREND_COLORS.frenzy.fill);
+                    ctx.fill();
+                }
+            }
+
+            // --- Blue: each contiguous "STAR above frenzies" region is ONE closed polygon ---
+            // Splitting regions into a run + separate crossing-triangle causes a shared edge
+            // between two fill calls; antialiasing always leaves a hairline on that edge.
+            // Fix: fold the intersection vertex ix directly into the region polygon so
+            // there is exactly one ctx.fill() per region and zero internal shared edges.
+            const gStar = vGrad(TREND_COLORS.star.fill);
+
+            // regTop/regBot accumulate STAR and frenzy vertices L→R for the active region.
+            // They are flushed as a single polygon (top L→R, bottom R→L, close).
+            let inReg = false;
+            let regTop = [];
+            let regBot = [];
+
+            const flushRegion = () => {
+                if (!inReg || regTop.length < 2) { inReg = false; regTop = []; regBot = []; return; }
+                ctx.beginPath();
+                ctx.moveTo(regTop[0].x, regTop[0].y);
+                for (let k = 1; k < regTop.length; k++) ctx.lineTo(regTop[k].x, regTop[k].y);
+                for (let k = regBot.length - 1; k >= 0; k--) ctx.lineTo(regBot[k].x, regBot[k].y);
+                ctx.closePath();
+                ctx.fillStyle = gStar;
+                ctx.fill();
+                inReg = false; regTop = []; regBot = [];
+            };
+
+            for (let i = 0; i < n - 1; i++) {
+                const s0 = ptS(i), s1 = ptS(i + 1);
+                const f0 = ptF(i), f1 = ptF(i + 1);
+                if (!s0 || !s1 || !f0 || !f1) {
+                    flushRegion(); continue;
+                }
+                const above0 = s0.y < f0.y;   // STAR higher on screen (lower y) at left end
+                const above1 = s1.y < f1.y;   // STAR higher on screen (lower y) at right end
+
+                if (!inReg) {
+                    if (above0 && above1) {
+                        // Fully above: start region at the left data point
+                        regTop = [s0, s1]; regBot = [f0, f1]; inReg = true;
+                    } else if (!above0 && above1) {
+                        // Entry crossing: region begins at the intersection inside this segment
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop = [ix, s1]; regBot = [ix, f1]; inReg = true; }
+                    } else if (above0 && !above1) {
+                        // Tiny region: starts above at left, exits within this segment
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop = [s0, ix]; regBot = [f0, ix]; inReg = true; flushRegion(); }
+                    }
+                    // !above0 && !above1: fully below this segment — nothing to do
+                } else {
+                    // In a region (above0 is true because the previous segment's above1 was true)
+                    if (above1) {
+                        // Continue: extend right endpoint
+                        regTop.push(s1); regBot.push(f1);
+                    } else {
+                        // Exit: STAR crosses below frenzy — close region at the intersection
+                        const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
+                        if (ix) { regTop.push(ix); regBot.push(ix); }
+                        flushRegion();
+                    }
+                }
+            }
+            flushRegion();
+
+            ctx.restore();
+        }
+    };
+    /** Vertical guides at each x: from plot bottom up to the visually higher of the two lines (smaller pixel y). */
+    const summaryTrendVLinePlugin = {
+        id: 'summaryTrendDataVLines',
+        beforeDatasetsDraw(chart) {
+            const metaF = chart.getDatasetMeta(0);
+            const metaS = chart.getDatasetMeta(1);
+            const { ctx, chartArea } = chart;
+            if (!metaF?.data?.length || !metaS?.data?.length || !chartArea) return;
+            const ptsF = metaF.data;
+            const ptsS = metaS.data;
+            const n = Math.min(ptsF.length, ptsS.length);
+
+            const scale = Math.max(1e-6, Math.abs(ctx.getTransform().a));
+            const hairline = 0.75 / scale;
+            const vlineStroke = 'rgba(28, 25, 23, 0.18)';
+
+            ctx.save();
+            ctx.strokeStyle = vlineStroke;
+            ctx.lineWidth = hairline;
+            for (let i = 0; i < n; i++) {
+                const a = ptsF[i];
+                const b = ptsS[i];
+                const x =
+                    (a && !a.skip && Number.isFinite(a.x) ? a.x : null) ??
+                    (b && !b.skip && Number.isFinite(b.x) ? b.x : null);
+                if (x == null) continue;
+                const ys = [];
+                if (a && !a.skip && Number.isFinite(a.y)) ys.push(a.y);
+                if (b && !b.skip && Number.isFinite(b.y)) ys.push(b.y);
+                if (!ys.length) continue;
+                const yTop = Math.min(...ys);
+                const top = Math.max(chartArea.top, Math.min(yTop, chartArea.bottom));
+                const xSnap = Math.round(x * scale) / scale;
+                ctx.beginPath();
+                ctx.moveTo(xSnap, chartArea.bottom);
+                ctx.lineTo(xSnap, top);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    };
     summaryTrendsChartInstance = new Chart(canvas, {
         type: 'line',
         data: {
             labels,
+            // Chart.js draws sorted metas from last index down to 0; lower `order` is sorted first
+            // and drawn last (on top). STAR order 0 keeps the blue stroke above the red stroke.
+            // tension: 0 — straight segments so custom fills match the lines (smooth curves left gaps).
             datasets: [
-                {
-                    label: 'Average STAR %',
-                    data: starData,
-                    order: 1,
-                    yAxisID: 'yStar',
-                    borderColor: TREND_COLORS.star.line,
-                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.star.fill),
-                    fill: true,
-                    borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
-                    pointRadius: 4,
-                    pointHoverRadius: 5,
-                    pointBackgroundColor: '#ffffff',
-                    pointBorderColor: TREND_COLORS.star.line,
-                    pointBorderWidth: 2,
-                    tension: 0.4
-                },
                 {
                     label: 'Number of Frenzies',
                     data: frenzyData,
-                    order: 0,
+                    order: 1,
                     yAxisID: 'yFrenzy',
                     borderColor: TREND_COLORS.frenzy.line,
-                    backgroundColor: (context) => gradientFill(context, TREND_COLORS.frenzy.fill),
-                    fill: true,
+                    backgroundColor: 'transparent',
+                    fill: false,
                     borderWidth: 2.5,
-                    cubicInterpolationMode: 'monotone',
+                    tension: 0,
                     pointRadius: 4,
-                    pointHoverRadius: 5,
                     pointBackgroundColor: '#ffffff',
                     pointBorderColor: TREND_COLORS.frenzy.line,
                     pointBorderWidth: 2,
-                    tension: 0.4
+                    pointHoverRadius: 5,
+                    pointHitRadius: 18,
+                    pointHoverBackgroundColor: '#ffffff',
+                    pointHoverBorderColor: TREND_COLORS.frenzy.line,
+                    pointHoverBorderWidth: 2
+                },
+                {
+                    label: 'Average STAR %',
+                    data: starData,
+                    order: 0,
+                    yAxisID: 'yStar',
+                    borderColor: TREND_COLORS.star.line,
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    borderWidth: 2.5,
+                    tension: 0,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#ffffff',
+                    pointBorderColor: TREND_COLORS.star.line,
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 5,
+                    pointHitRadius: 18,
+                    pointHoverBackgroundColor: '#ffffff',
+                    pointHoverBorderColor: TREND_COLORS.star.line,
+                    pointHoverBorderWidth: 2
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            devicePixelRatio: typeof window !== 'undefined' && window.devicePixelRatio
+                ? Math.min(window.devicePixelRatio, 3)
+                : 1,
+            elements: {
+                line: {
+                    borderJoinStyle: 'round',
+                    borderCapStyle: 'round'
+                }
+            },
             scales: {
                 yFrenzy: {
                     position: 'left',
@@ -20723,10 +21284,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                 },
                 x: {
                     grid: {
-                        display: true,
-                        drawOnChartArea: true,
-                        drawTicks: true,
-                        color: 'rgba(28, 25, 23, 0.08)'
+                        display: false
                     },
                     ticks: {
                         autoSkip: false,
@@ -20752,16 +21310,13 @@ function renderSummaryTrendChart(points, checkpoints) {
                         boxHeight: 13,
                         generateLabels(chart) {
                             const defaults = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                            return defaults
-                                .slice()
-                                .sort((a, b) => b.datasetIndex - a.datasetIndex)
-                                .map((label) => {
-                                    const isFrenzy = label.datasetIndex === 1;
-                                    return {
-                                        ...label,
-                                        pointStyle: isFrenzy ? legendSwatches.frenzy : legendSwatches.star
-                                    };
-                                });
+                            return defaults.map((label) => {
+                                const isFrenzy = label.datasetIndex === 0;
+                                return {
+                                    ...label,
+                                    pointStyle: isFrenzy ? legendSwatches.frenzy : legendSwatches.star
+                                };
+                            });
                         }
                     }
                 },
@@ -20871,8 +21426,14 @@ function renderSummaryTrendChart(points, checkpoints) {
                 }
             }
         },
-        plugins: [checkpointPlugin, legendBottomGapPlugin]
+        plugins: [boundedFillPlugin, summaryTrendVLinePlugin, checkpointPlugin, legendBottomGapPlugin]
     });
+    if (typeof window !== 'undefined' && window.visualViewport) {
+        summaryTrendVisualViewportHandler = () => {
+            if (summaryTrendsChartInstance) summaryTrendsChartInstance.resize();
+        };
+        window.visualViewport.addEventListener('resize', summaryTrendVisualViewportHandler);
+    }
     const grid = body.closest('.dashboard-card-grid');
     if (grid) scheduleMasonryLayoutAfterResize(grid);
 }
@@ -21181,6 +21742,8 @@ function buildOverviewDashboardCardHtml(data) {
     }
     const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
     const metaTriggerDay = hm.triggerDay?.day || headlineDay;
+    const displayTriggerTime = metaTriggerTime || headlineTime;
+    const displayTriggerDay = metaTriggerDay || headlineDay;
 
     const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
     const overallPct = Math.round(avgs.overall || 0);
@@ -21261,37 +21824,12 @@ function buildOverviewDashboardCardHtml(data) {
     const rstH = Math.round((resets / incidentMax) * 100);
 
     const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
-    let heatRows = '';
-    hm.days.forEach(day => {
-        let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
-        hm.timeSlots.forEach(tlabel => {
-            const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
-            const bg = overviewHeatColor(sevCell, hm);
-            const hasSeverity = typeof sevCell?.avg_severity === 'number';
-            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
-            let cls = 'overview-heatmap-cell';
-            if (isWorst) cls += ' overview-heatmap-cell--worst';
-            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-            let title;
-            if (hasSeverity) {
-                const avg = Number(sevCell.avg_severity);
-                const safeAvg = Number.isFinite(avg) ? avg : 0;
-                const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
-                const levelName = severityLabels[closest] || '';
-                const count = sevCell.frenzy_count || 0;
-                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
-            } else {
-                title = 'No frenzies';
-            }
-            row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
-        });
-        heatRows += row;
-    });
-
-    if (!heatRows) {
-        heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
-    }
+    let heatRows = buildOverviewHeatmapRowsHtml(
+        frenzySeverityByTimeByDay,
+        byTimeByDay,
+        hm,
+        severityLabels
+    );
 
     const overviewDeltaMetrics = [
         { key: 'present_pct', label: 'Attendance', delta: presentDelta, isPercent: true, lowerIsBetter: false },
@@ -21371,15 +21909,15 @@ function buildOverviewDashboardCardHtml(data) {
             </div>
         </div>`;
 
-    const headlineRight = headlineDay
-        ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
-        : escapeHtml(headlineTime || '—');
+    const headlineRight = displayTriggerDay
+        ? `${escapeHtml(displayTriggerTime)} on<br>${escapeHtml(displayTriggerDay)}`
+        : escapeHtml(displayTriggerTime || '—');
 
-    const triggerMetaLines = headlineTime ? `
+    const triggerMetaLines = (displayTriggerTime || displayTriggerDay) ? `
             <div class="overview-trigger-meta">
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || '—')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerTime || '—')}</span></div>
                 <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || '—')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerDay || '—')}</span></div>
             </div>` : '';
 
     const dashLen = 100;
@@ -21998,6 +22536,16 @@ function attachOverviewCardInteractions(container, data) {
         }
         buildFn();
         return true;
+    };
+
+    const syncIncidentsPanelSelectedState = () => {
+        const panel = overviewCard.querySelector('.overview-incidents-panel');
+        if (!panel) return;
+        const anyOpen = !!getExtraCard('reminders') || !!getExtraCard('resets');
+        panel.classList.toggle('overview-stat-selected', anyOpen);
+        overviewCard.querySelectorAll('.overview-incident-bar-col').forEach((col) => {
+            col.classList.remove('overview-stat-selected');
+        });
     };
 
     const buildDaysPresentCard = () => {
@@ -22921,19 +23469,20 @@ function attachOverviewCardInteractions(container, data) {
     };
 
     const renderReminderOrResetDetails = (mode) => {
-        const label = mode === 'reminders' ? 'Reminders' : 'Resets';
-        const assocKey = mode === 'reminders' ? 'infractions_for_reminders' : 'infractions_for_resets';
-        const assocMap = data.additional_info?.[assocKey] || {};
+        const cfg = getRemResKindConfig(mode);
+        if (!cfg) return;
+
+        const label = cfg.label;
+        const assocMap = data.additional_info?.[cfg.assocKey] || {};
         const entries = Object.entries(assocMap).sort((a, b) => b[1] - a[1]);
         const byTime = data.by_time || {};
         const byDay = data.by_day_of_week || {};
         const scheduleOrder = new Map(SCHEDULE_PERIODS.map((t, i) => [t, i]));
+        const { getTimeDelta, getDayDelta, getAssocDelta } = buildRemResOverviewDeltaGetters(data, cfg.key);
 
         const countForTimeSlot = (labelTime) => {
             const tdata = byTime[labelTime] || {};
-            return mode === 'reminders'
-                ? (Number(tdata.total_reminders) || 0)
-                : (Number(tdata.total_resets) || 0);
+            return Number(tdata[cfg.countField]) || 0;
         };
 
         const timeSlots = Object.keys(byTime)
@@ -22952,18 +23501,14 @@ function attachOverviewCardInteractions(container, data) {
         const daySlots = [];
         dayOrder.forEach((dayLabel) => {
             const ddata = byDay[dayLabel] || {};
-            const count = mode === 'reminders'
-                ? (Number(ddata.total_reminders) || 0)
-                : (Number(ddata.total_resets) || 0);
+            const count = Number(ddata[cfg.countField]) || 0;
             if (count > 0) daySlots.push({ dayLabel, count });
         });
         Object.keys(byDay)
             .filter((k) => !dayIndex.has(k))
             .forEach((dayLabel) => {
                 const ddata = byDay[dayLabel] || {};
-                const count = mode === 'reminders'
-                    ? (Number(ddata.total_reminders) || 0)
-                    : (Number(ddata.total_resets) || 0);
+                const count = Number(ddata[cfg.countField]) || 0;
                 if (count > 0) daySlots.push({ dayLabel, count });
             });
         daySlots.sort((a, b) => {
@@ -22975,74 +23520,76 @@ function attachOverviewCardInteractions(container, data) {
 
         let timeRows = '';
         timeSlots.forEach(({ labelTime, count }) => {
-            timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td></tr>`;
+            timeRows += `<tr><td>${escapeHtml(labelTime)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getTimeDelta(labelTime, count))}</td></tr>`;
         });
 
         let dayRows = '';
         daySlots.forEach(({ dayLabel, count }) => {
-            dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td></tr>`;
+            dayRows += `<tr><td>${escapeHtml(dayLabel)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getDayDelta(dayLabel, count))}</td></tr>`;
         });
 
         let infraRows = '';
         entries.forEach(([t, count]) => {
-            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td></tr>`;
+            infraRows += `<tr><td>${escapeHtml(t)}</td><td>${count}</td><td>${formatInfractionCountDeltaHtml(getAssocDelta(t, count))}</td></tr>`;
         });
 
-        const INFRA_CHART_CAP = 15;
-        let chartInfraEntries = entries.filter(([, c]) => (Number(c) || 0) > 0);
-        if (chartInfraEntries.length > INFRA_CHART_CAP) {
-            const top = chartInfraEntries.slice(0, INFRA_CHART_CAP);
-            const otherSum = chartInfraEntries.slice(INFRA_CHART_CAP).reduce((s, [, c]) => s + (Number(c) || 0), 0);
-            chartInfraEntries = [...top, ['Other', otherSum]];
-        }
+        const infraSlots = entries
+            .filter(([, c]) => (Number(c) || 0) > 0)
+            .map(([name, count]) => ({ label: String(name), count: Number(count) || 0 }));
 
         const timeEmptyMsg = `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by time.</p>`;
         const dayEmptyMsg = `<p style="font-size:0.8rem;color:var(--text-secondary);">No ${label.toLowerCase()} recorded by day.</p>`;
         const infraEmptyMsg = `<p style="font-size:0.85rem;color:var(--text-secondary);">No infractions are currently linked to ${label.toLowerCase()} for this period.</p>`;
 
-        const key = mode === 'reminders' ? 'reminders' : 'resets';
-        const uid = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        const idInf = `remres-${key}-infra-${uid}`;
-        const barColor = mode === 'reminders' ? '#e87a1e' : '#1e293b';
+        const key = cfg.key;
+        const barColor = cfg.barColor;
         const barColorEnc = encodeURIComponent(barColor);
 
-        let timeGraphBlock = timeEmptyMsg;
-        if (timeSlots.length) {
-            const maxTimeTotal = Math.max(...timeSlots.map((s) => s.count), 1);
-            const axisMax = niceCeilingAxisMax(maxTimeTotal);
+        const buildRemResHstarGraph = (slots, tipForSlot, getDeltaForSlot) => {
+            if (!slots.length) return '';
+            const maxTotal = Math.max(...slots.map((s) => s.count), 1);
+            const axisMax = niceCeilingAxisMax(maxTotal);
             const tickDivisions = 5;
             const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) =>
                 Math.round((axisMax * i) / tickDivisions)
             );
-            const timeRowsHtml = timeSlots
+            const rowsHtml = slots
                 .map((slot) => {
                     const rowT = slot.count;
                     const barPct = axisMax > 0 ? Math.min(100, (rowT / axisMax) * 100) : 0;
-                    const tipRaw = `${label}: ${rowT} at ${slot.labelTime}`;
+                    const tipRaw = tipForSlot(slot);
                     const hitEntries = [{ n: rowT, dataEnc: encodeInfractionsChartTipDataAttr(tipRaw) }];
                     const segMetaH = ` data-infraction-bar="h" data-ib-t="${rowT}" data-ib-ns="${rowT}" data-ib-cs="${barColorEnc}"`;
                     const segsInner = `<div class="infractions-hstar-barsheet infractions-hstar-barsheet--layers" aria-hidden="true"></div>${infractionBarHorizontalHitsHtml(hitEntries)}`;
                     return `
-                <div class="infractions-hstar-label">${escapeHtml(slot.labelTime)}</div>
+                <div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
                 <div class="infractions-hstar-slot">
                     <div class="infractions-hstar-bar-row">
                         <div class="infractions-hstar-bar" style="width:${barPct}%">
                             <div class="infractions-hstar-segments"${segMetaH}>${segsInner}</div>
                         </div>
-                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${rowT}</span></span>
+                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${rowT}</span>${formatInfractionCountDeltaHtml(getDeltaForSlot(slot))}</span>
                     </div>
                 </div>`;
                 })
                 .join('');
             const xTicksHtml = tickLabels.map((n) => `<span>${n}</span>`).join('');
-            timeGraphBlock = `<div class="infractions-hstar-chart">
+            return `<div class="infractions-hstar-chart">
                 <div class="infractions-hstar-body">
-                    ${timeRowsHtml}
+                    ${rowsHtml}
                     <div class="infractions-hstar-x-spacer" aria-hidden="true"></div>
                     <div class="infractions-hstar-x-axis">${xTicksHtml}</div>
                 </div>
             </div>`;
-        }
+        };
+
+        const timeGraphBlock = timeSlots.length
+            ? buildRemResHstarGraph(
+                timeSlots.map((s) => ({ label: s.labelTime, count: s.count })),
+                (slot) => `${label}: ${slot.count} at ${slot.label}`,
+                (slot) => getTimeDelta(slot.label, slot.count)
+            )
+            : timeEmptyMsg;
 
         let dayGraphBlock = dayEmptyMsg;
         if (daySlots.length) {
@@ -23055,33 +23602,42 @@ function attachOverviewCardInteractions(container, data) {
                     const segsInner = `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--layers" aria-hidden="true"></div>${infractionBarVerticalHitsHtml(hitEntries)}`;
                     return `
                 <div class="infractions-vbar-col">
-                    <div class="infractions-vbar-count"><span class="infractions-vbar-count-num">${dbTotal}</span></div>
+                    <div class="infractions-vbar-count infractions-vbar-count--stacked">
+                        <span class="infractions-vbar-count-num">${dbTotal}</span>
+                        ${formatInfractionCountDeltaHtml(getDayDelta(slot.dayLabel, dbTotal))}
+                    </div>
                     <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
-                    <div class="infractions-vbar-label">${escapeHtml(slot.dayLabel)}</div>
+                    <div class="infractions-vbar-label-slot" title="${escapeHtml(slot.dayLabel)}"><span class="infractions-vbar-label">${escapeHtml(formatVbarDayLabel(slot.dayLabel))}</span></div>
                 </div>`;
                 })
                 .join('');
             dayGraphBlock = `<div class="infractions-vbar-chart-wrap"><div class="infractions-vbar-chart">${dayColsHtml}</div></div>`;
         }
 
-        const infraGraphBlock = chartInfraEntries.length
-            ? `<div class="view-mode-chart-wrap overview-remres-chart-wrap overview-remres-chart-wrap--infra"><canvas id="${idInf}" aria-label="${escapeHtml(label)} linked infractions" role="img"></canvas></div>`
+        const infraGraphBlock = infraSlots.length
+            ? buildRemResHstarGraph(
+                infraSlots,
+                (slot) => `${label}: ${slot.count} — ${slot.label}`,
+                (slot) => getAssocDelta(slot.label, slot.count)
+            )
             : infraEmptyMsg;
 
+        const remResDeltaTh = '<th title="Change vs prior period">Δ</th>';
         const timeTableBlock = timeRows
-            ? `<table class="overview-remres-table"><thead><tr><th>Time</th><th>Count</th></tr></thead><tbody>${timeRows}</tbody></table>`
+            ? `<table class="overview-remres-table"><thead><tr><th>Time</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${timeRows}</tbody></table>`
             : timeEmptyMsg;
         const dayTableBlock = dayRows
-            ? `<table class="overview-remres-table"><thead><tr><th>Day</th><th>Count</th></tr></thead><tbody>${dayRows}</tbody></table>`
+            ? `<table class="overview-remres-table"><thead><tr><th>Day</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${dayRows}</tbody></table>`
             : dayEmptyMsg;
         const infraTableBlock = infraRows
-            ? `<table class="overview-remres-table"><thead><tr><th>Infraction</th><th>Count</th></tr></thead><tbody>${infraRows}</tbody></table>`
+            ? `<table class="overview-remres-table"><thead><tr><th>Infraction</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${infraRows}</tbody></table>`
             : infraEmptyMsg;
 
         removeExtraCard(key);
         const card = document.createElement('div');
-        card.className = 'dashboard-card full-width overview-extra-card overview-remres-card';
+        card.className = `dashboard-card full-width overview-extra-card overview-remres-card ${cfg.cardModifier}`;
         card.dataset.overviewCard = key;
+        card.style.setProperty('--remres-bar-color', barColor);
         card.innerHTML = `
             <div class="dashboard-card-header overview-remres-card-header">
                 <div class="overview-remres-card-header-left">
@@ -23113,9 +23669,9 @@ function attachOverviewCardInteractions(container, data) {
             </div>
         `;
         grid.appendChild(card);
-
-        const charts = [];
-        card._remResCharts = charts;
+        if (typeof wireInfractionsChartHoverTips === 'function') {
+            wireInfractionsChartHoverTips(card);
+        }
 
         const syncRrBreakdown = (tabMode) => {
             card.querySelectorAll('[data-rr-host]').forEach((host) => {
@@ -23129,13 +23685,7 @@ function attachOverviewCardInteractions(container, data) {
                 btn.classList.toggle('active', active);
                 btn.setAttribute('aria-selected', active ? 'true' : 'false');
             });
-            charts.forEach((ch) => {
-                try {
-                    ch.resize();
-                } catch (e) {
-                    /* ignore */
-                }
-            });
+            scheduleInfractionBarPixelLayout(card);
             if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                 scheduleMasonryLayoutAfterResize(grid);
             }
@@ -23152,13 +23702,7 @@ function attachOverviewCardInteractions(container, data) {
                 btn.classList.toggle('active', active);
                 btn.setAttribute('aria-selected', active ? 'true' : 'false');
             });
-            charts.forEach((ch) => {
-                try {
-                    ch.resize();
-                } catch (e) {
-                    /* ignore */
-                }
-            });
+            scheduleInfractionBarPixelLayout(card);
             if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                 scheduleMasonryLayoutAfterResize(grid);
             }
@@ -23181,110 +23725,8 @@ function attachOverviewCardInteractions(container, data) {
         syncRrBreakdown('time');
         setRrView('graph');
 
-        const barColor = mode === 'reminders' ? '#e87a1e' : '#1e293b';
-        if (typeof Chart !== 'undefined') {
-            const baseDataset = {
-                label,
-                backgroundColor: barColor,
-                borderRadius: 4,
-                borderSkipped: false
-            };
-            if (timeSlots.length) {
-                const el = document.getElementById(idTime);
-                if (el) {
-                    charts.push(new Chart(el.getContext('2d'), {
-                        type: 'bar',
-                        data: {
-                            labels: timeSlots.map((s) => s.labelTime),
-                            datasets: [{
-                                ...baseDataset,
-                                data: timeSlots.map((s) => s.count),
-                                maxBarThickness: 36
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                x: {
-                                    ticks: { maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 16 }
-                                },
-                                y: {
-                                    beginAtZero: true,
-                                    ticks: { precision: 0 }
-                                }
-                            }
-                        }
-                    }));
-                }
-            }
-            if (daySlots.length) {
-                const el = document.getElementById(idDay);
-                if (el) {
-                    charts.push(new Chart(el.getContext('2d'), {
-                        type: 'bar',
-                        data: {
-                            labels: daySlots.map((s) => s.dayLabel),
-                            datasets: [{
-                                ...baseDataset,
-                                data: daySlots.map((s) => s.count),
-                                maxBarThickness: 36
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                x: { ticks: { maxRotation: 35, minRotation: 0 } },
-                                y: { beginAtZero: true, ticks: { precision: 0 } }
-                            }
-                        }
-                    }));
-                }
-            }
-            if (chartInfraEntries.length) {
-                const el = document.getElementById(idInf);
-                if (el) {
-                    charts.push(new Chart(el.getContext('2d'), {
-                        type: 'bar',
-                        data: {
-                            labels: chartInfraEntries.map(([name]) => String(name)),
-                            datasets: [{
-                                ...baseDataset,
-                                data: chartInfraEntries.map(([, c]) => Number(c) || 0),
-                                maxBarThickness: 22
-                            }]
-                        },
-                        options: {
-                            indexAxis: 'y',
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
-                            scales: {
-                                x: { beginAtZero: true, ticks: { precision: 0 } },
-                                y: {
-                                    ticks: {
-                                        autoSkip: false,
-                                        font: { size: 11 }
-                                    }
-                                }
-                            }
-                        }
-                    }));
-                }
-            }
-        }
-
         requestAnimationFrame(() => {
-            charts.forEach((ch) => {
-                try {
-                    ch.resize();
-                } catch (e) {
-                    /* ignore */
-                }
-            });
+            scheduleInfractionBarPixelLayout(card);
             if (typeof scheduleMasonryLayoutAfterResize === 'function') {
                 scheduleMasonryLayoutAfterResize(grid);
             }
@@ -23728,43 +24170,30 @@ function attachOverviewCardInteractions(container, data) {
         }
         const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
         const metaTriggerDay = hm.triggerDay?.day || headlineDay;
-        const hasPriorTriggerData = Boolean(previousTrigger.time && previousTrigger.day);
-        const previousTriggerTime = hasPriorTriggerData ? previousTrigger.time : 'No prior data';
-        const previousTriggerDay = hasPriorTriggerData ? previousTrigger.day : 'No prior data';
+
+        const normalizePrevLabel = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (raw.toLowerCase() === 'none') return '';
+            return raw;
+        };
+
+        const prevTimeLabel = normalizePrevLabel(previousTrigger.time);
+        const prevDayLabel = normalizePrevLabel(previousTrigger.day);
+        const hasPriorTriggerData = Boolean(prevTimeLabel && prevDayLabel);
+        const previousTriggerTime = hasPriorTriggerData ? prevTimeLabel : 'No prior data';
+        const previousTriggerDay = hasPriorTriggerData ? prevDayLabel : 'No prior data';
         const previousHeroValue = hasPriorTriggerData
             ? `${escapeHtml(previousTriggerTime)} on<br>${escapeHtml(previousTriggerDay)}`
             : 'No prior data';
         const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
-        let heatRows = '';
-        hm.days.forEach(day => {
-            let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
-            hm.timeSlots.forEach(tlabel => {
-                const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
-                const bg = overviewHeatColor(sevCell, hm);
-                const hasSeverity = typeof sevCell?.avg_severity === 'number';
-                const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-                const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
-                let cls = 'overview-heatmap-cell';
-                if (isWorst) cls += ' overview-heatmap-cell--worst';
-                if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-                let title;
-                if (hasSeverity) {
-                    const avg = Number(sevCell.avg_severity);
-                    const safeAvg = Number.isFinite(avg) ? avg : 0;
-                    const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
-                    const levelName = severityLabels[closest] || '';
-                    const count = sevCell.frenzy_count || 0;
-                    title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'} • Click to drill down`;
-                } else {
-                    title = 'No frenzies recorded • Click to drill down';
-                }
-                row += `<div class="${cls}" style="background:${bg};cursor:pointer;" title="${escapeHtml(title)}" data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"></div>`;
-            });
-            heatRows += row;
-        });
-        if (!heatRows) {
-            heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
-        }
+        const heatRows = buildOverviewHeatmapRowsHtml(
+            frenzySeverityByTimeByDay,
+            byTimeByDay,
+            hm,
+            severityLabels,
+            { interactive: true }
+        );
         const headlineRight = headlineDay
             ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
             : escapeHtml(headlineTime || '—');
@@ -24613,6 +25042,7 @@ function attachOverviewCardInteractions(container, data) {
                                     <tr>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Time</th>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);" title="Change in total infractions vs prior period">Δ</th>
                                     </tr>
                                 </thead>
                                 <tbody>`;
@@ -24687,7 +25117,7 @@ function attachOverviewCardInteractions(container, data) {
                                         ${formatInfractionCountDeltaHtml(getInfDayDelta(day, dbTotal))}
                                     </div>
                                     <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
-                                    <div class="infractions-vbar-label">${escapeHtml(day)}</div>
+                                    <div class="infractions-vbar-label-slot" title="${escapeHtml(day)}"><span class="infractions-vbar-label">${escapeHtml(formatVbarDayLabel(day))}</span></div>
                                 </div>`;
                                 })
                                 .join('');
@@ -24698,7 +25128,6 @@ function attachOverviewCardInteractions(container, data) {
                                     <tr>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Day</th>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);" title="Change in total infractions vs prior period">Δ</th>
                                     </tr>
                                 </thead>
                                 <tbody>`;
@@ -25030,7 +25459,7 @@ function attachOverviewCardInteractions(container, data) {
                 removeExtraCard('reminders');
                 selectionOrder = selectionOrder.filter(k => k !== 'reminders');
             }
-            box.classList.toggle('overview-stat-selected', opened);
+            syncIncidentsPanelSelectedState();
         } else if (key === 'resets') {
             const opened = !getExtraCard('resets');
             if (opened) {
@@ -25041,7 +25470,7 @@ function attachOverviewCardInteractions(container, data) {
                 removeExtraCard('resets');
                 selectionOrder = selectionOrder.filter(k => k !== 'resets');
             }
-            box.classList.toggle('overview-stat-selected', opened);
+            syncIncidentsPanelSelectedState();
         } else if (key === 'trigger_times') {
             // Trigger Times: create/toggle the Trigger Times card and show day-of-week breakdown
             const opened = toggleExtraCard('trigger_times', buildTriggerTimesCard);
@@ -25082,6 +25511,38 @@ function attachOverviewCardInteractions(container, data) {
             applySelectionChange(box, key, { restore: false });
         });
     });
+
+    const incidentsPanel = overviewCard.querySelector('.overview-incidents-panel');
+    if (incidentsPanel) {
+        incidentsPanel.addEventListener('click', (e) => {
+            if (e.target.closest('.overview-incident-bar-col')) return;
+
+            const remindersOpen = !!getExtraCard('reminders');
+            const resetsOpen = !!getExtraCard('resets');
+            const bothOpen = remindersOpen && resetsOpen;
+
+            if (bothOpen) {
+                removeExtraCard('reminders');
+                removeExtraCard('resets');
+                selectionOrder = selectionOrder.filter(k => k !== 'reminders' && k !== 'resets');
+            } else {
+                if (!remindersOpen) {
+                    renderReminderOrResetDetails('reminders');
+                    selectionOrder = selectionOrder.filter(k => k !== 'reminders');
+                    selectionOrder.push('reminders');
+                }
+                if (!resetsOpen) {
+                    renderReminderOrResetDetails('resets');
+                    selectionOrder = selectionOrder.filter(k => k !== 'resets');
+                    selectionOrder.push('resets');
+                }
+            }
+            syncIncidentsPanelSelectedState();
+            reorderExtraCards();
+            persistSelectionOrder();
+            applySummaryMasonryLayout(grid);
+        });
+    }
 
     if (trendsBox) {
         const trendsCard = container.querySelector('.dashboard-card[data-summary-card="behavior-trend"]');
@@ -25125,6 +25586,7 @@ function attachOverviewCardInteractions(container, data) {
         });
         reorderExtraCards();
     }
+    syncIncidentsPanelSelectedState();
 
     // Apply layout whenever overview interactions are (re)wired
     applySummaryMasonryLayout(grid);

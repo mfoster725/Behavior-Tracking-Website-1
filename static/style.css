@@ -3229,6 +3229,36 @@ table tbody tr:hover {
     color: var(--danger) !important;
 }
 
+.marketplace-hidden-info {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: #166534;
+    line-height: 1.4;
+}
+
+.marketplace-hidden-info-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.marketplace-hidden-info-list {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.marketplace-hidden-info-list li {
+    margin: 2px 0;
+}
+
+.marketplace-hidden-info--empty {
+    color: #64748b;
+    font-style: italic;
+}
+
 .purchase-order-card {
     transition: background-color 0.2s ease;
 }

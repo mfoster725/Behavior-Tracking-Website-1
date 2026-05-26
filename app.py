@@ -25,7 +25,7 @@ from sqlalchemy import text, event
 from sqlalchemy.orm import selectinload, load_only, joinedload
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from functools import wraps
 from decimal import Decimal
 import re
@@ -345,8 +345,8 @@ def has_student_access(user, student_id):
 def get_support_team_user_ids(student_id):
     """
     Return set of user_ids who are on the student's support team.
-    Support team = any staff in that student's row in the student user table (User Management):
-    i.e. users matched from team_members (by name or username) + outside_staff_students + admins.
+    Support team = staff users matched from team_members for this student (by name or username).
+    Does not include admins or outside-staff assignments unless they appear in team_members.
     """
     team_members = TeamMember.query.filter_by(student_id=student_id).all()
     team_member_user_ids = set()
@@ -354,9 +354,8 @@ def get_support_team_user_ids(student_id):
         if not (tm.name and str(tm.name).strip()):
             continue
         name_or_username = str(tm.name).strip()
-        # Match staff/admin by name or username (case-insensitive) so all staff in student's row count
         u = User.query.filter(
-            User.role.in_(['staff', 'admin']),
+            User.role == 'staff',
             db.or_(
                 db.func.lower(User.name) == db.func.lower(name_or_username),
                 db.func.lower(User.username) == db.func.lower(name_or_username)
@@ -364,10 +363,18 @@ def get_support_team_user_ids(student_id):
         ).first()
         if u:
             team_member_user_ids.add(u.id)
-    outside_staff_ids = [oss.user_id for oss in OutsideStaffStudent.query.filter_by(student_id=student_id).all()]
-    admin_ids = [u.id for u in User.query.filter_by(role='admin').all()]
-    support_ids = team_member_user_ids | set(outside_staff_ids) | set(admin_ids)
-    return support_ids
+    return team_member_user_ids
+
+
+def user_is_on_student_support_team(user, student_id):
+    """True if user is on the student's support team (team_members row only)."""
+    if not user or not student_id:
+        return False
+    if user.role == 'student':
+        return user.student_id == student_id
+    if user.role != 'staff':
+        return False
+    return user.id in get_support_team_user_ids(student_id)
 
 
 def get_case_manager_user_ids_for_student(student_id):
@@ -397,12 +404,14 @@ def get_student_ids_for_staff_user(user):
     """
     if not user or user.role != 'staff':
         return set()
-    user_name = (user.name or user.username) or ''
-    user_username = (user.username or '').strip()
-    if not user_name and not user_username:
+    identifiers = []
+    for val in (user.name, user.username):
+        if val and str(val).strip():
+            identifiers.append(str(val).strip().lower())
+    if not identifiers:
         return set()
     team_members = TeamMember.query.filter(
-        (TeamMember.name == user_name) | (TeamMember.name == user_username)
+        db.or_(*[db.func.lower(TeamMember.name) == ident for ident in identifiers])
     ).all()
     return {tm.student_id for tm in team_members if tm.student_id}
 
@@ -430,6 +439,18 @@ def are_users_on_same_student_team(user_a, user_b):
     return bool(students_a & students_b)
 
 
+def utc_isoformat(value):
+    """Serialize naive UTC datetimes from the DB for API clients (ISO-8601 with Z suffix)."""
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return None
+    dt = value
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.isoformat(timespec='seconds') + 'Z'
+
+
 def student_grade_matches_item_grade_range(student_grade, item_grade_range):
     """Return True if student's grade can see item with given grade_range (k_3, 4_8, 9_12, school_wide)."""
     if not student_grade:
@@ -444,6 +465,25 @@ def student_grade_matches_item_grade_range(student_grade, item_grade_range):
     if item_grade_range == '9_12':
         return g in ('9', '10', '11', '12')
     return False
+
+
+def marketplace_hidden_rule_label(rule):
+    """Human-readable label for a marketplace hidden rule."""
+    if rule.hidden_type == 'student':
+        try:
+            sid = int(rule.value)
+        except (TypeError, ValueError):
+            return f'Student #{rule.value}'
+        student = Student.query.get(sid)
+        if student:
+            return f'Student: {student.name or f"#{sid}"}'
+        return f'Student #{rule.value}'
+    if rule.hidden_type == 'card_color':
+        value = (rule.value or '').strip()
+        return f'Card color: {value.capitalize()}' if value else 'Card color'
+    if rule.hidden_type == 'grade_section':
+        return f'Grade section: {rule.value}'
+    return rule.value or ''
 
 
 def is_item_hidden_for_student(item_id, student):
@@ -2685,8 +2725,8 @@ def _serialize_checkpoint(checkpoint):
         'description': checkpoint.description,
         'student_ids': [row.student_id for row in checkpoint.students],
         'created_by_user_id': checkpoint.created_by_user_id,
-        'created_at': checkpoint.created_at.isoformat() if checkpoint.created_at else None,
-        'updated_at': checkpoint.updated_at.isoformat() if checkpoint.updated_at else None,
+        'created_at': utc_isoformat(checkpoint.created_at),
+        'updated_at': utc_isoformat(checkpoint.updated_at),
     }
 
 
@@ -8027,7 +8067,7 @@ def manage_users():
                 'district': user.district if hasattr(user, 'district') else None,
                 'grades_taught': getattr(user, 'grades_taught', None),
                 'linked_case_manager_id': getattr(user, 'linked_case_manager_id', None),
-                'created_at': user.created_at.isoformat() if user.created_at else None
+                'created_at': utc_isoformat(user.created_at)
             }
             # Assigned students for Outside Staff (from batch)
             if user.id in assignments_by_user:
@@ -8519,8 +8559,8 @@ def amendment_requests():
                 'status': req.status,
                 'reviewed_by': req.reviewed_by.username if req.reviewed_by else None,
                 'review_notes': req.review_notes,
-                'reviewed_at': req.reviewed_at.isoformat() if req.reviewed_at else None,
-                'created_at': req.created_at.isoformat()
+                'reviewed_at': utc_isoformat(req.reviewed_at),
+                'created_at': utc_isoformat(req.created_at)
             })
         
         return jsonify(result)
@@ -8637,7 +8677,7 @@ def export_student_data(student_id):
             'email': student.email,
             'grade': student.grade,
             'directory_info_opt_out': student.directory_info_opt_out,
-            'created_at': student.created_at.isoformat() if student.created_at else None
+            'created_at': utc_isoformat(student.created_at)
         },
         'daily_records': []
     }
@@ -8759,7 +8799,7 @@ def rights_notification():
         
         return jsonify({
             'acknowledged': notification is not None and notification.acknowledged_at is not None,
-            'acknowledged_at': notification.acknowledged_at.isoformat() if notification and notification.acknowledged_at else None
+            'acknowledged_at': utc_isoformat(notification.acknowledged_at) if notification else None
         }), 200
 
 # Bank Account Helper Functions
@@ -8790,6 +8830,20 @@ def create_purchase_notification(student_user_id, notification_type, title, body
         purchase_order_id=purchase_order_id
     )
     db.session.add(n)
+
+
+def notify_support_team_purchase_order_pending(student_id, purchase_order_id, item_name):
+    """Notify each support-team staff member that a new purchase order needs review."""
+    student = Student.query.get(student_id)
+    student_name = student.name if student else 'A student'
+    for user_id in get_support_team_user_ids(student_id):
+        db.session.add(Notification(
+            user_id=user_id,
+            type='purchase_order_pending',
+            title='New purchase order',
+            body=f'{student_name} submitted a purchase order for {item_name}.',
+            purchase_order_id=purchase_order_id
+        ))
 
 
 def calculate_weekly_star_percent(student_id, start_date, end_date):
@@ -8956,7 +9010,7 @@ def get_bank_account(student_id):
             'amount': float(t.amount),
             'balance_after': float(t.balance_after),
             'description': t.description,
-            'created_at': t.created_at.isoformat()
+            'created_at': utc_isoformat(t.created_at)
         } for t in transactions]
     })
 
@@ -8999,8 +9053,8 @@ def get_paychecks(student_id):
             'final_pay': final_pay_val,
             'worksheet_completed': p.worksheet_completed,
             'is_verified': p.is_verified,
-            'deposited_at': p.deposited_at.isoformat() if p.deposited_at else None,
-            'created_at': p.created_at.isoformat()
+            'deposited_at': utc_isoformat(p.deposited_at),
+            'created_at': utc_isoformat(p.created_at)
         }
     return jsonify([paycheck_item(p) for p in paychecks])
 
@@ -9046,8 +9100,8 @@ def get_paycheck(paycheck_id):
         'student_calculated_deduction': float(paycheck.student_calculated_deduction) if paycheck.student_calculated_deduction else None,
         'student_calculated_final': float(paycheck.student_calculated_final) if paycheck.student_calculated_final else None,
         'is_verified': paycheck.is_verified,
-        'deposited_at': paycheck.deposited_at.isoformat() if paycheck.deposited_at else None,
-        'created_at': paycheck.created_at.isoformat()
+        'deposited_at': utc_isoformat(paycheck.deposited_at),
+        'created_at': utc_isoformat(paycheck.created_at)
     })
 
 def run_paycheck_generation(target_date=None):
@@ -9383,8 +9437,8 @@ def get_marketplace_catalog():
             'category_id': item.category_id,
             'category_name': item.category.name if item.category else None,
             'image_url': item.image_url,
-            'created_at': item.created_at.isoformat(),
-            'hidden_rules': [{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value} for r in item.hidden_rules]
+            'created_at': utc_isoformat(item.created_at),
+            'hidden_rules': [{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value, 'label': marketplace_hidden_rule_label(r)} for r in item.hidden_rules]
         } for item in items])
 
     if not student_id:
@@ -9494,7 +9548,7 @@ def get_marketplace_catalog():
         'category_id': item.category_id,
         'category_name': item.category.name if item.category else None,
         'image_url': item.image_url,
-        'created_at': item.created_at.isoformat()
+        'created_at': utc_isoformat(item.created_at)
     } for item in items])
 
 
@@ -9673,6 +9727,8 @@ def marketplace_checkout():
         db.session.add(transaction)
     account.balance = running_balance
     account.updated_at = datetime.utcnow()
+    for order, item_name, _price in created_orders:
+        notify_support_team_purchase_order_pending(student_id, order.id, item_name)
     db.session.commit()
     created = [{'id': o.id, 'item_name': name, 'item_price': p} for o, name, p in created_orders]
     return jsonify({'message': 'Purchase orders created', 'orders': created}), 201
@@ -9717,7 +9773,7 @@ def get_marketplace_items():
         'created_by_user_id': item.created_by_user_id,
         'is_global': item.is_global,
         'is_approved_for_global': item.is_approved_for_global,
-        'created_at': item.created_at.isoformat()
+        'created_at': utc_isoformat(item.created_at)
     } for item in items])
 
 @app.route('/api/marketplace-items', methods=['POST'])
@@ -9845,7 +9901,7 @@ def create_marketplace_item():
             'image_url': item.image_url,
             'created_by_user_id': item.created_by_user_id,
             'is_global': item.is_global,
-            'created_at': item.created_at.isoformat()
+            'created_at': utc_isoformat(item.created_at)
         }), 201
     except Exception as e:
         db.session.rollback()
@@ -9897,7 +9953,7 @@ def update_marketplace_item(item_id):
         'category_id': item.category_id,
         'image_url': item.image_url,
         'is_active': item.is_active,
-        'updated_at': item.updated_at.isoformat()
+        'updated_at': utc_isoformat(item.updated_at)
     })
 
 @app.route('/api/marketplace-items/<int:item_id>', methods=['DELETE'])
@@ -9927,7 +9983,7 @@ def get_marketplace_item_hidden_rules(item_id):
         return jsonify({'error': 'Permission denied'}), 403
     item = MarketplaceItem.query.get_or_404(item_id)
     rules = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id).all()
-    return jsonify([{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value, 'created_at': r.created_at.isoformat()} for r in rules])
+    return jsonify([{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value, 'label': marketplace_hidden_rule_label(r), 'created_at': utc_isoformat(r.created_at)} for r in rules])
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['POST'])
@@ -9950,7 +10006,7 @@ def add_marketplace_item_hidden_rule(item_id):
     rule = MarketplaceItemHiddenRule(item_id=item_id, hidden_type=hidden_type, value=value)
     db.session.add(rule)
     db.session.commit()
-    return jsonify({'id': rule.id, 'hidden_type': rule.hidden_type, 'value': rule.value, 'created_at': rule.created_at.isoformat()}), 201
+    return jsonify({'id': rule.id, 'hidden_type': rule.hidden_type, 'value': rule.value, 'created_at': utc_isoformat(rule.created_at)}), 201
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules/<int:rule_id>', methods=['DELETE'])
@@ -9998,7 +10054,7 @@ def request_global_marketplace_item(item_id):
         'id': request_obj.id,
         'item_id': request_obj.item_id,
         'status': request_obj.status,
-        'created_at': request_obj.created_at.isoformat()
+        'created_at': utc_isoformat(request_obj.created_at)
     }), 201
 
 @app.route('/api/marketplace-item-requests', methods=['GET'])
@@ -10027,7 +10083,7 @@ def get_marketplace_item_requests():
         'requester_name': r.requester.name if r.requester else None,
         'request_type': r.request_type,
         'status': r.status,
-        'created_at': r.created_at.isoformat()
+        'created_at': utc_isoformat(r.created_at)
     } for r in requests])
 
 @app.route('/api/marketplace-item-requests/<int:request_id>/approve', methods=['POST'])
@@ -10095,9 +10151,9 @@ def _po_to_json(o):
         'denied_by_user_id': o.denied_by_user_id,
         'denied_by_name': o.denied_by.name if o.denied_by else None,
         'denial_reason': o.denial_reason,
-        'created_at': o.created_at.isoformat(),
-        'approved_at': o.approved_at.isoformat() if o.approved_at else None,
-        'fulfilled_at': o.fulfilled_at.isoformat() if o.fulfilled_at else None
+        'created_at': utc_isoformat(o.created_at),
+        'approved_at': utc_isoformat(o.approved_at),
+        'fulfilled_at': utc_isoformat(o.fulfilled_at)
     }
 
 
@@ -10105,12 +10161,17 @@ def _po_to_json(o):
 @limiter.limit("30 per minute")
 @login_required
 def get_purchase_orders():
-    """Get purchase orders (student: own; staff/admin: students they have access to)"""
+    """Get purchase orders (student: own; staff: support team students only)"""
     if current_user.role == 'student':
         orders = PurchaseOrder.query.filter_by(student_id=current_user.student_id).order_by(PurchaseOrder.created_at.desc()).all()
-    elif current_user.role in ['staff', 'admin']:
-        all_orders = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
-        orders = [o for o in all_orders if has_student_access(current_user, o.student_id)]
+    elif current_user.role == 'staff':
+        team_student_ids = get_student_ids_for_staff_user(current_user)
+        if not team_student_ids:
+            orders = []
+        else:
+            orders = PurchaseOrder.query.filter(
+                PurchaseOrder.student_id.in_(team_student_ids)
+            ).order_by(PurchaseOrder.created_at.desc()).all()
     else:
         orders = []
     
@@ -10177,6 +10238,8 @@ def create_purchase_order():
         case_manager_id=case_manager_id
     )
     db.session.add(order)
+    db.session.flush()
+    notify_support_team_purchase_order_pending(student_id, order.id, item.name)
     db.session.commit()
     
     return jsonify({
@@ -10195,7 +10258,9 @@ def get_purchase_order(order_id):
     if current_user.role == 'student' and order.student_id != current_user.student_id:
         return jsonify({'error': 'Access denied'}), 403
     
-    if not has_student_access(current_user, order.student_id):
+    if current_user.role == 'staff' and not user_is_on_student_support_team(current_user, order.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    if current_user.role not in ('student', 'staff'):
         return jsonify({'error': 'Access denied'}), 403
     
     return jsonify(_po_to_json(order))
@@ -10324,11 +10389,18 @@ def update_purchase_order_status(order_id):
 @limiter.limit("30 per minute")
 @login_required
 def get_case_manager_purchase_orders(user_id):
-    """Get orders for a case manager's students"""
+    """Get purchase orders for students on the given staff member's support team."""
     if current_user.role != 'admin' and current_user.id != user_id:
         return jsonify({'error': 'Permission denied'}), 403
     
-    orders = PurchaseOrder.query.filter_by(case_manager_id=user_id).order_by(PurchaseOrder.created_at.desc()).all()
+    target_user = User.query.get_or_404(user_id)
+    team_student_ids = get_student_ids_for_staff_user(target_user)
+    if not team_student_ids:
+        orders = []
+    else:
+        orders = PurchaseOrder.query.filter(
+            PurchaseOrder.student_id.in_(team_student_ids)
+        ).order_by(PurchaseOrder.created_at.desc()).all()
     
     return jsonify([{
         'id': o.id,
@@ -10338,7 +10410,7 @@ def get_case_manager_purchase_orders(user_id):
         'item_name': o.item.name,
         'item_price': float(o.item_price),
         'status': o.status,
-        'created_at': o.created_at.isoformat()
+        'created_at': utc_isoformat(o.created_at)
     } for o in orders])
 
 
@@ -10357,8 +10429,8 @@ def get_notifications():
         'title': n.title,
         'body': n.body,
         'purchase_order_id': n.purchase_order_id,
-        'read_at': n.read_at.isoformat() if n.read_at else None,
-        'created_at': n.created_at.isoformat()
+        'read_at': utc_isoformat(n.read_at),
+        'created_at': utc_isoformat(n.created_at)
     } for n in notifications])
 
 
@@ -10372,7 +10444,7 @@ def mark_notification_read(notification_id):
         return jsonify({'error': 'Access denied'}), 403
     n.read_at = datetime.utcnow()
     db.session.commit()
-    return jsonify({'id': n.id, 'read_at': n.read_at.isoformat()})
+    return jsonify({'id': n.id, 'read_at': utc_isoformat(n.read_at)})
 
 
 @app.route('/api/notifications/read-all', methods=['PATCH', 'POST'])

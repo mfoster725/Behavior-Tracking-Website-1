@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign7">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -490,6 +490,7 @@
                                     <th>Name</th>
                                     <th>Role</th>
                                     <th>Username</th>
+                                    <th>Caseload</th>
                                     <th>Password</th>
                                     <th>Actions</th>
                                 </tr>
@@ -1574,6 +1575,20 @@
         </div>
     </div>
 
+    <!-- Caseload Modal -->
+    <div id="caseload-modal" class="modal">
+        <div class="modal-content" style="max-width: 520px;">
+            <span class="close" onclick="document.getElementById('caseload-modal').style.display='none'">&times;</span>
+            <h2 id="caseload-modal-title">Caseload</h2>
+            <div id="caseload-modal-body" style="margin-top: 1rem;">
+                <!-- Caseload content will be injected dynamically -->
+            </div>
+            <div class="modal-buttons" style="margin-top: 1.5rem; text-align: right;">
+                <button class="btn-secondary" onclick="document.getElementById('caseload-modal').style.display='none'">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Infractions Summary Modal -->
     <div id="infractions-summary-modal" class="modal">
         <div class="modal-content" style="max-width: 700px;">
@@ -1774,6 +1789,7 @@
             <span class="close" id="marketplace-hide-modal-close">&times;</span>
             <h2>Hide item from students</h2>
             <p id="marketplace-hide-item-name" style="margin-bottom: 16px; color: #64748b;"></p>
+            <div id="marketplace-hide-current-rules" class="marketplace-hidden-info" style="display: none; margin-bottom: 16px;"></div>
             <div class="form-group">
                 <label>Hide from</label>
                 <div style="margin-bottom: 12px;">
@@ -1823,7 +1839,8 @@
             <h2>Manage visibility</h2>
             <p id="marketplace-unhide-item-name" style="margin-bottom: 16px; color: #64748b;"></p>
             <p style="font-size: 13px; color: #64748b; margin-bottom: 12px;">This item is hidden from the following. Remove a rule to make it visible again.</p>
-            <ul id="marketplace-unhide-rules-list" style="list-style: none; padding: 0; margin: 0 0 16px 0;"></ul>
+            <div id="marketplace-unhide-current-rules" class="marketplace-hidden-info" style="margin-bottom: 16px; display: none;"></div>
+            <ul id="marketplace-unhide-rules-list" style="list-style: none; padding: 0; margin: 0 0 16px 0; display: none;"></ul>
             <div style="margin-top: 16px;">
                 <button type="button" id="marketplace-unhide-add-more" class="btn-secondary" style="margin-right: 8px;">Add another rule</button>
                 <button type="button" id="marketplace-unhide-close-btn" class="btn-secondary">Close</button>
@@ -1911,7 +1928,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc105"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc108"></script>
 </body>
 </html>
 
