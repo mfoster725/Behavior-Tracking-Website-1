@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign7">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -174,6 +174,10 @@
                                 <input type="checkbox" id="daily-managed-by-me-checkbox">
                                 <span>Show students managed by me</span>
                             </label>
+                            <div class="daily-entry-actions">
+                                <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
+                                <button id="clear-daily-all-btn" class="btn-secondary">Clear All</button>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -189,12 +193,6 @@
                         <p class="daily-grid-loading-text">Loading point cards...</p>
                     </div>
                     <div id="daily-staff-filter-title" class="daily-staff-filter-title" style="display: none;"></div>
-                    {% if user.role in ['staff', 'admin'] %}
-                    <div class="grid-controls">
-                        <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
-                        <button id="clear-daily-all-btn" class="btn-secondary">Clear All</button>
-                    </div>
-                    {% endif %}
                     <div id="daily-grid" class="daily-grid">
                         <div id="daily-header" class="daily-header"></div>
                         <div id="daily-body" class="daily-body"></div>
