@@ -19627,14 +19627,66 @@ function collectOverviewTimeSlots(byTimeByDay) {
     return arr;
 }
 
+const OVERVIEW_HEATMAP_NO_DATA_BG = '#e2e8f0';
+
+function overviewHeatmapCellHasStarData(fallbackCell) {
+    if (!fallbackCell || typeof fallbackCell !== 'object') return false;
+    if (Number(fallbackCell.total_days || 0) > 0) return true;
+    const overall = fallbackCell.percentages?.overall;
+    return typeof overall === 'number' && Number.isFinite(overall);
+}
+
+function buildOverviewHeatmapRowsHtml(frenzySeverityByTimeByDay, byTimeByDay, hm, severityLabels, options = {}) {
+    const interactive = !!options.interactive;
+    let heatRows = '';
+    hm.days.forEach((day) => {
+        let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
+        hm.timeSlots.forEach((tlabel) => {
+            const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
+            const fallbackCell = (byTimeByDay[day] || {})[tlabel];
+            const hasSeverity = typeof sevCell?.avg_severity === 'number';
+            const hasStarData = overviewHeatmapCellHasStarData(fallbackCell);
+            const noData = !hasSeverity && !hasStarData;
+            const bg = noData ? OVERVIEW_HEATMAP_NO_DATA_BG : overviewHeatColor(sevCell, hm);
+            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
+            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel && !noData;
+            let cls = 'overview-heatmap-cell';
+            if (noData) cls += ' overview-heatmap-cell--nodata';
+            if (isWorst) cls += ' overview-heatmap-cell--worst';
+            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
+            let title;
+            if (hasSeverity) {
+                const avg = Number(sevCell.avg_severity);
+                const safeAvg = Number.isFinite(avg) ? avg : 0;
+                const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
+                const levelName = severityLabels[closest] || '';
+                const count = sevCell.frenzy_count || 0;
+                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
+                if (interactive) title += ' • Click to drill down';
+            } else if (noData) {
+                title = 'No point card or frenzy data';
+                if (interactive) title += ' • Click to drill down';
+            } else {
+                title = interactive ? 'No frenzies recorded • Click to drill down' : 'No frenzies';
+            }
+            const dataAttrs = interactive
+                ? ` data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"`
+                : '';
+            const styleExtras = interactive ? ';cursor:pointer;' : '';
+            row += `<div class="${cls}" style="background:${bg}${styleExtras}" title="${escapeHtml(title)}"${dataAttrs}></div>`;
+        });
+        heatRows += row;
+    });
+    return heatRows;
+}
+
 function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    // Build the column set from period data (so rows always have cells),
-    // and merge in any extra slots that only appear in frenzy severity data.
+    // Always show the full school-day schedule; merge in any extra slots from data.
     const fallbackSlots = collectOverviewTimeSlots(byTimeByDayFallback || {});
     const severitySlots = collectOverviewTimeSlots(frenzySeverityByTimeByDay || {});
-    const timeSlots = fallbackSlots.slice();
-    severitySlots.forEach(slot => {
+    const timeSlots = SCHEDULE_PERIODS.slice();
+    [...fallbackSlots, ...severitySlots].forEach((slot) => {
         if (!timeSlots.includes(slot)) timeSlots.push(slot);
     });
     const normalize = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -19650,13 +19702,6 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
         });
     });
     const showBusColumns = hasAmBusData || hasPmBusData;
-    if (!showBusColumns) {
-        for (let i = timeSlots.length - 1; i >= 0; i--) {
-            const slot = normalize(timeSlots[i]);
-            if (slot.includes('am') && slot.includes('bus')) timeSlots.splice(i, 1);
-            else if (slot.includes('pm') && slot.includes('bus')) timeSlots.splice(i, 1);
-        }
-    }
     const tieStarPercent = (cell) => {
         const v = cell?.percentages?.overall;
         return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -19730,6 +19775,7 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
             const sevCell = sevMap[timeLabel];
             const avg = typeof sevCell?.avg_severity === 'number' ? sevCell.avg_severity : null;
             const fallbackCell = fallbackMap[timeLabel] || {};
+            const hasStarData = overviewHeatmapCellHasStarData(fallbackCell);
             const observedCell = {
                 day,
                 timeLabel,
@@ -19737,7 +19783,8 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
                 avg,
                 frenzyCount: Number(sevCell?.frenzy_count || 0),
                 starPercent: tieStarPercent(fallbackCell),
-                infractions: tieInfractions(fallbackCell)
+                infractions: tieInfractions(fallbackCell),
+                hasStarData
             };
             observedCells.push(observedCell);
             if (avg != null) {
@@ -19750,7 +19797,8 @@ function overviewHeatmapMeta(frenzySeverityByTimeByDay, byTimeByDayFallback) {
                     worst = observedCell;
                 }
             }
-            // A cell with no frenzies is cooler than any cell with frenzies.
+            // No-frenzy cells with STAR data are coolest; empty cells are excluded from best.
+            if (avg == null && !hasStarData) return;
             const coolRank = avg == null ? -1 : avg;
             if (coolRank < bestSev || (coolRank === bestSev && (!best || compareCoolestTie(best, observedCell) > 0))) {
                 bestSev = coolRank;
@@ -21698,37 +21746,12 @@ function buildOverviewDashboardCardHtml(data) {
     const rstH = Math.round((resets / incidentMax) * 100);
 
     const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
-    let heatRows = '';
-    hm.days.forEach(day => {
-        let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
-        hm.timeSlots.forEach(tlabel => {
-            const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
-            const bg = overviewHeatColor(sevCell, hm);
-            const hasSeverity = typeof sevCell?.avg_severity === 'number';
-            const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-            const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
-            let cls = 'overview-heatmap-cell';
-            if (isWorst) cls += ' overview-heatmap-cell--worst';
-            if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-            let title;
-            if (hasSeverity) {
-                const avg = Number(sevCell.avg_severity);
-                const safeAvg = Number.isFinite(avg) ? avg : 0;
-                const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
-                const levelName = severityLabels[closest] || '';
-                const count = sevCell.frenzy_count || 0;
-                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
-            } else {
-                title = 'No frenzies';
-            }
-            row += `<div class="${cls}" style="background:${bg}" title="${escapeHtml(title)}"></div>`;
-        });
-        heatRows += row;
-    });
-
-    if (!heatRows) {
-        heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
-    }
+    let heatRows = buildOverviewHeatmapRowsHtml(
+        frenzySeverityByTimeByDay,
+        byTimeByDay,
+        hm,
+        severityLabels
+    );
 
     const overviewDeltaMetrics = [
         { key: 'present_pct', label: 'Attendance', delta: presentDelta, isPercent: true, lowerIsBetter: false },
@@ -24086,36 +24109,13 @@ function attachOverviewCardInteractions(container, data) {
             ? `${escapeHtml(previousTriggerTime)} on<br>${escapeHtml(previousTriggerDay)}`
             : 'No prior data';
         const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
-        let heatRows = '';
-        hm.days.forEach(day => {
-            let row = `<div class="overview-heatmap-time">${escapeHtml(overviewDayInitial(day))}</div>`;
-            hm.timeSlots.forEach(tlabel => {
-                const sevCell = (frenzySeverityByTimeByDay[day] || {})[tlabel];
-                const bg = overviewHeatColor(sevCell, hm);
-                const hasSeverity = typeof sevCell?.avg_severity === 'number';
-                const isWorst = hm.worst && hm.worst.day === day && hm.worst.timeLabel === tlabel && hasSeverity;
-                const isBest = hm.best && hm.best.day === day && hm.best.timeLabel === tlabel;
-                let cls = 'overview-heatmap-cell';
-                if (isWorst) cls += ' overview-heatmap-cell--worst';
-                if (isBest && !isWorst) cls += ' overview-heatmap-cell--best';
-                let title;
-                if (hasSeverity) {
-                    const avg = Number(sevCell.avg_severity);
-                    const safeAvg = Number.isFinite(avg) ? avg : 0;
-                    const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
-                    const levelName = severityLabels[closest] || '';
-                    const count = sevCell.frenzy_count || 0;
-                    title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'} • Click to drill down`;
-                } else {
-                    title = 'No frenzies recorded • Click to drill down';
-                }
-                row += `<div class="${cls}" style="background:${bg};cursor:pointer;" title="${escapeHtml(title)}" data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"></div>`;
-            });
-            heatRows += row;
-        });
-        if (!heatRows) {
-            heatRows = `<p class="overview-heatmap-empty">Not enough scheduled period data to build a heatmap.</p>`;
-        }
+        const heatRows = buildOverviewHeatmapRowsHtml(
+            frenzySeverityByTimeByDay,
+            byTimeByDay,
+            hm,
+            severityLabels,
+            { interactive: true }
+        );
         const headlineRight = headlineDay
             ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
             : escapeHtml(headlineTime || '—');
