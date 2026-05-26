@@ -622,6 +622,31 @@ def ensure_ui_preferences_column():
 ensure_ui_preferences_column()
 
 
+def ensure_frenzy_severity_column():
+    """
+    Ensure frenzy_events.severity exists in Postgres and backfill NULL to 1 (Para).
+    Safe to run multiple times thanks to IF NOT EXISTS.
+    """
+    if not use_postgres_db:
+        return
+
+    try:
+        with app.app_context():
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE frenzy_events ADD COLUMN IF NOT EXISTS severity INTEGER"
+                ))
+                conn.execute(text(
+                    "UPDATE frenzy_events SET severity = 1 WHERE severity IS NULL"
+                ))
+                conn.commit()
+    except Exception as e:
+        app.logger.warning(f"Failed to ensure frenzy_events.severity column exists: {e}")
+
+
+ensure_frenzy_severity_column()
+
+
 def ensure_daily_query_indexes():
     """Create missing indexes used by daily overview queries."""
     try:
@@ -1115,7 +1140,8 @@ def init_db():
                 
                 inspector = inspect(db.engine)
                 table_names = inspector.get_table_names()
-                
+                is_postgres = 'postgresql' in str(db.engine.url).lower()
+
                 # Check if outside_staff_students table exists
                 if 'outside_staff_students' not in table_names:
                     print("Creating outside_staff_students table...")
@@ -1124,9 +1150,7 @@ def init_db():
                 # Verify columns exist in users table
                 if 'users' in table_names:
                     columns = [col['name'] for col in inspector.get_columns('users')]
-                    # Check if we're using PostgreSQL or SQLite
-                    is_postgres = 'postgresql' in str(db.engine.url).lower()
-                    
+
                     if 'is_outside_staff' not in columns:
                         print("Adding is_outside_staff column to users table...")
                         try:
@@ -1238,9 +1262,30 @@ def init_db():
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add must_change_password column (may already exist): {e}")
                 
+                # Verify columns exist in frenzy_events table
+                if 'frenzy_events' in table_names:
+                    frenzy_columns = [col['name'] for col in inspector.get_columns('frenzy_events')]
+                    if 'severity' not in frenzy_columns:
+                        print("Adding severity column to frenzy_events table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text(
+                                        "ALTER TABLE frenzy_events ADD COLUMN IF NOT EXISTS severity INTEGER"
+                                    ))
+                                else:
+                                    conn.execute(text(
+                                        "ALTER TABLE frenzy_events ADD COLUMN severity INTEGER"
+                                    ))
+                                conn.execute(text(
+                                    "UPDATE frenzy_events SET severity = 1 WHERE severity IS NULL"
+                                ))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add frenzy_events.severity column (may already exist): {e}")
+
                 # Verify columns exist in students table
                 if 'students' in table_names:
-                    is_postgres = 'postgresql' in str(db.engine.url).lower()
                     columns = [col['name'] for col in inspector.get_columns('students')]
                     if 'lunch_number' not in columns:
                         print("Adding lunch_number column to students table...")
