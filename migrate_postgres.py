@@ -22,6 +22,7 @@ def main():
         print("Warning: DATABASE_URL does not look like PostgreSQL. This script is for Postgres (e.g. Aiven).")
 
     # Import app so that DATABASE_URL is applied and init_db is available
+    os.environ['USE_POSTGRES'] = '1'
     from app import app, init_db
 
     with app.app_context():

@@ -20,9 +20,11 @@ if errorlevel 1 (
     )
 )
 echo.
-echo Starting server...
+echo Starting server (local SQLite database)...
 echo Open your browser to http://localhost:5000
 echo.
+set USE_LOCAL_DB=1
+set DATABASE_URL=
 python app.py
 if errorlevel 1 (
     py app.py

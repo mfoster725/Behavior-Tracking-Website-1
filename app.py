@@ -74,9 +74,23 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Database configuration: Use PostgreSQL (Aiven, Render, Neon, etc.) or SQLite locally
+
+def _env_truthy(name):
+    return os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes')
+
+
+# Database configuration: PostgreSQL on Render/production; SQLite for local dev by default.
+# Locally, DATABASE_URL in your shell (e.g. from Aiven setup) is ignored unless USE_POSTGRES=1.
+# Force SQLite: USE_LOCAL_DB=1. Force Postgres locally: USE_POSTGRES=1 + DATABASE_URL.
 database_url = os.environ.get('DATABASE_URL')
-if database_url:
+_on_render = bool(os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_URL'))
+use_postgres_db = bool(
+    database_url
+    and not _env_truthy('USE_LOCAL_DB')
+    and (_on_render or _env_truthy('USE_POSTGRES'))
+)
+
+if use_postgres_db:
     # Aiven/Render/Neon provide postgres:// or postgresql://; SQLAlchemy needs postgresql+psycopg:// for psycopg3
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql+psycopg://', 1)
@@ -137,6 +151,18 @@ else:
             local_db_path = legacy_db_path
         app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{local_db_path}'
 
+if use_postgres_db:
+    print('Database: PostgreSQL (DATABASE_URL)', flush=True)
+else:
+    _sqlite_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
+    print(f'Database: SQLite ({_sqlite_path})', flush=True)
+    if database_url and not _on_render:
+        print(
+            'Note: DATABASE_URL is set in your environment but ignored for local dev. '
+            'Use USE_POSTGRES=1 to connect to Postgres locally.',
+            flush=True,
+        )
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -149,9 +175,22 @@ limiter = Limiter(
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
 
+# Render/production sits behind a reverse proxy; trust X-Forwarded-* for HTTPS and cookies.
+if use_postgres_db:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    """Return JSON for API routes so fetch() does not follow an HTML login redirect."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required', 'login_required': True}), 401
+    return redirect(url_for('login', next=request.url))
 
 # SQLite performance tuning for local development.
 # Safe no-op for Postgres environments.
@@ -249,6 +288,18 @@ def admin_required(f):
             return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+def api_json_errors(f):
+    """Ensure uncaught API exceptions return JSON (not Flask HTML error pages)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            app.logger.exception('API error in %s', f.__name__)
+            return jsonify({'error': f'Failed to complete {f.__name__}', 'detail': str(e)}), 500
+    return decorated
 
 # Helper Functions
 def has_student_access(user, student_id):
@@ -523,7 +574,7 @@ def ensure_ui_preferences_column():
     Safe to run multiple times thanks to IF NOT EXISTS.
     """
     # Only run when using external Postgres (Aiven, Render, etc.)
-    if not os.environ.get('DATABASE_URL'):
+    if not use_postgres_db:
         return
 
     try:
@@ -2908,6 +2959,7 @@ def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
 @app.route('/api/summary', methods=['GET'])
 @limiter.limit("30 per minute")
 @login_required
+@api_json_errors
 def summary():
     student_id = request.args.get('student_id', type=int)
     period = request.args.get('period', None)
@@ -3216,19 +3268,30 @@ def summary():
             period_ids = [p.id for p in period_rows]
             infractions_by_period = {}
             if period_ids:
-                inf_rows = db.session.query(
-                    Infraction.period_record_id,
-                    Infraction.infraction_type,
-                    db.func.sum(Infraction.count),
-                ).filter(
-                    Infraction.period_record_id.in_(period_ids)
-                ).group_by(
-                    Infraction.period_record_id, Infraction.infraction_type
-                ).all()
-                for pr_id, itype, cnt in inf_rows:
-                    infractions_by_period.setdefault(pr_id, []).append(
-                        SimpleNamespace(infraction_type=itype, count=int(cnt or 0))
-                    )
+                # SQLite has a hard limit on the number of bound parameters per statement
+                # (typically 999). For larger timeframes / multi-student views, `period_ids`
+                # can exceed that limit and crash the whole summary request.
+                #
+                # Batch the IN-list to keep each query under the limit, then merge results.
+                def _chunked(seq, size):
+                    for i in range(0, len(seq), size):
+                        yield seq[i:i + size]
+
+                chunk_size = 900  # keep a margin under SQLite's 999 parameter limit
+                for period_id_chunk in _chunked(period_ids, chunk_size):
+                    inf_rows = db.session.query(
+                        Infraction.period_record_id,
+                        Infraction.infraction_type,
+                        db.func.sum(Infraction.count),
+                    ).filter(
+                        Infraction.period_record_id.in_(period_id_chunk)
+                    ).group_by(
+                        Infraction.period_record_id, Infraction.infraction_type
+                    ).all()
+                    for pr_id, itype, cnt in inf_rows:
+                        infractions_by_period.setdefault(pr_id, []).append(
+                            SimpleNamespace(infraction_type=itype, count=int(cnt or 0))
+                        )
 
             for p in period_rows:
                 p_obj = SimpleNamespace(

@@ -19386,13 +19386,48 @@ async function loadSummaryDashboard() {
     if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
     params.push(`quarter_dates=${encodeURIComponent(JSON.stringify(quarterDatesForBackend))}`);
     params.push(`school_year_dates=${encodeURIComponent(JSON.stringify(schoolYearDatesForBackend))}`);
+    params.push('lite=true');
 
     const url = '/api/summary?' + params.join('&');
 
     try {
         const fetchStart = performance.now();
-        const response = await fetch(url, { signal: activeAbortController.signal });
-        const data = await response.json();
+        const response = await fetch(url, {
+            signal: activeAbortController.signal,
+            credentials: 'same-origin',
+            redirect: 'manual',
+        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const rawText = await response.text();
+        const isHtmlBody = /^\s*</.test(rawText);
+        const titleMatch = isHtmlBody ? rawText.match(/<title>([^<]*)<\/title>/i) : null;
+        if (
+            response.type === 'opaqueredirect' ||
+            response.status === 0 ||
+            response.status === 302 || response.status === 301 ||
+            response.status === 303 || response.status === 307 || response.status === 308
+        ) {
+            throw new Error('Session expired. Please refresh the page and log in again.');
+        }
+        if (response.status === 401) {
+            throw new Error('Session expired. Please refresh the page and log in again.');
+        }
+        if (!response.ok || !contentType.includes('application/json')) {
+            let serverMsg;
+            if (isHtmlBody) {
+                if (response.status === 502 || response.status === 504) {
+                    serverMsg = 'Summary request timed out on the server. Try a shorter timeframe (e.g. 30 School Days).';
+                } else if (titleMatch && /redirect/i.test(titleMatch[1])) {
+                    serverMsg = 'Session expired. Please refresh the page and log in again.';
+                } else {
+                    serverMsg = `Server returned HTML instead of JSON (HTTP ${response.status}${titleMatch ? ': ' + titleMatch[1] : ''})`;
+                }
+            } else {
+                serverMsg = rawText.slice(0, 200);
+            }
+            throw new Error(serverMsg || `Request failed (${response.status})`);
+        }
+        const data = JSON.parse(rawText);
         if (requestToken !== summaryLoadRequestToken) return;
         const fetchMs = performance.now() - fetchStart;
         window.currentSummaryData = data;
@@ -23981,6 +24016,9 @@ function attachOverviewCardInteractions(container, data) {
         const previousTrigger = data.previous_trigger || {};
         const frenzyCellDetailsByTimeByDay = data.frenzy_cell_details_by_time_by_day || {};
         const byTimeByDay = data.by_time_by_day || {};
+        // #region agent log
+        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cf9cff'},body:JSON.stringify({sessionId:'cf9cff',runId:'pre-fix',hypothesisId:'H4',location:'static/app.js:24014',message:'TriggerTimes build entry',data:{hasData:!!data,keysTop:Object.keys(data||{}).slice(0,25),sevDaysCount:Object.keys(frenzySeverityByTimeByDay||{}).length,byTimeByDayDaysCount:Object.keys(byTimeByDay||{}).length,prevTriggerType:typeof previousTrigger,prevTrigger:previousTrigger?{time:previousTrigger.time,day:previousTrigger.day}:null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const formatTriggerTimeStack = (value) => {
             const raw = String(value || '').trim();
             if (!raw || !raw.includes('-')) return escapeHtml(raw || '—');
@@ -24032,9 +24070,22 @@ function attachOverviewCardInteractions(container, data) {
         }
         const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
         const metaTriggerDay = hm.triggerDay?.day || headlineDay;
-        const hasPriorTriggerData = Boolean(previousTrigger.time && previousTrigger.day);
-        const previousTriggerTime = hasPriorTriggerData ? previousTrigger.time : 'No prior data';
-        const previousTriggerDay = hasPriorTriggerData ? previousTrigger.day : 'No prior data';
+
+        const normalizePrevLabel = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (raw.toLowerCase() === 'none') return '';
+            return raw;
+        };
+
+        const prevTimeLabel = normalizePrevLabel(previousTrigger.time);
+        const prevDayLabel = normalizePrevLabel(previousTrigger.day);
+        const hasPriorTriggerData = Boolean(prevTimeLabel && prevDayLabel);
+        const previousTriggerTime = hasPriorTriggerData ? prevTimeLabel : 'No prior data';
+        const previousTriggerDay = hasPriorTriggerData ? prevDayLabel : 'No prior data';
+        // #region agent log
+        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cf9cff'},body:JSON.stringify({sessionId:'cf9cff',runId:'pre-fix',hypothesisId:'H1',location:'static/app.js:24054',message:'TriggerTimes computed meta/headlines',data:{timeSlotsCount:(hm?.timeSlots||[]).length,days:(hm?.days||[]).slice(0,7),hasWorst:!!hm?.worst,worst:hm?.worst?{day:hm.worst.day,timeLabel:hm.worst.timeLabel}:null,metaTriggerTime:String(metaTriggerTime||''),metaTriggerDay:String(metaTriggerDay||''),prevTimeLabel:String(prevTimeLabel||''),prevDayLabel:String(prevDayLabel||''),hasPriorTriggerData:!!hasPriorTriggerData,sortedTriggerRowsCount:sortedTriggerRows.length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const previousHeroValue = hasPriorTriggerData
             ? `${escapeHtml(previousTriggerTime)} on<br>${escapeHtml(previousTriggerDay)}`
             : 'No prior data';
