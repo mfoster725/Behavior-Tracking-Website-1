@@ -35,6 +35,7 @@ import json
 import time
 import logging
 import shutil
+import copy
 from types import SimpleNamespace
 from io import StringIO, BytesIO
 from urllib.parse import urlparse, urljoin
@@ -73,6 +74,7 @@ except ImportError:
     Image = None
 
 app = Flask(__name__)
+SUMMARY_API_BUILD = 'frenzy-heatmap-v3'
 
 
 def _env_truthy(name):
@@ -156,6 +158,7 @@ if use_postgres_db:
 else:
     _sqlite_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
     print(f'Database: SQLite ({_sqlite_path})', flush=True)
+    print(f'Summary API build: {SUMMARY_API_BUILD}', flush=True)
     if database_url and not _on_render:
         print(
             'Note: DATABASE_URL is set in your environment but ignored for local dev. '
@@ -183,6 +186,17 @@ if use_postgres_db:
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+
+@app.after_request
+def _disable_browser_html_cache(response):
+    """Avoid stale index.html keeping an old app.js ?v= query string after deploys."""
+    content_type = (response.content_type or '').split(';', 1)[0].strip().lower()
+    if content_type == 'text/html':
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
 
 
 @login_manager.unauthorized_handler
@@ -2949,11 +2963,24 @@ def _records_star_stats_zero_unexcused(all_records, star_date_set):
 
 def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
     """Infractions / frenzies / by-time use present-day window; STAR % uses present+unexcused with unexcused at 0%."""
-    out = dict(stats_behavior)
+    out = dict(stats_behavior or {})
     if stats_star:
         out['percentages'] = dict(stats_star.get('percentages') or {})
         out['totals'] = dict(stats_star.get('totals') or {})
+    # stats_behavior and stats_star are separate lite aggregates; deep-copy frenzy maps so a
+    # later STAR-window pass cannot clear behavior-window heatmap slots via shared references.
+    sev = (stats_behavior or {}).get('frenzy_severity_by_time_by_day')
+    if isinstance(sev, dict):
+        out['frenzy_severity_by_time_by_day'] = copy.deepcopy(sev)
+    details = (stats_behavior or {}).get('frenzy_cell_details_by_time_by_day')
+    if isinstance(details, dict):
+        out['frenzy_cell_details_by_time_by_day'] = copy.deepcopy(details)
     return out
+
+
+def _chunked_id_list(seq, size=900):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
 
 
 @app.route('/api/summary', methods=['GET'])
@@ -3250,6 +3277,8 @@ def summary():
 
         daily_ids = [r.id for r in daily_rows]
         periods_by_daily = {}
+        frenzies_by_daily = {}
+        period_rows = []
         if daily_ids:
             period_rows = db.session.query(
                 PeriodRecord.id,
@@ -3310,6 +3339,25 @@ def summary():
                 )
                 periods_by_daily.setdefault(p.daily_record_id, []).append(p_obj)
 
+            frenzies_by_daily = {}
+            for daily_id_chunk in _chunked_id_list(daily_ids):
+                frenzy_rows = db.session.query(
+                    FrenzyEvent.daily_record_id,
+                    FrenzyEvent.time_range,
+                    FrenzyEvent.severity,
+                    FrenzyEvent.purpose,
+                    FrenzyEvent.purpose2,
+                ).filter(FrenzyEvent.daily_record_id.in_(daily_id_chunk)).all()
+                for fr in frenzy_rows:
+                    frenzies_by_daily.setdefault(fr.daily_record_id, []).append(
+                        SimpleNamespace(
+                            time_range=fr.time_range,
+                            severity=fr.severity,
+                            purpose=fr.purpose,
+                            purpose2=fr.purpose2,
+                        )
+                    )
+
         all_records_raw = []
         for r in daily_rows:
             all_records_raw.append(SimpleNamespace(
@@ -3320,6 +3368,7 @@ def summary():
                 attendance_status=r.attendance_status,
                 present=r.present,
                 periods=periods_by_daily.get(r.id, []),
+                frenzies=frenzies_by_daily.get(r.id, []) if daily_ids else [],
             ))
     else:
         query = query.options(
@@ -3517,6 +3566,7 @@ def summary():
         }
         by_class = {}
         by_time = {}
+        by_time_by_day = {day: {} for day in weekdays}
 
         # Per-(day, time) frenzy severity aggregation. Mirrors the heavy
         # summary path so the overview heatmap always has severity data.
@@ -3616,6 +3666,30 @@ def summary():
                     d['relationships_points'] += rp
                     d['possible_points'] += pp
 
+                    day_time_map = by_time_by_day[day_of_week]
+                    if time_label not in day_time_map:
+                        day_time_map[time_label] = {
+                            'total_days': 0,
+                            'safety_points': 0,
+                            'teamwork_points': 0,
+                            'accountability_points': 0,
+                            'relationships_points': 0,
+                            'possible_points': 0,
+                            'infractions': {},
+                            'total_reminders': 0,
+                            'total_resets': 0,
+                            '_unique_dates': set(),
+                        }
+                    dt_bucket = day_time_map[time_label]
+                    dt_bucket['safety_points'] += sp
+                    dt_bucket['teamwork_points'] += tp
+                    dt_bucket['accountability_points'] += ap
+                    dt_bucket['relationships_points'] += rp
+                    dt_bucket['possible_points'] += pp
+                    if record.date not in dt_bucket['_unique_dates']:
+                        dt_bucket['_unique_dates'].add(record.date)
+                        dt_bucket['total_days'] += 1
+
                 period_infraction_counts = {}
                 for infraction in period.infractions:
                     itype = infraction.infraction_type
@@ -3627,6 +3701,22 @@ def summary():
                     if is_weekday:
                         d = by_day_of_week[day_of_week]
                         d['infractions'][itype] = d['infractions'].get(itype, 0) + cnt
+                        day_time_map = by_time_by_day[day_of_week]
+                        if time_label not in day_time_map:
+                            day_time_map[time_label] = {
+                                'total_days': 0,
+                                'safety_points': 0,
+                                'teamwork_points': 0,
+                                'accountability_points': 0,
+                                'relationships_points': 0,
+                                'possible_points': 0,
+                                'infractions': {},
+                                'total_reminders': 0,
+                                'total_resets': 0,
+                                '_unique_dates': set(),
+                            }
+                        dt_bucket = day_time_map[time_label]
+                        dt_bucket['infractions'][itype] = dt_bucket['infractions'].get(itype, 0) + cnt
                     period_infraction_counts[itype] = period_infraction_counts.get(itype, 0) + cnt
 
                 has_reminder_for_period = False
@@ -3728,6 +3818,34 @@ def summary():
                 'top_class_count': top_class_count,
             }
 
+        by_time_by_day_formatted = {}
+        for day, times_map in by_time_by_day.items():
+            formatted_times = {}
+            for time_label, time_data in times_map.items():
+                time_data.pop('_unique_dates', None)
+                num_periods_time = time_data['possible_points'] / 4 if time_data['possible_points'] > 0 else 0
+                max_per_category_time = num_periods_time * 2 if num_periods_time > 0 else 0
+                safety_percent_time = (time_data['safety_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                teamwork_percent_time = (time_data['teamwork_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                accountability_percent_time = (time_data['accountability_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                relationships_percent_time = (time_data['relationships_points'] / max_per_category_time * 100) if max_per_category_time > 0 else 0
+                overall_percent_time = (safety_percent_time + teamwork_percent_time + accountability_percent_time + relationships_percent_time) / 4 if max_per_category_time > 0 else 0
+                formatted_times[time_label] = {
+                    'total_days': time_data['total_days'],
+                    'percentages': {
+                        'safety': round(safety_percent_time, 1),
+                        'teamwork': round(teamwork_percent_time, 1),
+                        'accountability': round(accountability_percent_time, 1),
+                        'relationships': round(relationships_percent_time, 1),
+                        'overall': round(overall_percent_time, 1),
+                    },
+                    'total_infractions': sum(time_data['infractions'].values()),
+                    'infractions': dict(time_data.get('infractions', {})),
+                    'total_reminders': time_data['total_reminders'],
+                    'total_resets': time_data['total_resets'],
+                }
+            by_time_by_day_formatted[day] = formatted_times
+
         # Format frenzy severity per (day, time) cell into average severity.
         frenzy_severity_by_time_by_day_formatted = {}
         frenzy_cell_details_by_time_by_day = {}
@@ -3778,7 +3896,7 @@ def summary():
             'by_day_of_week': by_day_of_week_formatted,
             'by_class': by_class_formatted,
             'by_time': by_time_formatted,
-            'by_time_by_day': {},
+            'by_time_by_day': by_time_by_day_formatted,
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
             'infractions_by_type': {},
@@ -5334,7 +5452,10 @@ def summary():
             result['has_full_30_days'] = available_data_points >= 30
         if staff_context_name:
             result['staff_context'] = staff_context_name
-        return jsonify(result)
+        result['api_build'] = SUMMARY_API_BUILD
+        resp = jsonify(result)
+        resp.headers['X-Summary-Api-Build'] = SUMMARY_API_BUILD
+        return resp
     
     def _summary_response(resp_dict):
         if staff_context_name:

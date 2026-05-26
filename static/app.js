@@ -21616,6 +21616,8 @@ function buildOverviewDashboardCardHtml(data) {
     }
     const metaTriggerTime = hm.triggerTime?.timeLabel || headlineTime;
     const metaTriggerDay = hm.triggerDay?.day || headlineDay;
+    const displayTriggerTime = metaTriggerTime || headlineTime;
+    const displayTriggerDay = metaTriggerDay || headlineDay;
 
     const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
     const overallPct = Math.round(avgs.overall || 0);
@@ -21806,15 +21808,15 @@ function buildOverviewDashboardCardHtml(data) {
             </div>
         </div>`;
 
-    const headlineRight = headlineDay
-        ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
-        : escapeHtml(headlineTime || '—');
+    const headlineRight = displayTriggerDay
+        ? `${escapeHtml(displayTriggerTime)} on<br>${escapeHtml(displayTriggerDay)}`
+        : escapeHtml(displayTriggerTime || '—');
 
-    const triggerMetaLines = headlineTime ? `
+    const triggerMetaLines = (displayTriggerTime || displayTriggerDay) ? `
             <div class="overview-trigger-meta">
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || '—')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerTime || '—')}</span></div>
                 <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || '—')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerDay || '—')}</span></div>
             </div>` : '';
 
     const dashLen = 100;
@@ -24016,9 +24018,6 @@ function attachOverviewCardInteractions(container, data) {
         const previousTrigger = data.previous_trigger || {};
         const frenzyCellDetailsByTimeByDay = data.frenzy_cell_details_by_time_by_day || {};
         const byTimeByDay = data.by_time_by_day || {};
-        // #region agent log
-        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cf9cff'},body:JSON.stringify({sessionId:'cf9cff',runId:'pre-fix',hypothesisId:'H4',location:'static/app.js:24014',message:'TriggerTimes build entry',data:{hasData:!!data,keysTop:Object.keys(data||{}).slice(0,25),sevDaysCount:Object.keys(frenzySeverityByTimeByDay||{}).length,byTimeByDayDaysCount:Object.keys(byTimeByDay||{}).length,prevTriggerType:typeof previousTrigger,prevTrigger:previousTrigger?{time:previousTrigger.time,day:previousTrigger.day}:null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const formatTriggerTimeStack = (value) => {
             const raw = String(value || '').trim();
             if (!raw || !raw.includes('-')) return escapeHtml(raw || '—');
@@ -24083,9 +24082,6 @@ function attachOverviewCardInteractions(container, data) {
         const hasPriorTriggerData = Boolean(prevTimeLabel && prevDayLabel);
         const previousTriggerTime = hasPriorTriggerData ? prevTimeLabel : 'No prior data';
         const previousTriggerDay = hasPriorTriggerData ? prevDayLabel : 'No prior data';
-        // #region agent log
-        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cf9cff'},body:JSON.stringify({sessionId:'cf9cff',runId:'pre-fix',hypothesisId:'H1',location:'static/app.js:24054',message:'TriggerTimes computed meta/headlines',data:{timeSlotsCount:(hm?.timeSlots||[]).length,days:(hm?.days||[]).slice(0,7),hasWorst:!!hm?.worst,worst:hm?.worst?{day:hm.worst.day,timeLabel:hm.worst.timeLabel}:null,metaTriggerTime:String(metaTriggerTime||''),metaTriggerDay:String(metaTriggerDay||''),prevTimeLabel:String(prevTimeLabel||''),prevDayLabel:String(prevDayLabel||''),hasPriorTriggerData:!!hasPriorTriggerData,sortedTriggerRowsCount:sortedTriggerRows.length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const previousHeroValue = hasPriorTriggerData
             ? `${escapeHtml(previousTriggerTime)} on<br>${escapeHtml(previousTriggerDay)}`
             : 'No prior data';

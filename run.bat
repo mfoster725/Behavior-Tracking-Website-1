@@ -1,6 +1,7 @@
 @echo off
 cd /d "%~dp0"
 echo Starting Behavior Tracking System...
+echo (In PowerShell use:  .\run.bat   or   .\run.ps1)
 echo.
 echo Installing dependencies...
 python -m pip install -r requirements.txt
@@ -18,6 +19,11 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
+)
+echo.
+echo Stopping any existing server on port 5000...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5000" ^| findstr LISTENING') do (
+    taskkill /F /PID %%a >nul 2>&1
 )
 echo.
 echo Starting server (local SQLite database)...
