@@ -74,7 +74,7 @@ except ImportError:
     Image = None
 
 app = Flask(__name__)
-SUMMARY_API_BUILD = 'frenzy-heatmap-v3'
+SUMMARY_API_BUILD = 'frenzy-heatmap-v4-info-period'
 
 
 def _env_truthy(name):
@@ -3439,11 +3439,17 @@ def summary():
                 PeriodRecord.frenzy,
                 PeriodRecord.info,
             )
-            .selectinload(PeriodRecord.infractions)
+            .            selectinload(PeriodRecord.infractions)
             .load_only(
                 Infraction.period_record_id,
                 Infraction.infraction_type,
                 Infraction.count,
+            ),
+            selectinload(DailyRecord.frenzies).load_only(
+                FrenzyEvent.time_range,
+                FrenzyEvent.severity,
+                FrenzyEvent.purpose,
+                FrenzyEvent.purpose2,
             ),
         )
         all_records_raw = query.all()
@@ -3576,6 +3582,55 @@ def summary():
                 trimmed[day] = counts
         return trimmed
 
+    def _info_json_truthy(value):
+        return value and value not in (False, None, '', 'false', 'False', '0', 0)
+
+    def _purpose_values_from_info(info_data):
+        """Purposes from daily-entry info JSON (array or legacy purpose1/2)."""
+        vals = []
+        purposes = (info_data or {}).get('purposes')
+        if isinstance(purposes, list):
+            vals.extend(purposes)
+        for key in ('purpose1', 'purpose2'):
+            p = (info_data or {}).get(key)
+            if p:
+                vals.append(p)
+        return vals
+
+    def _period_info_frenzy_severity_int(info_data):
+        """Severity 1–5 when info marks a frenzy; None if not a frenzy row."""
+        if not _info_json_truthy((info_data or {}).get('frenzy')):
+            return None
+        sev_raw = (info_data or {}).get('severity')
+        if sev_raw is not None and sev_raw != '':
+            try:
+                return max(1, min(5, int(sev_raw)))
+            except (TypeError, ValueError):
+                pass
+        return 1
+
+    def _accumulate_frenzy_severity_for_cell(sev_map, time_label, sev_int, purpose_values=()):
+        """Add one frenzy into per-(weekday, time) severity buckets for trigger-time heatmap/table."""
+        sev_int = max(1, min(5, int(sev_int)))
+        bucket = sev_map.get(time_label)
+        if bucket is None:
+            bucket = {
+                'severity_sum': 0,
+                'severity_count': 0,
+                'severity_breakdown': {},
+                'purpose_breakdown': {},
+            }
+            sev_map[time_label] = bucket
+        bucket['severity_sum'] += sev_int
+        bucket['severity_count'] += 1
+        sev_key = str(sev_int)
+        bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
+        for purpose_val in purpose_values:
+            purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
+            bucket['purpose_breakdown'][purpose_name] = (
+                bucket['purpose_breakdown'].get(purpose_name, 0) + 1
+            )
+
     def calculate_summary_stats_lite(record_list):
         """Faster summary aggregation used for dashboard loads."""
         weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
@@ -3632,23 +3687,12 @@ def summary():
                     except (TypeError, ValueError):
                         continue
                     time_label = (getattr(frenzy, 'time_range', '') or '').strip() or 'Unknown'
-                    sev_map = frenzy_severity_by_time_by_day[day_of_week]
-                    bucket = sev_map.get(time_label)
-                    if bucket is None:
-                        bucket = {
-                            'severity_sum': 0,
-                            'severity_count': 0,
-                            'severity_breakdown': {},
-                            'purpose_breakdown': {},
-                        }
-                        sev_map[time_label] = bucket
-                    bucket['severity_sum'] += sev_int
-                    bucket['severity_count'] += 1
-                    sev_key = str(max(1, min(5, sev_int)))
-                    bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
-                    for purpose_val in (getattr(frenzy, 'purpose', None), getattr(frenzy, 'purpose2', None)):
-                        purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
-                        bucket['purpose_breakdown'][purpose_name] = bucket['purpose_breakdown'].get(purpose_name, 0) + 1
+                    _accumulate_frenzy_severity_for_cell(
+                        frenzy_severity_by_time_by_day[day_of_week],
+                        time_label,
+                        sev_int,
+                        (getattr(frenzy, 'purpose', None), getattr(frenzy, 'purpose2', None)),
+                    )
 
             for period in record.periods:
                 sp = int(period.safety_points or 0)
@@ -3790,6 +3834,18 @@ def summary():
                         has_reset_for_period = True
                         if is_weekday:
                             by_day_of_week[day_of_week]['total_resets'] += 1
+
+                    # Daily-entry frenzies live in period.info (not frenzy_events rows).
+                    if is_weekday:
+                        info_sev = _period_info_frenzy_severity_int(info_data)
+                        if info_sev is not None:
+                            info_time_label = (period.time_range or '').strip() or 'Unknown'
+                            _accumulate_frenzy_severity_for_cell(
+                                frenzy_severity_by_time_by_day[day_of_week],
+                                info_time_label,
+                                info_sev,
+                                _purpose_values_from_info(info_data),
+                            )
 
                 if has_reminder_for_period and period_infraction_counts:
                     for itype, cnt in period_infraction_counts.items():
@@ -4016,23 +4072,12 @@ def summary():
                     except (TypeError, ValueError):
                         continue
                     time_label = (frenzy.time_range or '').strip() or 'Unknown'
-                    sev_map = frenzy_severity_by_time_by_day[day_of_week]
-                    bucket = sev_map.get(time_label)
-                    if bucket is None:
-                        bucket = {
-                            'severity_sum': 0,
-                            'severity_count': 0,
-                            'severity_breakdown': {},
-                            'purpose_breakdown': {},
-                        }
-                        sev_map[time_label] = bucket
-                    bucket['severity_sum'] += sev_int
-                    bucket['severity_count'] += 1
-                    sev_key = str(max(1, min(5, sev_int)))
-                    bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
-                    for purpose_val in (frenzy.purpose, frenzy.purpose2):
-                        purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
-                        bucket['purpose_breakdown'][purpose_name] = bucket['purpose_breakdown'].get(purpose_name, 0) + 1
+                    _accumulate_frenzy_severity_for_cell(
+                        frenzy_severity_by_time_by_day[day_of_week],
+                        time_label,
+                        sev_int,
+                        (frenzy.purpose, frenzy.purpose2),
+                    )
 
             for period in record.periods:
                 total_safety += period.safety_points
@@ -4532,6 +4577,18 @@ def summary():
                                     'class_counts': {},
                                 }
                             by_time[time_label]['total_resets'] += 1
+
+                        # Daily-entry frenzies live in period.info (not frenzy_events rows).
+                        if is_weekday:
+                            info_sev = _period_info_frenzy_severity_int(info_data)
+                            if info_sev is not None:
+                                info_time_label = (period.time_range or '').strip() or 'Unknown'
+                                _accumulate_frenzy_severity_for_cell(
+                                    frenzy_severity_by_time_by_day[day_of_week],
+                                    info_time_label,
+                                    info_sev,
+                                    _purpose_values_from_info(info_data),
+                                )
 
                     except (json.JSONDecodeError, ValueError, TypeError):
                         pass
