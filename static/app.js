@@ -22477,26 +22477,36 @@ function applySummaryMasonryLayout(grid) {
         overviewCard.style.width = rightWidth + 'px';
 
         let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
-        let leftTop = trendBottom;
+        // Track both columns under the 2-wide Trends card so the middle
+        // column gets cards instead of staying empty.
+        const leftColTops = [trendBottom, trendBottom];
+        const leftColLefts = [0, perColWidth + gap];
         const handled = new Set([trendCard, overviewCard]);
         const extraCards = cards.filter(card => !handled.has(card));
+
+        const shortestLeftColIndex = () =>
+            leftColTops[0] <= leftColTops[1] ? 0 : 1;
+        const minLeftTop = () => Math.min(leftColTops[0], leftColTops[1]);
+        const placeInLeftColumns = (card) => {
+            const colIndex = shortestLeftColIndex();
+            card.style.position = 'absolute';
+            card.style.width = rightWidth + 'px';
+            card.style.left = leftColLefts[colIndex] + 'px';
+            card.style.top = leftColTops[colIndex] + 'px';
+            leftColTops[colIndex] += card.offsetHeight + gap;
+        };
+
         const triggerTimesExtraCard = extraCards.find(card => card.dataset.overviewCard === 'trigger_times');
         if (triggerTimesExtraCard) {
-            triggerTimesExtraCard.style.position = 'absolute';
-            triggerTimesExtraCard.style.width = rightWidth + 'px';
-            triggerTimesExtraCard.style.left = '0px';
-            triggerTimesExtraCard.style.top = leftTop + 'px';
-            leftTop += triggerTimesExtraCard.offsetHeight + gap;
+            placeInLeftColumns(triggerTimesExtraCard);
             handled.add(triggerTimesExtraCard);
         }
         extraCards.forEach(card => {
             if (handled.has(card)) return;
             card.style.position = 'absolute';
             card.style.width = rightWidth + 'px';
-            if (leftTop <= rightTop) {
-                card.style.left = '0px';
-                card.style.top = leftTop + 'px';
-                leftTop += card.offsetHeight + gap;
+            if (minLeftTop() <= rightTop) {
+                placeInLeftColumns(card);
             } else {
                 card.style.left = rightLeft + 'px';
                 card.style.top = rightTop + 'px';
@@ -22504,7 +22514,12 @@ function applySummaryMasonryLayout(grid) {
             }
         });
 
-        const maxHeight = Math.max(leftTop, rightTop, overviewCard.offsetHeight + Math.max(0, overviewTopOffset));
+        const maxHeight = Math.max(
+            leftColTops[0],
+            leftColTops[1],
+            rightTop,
+            overviewCard.offsetHeight + Math.max(0, overviewTopOffset)
+        );
         grid.style.height = maxHeight + 'px';
         if (summaryContainer && summaryContainer.id === 'summary-results') {
             summaryContainer.style.minHeight = maxHeight + 'px';
