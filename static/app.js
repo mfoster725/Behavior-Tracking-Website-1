@@ -10516,7 +10516,62 @@ function renderTeacherSchedule() {
             addScheduleRow('teacher', time, null);
         }
     });
+
+    requestAnimationFrame(() => syncScheduleRowHeights());
 }
+
+/**
+ * Keep teacher and student schedule rows lined up period-for-period.
+ * Resets heights first, then matches each pair (and the header) to the taller side.
+ */
+function syncScheduleRowHeights() {
+    const teacherTable = document.querySelector('.teacher-schedule-table');
+    const studentTable = document.querySelector('.student-schedule-table');
+    if (!teacherTable || !studentTable) return;
+
+    const teacherHeader = teacherTable.querySelector('thead tr');
+    const studentHeader = studentTable.querySelector('thead tr');
+    const teacherRows = teacherTable.querySelectorAll('tbody tr');
+    const studentRows = studentTable.querySelectorAll('tbody tr');
+
+    const clearHeight = (el) => {
+        if (el) el.style.height = '';
+    };
+
+    clearHeight(teacherHeader);
+    clearHeight(studentHeader);
+    teacherRows.forEach(clearHeight);
+    studentRows.forEach(clearHeight);
+
+    // Force layout so offsetHeight reflects natural sizes after reset
+    void teacherTable.offsetHeight;
+
+    const matchPair = (a, b) => {
+        if (!a || !b) return;
+        const h = Math.max(a.offsetHeight, b.offsetHeight);
+        a.style.height = `${h}px`;
+        b.style.height = `${h}px`;
+    };
+
+    matchPair(teacherHeader, studentHeader);
+    const count = Math.max(teacherRows.length, studentRows.length);
+    for (let i = 0; i < count; i++) {
+        matchPair(teacherRows[i], studentRows[i]);
+    }
+}
+
+// Keep rows aligned when the viewport changes
+let syncScheduleRowHeightsRaf = null;
+window.addEventListener('resize', () => {
+    if (syncScheduleRowHeightsRaf) cancelAnimationFrame(syncScheduleRowHeightsRaf);
+    syncScheduleRowHeightsRaf = requestAnimationFrame(() => {
+        syncScheduleRowHeightsRaf = null;
+        const schedulesView = document.getElementById('schedules-view');
+        if (schedulesView && schedulesView.classList.contains('active')) {
+            syncScheduleRowHeights();
+        }
+    });
+});
 
 /**
  * Mount autocomplete options from a DocumentFragment.
@@ -11236,6 +11291,8 @@ function renderStudentSchedule() {
         const savedSchedule = studentScheduleData.find(s => s && s.time_period === time);
         addScheduleRow('student', time, savedSchedule || null);
     });
+
+    requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
 // Helper function to add a class input group to the classes container
@@ -11257,6 +11314,7 @@ function addClassInputGroup(container, value = '') {
             if (container && container.querySelectorAll('.class-input-group').length === 0) {
                 addClassInputGroup(container);
             }
+            syncScheduleRowHeights();
         });
     }
     
@@ -11277,6 +11335,7 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
             const classesContainer = row.querySelector('.classes-container');
             if (classesContainer) {
                 addClassInputGroup(classesContainer);
+                syncScheduleRowHeights();
             }
         });
     }
@@ -11292,6 +11351,8 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
                 // If this was the last class input, ensure at least one remains
                 if (container.querySelectorAll('.class-input-group').length === 0) {
                     addClassInputGroup(container);
+                } else {
+                    syncScheduleRowHeights();
                 }
             }
         });
@@ -13624,12 +13685,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add period buttons
     const addTeacherPeriodBtn = document.getElementById('add-teacher-period-btn');
     if (addTeacherPeriodBtn) {
-        addTeacherPeriodBtn.addEventListener('click', () => addScheduleRow('teacher'));
+        addTeacherPeriodBtn.addEventListener('click', () => {
+            addScheduleRow('teacher');
+            syncScheduleRowHeights();
+        });
     }
     
     const addStudentPeriodBtn = document.getElementById('add-student-period-btn');
     if (addStudentPeriodBtn) {
-        addStudentPeriodBtn.addEventListener('click', () => addScheduleRow('student'));
+        addStudentPeriodBtn.addEventListener('click', () => {
+            addScheduleRow('student');
+            syncScheduleRowHeights();
+        });
     }
     
     // Save schedule buttons

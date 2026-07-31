@@ -1894,34 +1894,115 @@ table tbody tr:hover {
    SCHEDULE MANAGEMENT
    ============================================================ */
 .schedules-container {
-    display: flex;
-    gap: 2rem;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+        "title-t title-s"
+        "controls-t controls-s"
+        "table-t table-s";
+    column-gap: 2rem;
+    row-gap: 0;
+    align-items: start;
 }
 
-.schedule-section {
-    flex: 1;
-    min-width: 0;
-}
+.schedule-area-title-teacher { grid-area: title-t; }
+.schedule-area-title-student { grid-area: title-s; }
+.schedule-area-controls-teacher { grid-area: controls-t; }
+.schedule-area-controls-student { grid-area: controls-s; }
+.schedule-area-table-teacher { grid-area: table-t; }
+.schedule-area-table-student { grid-area: table-s; }
 
-.schedule-section h3 {
+.schedule-section-header h3 {
     color: var(--text-primary);
-    margin-bottom: 1.25rem;
+    margin: 0 0 0.75rem;
     font-family: var(--font-heading);
     font-weight: 600;
 }
 
-#teacher-schedule-container {
+.schedule-controls {
+    margin-bottom: 0.75rem;
+    min-width: 0;
+}
+
+.schedule-controls-label-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 2em;
+    min-height: 1.5rem;
+    margin-bottom: 0.375rem;
+}
+
+.schedule-controls-label-row > label {
+    margin: 0;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.schedule-managed-by-me-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: normal;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.schedule-managed-by-me-label input {
+    cursor: pointer;
+    width: auto;
+}
+
+.schedule-controls select {
+    width: 100%;
+    max-width: 300px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    background: var(--bg-surface);
+}
+
+.schedule-section {
+    min-width: 0;
+}
+
+#teacher-schedule-container,
+#student-schedule-container {
     margin-top: 0;
 }
 
 .schedule-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 1.25rem;
+    margin-top: 0;
     background: var(--bg-surface);
     table-layout: fixed;
     overflow: visible;
+}
+
+.schedule-table th,
+.schedule-table td {
+    vertical-align: middle;
+}
+
+@media (max-width: 900px) {
+    .schedules-container {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "title-t"
+            "controls-t"
+            "table-t"
+            "title-s"
+            "controls-s"
+            "table-s";
+        row-gap: 1rem;
+    }
 }
 
 .schedule-table th {

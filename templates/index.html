@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign9">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -326,68 +326,72 @@
                 <h2>Schedule Management</h2>
                 
                 <div class="schedules-container">
-                    <!-- Teacher Schedule Section -->
-                    <div class="schedule-section">
+                    <!-- Titles (grid row 1 — aligned across columns) -->
+                    <div class="schedule-section-header schedule-area-title-teacher">
                         <h3>Teacher's Schedule</h3>
-                        {% if user.role in ['staff', 'admin'] %}
-                        <div class="form-group" style="margin-top: 10px; margin-bottom: 10px;">
-                            <label for="teacher-schedule-staff-search" style="margin-right: 8px;">Select Staff:</label>
-                            <select id="teacher-schedule-staff-search" style="max-width: 300px;">
-                                <option value="">Loading…</option>
-                            </select>
-                        </div>
-                        {% endif %}
-                        <div id="teacher-schedule-container">
-                            <table class="schedule-table teacher-schedule-table">
-                                <thead>
-                                    <tr>
-                                        <th>Time</th>
-                                        <th>Class</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="teacher-schedule-body">
-                                    <!-- Schedule rows will be added dynamically -->
-                                </tbody>
-                            </table>
-                            <button id="add-teacher-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
-                            <button id="save-teacher-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Teacher Schedule</button>
-                        </div>
+                    </div>
+                    <div class="schedule-section-header schedule-area-title-student">
+                        <h3>Student's Schedule</h3>
                     </div>
 
-                    <!-- Student Schedule Section -->
-                    <div class="schedule-section">
-                        <h3>Student's Schedule</h3>
-                        <div class="form-group">
-                            <div style="display: flex; align-items: center; flex-wrap: nowrap; gap: 2em; margin-bottom: 6px;">
-                                <label for="schedule-student-select" style="margin: 0; white-space: nowrap;">Select Student:</label>
-                                {% if user.role in ['staff', 'admin'] %}
-                                <label style="display: inline-flex; align-items: center; gap: 5px; font-weight: normal; cursor: pointer; white-space: nowrap; margin: 0; flex-shrink: 0;">
-                                    <input type="checkbox" id="schedule-managed-by-me-checkbox" style="cursor: pointer;">
-                                    <span>Show students managed by me</span>
-                                </label>
-                                {% endif %}
-                            </div>
-                            <select id="schedule-student-select" style="max-width: 300px;">
-                                <option value="">Select Student</option>
-                            </select>
+                    <!-- Controls (grid row 2 — shared height so tables start together) -->
+                    <div class="schedule-controls schedule-area-controls-teacher">
+                        {% if user.role in ['staff', 'admin'] %}
+                        <div class="schedule-controls-label-row">
+                            <label for="teacher-schedule-staff-search">Select Staff:</label>
                         </div>
-                        <div id="student-schedule-container">
-                            <table class="schedule-table student-schedule-table">
-                                <thead>
-                                    <tr>
-                                        <th>Time</th>
-                                        <th>Class</th>
-                                        <th>Staff</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="student-schedule-body">
-                                    <!-- Schedule rows will be added dynamically -->
-                                </tbody>
-                            </table>
-                            <button id="add-student-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
-                            <button id="save-student-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Student Schedule</button>
+                        <select id="teacher-schedule-staff-search" style="max-width: 300px;">
+                            <option value="">Loading…</option>
+                        </select>
+                        {% endif %}
+                    </div>
+                    <div class="schedule-controls schedule-area-controls-student">
+                        <div class="schedule-controls-label-row">
+                            <label for="schedule-student-select">Select Student:</label>
+                            {% if user.role in ['staff', 'admin'] %}
+                            <label class="schedule-managed-by-me-label">
+                                <input type="checkbox" id="schedule-managed-by-me-checkbox">
+                                <span>Show students managed by me</span>
+                            </label>
+                            {% endif %}
                         </div>
+                        <select id="schedule-student-select" style="max-width: 300px;">
+                            <option value="">Select Student</option>
+                        </select>
+                    </div>
+
+                    <!-- Tables (grid row 3 — aligned starts; row heights synced in JS) -->
+                    <div id="teacher-schedule-container" class="schedule-section schedule-area-table-teacher">
+                        <table class="schedule-table teacher-schedule-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Class</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teacher-schedule-body">
+                                <!-- Schedule rows will be added dynamically -->
+                            </tbody>
+                        </table>
+                        <button id="add-teacher-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
+                        <button id="save-teacher-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Teacher Schedule</button>
+                    </div>
+                    <div id="student-schedule-container" class="schedule-section schedule-area-table-student">
+                        <table class="schedule-table student-schedule-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Class</th>
+                                    <th>Staff</th>
+                                </tr>
+                            </thead>
+                            <tbody id="student-schedule-body">
+                                <!-- Schedule rows will be added dynamically -->
+                            </tbody>
+                        </table>
+                        <button id="add-student-period-btn" class="btn-secondary" style="margin-top: 15px;">Add Time Period</button>
+                        <button id="save-student-schedule-btn" class="btn-primary" style="margin-top: 15px;">Save Student Schedule</button>
                     </div>
                 </div>
             </div>
@@ -1965,7 +1969,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc110"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=acc111"></script>
 </body>
 </html>
 
