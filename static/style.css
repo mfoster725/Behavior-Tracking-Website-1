@@ -1320,6 +1320,16 @@ table tbody tr:hover {
     cursor: pointer;
 }
 
+/* Highlight reminder / reset / frenzy rows when STAR period has a 0 or 1 */
+#info-modal .inline-checkbox-row.info-field-highlight {
+    outline: 2px solid #dc3545;
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.15);
+    padding: 0.25rem 0.375rem;
+    margin: -0.25rem -0.375rem;
+}
+
 .infraction-row {
     display: flex;
     gap: 0.625rem;

@@ -3806,23 +3806,62 @@ function buildStarNavContext(select, extras = {}) {
     };
 }
 
-function rowHasStarZero(studentId, period) {
+function getPeriodStarValues(studentId, period) {
     if (isDailyEntryViewActive()) {
         const row = dailyData[studentId]?.[period];
-        if (!row) return false;
-        return row.s === 0 || row.t === 0 || row.a === 0 || row.r === 0;
+        if (!row) return [];
+        return [row.s, row.t, row.a, row.r];
     }
     if (isPeriodEntryViewActive()) {
         const data = periodData[studentId];
-        if (!data) return false;
-        return data.safety_points === 0 || data.teamwork_points === 0 ||
-            data.accountability_points === 0 || data.relationships_points === 0;
+        if (!data) return [];
+        return [
+            data.safety_points,
+            data.teamwork_points,
+            data.accountability_points,
+            data.relationships_points
+        ];
     }
     // Fallback: inspect DOM selects for this student/period
     const inputs = document.querySelectorAll(
         `.daily-input[data-student-id="${studentId}"][data-period="${period}"]`
     );
-    return Array.from(inputs).some((el) => el.value === '0');
+    return Array.from(inputs).map((el) => (el.value === '' ? null : parseInt(el.value, 10)));
+}
+
+function rowHasStarZero(studentId, period) {
+    return getPeriodStarValues(studentId, period).some((v) => v === 0);
+}
+
+function rowHasStarOne(studentId, period) {
+    return getPeriodStarValues(studentId, period).some((v) => v === 1);
+}
+
+function clearInfoModalStarHighlights() {
+    document.querySelectorAll('#info-modal .info-field-highlight').forEach((el) => {
+        el.classList.remove('info-field-highlight');
+    });
+}
+
+function applyInfoModalStarHighlights(studentId, period) {
+    clearInfoModalStarHighlights();
+    const studentIdNum = parseInt(studentId, 10);
+    const hasZero = rowHasStarZero(studentIdNum, period);
+    const hasOne = rowHasStarOne(studentIdNum, period);
+    if (!hasZero && !hasOne) return;
+
+    const reminderRow = document.getElementById('info-reminder-1')?.closest('.inline-checkbox-row');
+    const resetRow = document.getElementById('info-reset')?.closest('.inline-checkbox-row');
+    const frenzyRow = document.getElementById('info-frenzy')?.closest('.inline-checkbox-row');
+
+    // 0 → highlight reminders, reset, and frenzy; 1 → highlight reminders only
+    if (hasZero) {
+        reminderRow?.classList.add('info-field-highlight');
+        resetRow?.classList.add('info-field-highlight');
+        frenzyRow?.classList.add('info-field-highlight');
+    } else if (hasOne) {
+        reminderRow?.classList.add('info-field-highlight');
+    }
 }
 
 function isStarRowComplete(studentId, period) {
@@ -9259,6 +9298,7 @@ async function showInfoModal(event) {
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
     bindInfoModalAutoPreview();
     refreshInfoModalAutoPreview();
+    applyInfoModalStarHighlights(studentId, period);
     
     modal.style.display = 'block';
 }
@@ -9570,6 +9610,7 @@ function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
 
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
+    clearInfoModalStarHighlights();
     modal.style.display = 'none';
     onInfoModalClosedForNav();
 }
@@ -9697,6 +9738,7 @@ function saveInfoModal() {
     
     // Close without double-firing nav handoff; run handoff after save completes
     const modalEl = document.getElementById('info-modal');
+    clearInfoModalStarHighlights();
     if (modalEl) modalEl.style.display = 'none';
     showMessage('Information saved!', 'success');
     onInfoModalClosedForNav();
