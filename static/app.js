@@ -395,6 +395,10 @@ let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
+const STAR_ENTRY_MODE_KEY = 'starEntryMode'; // localStorage: 'student' | 'period'
+let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
+let starNavKeydownBound = false;
+let starZeroWarningKeydownBound = false;
 // Starbucks management state (Bank Account tab)
 let starbucksRows = []; // [{ student_id, student_name, starbucks_count }]
 let starbucksAutosaveTimer = null; // Debounce timer for Starbucks table autosave
@@ -1162,6 +1166,9 @@ function setupEventListeners() {
                 scheduleDailyDataLoad(0);
             });
         }
+
+        initStarEntryModeToggle();
+        initStarNavModals();
 
         ensureDailyGridDelegatedListeners();
         
@@ -2486,7 +2493,9 @@ function renderStudentsGrid() {
             const select = document.createElement('select');
             select.className = 'daily-input';
             select.dataset.studentId = student.id;
+            select.dataset.period = currentPeriod || '';
             select.dataset.category = cat.short;
+            select.dataset.studentName = student.name || '';
             
             if (isStudent()) select.disabled = true;
             
@@ -2516,9 +2525,13 @@ function renderStudentsGrid() {
                 // Update "I" box highlight based on STAR values
                 updateInfoButtonHighlight(student.id, currentPeriod);
                 
-                // Auto-advance to next input (skipping Info column), unless this was triggered by backspace
+                // Auto-advance, unless backspace clear. R uses special nav flow.
                 if (!e.isBackspaceClear) {
-                    moveToNextInput(select);
+                    if (cat.short === 'r' && val !== null) {
+                        afterStarREntry(select);
+                    } else {
+                        moveToNextInput(select);
+                    }
                 }
             });
             
@@ -3268,6 +3281,7 @@ function renderDailyGrid() {
                 select.dataset.studentId = student.id;
                 select.dataset.period = period.time;
                 select.dataset.category = category;
+                select.dataset.studentName = student.name || '';
                 
                 // Disable for students
                 if (isStudent()) {
@@ -3585,9 +3599,13 @@ function handleDailyInputChange(e) {
     // Schedule an autosave of the current daily grid state
     scheduleDailyAutosave();
     
-    // Auto-advance to next input, unless this was triggered by backspace
+    // Auto-advance, unless backspace clear. R uses special nav flow.
     if (!e.isBackspaceClear) {
-        moveToNextInput(select);
+        if (category === 'r' && value !== null) {
+            afterStarREntry(select);
+        } else {
+            moveToNextInput(select);
+        }
     }
 }
 
@@ -3617,12 +3635,14 @@ function handleDailyInputKeydown(e) {
         e.preventDefault();
         select.value = e.key;
         
-        // Trigger change event
+        // Trigger change event (R advance handled in change handler)
         const event = new Event('change', { bubbles: true });
         select.dispatchEvent(event);
-        
-        // Move to next input after setting value (works even if clicked first)
-        moveToNextInput(select);
+
+        // S/T/A still advance here; R is handled by afterStarREntry in change
+        if (select.dataset.category !== 'r') {
+            moveToNextInput(select);
+        }
     }
     // Handle arrow keys for navigation
     else if (e.key === 'ArrowRight' || e.key === 'Tab') {
@@ -3655,6 +3675,462 @@ function moveToPreviousInput(currentInput) {
         const prevInput = allInputs[currentIndex - 1];
         prevInput.focus();
     }
+}
+
+function isDailyEntryViewActive() {
+    return !!document.getElementById('entry-view')?.classList.contains('active');
+}
+
+function isPeriodEntryViewActive() {
+    return !!document.getElementById('period-entry-view')?.classList.contains('active');
+}
+
+function getStarEntryMode() {
+    try {
+        const mode = localStorage.getItem(STAR_ENTRY_MODE_KEY);
+        return mode === 'student' || mode === 'period' ? mode : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setStarEntryMode(mode, { syncToggle = true } = {}) {
+    try {
+        if (mode === 'student' || mode === 'period') {
+            localStorage.setItem(STAR_ENTRY_MODE_KEY, mode);
+        } else {
+            localStorage.removeItem(STAR_ENTRY_MODE_KEY);
+        }
+    } catch (e) {
+        // ignore storage failures
+    }
+    if (syncToggle) {
+        syncStarEntryModeToggle();
+    }
+}
+
+function syncStarEntryModeToggle() {
+    const mode = getStarEntryMode();
+    const studentBtn = document.getElementById('star-entry-mode-student');
+    const periodBtn = document.getElementById('star-entry-mode-period');
+    if (studentBtn) studentBtn.classList.toggle('active', mode === 'student');
+    if (periodBtn) periodBtn.classList.toggle('active', mode === 'period');
+}
+
+function initStarEntryModeToggle() {
+    const toggle = document.getElementById('star-entry-mode-toggle');
+    if (!toggle || toggle.dataset.bound === 'true') {
+        syncStarEntryModeToggle();
+        return;
+    }
+    toggle.dataset.bound = 'true';
+    toggle.querySelectorAll('.star-entry-mode-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            setStarEntryMode(btn.dataset.mode);
+        });
+    });
+    syncStarEntryModeToggle();
+}
+
+function initStarNavModals() {
+    const navModal = document.getElementById('star-nav-modal');
+    if (navModal && navModal.dataset.bound !== 'true') {
+        navModal.dataset.bound = 'true';
+        document.getElementById('star-nav-modal-close')?.addEventListener('click', () => {
+            closeStarNavPopup({ restoreFocus: true });
+        });
+        document.getElementById('star-nav-next-student')?.addEventListener('click', () => {
+            handleStarNavChoice('next-student');
+        });
+        document.getElementById('star-nav-additional-info')?.addEventListener('click', () => {
+            handleStarNavChoice('additional-info');
+        });
+        document.getElementById('star-nav-next-period')?.addEventListener('click', () => {
+            handleStarNavChoice('next-period');
+        });
+    }
+
+    const zeroModal = document.getElementById('star-zero-warning-modal');
+    if (zeroModal && zeroModal.dataset.bound !== 'true') {
+        zeroModal.dataset.bound = 'true';
+        document.getElementById('star-zero-warning-close-x')?.addEventListener('click', () => {
+            closeStarZeroWarningPopup({ continueNav: true });
+        });
+        document.getElementById('star-zero-warning-close')?.addEventListener('click', () => {
+            closeStarZeroWarningPopup({ continueNav: true });
+        });
+        document.getElementById('star-zero-warning-add-info')?.addEventListener('click', () => {
+            openAdditionalInfoFromStarNav();
+        });
+    }
+}
+
+function getStudentsForStarNav() {
+    if (isDailyEntryViewActive()) {
+        return Array.isArray(filteredDailyStudents) && filteredDailyStudents.length
+            ? filteredDailyStudents
+            : allStudents;
+    }
+    if (isPeriodEntryViewActive()) {
+        return Array.isArray(filteredStudentsForPeriod) && filteredStudentsForPeriod.length
+            ? filteredStudentsForPeriod
+            : allStudents;
+    }
+    return allStudents;
+}
+
+function getPeriodForStarInput(select) {
+    return select?.dataset?.period || currentPeriod || '';
+}
+
+function getStudentNameForStarInput(select, studentId) {
+    if (select?.dataset?.studentName) return select.dataset.studentName;
+    const students = getStudentsForStarNav();
+    const match = students.find((s) => String(s.id) === String(studentId));
+    if (match?.name) return match.name;
+    const infoBtn = document.querySelector(`.info-btn[data-student-id="${studentId}"]`);
+    return infoBtn?.dataset?.studentName || 'Student';
+}
+
+function buildStarNavContext(select, extras = {}) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    return {
+        select,
+        studentId,
+        period,
+        studentName: getStudentNameForStarInput(select, studentId),
+        hideAdditionalInfo: false,
+        skipZeroWarning: false,
+        ...extras
+    };
+}
+
+function rowHasStarZero(studentId, period) {
+    if (isDailyEntryViewActive()) {
+        const row = dailyData[studentId]?.[period];
+        if (!row) return false;
+        return row.s === 0 || row.t === 0 || row.a === 0 || row.r === 0;
+    }
+    if (isPeriodEntryViewActive()) {
+        const data = periodData[studentId];
+        if (!data) return false;
+        return data.safety_points === 0 || data.teamwork_points === 0 ||
+            data.accountability_points === 0 || data.relationships_points === 0;
+    }
+    // Fallback: inspect DOM selects for this student/period
+    const inputs = document.querySelectorAll(
+        `.daily-input[data-student-id="${studentId}"][data-period="${period}"]`
+    );
+    return Array.from(inputs).some((el) => el.value === '0');
+}
+
+function isStarRowComplete(studentId, period) {
+    if (isPeriodEntryViewActive()) {
+        const data = periodData[studentId];
+        if (!data) return false;
+        return data.safety_points !== null && data.safety_points !== undefined &&
+            data.teamwork_points !== null && data.teamwork_points !== undefined &&
+            data.accountability_points !== null && data.accountability_points !== undefined &&
+            data.relationships_points !== null && data.relationships_points !== undefined;
+    }
+    const row = dailyData[studentId]?.[period];
+    if (!row) return false;
+    return row.s !== null && row.s !== undefined &&
+        row.t !== null && row.t !== undefined &&
+        row.a !== null && row.a !== undefined &&
+        row.r !== null && row.r !== undefined;
+}
+
+function isLastPeriodRow(period) {
+    if (isPeriodEntryViewActive()) return true;
+    if (!period || !STANDARD_PERIODS.length) return true;
+    return STANDARD_PERIODS[STANDARD_PERIODS.length - 1].time === period;
+}
+
+function focusStarInput(studentId, period, category = 's') {
+    const periodAttr = period || currentPeriod || '';
+    let selector = `.daily-input[data-student-id="${studentId}"][data-category="${category}"]`;
+    if (periodAttr) {
+        selector = `.daily-input[data-student-id="${studentId}"][data-period="${periodAttr}"][data-category="${category}"]`;
+    }
+    const input = document.querySelector(selector);
+    if (input && !input.disabled) {
+        input.focus();
+        return true;
+    }
+    return false;
+}
+
+function findFirstIncompleteStarInput(studentId) {
+    if (isPeriodEntryViewActive()) {
+        if (!isStarRowComplete(studentId, currentPeriod)) {
+            return focusStarInput(studentId, currentPeriod, 's');
+        }
+        return false;
+    }
+    for (const period of STANDARD_PERIODS) {
+        if (!isStarRowComplete(studentId, period.time)) {
+            return focusStarInput(studentId, period.time, 's');
+        }
+    }
+    return false;
+}
+
+function navigateNextPeriod(select) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    if (isPeriodEntryViewActive() || isLastPeriodRow(period)) {
+        return false;
+    }
+    const idx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+    if (idx < 0 || idx >= STANDARD_PERIODS.length - 1) return false;
+    return focusStarInput(studentId, STANDARD_PERIODS[idx + 1].time, 's');
+}
+
+function navigateNextStudent(select) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    const students = getStudentsForStarNav();
+    const currentIndex = students.findIndex((s) => String(s.id) === String(studentId));
+    if (currentIndex < 0) return false;
+
+    const onLastRow = isLastPeriodRow(period);
+
+    for (let i = currentIndex + 1; i < students.length; i++) {
+        const nextStudent = students[i];
+        if (onLastRow) {
+            if (findFirstIncompleteStarInput(nextStudent.id)) {
+                return true;
+            }
+            continue;
+        }
+        if (focusStarInput(nextStudent.id, period, 's')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function afterStarREntry(select) {
+    const context = buildStarNavContext(select);
+    if (!context.skipZeroWarning && rowHasStarZero(context.studentId, context.period)) {
+        showStarZeroWarningPopup(context);
+        return;
+    }
+    continueAfterStarREntry(context);
+}
+
+function continueAfterStarREntry(context) {
+    if (!context?.select) return;
+    pendingStarNavContext = context;
+    const mode = getStarEntryMode();
+    if (mode === 'period') {
+        pendingStarNavContext = null;
+        navigateNextStudent(context.select);
+        return;
+    }
+    if (mode === 'student') {
+        pendingStarNavContext = null;
+        // On last row / period entry, Next Period is unavailable — fall back to next student
+        if (!navigateNextPeriod(context.select)) {
+            navigateNextStudent(context.select);
+        }
+        return;
+    }
+    showStarNavPopup(context);
+}
+
+function showStarZeroWarningPopup(context) {
+    pendingStarNavContext = { ...context, skipZeroWarning: true };
+    const modal = document.getElementById('star-zero-warning-modal');
+    const messageEl = document.getElementById('star-zero-warning-message');
+    if (!modal || !messageEl) {
+        continueAfterStarREntry(pendingStarNavContext);
+        return;
+    }
+    messageEl.textContent =
+        `${context.studentName} has a 0 during this period. Please add additional information.`;
+    modal.style.display = 'block';
+    const addBtn = document.getElementById('star-zero-warning-add-info');
+    // Autofocus Add Information so Enter activates it; Close is reached via Tab
+    setTimeout(() => addBtn?.focus(), 0);
+
+    if (!starZeroWarningKeydownBound) {
+        starZeroWarningKeydownBound = true;
+        document.addEventListener('keydown', handleStarZeroWarningKeydown, true);
+    }
+}
+
+function closeStarZeroWarningPopup({ continueNav = false } = {}) {
+    const modal = document.getElementById('star-zero-warning-modal');
+    if (modal) modal.style.display = 'none';
+    if (starZeroWarningKeydownBound) {
+        document.removeEventListener('keydown', handleStarZeroWarningKeydown, true);
+        starZeroWarningKeydownBound = false;
+    }
+    if (continueNav && pendingStarNavContext) {
+        const ctx = { ...pendingStarNavContext, skipZeroWarning: true };
+        pendingStarNavContext = null;
+        continueAfterStarREntry(ctx);
+    }
+}
+
+function handleStarZeroWarningKeydown(e) {
+    const modal = document.getElementById('star-zero-warning-modal');
+    if (!modal || modal.style.display !== 'block') return;
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        closeStarZeroWarningPopup({ continueNav: true });
+    }
+}
+
+function showStarNavPopup(context) {
+    pendingStarNavContext = context;
+    const modal = document.getElementById('star-nav-modal');
+    if (!modal) {
+        navigateNextStudent(context.select);
+        return;
+    }
+
+    const nextPeriodBtn = document.getElementById('star-nav-next-period');
+    const infoBtn = document.getElementById('star-nav-additional-info');
+    const hideNextPeriod = isLastPeriodRow(context.period) || isPeriodEntryViewActive();
+    if (nextPeriodBtn) {
+        nextPeriodBtn.style.display = hideNextPeriod ? 'none' : '';
+    }
+    if (infoBtn) {
+        const hideInfo = !!context.hideAdditionalInfo;
+        infoBtn.style.display = hideInfo ? 'none' : '';
+        const highlight = !hideInfo && rowHasStarZero(context.studentId, context.period);
+        infoBtn.classList.toggle('star-nav-highlight', highlight);
+    }
+
+    modal.style.display = 'block';
+    const defaultBtn = document.getElementById('star-nav-next-student');
+    setTimeout(() => defaultBtn?.focus(), 0);
+
+    if (!starNavKeydownBound) {
+        starNavKeydownBound = true;
+        document.addEventListener('keydown', handleStarNavPopupKeydown, true);
+    }
+}
+
+function closeStarNavPopup({ restoreFocus = false } = {}) {
+    const modal = document.getElementById('star-nav-modal');
+    if (modal) modal.style.display = 'none';
+    if (starNavKeydownBound) {
+        document.removeEventListener('keydown', handleStarNavPopupKeydown, true);
+        starNavKeydownBound = false;
+    }
+    if (restoreFocus && pendingStarNavContext?.select) {
+        pendingStarNavContext.select.focus();
+    }
+}
+
+function handleStarNavPopupKeydown(e) {
+    const modal = document.getElementById('star-nav-modal');
+    if (!modal || modal.style.display !== 'block') return;
+
+    const key = e.key;
+    if (key === 'Tab') {
+        e.preventDefault();
+        handleStarNavChoice('next-student');
+        return;
+    }
+    if (key === 'Enter') {
+        const nextPeriodBtn = document.getElementById('star-nav-next-period');
+        if (nextPeriodBtn && nextPeriodBtn.style.display !== 'none') {
+            e.preventDefault();
+            handleStarNavChoice('next-period');
+        }
+        return;
+    }
+    if (key === 'i' || key === 'I') {
+        const infoBtn = document.getElementById('star-nav-additional-info');
+        if (infoBtn && infoBtn.style.display !== 'none') {
+            e.preventDefault();
+            handleStarNavChoice('additional-info');
+        }
+        return;
+    }
+    if (key === 'Escape') {
+        e.preventDefault();
+        closeStarNavPopup({ restoreFocus: true });
+    }
+}
+
+function handleStarNavChoice(action) {
+    const context = pendingStarNavContext;
+    if (!context?.select) {
+        closeStarNavPopup();
+        return;
+    }
+
+    if (action === 'next-student') {
+        setStarEntryMode('period');
+        closeStarNavPopup();
+        pendingStarNavContext = null;
+        navigateNextStudent(context.select);
+        return;
+    }
+    if (action === 'next-period') {
+        setStarEntryMode('student');
+        closeStarNavPopup();
+        pendingStarNavContext = null;
+        if (!navigateNextPeriod(context.select)) {
+            navigateNextStudent(context.select);
+        }
+        return;
+    }
+    if (action === 'additional-info') {
+        closeStarNavPopup();
+        openAdditionalInfoFromStarNav();
+    }
+}
+
+function openAdditionalInfoFromStarNav() {
+    const context = pendingStarNavContext;
+    if (!context) return;
+
+    // Close zero warning without continuing nav; keep pending context for I handoff
+    const zeroModal = document.getElementById('star-zero-warning-modal');
+    if (zeroModal && zeroModal.style.display === 'block') {
+        zeroModal.style.display = 'none';
+        if (starZeroWarningKeydownBound) {
+            document.removeEventListener('keydown', handleStarZeroWarningKeydown, true);
+            starZeroWarningKeydownBound = false;
+        }
+    }
+
+    pendingStarNavContext = {
+        ...context,
+        skipZeroWarning: true,
+        hideAdditionalInfo: true,
+        awaitingInfoModalClose: true
+    };
+
+    const infoBtn = document.querySelector(
+        `.info-btn[data-student-id="${context.studentId}"][data-period="${context.period || currentPeriod}"]`
+    );
+    if (infoBtn) {
+        showInfoModal({ target: infoBtn });
+    } else {
+        onInfoModalClosedForNav();
+    }
+}
+
+function onInfoModalClosedForNav() {
+    const context = pendingStarNavContext;
+    if (!context?.awaitingInfoModalClose) return;
+    const nextContext = {
+        ...context,
+        awaitingInfoModalClose: false,
+        skipZeroWarning: true,
+        hideAdditionalInfo: true
+    };
+    pendingStarNavContext = null;
+    continueAfterStarREntry(nextContext);
 }
 
 function updateDailyAutosaveStatus(text) {
@@ -9095,6 +9571,7 @@ function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
     modal.style.display = 'none';
+    onInfoModalClosedForNav();
 }
 
 function saveInfoModal() {
@@ -9218,8 +9695,11 @@ function saveInfoModal() {
         }
     }
     
-    closeInfoModal();
+    // Close without double-firing nav handoff; run handoff after save completes
+    const modalEl = document.getElementById('info-modal');
+    if (modalEl) modalEl.style.display = 'none';
     showMessage('Information saved!', 'success');
+    onInfoModalClosedForNav();
 }
 
 // Helper function to check if info data has any content

@@ -844,6 +844,93 @@ table tbody tr:hover {
     cursor: pointer;
 }
 
+.star-entry-mode-toggle {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-elevated);
+}
+
+.star-entry-mode-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    min-height: 34px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.star-entry-mode-btn + .star-entry-mode-btn {
+    border-left: 1px solid var(--border-strong);
+}
+
+.star-entry-mode-btn:hover {
+    background: var(--bg-page);
+    color: var(--text-primary);
+}
+
+.star-entry-mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+.star-entry-mode-btn.active:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.star-nav-modal-content,
+.star-zero-warning-modal-content {
+    max-width: 420px;
+}
+
+.star-nav-modal-hint {
+    margin: 0.5rem 0 1.25rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.star-nav-modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.star-nav-btn {
+    width: 100%;
+    text-align: left;
+    justify-content: space-between;
+    display: flex;
+    align-items: center;
+}
+
+.star-nav-hotkey {
+    font-size: 0.8rem;
+    font-weight: 500;
+    opacity: 0.8;
+    margin-left: 0.75rem;
+    white-space: nowrap;
+}
+
+.star-nav-btn.star-nav-highlight {
+    outline: 2px solid #dc3545;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.15);
+}
+
+.star-zero-warning-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-start;
+}
+
 /* Attendance dropdown styling (match global corner radius) */
 .attendance-select {
     border-radius: var(--radius-sm);
