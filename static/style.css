@@ -1008,8 +1008,9 @@ table tbody tr:hover {
     text-transform: none;
     letter-spacing: -0.3px;
     border-bottom: 1px solid var(--border);
-    padding: 6px 6px;
+    padding: 6px 22px 6px 6px;
     gap: 4px;
+    position: relative;
     /* Only round the top corners so it visually merges with STARI row below */
     border-top-left-radius: var(--radius-md);
     border-top-right-radius: var(--radius-md);
@@ -2335,17 +2336,26 @@ table tbody tr:hover {
 .plan-header-controls {
     display: flex;
     align-items: flex-start;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 4px;
     width: 100%;
-    margin-bottom: 2px;
+    margin: 0;
+    min-height: 0;
 }
+
+/* Only take vertical space when a threshold met icon is showing */
+.plan-met-icons:empty {
+    display: none;
+}
+
 .plan-met-icons {
     display: flex;
     flex-wrap: wrap;
     gap: 2px;
     min-height: 0;
+    line-height: 0;
 }
+
 .plan-met-icon-btn {
     border: none;
     background: transparent;
@@ -2353,27 +2363,39 @@ table tbody tr:hover {
     cursor: pointer;
     line-height: 0;
 }
+
 .plan-met-icon-img {
     display: block;
     width: 18px;
     height: 18px;
 }
+
 .plan-kebab-wrap {
-    position: relative;
-    flex-shrink: 0;
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 5;
+    line-height: 0;
 }
+
 .plan-kebab-btn {
-    border: 1px solid #ddd;
-    background: #fff;
+    border: none;
+    background: transparent;
     border-radius: 4px;
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     cursor: pointer;
     font-size: 16px;
     line-height: 1;
     color: #334155;
 }
+
+.plan-kebab-btn:hover,
+.plan-kebab-btn:focus {
+    background: transparent;
+}
+
 .plan-kebab-menu {
     display: none;
     position: absolute;
@@ -2387,7 +2409,9 @@ table tbody tr:hover {
     box-shadow: 0 8px 24px rgba(0,0,0,0.12);
     padding: 4px;
 }
+
 .plan-kebab-menu.open { display: block; }
+
 .plan-kebab-menu button {
     display: block;
     width: 100%;
@@ -2399,6 +2423,7 @@ table tbody tr:hover {
     cursor: pointer;
     border-radius: 6px;
 }
+
 .plan-kebab-menu button:hover { background: #f1f5f9; }
 .plan-met-popover {
     position: absolute;

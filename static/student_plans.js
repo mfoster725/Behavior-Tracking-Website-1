@@ -326,6 +326,14 @@
                     <textarea class="plan-then-input" rows="3" ${readOnly ? 'readonly' : ''} placeholder="Then…">${escapeHtml(row.then_text || '')}</textarea>
                 </td>
                 <td class="plan-row-actions">
+                    ${
+                        readOnly && canEditPlans() && row.id
+                            ? `<div class="plan-manual-met-actions" style="display:flex;flex-direction:column;gap:6px;">
+                                <button type="button" class="btn-secondary plan-manual-met-btn" data-row-id="${row.id}" data-deliver="0" style="padding:4px 10px;font-size:12px;" title="Mark met — shows reward star until delivered">Met</button>
+                                <button type="button" class="btn-primary plan-manual-met-btn" data-row-id="${row.id}" data-deliver="1" style="padding:4px 10px;font-size:12px;" title="Mark met and delivered in one step (no star)">Met &amp; delivered</button>
+                               </div>`
+                            : ''
+                    }
                     ${readOnly ? '' : `<button type="button" class="btn-danger plan-remove-row" style="padding:4px 8px;font-size:12px;">Remove</button>`}
                 </td>
             `;
@@ -333,6 +341,44 @@
             updateThresholdFieldVisibility(tr);
             wireRowEvents(tr, idx);
         });
+    }
+
+    async function manualMetRow(rowId, deliver, btn) {
+        if (!canEditPlans() || !planModalState.studentId || !rowId) return;
+        const label = deliver ? 'Met & delivered' : 'Met';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '…';
+        }
+        try {
+            const res = await fetch(
+                `/api/students/${planModalState.studentId}/plan/rows/${rowId}/manual-met`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deliver: !!deliver }),
+                }
+            );
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Failed to mark met');
+            if (typeof showMessage === 'function') {
+                showMessage(deliver ? 'Marked met and delivered.' : 'Marked met — star added.', 'success');
+            }
+            if (btn) {
+                btn.textContent = 'Done ✓';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = label;
+                }, 1200);
+            }
+            await refreshActiveMets([planModalState.studentId]);
+        } catch (e) {
+            alert(e.message || 'Could not mark met.');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = label;
+            }
+        }
     }
 
     function wireRowEvents(tr, idx) {
@@ -358,6 +404,15 @@
                 renderPlanRows();
             });
         }
+
+        const metBtns = tr.querySelectorAll('.plan-manual-met-btn');
+        metBtns.forEach((metBtn) => {
+            metBtn.addEventListener('click', () => {
+                const rowId = parseInt(metBtn.dataset.rowId, 10);
+                const deliver = metBtn.dataset.deliver === '1';
+                manualMetRow(rowId, deliver, metBtn);
+            });
+        });
 
         if (ifInput && dropdown && !planModalState.readOnly) {
             let timer = null;

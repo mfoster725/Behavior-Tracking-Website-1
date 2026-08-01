@@ -3156,7 +3156,7 @@ function renderDailyGrid() {
         studentHeader.style.display = 'flex';
         studentHeader.style.flexDirection = 'column';
         studentHeader.style.gap = '4px';
-        studentHeader.style.padding = '6px 8px';
+        studentHeader.style.padding = '6px 22px 6px 8px';
         studentHeader.dataset.studentId = student.id;
         
         // Apply card color background

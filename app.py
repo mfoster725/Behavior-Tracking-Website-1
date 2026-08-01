@@ -2809,6 +2809,54 @@ def deliver_plan_threshold_event(event_id):
     })
 
 
+@app.route('/api/students/<int:student_id>/plan/rows/<int:row_id>/manual-met', methods=['POST'])
+@limiter.limit("60 per minute")
+@login_required
+def manual_plan_row_met(student_id, row_id):
+    """
+    Staff/admin: manually mark a plan If/Then row as met.
+    Body: { "deliver": false } → met only (shows star until delivered)
+          { "deliver": true }  → met + delivered in one step (no star)
+    """
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    student = Student.query.get_or_404(student_id)
+    plan = StudentPlan.query.filter_by(student_id=student.id).first()
+    if not plan:
+        return jsonify({'error': 'Student has no plan'}), 404
+    row = StudentPlanRow.query.filter_by(id=row_id, plan_id=plan.id).first()
+    if not row:
+        return jsonify({'error': 'Plan row not found'}), 404
+
+    data = request.json or {}
+    also_deliver = bool(data.get('deliver'))
+
+    now = datetime.utcnow()
+    # Unique window key so repeated manual mets are allowed and tracked separately
+    window_key = f"manual-{now.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
+    evt = PlanThresholdEvent(
+        student_id=student.id,
+        plan_row_id=row.id,
+        if_normalized=normalize_if_text(row.if_text),
+        window_key=window_key,
+        met_at=now,
+        delivered_at=now if also_deliver else None,
+        delivered_by_user_id=current_user.id if also_deliver else None,
+    )
+    db.session.add(evt)
+    db.session.commit()
+    return jsonify({
+        'event_id': evt.id,
+        'plan_row_id': row.id,
+        'window_key': window_key,
+        'met_at': evt.met_at.isoformat(),
+        'delivered_at': evt.delivered_at.isoformat() if evt.delivered_at else None,
+        'delivered_by_user_id': evt.delivered_by_user_id,
+        'is_delivered': also_deliver,
+        'message': 'Marked met and delivered' if also_deliver else 'Marked met',
+    }), 201
+
+
 @app.route('/api/students/<int:student_id>/plan/delivery-history', methods=['GET'])
 @limiter.limit("60 per minute")
 @login_required
