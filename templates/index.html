@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=redesign9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=levelups1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -94,6 +94,7 @@
                 username: {{ user.username|tojson }},
                 name: {{ (user.name|default(user.username))|tojson }},
                 role: {{ user.role|tojson }},
+                designation: {{ (user.designation|default(''))|tojson }},
                 studentId: {% if user.student_id is not none %}{{ user.student_id }}{% else %}null{% endif %},
                 is_outside_staff: {{ 'true' if user.is_outside_staff else 'false' }}
             };
@@ -1969,7 +1970,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=acc111"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=levelups1"></script>
 </body>
 </html>
 

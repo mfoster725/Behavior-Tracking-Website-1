@@ -5810,6 +5810,124 @@ a.dashboard-compare-toggle {
     flex: 1;
 }
 
+.overview-card--rich .overview-rich-bottom .overview-level-ups-panel {
+    flex: 1;
+    min-width: 110px;
+}
+
+.overview-level-ups-panel {
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.overview-level-ups-panel:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.overview-level-ups-panel.overview-stat-selected {
+    background-color: var(--bg-surface);
+    border-color: var(--accent);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
+}
+
+.overview-level-ups-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    text-align: center;
+    padding: 8px 4px 4px;
+}
+
+.overview-level-ups-count {
+    font-size: 1.65rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.overview-level-ups-sub {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 4px;
+    line-height: 1.25;
+}
+
+.level-ups-card .level-ups-intro {
+    margin: 0 0 14px 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.level-ups-card .level-ups-section {
+    margin-bottom: 18px;
+}
+
+.level-ups-card .level-ups-section-title {
+    margin: 0 0 8px 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.level-ups-card .level-ups-empty {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.level-ups-card .level-ups-table-wrap {
+    overflow-x: auto;
+}
+
+.level-ups-card .level-ups-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+}
+
+.level-ups-card .level-ups-table th,
+.level-ups-card .level-ups-table td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.level-ups-card .level-ups-table th {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.level-ups-card .level-ups-col-days,
+.level-ups-card .level-ups-col-avg {
+    white-space: nowrap;
+}
+
+.level-ups-card .level-ups-col-needed {
+    min-width: 12rem;
+}
+
+.level-ups-card .level-ups-col-action {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.level-ups-card .level-up-btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
 .overview-incidents-panel {
     cursor: pointer;
     transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;

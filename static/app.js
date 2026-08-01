@@ -734,6 +734,19 @@ function isAdmin() {
     return window.currentUser && window.currentUser.role === 'admin';
 }
 
+function isCaseManagerUser() {
+    return !!(
+        window.currentUser &&
+        ['staff', 'admin'].includes(window.currentUser.role) &&
+        window.currentUser.designation === 'Case Manager'
+    );
+}
+
+/** Admins and Case Managers can promote eligible students. */
+function canManageLevelUps() {
+    return isAdmin() || isCaseManagerUser();
+}
+
 function canEdit() {
     return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
 }
@@ -19981,6 +19994,60 @@ function setupCompareToggle(pageKey) {
     }
 }
 
+// ---- Level Up's (Summary Overview) ----
+function buildSummaryLevelUpsQueryParams() {
+    const st = (typeof dashboardState !== 'undefined' && dashboardState.summary) ? dashboardState.summary : {};
+    const params = [];
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    return params;
+}
+
+function formatCardColorLabel(color) {
+    const c = String(color || 'yellow').toLowerCase();
+    if (c === 'green') return 'Green Card';
+    if (c === 'blue') return 'Blue Card';
+    return 'Yellow Card';
+}
+
+async function fetchLevelUpsData() {
+    const params = buildSummaryLevelUpsQueryParams();
+    const url = '/api/level-ups' + (params.length ? `?${params.join('&')}` : '');
+    const response = await fetch(url, { credentials: 'same-origin' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const msg = data && data.error ? data.error : 'Failed to load Level Up’s data.';
+        throw new Error(msg);
+    }
+    return data;
+}
+
+function updateLevelUpsOverviewTeaser(overviewCard, data) {
+    if (!overviewCard || !data) return;
+    const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
+    const subEl = overviewCard.querySelector('[data-level-ups-sub]');
+    const eligible = Number(data.eligible_count || 0);
+    if (countEl) countEl.textContent = String(eligible);
+    if (subEl) {
+        subEl.textContent = eligible === 1 ? 'ready to level up' : 'ready to level up';
+    }
+}
+
+async function refreshLevelUpsOverviewTeaser(overviewCard) {
+    if (!overviewCard) return;
+    try {
+        const data = await fetchLevelUpsData();
+        overviewCard._levelUpsData = data;
+        updateLevelUpsOverviewTeaser(overviewCard, data);
+    } catch (err) {
+        console.warn('Unable to load Level Up’s teaser:', err);
+        const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
+        if (countEl) countEl.textContent = '—';
+    }
+}
+
 // ---- Incentive Tracking Toggle (Summary / Point Card) ----
 function setupIncentiveToggle() {
     const toggle = document.getElementById('summary-incentive-toggle');
@@ -22861,6 +22928,13 @@ function buildOverviewDashboardCardHtml(data) {
                     </div>
                 </div>
             </div>
+            <div class="overview-beige-panel overview-stat overview-level-ups-panel" data-overview-key="level_ups" title="Level Up’s">
+                <div class="overview-panel-kicker">Level Up’s</div>
+                <div class="overview-level-ups-body">
+                    <div class="overview-level-ups-count" data-level-ups-eligible-count>—</div>
+                    <div class="overview-level-ups-sub" data-level-ups-sub>ready to level up</div>
+                </div>
+            </div>
         </div>
     </div>`;
 }
@@ -22879,6 +22953,11 @@ function renderSummarySingle(container, data) {
         attachOverviewCardInteractions(container, data);
     } catch (e) {
         console.error('Error wiring overview card interactions:', e);
+    }
+
+    const overviewCardEl = container.querySelector('.overview-card');
+    if (overviewCardEl) {
+        refreshLevelUpsOverviewTeaser(overviewCardEl);
     }
 
     const gridEl = container.querySelector('.dashboard-card-grid');
@@ -23252,7 +23331,8 @@ function attachOverviewCardInteractions(container, data) {
         infractions: 'infractions_card',
         reminders: 'reminders',
         resets: 'resets',
-        trigger_times: 'trigger_times'
+        trigger_times: 'trigger_times',
+        level_ups: 'level_ups'
     };
 
     const STORAGE_KEY = 'summary_overview_selected_stats_v1';
@@ -25414,6 +25494,151 @@ function attachOverviewCardInteractions(container, data) {
         setTriggerTimesView('graph');
     };
 
+    const buildLevelUpsCard = () => {
+        const card = document.createElement('div');
+        card.className = 'dashboard-card level-ups-card overview-extra-card';
+        card.dataset.overviewCard = 'level_ups';
+        card.innerHTML = `
+            <div class="dashboard-card-header level-ups-card-header">
+                <h3 class="dashboard-card-title">Level Up’s</h3>
+            </div>
+            <div class="dashboard-card-body level-ups-card-body">
+                <div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading Level Up’s...</p></div>
+            </div>
+        `;
+        grid.appendChild(card);
+
+        const body = card.querySelector('.level-ups-card-body');
+        const canPromote = canManageLevelUps();
+
+        const renderTables = (payload) => {
+            const yellowRows = payload.yellow_to_green || [];
+            const greenRows = payload.green_to_blue || [];
+            const showPromote = !!(payload.can_level_up && canPromote);
+
+            const buildSection = (title, rows, emptyText) => {
+                if (!rows.length) {
+                    return `
+                        <div class="level-ups-section">
+                            <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
+                            <p class="level-ups-empty">${escapeHtml(emptyText)}</p>
+                        </div>
+                    `;
+                }
+                const headAction = showPromote ? '<th class="level-ups-col-action"></th>' : '';
+                const bodyRows = rows.map((row) => {
+                    const daysLogged = Number(row.days_logged || 0);
+                    const daysRequired = Number(row.days_required || 30);
+                    const avg = row.average_percent;
+                    const avgText = (avg == null || Number.isNaN(Number(avg))) ? '—' : `${Number(avg).toFixed(1)}%`;
+                    const needed = Number(row.days_at_90_needed || 0);
+                    const neededText = row.eligible
+                        ? 'Eligible now'
+                        : `${needed} more day${needed === 1 ? '' : 's'} with 90% or more to level up`;
+                    const actionCell = showPromote
+                        ? (row.eligible
+                            ? `<td class="level-ups-col-action"><button type="button" class="btn-primary level-up-btn" data-level-up-student-id="${row.id}">Level Up</button></td>`
+                            : '<td class="level-ups-col-action"></td>')
+                        : '';
+                    return `<tr data-student-id="${row.id}">
+                        <td>${escapeHtml(row.name || '')}</td>
+                        <td>${escapeHtml(formatCardColorLabel(row.card_color))}</td>
+                        <td class="level-ups-col-days">${daysLogged}/${daysRequired}</td>
+                        <td class="level-ups-col-avg">${escapeHtml(avgText)}</td>
+                        <td class="level-ups-col-needed">${escapeHtml(neededText)}</td>
+                        ${actionCell}
+                    </tr>`;
+                }).join('');
+                return `
+                    <div class="level-ups-section">
+                        <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
+                        <div class="level-ups-table-wrap">
+                            <table class="level-ups-table">
+                                <thead>
+                                    <tr>
+                                        <th>Student</th>
+                                        <th>Current</th>
+                                        <th>Days</th>
+                                        <th>Average</th>
+                                        <th>Progress</th>
+                                        ${headAction}
+                                    </tr>
+                                </thead>
+                                <tbody>${bodyRows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            };
+
+            body.innerHTML = `
+                <p class="level-ups-intro">
+                    Students level up when their average STAR % over the previous 30 school days with data is 90% or higher.
+                    Excused days are excluded; unexcused days count as 0%.
+                </p>
+                ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.')}
+                ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.')}
+            `;
+
+            if (showPromote) {
+                body.querySelectorAll('.level-up-btn').forEach((btn) => {
+                    btn.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const sid = Number(btn.getAttribute('data-level-up-student-id'));
+                        if (!sid) return;
+                        const studentName = btn.closest('tr')?.querySelector('td')?.textContent || 'this student';
+                        if (!window.confirm(`Level up ${studentName}? This moves them to the next card color and restarts their 30-day window.`)) {
+                            return;
+                        }
+                        btn.disabled = true;
+                        btn.textContent = 'Working…';
+                        try {
+                            const resp = await fetch(`/api/students/${sid}/level-up`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json' },
+                            });
+                            const result = await resp.json().catch(() => ({}));
+                            if (!resp.ok) {
+                                throw new Error(result.error || 'Level up failed');
+                            }
+                            const refreshed = await fetchLevelUpsData();
+                            overviewCard._levelUpsData = refreshed;
+                            updateLevelUpsOverviewTeaser(overviewCard, refreshed);
+                            renderTables(refreshed);
+                            if (typeof applySummaryMasonryLayout === 'function') {
+                                applySummaryMasonryLayout(grid);
+                            }
+                        } catch (err) {
+                            console.error(err);
+                            window.alert(err.message || 'Level up failed');
+                            btn.disabled = false;
+                            btn.textContent = 'Level Up';
+                        }
+                    });
+                });
+            }
+        };
+
+        const loadAndRender = async () => {
+            try {
+                const payload = await fetchLevelUpsData();
+                overviewCard._levelUpsData = payload;
+                updateLevelUpsOverviewTeaser(overviewCard, payload);
+                renderTables(payload);
+            } catch (err) {
+                console.error(err);
+                body.innerHTML = `<div class="dashboard-empty"><p>${escapeHtml(err.message || 'Error loading Level Up’s')}</p></div>`;
+            }
+            if (typeof applySummaryMasonryLayout === 'function') {
+                applySummaryMasonryLayout(grid);
+            }
+        };
+
+        loadAndRender();
+    };
+
     const applySelectionChange = (box, key, { restore = false } = {}) => {
         if (!key) return;
 
@@ -25442,6 +25667,21 @@ function attachOverviewCardInteractions(container, data) {
                 }
             } else {
                 selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
+            }
+        } else if (key === 'level_ups') {
+            const opened = toggleExtraCard('level_ups', buildLevelUpsCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'level_ups');
+                selectionOrder.push('level_ups');
+                if (!restore) {
+                    const levelCard = container.querySelector('.level-ups-card');
+                    if (levelCard && typeof levelCard.scrollIntoView === 'function') {
+                        levelCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'level_ups');
             }
         } else if (key === 'starbucks') {
             // Starbucks: only visual selection, no extra card

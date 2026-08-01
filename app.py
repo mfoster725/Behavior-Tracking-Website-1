@@ -516,6 +516,15 @@ def is_case_manager(user):
     return user.role in ('staff', 'admin') and getattr(user, 'designation', None) == 'Case Manager'
 
 
+def can_manage_level_ups(user):
+    """True if user can see/use the Level Up action (admins and Case Managers)."""
+    if not user:
+        return False
+    if getattr(user, 'role', None) == 'admin':
+        return True
+    return is_case_manager(user)
+
+
 # Password validation
 def validate_password_strength(password):
     """
@@ -728,6 +737,8 @@ class Student(db.Model):
     email = db.Column(db.String(100))
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
+    # When set, only school days with data after this date count toward the next level-up window.
+    card_level_reset_at = db.Column(db.Date, nullable=True)
     # Directory information opt-out
     directory_info_opt_out = db.Column(db.Boolean, default=False, nullable=False)
     # Import: lunch number used as external unique identifier
@@ -1354,6 +1365,14 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add directory_info_opt_out column (may already exist): {e}")
+                    if 'card_level_reset_at' not in columns:
+                        print("Adding card_level_reset_at column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE students ADD COLUMN card_level_reset_at DATE"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add card_level_reset_at column (may already exist): {e}")
             except Exception as inner_e:
                 print(f"Error during database migration: {inner_e}")
                 import traceback
@@ -10895,6 +10914,301 @@ def update_starbucks_balances_bulk():
         return jsonify({'error': 'Failed to update Starbucks balances'}), 500
 
     return jsonify({'status': 'ok'})
+
+
+LEVEL_UP_WINDOW_DAYS = 30
+LEVEL_UP_AVERAGE_THRESHOLD = 90.0
+LEVEL_UP_NEXT_COLOR = {
+    'yellow': 'green',
+    'green': 'blue',
+}
+
+
+def _normalize_card_color(card_color):
+    color = (card_color or '').strip().lower()
+    if color in ('yellow', 'green', 'blue'):
+        return color
+    # Unset card color is treated as Yellow Card (school starting level).
+    return 'yellow'
+
+
+def _daily_star_overall_percent_for_level_up(record):
+    """
+    Daily STAR overall % for level-up windows.
+    Excused days are excluded (None). Unexcused days count as 0%.
+    Present days use the same STAR category average as summary/incentive tracking.
+    """
+    status = _record_attendance_status_norm(record)
+    if status == 'excused':
+        return None
+    if status == 'unexcused':
+        return 0.0
+
+    total_safety = 0
+    total_teamwork = 0
+    total_accountability = 0
+    total_relationships = 0
+    total_possible = 0
+    for period in getattr(record, 'periods', None) or []:
+        total_safety += int(period.safety_points or 0)
+        total_teamwork += int(period.teamwork_points or 0)
+        total_accountability += int(period.accountability_points or 0)
+        total_relationships += int(period.relationships_points or 0)
+        total_possible += int(period.points_possible or 4)
+
+    if total_possible <= 0:
+        return 0.0
+
+    num_periods = total_possible / 4.0
+    max_per_category = num_periods * 2.0
+    if max_per_category <= 0:
+        return 0.0
+
+    safety_percent = (total_safety / max_per_category) * 100.0
+    teamwork_percent = (total_teamwork / max_per_category) * 100.0
+    accountability_percent = (total_accountability / max_per_category) * 100.0
+    relationships_percent = (total_relationships / max_per_category) * 100.0
+    return (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4.0
+
+
+def _level_up_days_with_data(records, reset_at=None):
+    """
+    Return daily overall percents newest-first for school days with data.
+    Only dates after card_level_reset_at are included when a reset exists.
+    """
+    by_date = {}
+    for record in records or []:
+        record_date = getattr(record, 'date', None)
+        if record_date is None:
+            continue
+        if reset_at and record_date <= reset_at:
+            continue
+        pct = _daily_star_overall_percent_for_level_up(record)
+        if pct is None:
+            continue
+        # Prefer the latest processed record if duplicates ever appear.
+        by_date[record_date] = float(pct)
+
+    ordered_dates = sorted(by_date.keys(), reverse=True)
+    return [by_date[d] for d in ordered_dates]
+
+
+def _average_or_none(values):
+    if not values:
+        return None
+    return sum(values) / float(len(values))
+
+
+def _days_at_90_needed_for_level_up(daily_pcts_newest_first, window=LEVEL_UP_WINDOW_DAYS, threshold=LEVEL_UP_AVERAGE_THRESHOLD):
+    """
+    How many additional future days at exactly 90% are needed until the rolling
+    window has `window` days and averages >= threshold.
+    """
+    window = int(window)
+    threshold = float(threshold)
+    sim = list(daily_pcts_newest_first[:window])
+
+    def is_eligible(vals):
+        return len(vals) >= window and _average_or_none(vals) >= threshold
+
+    if is_eligible(sim):
+        return 0
+
+    # Worst case: replace the entire window with 90% days.
+    max_steps = window * 2
+    needed = 0
+    while needed < max_steps:
+        needed += 1
+        sim = [threshold] + sim
+        if len(sim) > window:
+            sim = sim[:window]
+        if is_eligible(sim):
+            return needed
+    return needed
+
+
+def _compute_level_up_progress(daily_pcts_newest_first):
+    window = list(daily_pcts_newest_first[:LEVEL_UP_WINDOW_DAYS])
+    days_logged = len(window)
+    average = _average_or_none(window)
+    eligible = days_logged >= LEVEL_UP_WINDOW_DAYS and average is not None and average >= LEVEL_UP_AVERAGE_THRESHOLD
+    days_needed = 0 if eligible else _days_at_90_needed_for_level_up(daily_pcts_newest_first)
+    return {
+        'days_logged': days_logged,
+        'days_required': LEVEL_UP_WINDOW_DAYS,
+        'average_percent': round(average, 1) if average is not None else None,
+        'days_at_90_needed': days_needed,
+        'eligible': eligible,
+    }
+
+
+def _build_level_up_entry(student, records):
+    color = _normalize_card_color(getattr(student, 'card_color', None))
+    if color == 'blue':
+        return None
+
+    reset_at = getattr(student, 'card_level_reset_at', None)
+    daily_pcts = _level_up_days_with_data(records, reset_at=reset_at)
+    progress = _compute_level_up_progress(daily_pcts)
+    next_color = LEVEL_UP_NEXT_COLOR.get(color)
+    return {
+        'id': student.id,
+        'name': student.name,
+        'card_color': color,
+        'next_card_color': next_color,
+        'days_logged': progress['days_logged'],
+        'days_required': progress['days_required'],
+        'average_percent': progress['average_percent'],
+        'days_at_90_needed': progress['days_at_90_needed'],
+        'eligible': progress['eligible'],
+        'card_level_reset_at': reset_at.isoformat() if reset_at else None,
+    }
+
+
+@app.route('/api/level-ups', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+@api_json_errors
+def level_ups():
+    """
+    Level-up progress for selected students (Yellow→Green and Green→Blue).
+
+    Eligibility: average STAR % over the previous 30 school days with data >= 90%.
+    Excused days are excluded; unexcused days count as 0%.
+    """
+    from sqlalchemy.orm import joinedload
+
+    student_id = request.args.get('student_id', type=int)
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+
+    selected_ids = _resolve_student_scope(
+        student_id=student_id,
+        staff_id=staff_id,
+        managed_by_me=managed_by_me,
+    )
+    if not selected_ids:
+        return jsonify({
+            'yellow_to_green': [],
+            'green_to_blue': [],
+            'eligible_count': 0,
+            'can_level_up': can_manage_level_ups(current_user),
+        })
+
+    students = Student.query.filter(Student.id.in_(selected_ids)).order_by(Student.name).all()
+    # Exclude archived students (no active student user), matching "all students" scope.
+    active_student_ids = {
+        u.student_id
+        for u in User.query.filter(User.role == 'student', User.student_id.in_(selected_ids)).all()
+        if u.student_id
+    }
+    students = [s for s in students if s.id in active_student_ids and _normalize_card_color(s.card_color) != 'blue']
+    if not students:
+        return jsonify({
+            'yellow_to_green': [],
+            'green_to_blue': [],
+            'eligible_count': 0,
+            'can_level_up': can_manage_level_ups(current_user),
+        })
+
+    student_ids = [s.id for s in students]
+    records = (
+        DailyRecord.query.filter(DailyRecord.student_id.in_(student_ids))
+        .options(joinedload(DailyRecord.periods))
+        .order_by(DailyRecord.date.desc())
+        .all()
+    )
+    records_by_student = {}
+    for record in records:
+        records_by_student.setdefault(record.student_id, []).append(record)
+
+    yellow_to_green = []
+    green_to_blue = []
+    for student in students:
+        entry = _build_level_up_entry(student, records_by_student.get(student.id, []))
+        if not entry:
+            continue
+        if entry['card_color'] == 'yellow':
+            yellow_to_green.append(entry)
+        elif entry['card_color'] == 'green':
+            green_to_blue.append(entry)
+
+    def sort_key(item):
+        # Eligible first, then fewest days remaining at 90%, then name.
+        return (0 if item.get('eligible') else 1, item.get('days_at_90_needed', 999), (item.get('name') or '').lower())
+
+    yellow_to_green.sort(key=sort_key)
+    green_to_blue.sort(key=sort_key)
+    eligible_count = sum(1 for row in yellow_to_green + green_to_blue if row.get('eligible'))
+
+    return jsonify({
+        'yellow_to_green': yellow_to_green,
+        'green_to_blue': green_to_blue,
+        'eligible_count': eligible_count,
+        'can_level_up': can_manage_level_ups(current_user),
+    })
+
+
+@app.route('/api/students/<int:student_id>/level-up', methods=['POST'])
+@limiter.limit("20 per minute")
+@login_required
+@api_json_errors
+def level_up_student(student_id):
+    """Promote an eligible student to the next card color and restart the 30-day window."""
+    from sqlalchemy.orm import joinedload
+
+    if not can_manage_level_ups(current_user):
+        return jsonify({'error': 'Only case managers and admins can level up students'}), 403
+
+    allowed_ids = set(_resolve_student_scope())
+    if student_id not in allowed_ids:
+        return jsonify({'error': 'Access denied to this student'}), 403
+
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+
+    color = _normalize_card_color(student.card_color)
+    next_color = LEVEL_UP_NEXT_COLOR.get(color)
+    if not next_color:
+        return jsonify({'error': 'Student is already at the highest card level'}), 400
+
+    records = (
+        DailyRecord.query.filter_by(student_id=student_id)
+        .options(joinedload(DailyRecord.periods))
+        .order_by(DailyRecord.date.desc())
+        .all()
+    )
+    entry = _build_level_up_entry(student, records)
+    if not entry or not entry.get('eligible'):
+        return jsonify({'error': 'Student is not eligible to level up yet'}), 400
+
+    student.card_color = next_color
+    # Restart the window: only days after today count toward the next level.
+    student.card_level_reset_at = date.today()
+    # Keep model in sync if card_color was previously null/invalid.
+    db.session.commit()
+
+    log_phi_access(
+        action='UPDATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='student_level_up',
+        resource_id=student_id,
+        details=f"Leveled up from {color} to {next_color}",
+        ip_address=get_remote_address(),
+    )
+
+    return jsonify({
+        'status': 'ok',
+        'id': student.id,
+        'name': student.name,
+        'previous_card_color': color,
+        'card_color': next_color,
+        'card_level_reset_at': student.card_level_reset_at.isoformat() if student.card_level_reset_at else None,
+    })
+
 
 @app.route('/api/incentive-tracking', methods=['GET'])
 @limiter.limit("30 per minute")
