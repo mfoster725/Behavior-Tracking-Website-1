@@ -429,7 +429,8 @@
                                     <th>Professional</th>
                                     <th>Group Leader</th>
                                     <th>Username</th>
-                                    <th>Password</th>
+                                    <th class="users-table-password-col">Password</th>
+                                    <th>Plan</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -467,6 +468,7 @@
                                     <th>Practitioner</th>
                                     <th>Professional</th>
                                     <th>Group Leader</th>
+                                    <th>Plan</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -912,6 +914,20 @@
                         style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg-surface); padding: 16px;"
                     >
                         <p style="margin: 0; color: #94a3b8;">No transactions yet.</p>
+                    </div>
+                </div>
+
+                <!-- Plan reward deliveries (informational) -->
+                <div
+                    id="bank-plan-deliveries-section"
+                    style="display: none; margin-bottom: 28px;"
+                >
+                    <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Plan reward deliveries</h3>
+                    <div
+                        id="bank-plan-deliveries-list"
+                        style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg-surface); padding: 16px;"
+                    >
+                        <p style="margin: 0; color: #94a3b8;">No plan rewards delivered yet.</p>
                     </div>
                 </div>
             </div>
@@ -1912,6 +1928,46 @@
         </div>
     </div>
 
+    <!-- Student If/Then Plan Modal -->
+    <div id="student-plan-modal" class="modal">
+        <div class="modal-content" style="max-width: 920px;">
+            <span class="close" onclick="closeStudentPlanModal()">&times;</span>
+            <h2 id="student-plan-modal-title">Student plan</h2>
+            <p style="margin: 0 0 16px; color: #64748b; font-size: 14px;">
+                Add If / Then rows. Optionally attach a structured point-card percent threshold so the system can detect when it is met.
+            </p>
+            <div class="plan-table-wrap" style="overflow-x: auto;">
+                <table class="users-table plan-editor-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th style="width: 48%;">If</th>
+                            <th style="width: 40%;">Then</th>
+                            <th style="width: 12%;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="plan-rows-body"></tbody>
+                </table>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
+                <button type="button" id="plan-add-row-btn" class="btn-secondary">Add row</button>
+                <button type="button" id="plan-save-btn" class="btn-primary">Save plan</button>
+                <button type="button" class="btn-secondary" onclick="closeStudentPlanModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Plan delivery history modal -->
+    <div id="plan-delivery-history-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <span class="close" onclick="closePlanDeliveryHistoryModal()">&times;</span>
+            <h2 id="plan-delivery-history-title">Delivery history</h2>
+            <div id="plan-delivery-history-body" style="margin-top: 12px;"></div>
+            <div style="margin-top: 16px;">
+                <button type="button" class="btn-secondary" onclick="closePlanDeliveryHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Amendment Request Modal -->
     <div id="amendment-request-modal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
@@ -1971,6 +2027,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}?v=levelups1"></script>
+    <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan1"></script>
 </body>
 </html>
 

@@ -2424,14 +2424,22 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.textContent = student.name;
         studentHeader.style.gridColumn = 'span 5';
+        studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
         const bgColor = getCardColor(student.card_color);
         if (bgColor) {
             studentHeader.style.backgroundColor = bgColor;
         }
+
+        if (window.StudentPlans && typeof window.StudentPlans.buildStudentHeaderPlanControls === 'function') {
+            studentHeader.appendChild(window.StudentPlans.buildStudentHeaderPlanControls(student));
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = student.name;
+        nameSpan.style.fontWeight = '600';
+        studentHeader.appendChild(nameSpan);
         
         header.appendChild(studentHeader);
         
@@ -2690,6 +2698,10 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach(student => {
         updateInfoButtonHighlight(student.id, currentPeriod);
     });
+
+    if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+        window.StudentPlans.refreshActiveMets(studentsToDisplay.map(s => s.id), currentDate);
+    }
 }
 
 async function savePeriodData() {
@@ -2755,6 +2767,9 @@ async function savePeriodData() {
             loadPeriodData();
             // Refresh summary if it's currently displayed
             refreshSummaryIfActive();
+            if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+                window.StudentPlans.refreshActiveMets(studentsData.map(s => s.student_id), currentDate);
+            }
         } else {
             throw new Error('Failed to save');
         }
@@ -3142,11 +3157,16 @@ function renderDailyGrid() {
         studentHeader.style.flexDirection = 'column';
         studentHeader.style.gap = '4px';
         studentHeader.style.padding = '6px 8px';
+        studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
         const bgColor = getCardColor(student.card_color);
         if (bgColor) {
             studentHeader.style.backgroundColor = bgColor;
+        }
+
+        if (window.StudentPlans && typeof window.StudentPlans.buildStudentHeaderPlanControls === 'function') {
+            studentHeader.appendChild(window.StudentPlans.buildStudentHeaderPlanControls(student));
         }
         
         // Student name
@@ -3514,6 +3534,10 @@ function renderDailyGrid() {
             updateInfoButtonHighlight(student.id, period.time);
         });
     });
+
+    if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+        window.StudentPlans.refreshActiveMets(studentsToDisplay.map(s => s.id), currentDate);
+    }
 }
 
 function updateDailyPercentageRow() {
@@ -11774,7 +11798,7 @@ async function loadUsers() {
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
                 archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
@@ -11909,7 +11933,7 @@ async function loadUsers() {
         
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -11941,7 +11965,7 @@ async function loadUsers() {
                     });
                     
                     if (archivedStudents.length === 0) {
-                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="9" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
                         const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
@@ -11955,6 +11979,7 @@ async function loadUsers() {
                             const professional = fmt(tm.professional);
                             const groupLeader = fmt(tm.group_leader);
                             const safeName = (student.name || 'Student').replace(/'/g, "\\'");
+                            const nameForJs = JSON.stringify(student.name || 'Student');
                             row.innerHTML = `
                                 <td><strong>${student.name || 'Unnamed Student'}</strong></td>
                                 <td>${student.grade || '-'}</td>
@@ -11963,6 +11988,12 @@ async function loadUsers() {
                                 <td style="font-size: 13px;">${practitioner}</td>
                                 <td style="font-size: 13px;">${professional}</td>
                                 <td style="font-size: 13px;">${groupLeader}</td>
+                                <td class="plan-cell">
+                                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
+                                        onclick='openStudentPlanModal(${student.id}, ${nameForJs}, false)'>
+                                        Plan
+                                    </button>
+                                </td>
                                 <td class="actions-cell">
                                     <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
                                         onclick="restoreArchivedStudent(${student.id}, '${safeName}')">
@@ -11975,11 +12006,11 @@ async function loadUsers() {
                         archivedStudentsTbody.appendChild(archivedFrag);
                     }
                 } else {
-                    archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                    archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
                 }
             } catch (e) {
                 console.error('Error loading archived students:', e);
-                archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
             }
         }
 
@@ -12206,10 +12237,13 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
         <td>${user.username}</td>
-        <td id="password-cell-${user.id}">
+        <td id="password-cell-${user.id}" class="users-table-password-col">
             ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+                <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View</button>
             ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="plan-cell">
+            ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
@@ -18102,6 +18136,10 @@ async function loadBankAccount(studentId) {
         
         // Load paychecks
         await loadPaychecks(studentId);
+
+        if (window.StudentPlans && typeof window.StudentPlans.loadBankPlanDeliveries === 'function') {
+            window.StudentPlans.loadBankPlanDeliveries(studentId);
+        }
         
         currentBankStudentId = studentId;
     } catch (error) {
@@ -22871,6 +22909,9 @@ function buildOverviewDashboardCardHtml(data) {
                     </div>
                 </div>
             </div>
+            ${window.StudentPlans && typeof window.StudentPlans.buildPlanThresholdsOverviewHtml === 'function'
+                ? window.StudentPlans.buildPlanThresholdsOverviewHtml(data.plan_threshold_stats)
+                : ''}
         </div>
 
         <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
@@ -23332,7 +23373,8 @@ function attachOverviewCardInteractions(container, data) {
         reminders: 'reminders',
         resets: 'resets',
         trigger_times: 'trigger_times',
-        level_ups: 'level_ups'
+        level_ups: 'level_ups',
+        plan_thresholds: 'plan_thresholds'
     };
 
     const STORAGE_KEY = 'summary_overview_selected_stats_v1';
@@ -25682,6 +25724,24 @@ function attachOverviewCardInteractions(container, data) {
                 }
             } else {
                 selectionOrder = selectionOrder.filter(k => k !== 'level_ups');
+            }
+        } else if (key === 'plan_thresholds') {
+            const opened = toggleExtraCard('plan_thresholds', () => {
+                if (window.StudentPlans && typeof window.StudentPlans.buildPlanThresholdsCard === 'function') {
+                    return window.StudentPlans.buildPlanThresholdsCard(data);
+                }
+                const card = document.createElement('div');
+                card.className = 'dashboard-card overview-extra-card';
+                card.dataset.overviewCard = 'plan_thresholds';
+                card.innerHTML = '<h3 class="dashboard-card-title">Plan thresholds</h3><p>No data.</p>';
+                return card;
+            });
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'plan_thresholds');
+                selectionOrder.push('plan_thresholds');
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'plan_thresholds');
             }
         } else if (key === 'starbucks') {
             // Starbucks: only visual selection, no extra card

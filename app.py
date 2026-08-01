@@ -987,6 +987,93 @@ class StarbucksBalance(db.Model):
     # Relationships
     student = db.relationship('Student', backref='starbucks_balance')
 
+
+class PlanIfLibrary(db.Model):
+    __tablename__ = 'plan_if_library'
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.Text, nullable=False)
+    normalized_text = db.Column(db.String(500), nullable=False, unique=True, index=True)
+    usage_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class StudentPlan(db.Model):
+    __tablename__ = 'student_plans'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship('Student', backref=db.backref('plan', uselist=False))
+    rows = db.relationship('StudentPlanRow', backref='plan', lazy=True, cascade='all, delete-orphan',
+                           order_by='StudentPlanRow.sort_order')
+
+
+class StudentPlanRow(db.Model):
+    __tablename__ = 'student_plan_rows'
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('student_plans.id'), nullable=False, index=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    if_text = db.Column(db.Text, nullable=False, default='')
+    then_text = db.Column(db.Text, nullable=False, default='')
+    has_threshold = db.Column(db.Boolean, default=False, nullable=False)
+    threshold_percent = db.Column(db.Numeric(5, 2), nullable=True)
+    # by_time | dow_range | consecutive_days | days_in_window | specific_period |
+    # end_of_day | weekly_average | category_specific
+    threshold_type = db.Column(db.String(40), nullable=True)
+    cutoff_time = db.Column(db.String(20), nullable=True)  # HH:MM
+    dow_start = db.Column(db.String(20), nullable=True)
+    dow_end = db.Column(db.String(20), nullable=True)
+    consecutive_n = db.Column(db.Integer, nullable=True)
+    days_needed = db.Column(db.Integer, nullable=True)
+    window_days = db.Column(db.Integer, nullable=True)
+    period_time_range = db.Column(db.String(50), nullable=True)
+    period_location = db.Column(db.String(100), nullable=True)
+    star_category = db.Column(db.String(20), nullable=True)  # overall|s|t|a|r
+
+
+class PlanThresholdEvent(db.Model):
+    __tablename__ = 'plan_threshold_events'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    plan_row_id = db.Column(db.Integer, db.ForeignKey('student_plan_rows.id'), nullable=False, index=True)
+    if_normalized = db.Column(db.String(500), nullable=False, index=True)
+    window_key = db.Column(db.String(64), nullable=False)
+    met_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    delivered_at = db.Column(db.DateTime, nullable=True)
+    delivered_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    student = db.relationship('Student', backref='plan_threshold_events')
+    plan_row = db.relationship('StudentPlanRow', backref='threshold_events')
+    delivered_by = db.relationship('User', foreign_keys=[delivered_by_user_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('plan_row_id', 'window_key', name='unique_plan_row_window'),
+    )
+
+
+def seed_plan_if_library():
+    """Insert the 40 common If texts if the library is empty / missing any."""
+    from student_plans_lib import PLAN_IF_SEED_TEXTS, normalize_if_text as _norm_if
+    try:
+        for text in PLAN_IF_SEED_TEXTS:
+            norm = _norm_if(text)
+            if not norm:
+                continue
+            existing = PlanIfLibrary.query.filter_by(normalized_text=norm).first()
+            if existing:
+                continue
+            db.session.add(PlanIfLibrary(text=text, normalized_text=norm, usage_count=0))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        try:
+            app.logger.warning(f"seed_plan_if_library failed: {e}")
+        except Exception:
+            print(f"seed_plan_if_library failed: {e}")
+
+
 class Paycheck(db.Model):
     __tablename__ = 'paychecks'
     id = db.Column(db.Integer, primary_key=True)
@@ -1182,6 +1269,10 @@ def init_db():
             # Create all tables
             db.create_all()
             ensure_daily_query_indexes()
+            try:
+                seed_plan_if_library()
+            except Exception as seed_err:
+                print(f"Note: plan if library seed skipped: {seed_err}", flush=True)
             print("Database tables created/verified", flush=True)
             
             # Ensure OutsideStaffStudent table exists and run migrations
@@ -2184,6 +2275,575 @@ def restore_student_user(student_id):
         'message': 'Student user restored successfully.',
         'user_id': user.id
     }), 201
+
+
+# ---------------------------------------------------------------------------
+# Student If/Then Plans
+# ---------------------------------------------------------------------------
+
+from student_plans_lib import (
+    PLAN_IF_SEED_TEXTS,
+    THRESHOLD_TYPES,
+    normalize_if_text,
+    parse_hhmm,
+    parse_period_end_time,
+    percent_from_periods,
+    window_key_for_row,
+    dow_index,
+    week_monday,
+)
+
+
+def upsert_plan_if_library(text):
+    norm = normalize_if_text(text)
+    if not norm:
+        return None
+    entry = PlanIfLibrary.query.filter_by(normalized_text=norm).first()
+    if entry:
+        entry.usage_count = (entry.usage_count or 0) + 1
+        if not entry.text and text:
+            entry.text = text.strip()
+        return entry
+    entry = PlanIfLibrary(text=str(text).strip(), normalized_text=norm, usage_count=1)
+    db.session.add(entry)
+    return entry
+
+
+def serialize_plan_row(row):
+    return {
+        'id': row.id,
+        'sort_order': row.sort_order,
+        'if_text': row.if_text or '',
+        'then_text': row.then_text or '',
+        'has_threshold': bool(row.has_threshold),
+        'threshold_percent': float(row.threshold_percent) if row.threshold_percent is not None else None,
+        'threshold_type': row.threshold_type,
+        'cutoff_time': row.cutoff_time,
+        'dow_start': row.dow_start,
+        'dow_end': row.dow_end,
+        'consecutive_n': row.consecutive_n,
+        'days_needed': row.days_needed,
+        'window_days': row.window_days,
+        'period_time_range': row.period_time_range,
+        'period_location': row.period_location,
+        'star_category': row.star_category,
+    }
+
+
+def serialize_plan(plan):
+    if not plan:
+        return {'id': None, 'student_id': None, 'rows': [], 'updated_at': None}
+    return {
+        'id': plan.id,
+        'student_id': plan.student_id,
+        'updated_at': plan.updated_at.isoformat() if plan.updated_at else None,
+        'updated_by_user_id': plan.updated_by_user_id,
+        'rows': [serialize_plan_row(r) for r in sorted(plan.rows, key=lambda x: x.sort_order or 0)],
+    }
+
+
+def _day_percent_for_student(student_id, eval_date, star_category=None, cutoff_time=None, period_filter=None):
+    """Overall or category STAR % for one day, optionally filtering periods by cutoff/period."""
+    daily = DailyRecord.query.filter_by(student_id=student_id, date=eval_date).first()
+    if not daily:
+        return None
+    periods = list(daily.periods or [])
+    if cutoff_time is not None:
+        filtered = []
+        for p in periods:
+            end_t = parse_period_end_time(p.time_range)
+            if end_t is None:
+                filtered.append(p)  # include when unknown
+            elif end_t <= cutoff_time:
+                filtered.append(p)
+        periods = filtered
+    if period_filter:
+        tr = (period_filter.get('time_range') or '').strip().lower()
+        loc = (period_filter.get('location') or '').strip().lower()
+        matched = []
+        for p in periods:
+            ok = True
+            if tr and (p.time_range or '').strip().lower() != tr:
+                ok = False
+            if loc and (p.location or '').strip().lower() != loc:
+                ok = False
+            if ok:
+                matched.append(p)
+        periods = matched
+    return percent_from_periods(periods, star_category=star_category)
+
+
+def _meets_threshold(pct, threshold_percent):
+    if pct is None or threshold_percent is None:
+        return False
+    try:
+        return float(pct) >= float(threshold_percent)
+    except (TypeError, ValueError):
+        return False
+
+
+def evaluate_plan_row_met(row, student_id, eval_date, now_dt=None):
+    """
+    Return (is_met: bool, window_key: str|None).
+    Structured threshold evaluation only; freeform If text is ignored here.
+    """
+    if not row.has_threshold or row.threshold_percent is None or not row.threshold_type:
+        return False, None
+
+    now_dt = now_dt or datetime.now()
+    ttype = (row.threshold_type or '').strip()
+    cat = row.star_category
+    if ttype == 'category_specific':
+        cat = cat or 's'
+    thr = row.threshold_percent
+    wkey = window_key_for_row(row, eval_date)
+
+    if ttype == 'by_time':
+        cutoff = parse_hhmm(row.cutoff_time)
+        if cutoff is None:
+            return False, None
+        # Only evaluate at/after cutoff on that day
+        if eval_date == now_dt.date() and now_dt.time() < cutoff:
+            return False, None
+        if eval_date > now_dt.date():
+            return False, None
+        pct = _day_percent_for_student(student_id, eval_date, star_category=cat, cutoff_time=cutoff)
+        return _meets_threshold(pct, thr), wkey
+
+    if ttype == 'end_of_day' or ttype == 'category_specific':
+        # Treat as evaluable anytime (running day average); staff typically check after school
+        pct = _day_percent_for_student(student_id, eval_date, star_category=cat)
+        return _meets_threshold(pct, thr), wkey
+
+    if ttype == 'specific_period':
+        pct = _day_percent_for_student(
+            student_id,
+            eval_date,
+            star_category=cat,
+            period_filter={'time_range': row.period_time_range, 'location': row.period_location},
+        )
+        return _meets_threshold(pct, thr), wkey
+
+    if ttype == 'dow_range':
+        start_i = dow_index(row.dow_start)
+        end_i = dow_index(row.dow_end)
+        if start_i is None or end_i is None:
+            return False, None
+        # Inclusive DOW span within the current week Mon-Sun
+        mon = week_monday(eval_date)
+        days = []
+        for i in range(7):
+            d = mon + timedelta(days=i)
+            di = d.weekday()
+            if start_i <= end_i:
+                in_range = start_i <= di <= end_i
+            else:
+                in_range = di >= start_i or di <= end_i
+            if in_range and d <= eval_date:
+                days.append(d)
+        if not days:
+            return False, None
+        # Average of daily overall/category percents across included days that have data
+        pcts = []
+        for d in days:
+            p = _day_percent_for_student(student_id, d, star_category=cat)
+            if p is not None:
+                pcts.append(p)
+        if not pcts:
+            return False, None
+        avg = sum(pcts) / len(pcts)
+        return _meets_threshold(avg, thr), wkey
+
+    if ttype == 'consecutive_days':
+        n = int(row.consecutive_n or 0)
+        if n <= 0:
+            return False, None
+        # Check last n school days ending at eval_date that have daily records (or calendar days with data)
+        ok_streak = 0
+        d = eval_date
+        checked = 0
+        while checked < 60 and ok_streak < n:
+            pct = _day_percent_for_student(student_id, d, star_category=cat)
+            if pct is None:
+                # skip days with no record
+                d = d - timedelta(days=1)
+                checked += 1
+                continue
+            if _meets_threshold(pct, thr):
+                ok_streak += 1
+            else:
+                return False, None
+            d = d - timedelta(days=1)
+            checked += 1
+        return ok_streak >= n, wkey
+
+    if ttype == 'days_in_window':
+        needed = int(row.days_needed or 0)
+        window = int(row.window_days or 0)
+        if needed <= 0 or window <= 0:
+            return False, None
+        hits = 0
+        for i in range(window):
+            d = eval_date - timedelta(days=i)
+            pct = _day_percent_for_student(student_id, d, star_category=cat)
+            if _meets_threshold(pct, thr):
+                hits += 1
+        return hits >= needed, wkey
+
+    if ttype == 'weekly_average':
+        mon = week_monday(eval_date)
+        fri = mon + timedelta(days=4)
+        end = min(eval_date, fri)
+        pcts = []
+        d = mon
+        while d <= end:
+            pct = _day_percent_for_student(student_id, d, star_category=cat)
+            if pct is not None:
+                pcts.append(pct)
+            d += timedelta(days=1)
+        if not pcts:
+            return False, None
+        avg = sum(pcts) / len(pcts)
+        return _meets_threshold(avg, thr), wkey
+
+    return False, None
+
+
+def evaluate_and_record_plan_thresholds(student_id, eval_date=None, now_dt=None):
+    """Evaluate all threshold rows for a student; insert met events once per window_key."""
+    eval_date = eval_date or date.today()
+    now_dt = now_dt or datetime.now()
+    plan = StudentPlan.query.filter_by(student_id=student_id).first()
+    if not plan:
+        return []
+    created = []
+    for row in plan.rows:
+        if not row.has_threshold:
+            continue
+        is_met, wkey = evaluate_plan_row_met(row, student_id, eval_date, now_dt=now_dt)
+        if not is_met or not wkey:
+            continue
+        existing = PlanThresholdEvent.query.filter_by(plan_row_id=row.id, window_key=wkey).first()
+        if existing:
+            continue
+        evt = PlanThresholdEvent(
+            student_id=student_id,
+            plan_row_id=row.id,
+            if_normalized=normalize_if_text(row.if_text),
+            window_key=wkey,
+            met_at=now_dt,
+        )
+        db.session.add(evt)
+        created.append(evt)
+    if created:
+        db.session.commit()
+    return created
+
+
+def get_active_plan_mets(student_id, eval_date=None):
+    """Undelivered met events (stars) for a student."""
+    evaluate_and_record_plan_thresholds(student_id, eval_date=eval_date)
+    events = (
+        PlanThresholdEvent.query
+        .filter_by(student_id=student_id)
+        .filter(PlanThresholdEvent.delivered_at.is_(None))
+        .order_by(PlanThresholdEvent.met_at.desc())
+        .all()
+    )
+    out = []
+    for evt in events:
+        row = evt.plan_row
+        out.append({
+            'event_id': evt.id,
+            'student_id': student_id,
+            'plan_row_id': evt.plan_row_id,
+            'if_text': row.if_text if row else '',
+            'then_text': row.then_text if row else '',
+            'if_normalized': evt.if_normalized,
+            'window_key': evt.window_key,
+            'met_at': evt.met_at.isoformat() if evt.met_at else None,
+        })
+    return out
+
+
+def build_plan_threshold_stats(student_ids, start_date=None, end_date=None):
+    """Aggregate met/delivery stats for overview, grouped by normalized If text."""
+    empty = {
+        'overall': {'met_count': 0, 'delivered_count': 0, 'student_count': 0, 'unique_if_count': 0},
+        'by_if': [],
+        'by_student': [],
+    }
+    if not student_ids:
+        return empty
+    q = PlanThresholdEvent.query.filter(PlanThresholdEvent.student_id.in_(list(student_ids)))
+    if start_date:
+        q = q.filter(PlanThresholdEvent.met_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        q = q.filter(PlanThresholdEvent.met_at <= datetime.combine(end_date, datetime.max.time()))
+    events = q.all()
+    by_if = {}
+    by_student = {}
+    for evt in events:
+        key = evt.if_normalized or ''
+        bucket = by_if.setdefault(key, {
+            'if_normalized': key,
+            'if_text': key,
+            'met_count': 0,
+            'delivered_count': 0,
+            'student_ids': set(),
+        })
+        bucket['met_count'] += 1
+        if evt.delivered_at:
+            bucket['delivered_count'] += 1
+        bucket['student_ids'].add(evt.student_id)
+        # Prefer display text from row
+        if evt.plan_row and evt.plan_row.if_text:
+            bucket['if_text'] = evt.plan_row.if_text
+
+        sb = by_student.setdefault(evt.student_id, {
+            'student_id': evt.student_id,
+            'met_count': 0,
+            'delivered_count': 0,
+            'by_if': {},
+        })
+        sb['met_count'] += 1
+        if evt.delivered_at:
+            sb['delivered_count'] += 1
+        ib = sb['by_if'].setdefault(key, {'if_normalized': key, 'if_text': bucket['if_text'], 'met_count': 0, 'delivered_count': 0})
+        ib['met_count'] += 1
+        if evt.delivered_at:
+            ib['delivered_count'] += 1
+
+    by_if_list = []
+    for b in by_if.values():
+        by_if_list.append({
+            'if_normalized': b['if_normalized'],
+            'if_text': b['if_text'],
+            'met_count': b['met_count'],
+            'delivered_count': b['delivered_count'],
+            'student_count': len(b['student_ids']),
+        })
+    by_if_list.sort(key=lambda x: (-x['met_count'], x['if_text'] or ''))
+
+    students_map = {s.id: s.name for s in Student.query.filter(Student.id.in_(list(student_ids))).all()} if student_ids else {}
+    by_student_list = []
+    for sid, sb in by_student.items():
+        by_student_list.append({
+            'student_id': sid,
+            'student_name': students_map.get(sid, f'Student {sid}'),
+            'met_count': sb['met_count'],
+            'delivered_count': sb['delivered_count'],
+            'any_if_met_count': sb['met_count'],
+            'by_if': sorted(sb['by_if'].values(), key=lambda x: -x['met_count']),
+        })
+    by_student_list.sort(key=lambda x: (-x['met_count'], x['student_name'] or ''))
+
+    return {
+        'overall': {
+            'met_count': len(events),
+            'delivered_count': sum(1 for e in events if e.delivered_at),
+            'student_count': len(by_student),
+            'unique_if_count': len(by_if),
+        },
+        'by_if': by_if_list,
+        'by_student': by_student_list,
+    }
+
+
+def empty_plan_threshold_stats():
+    return {
+        'overall': {'met_count': 0, 'delivered_count': 0, 'student_count': 0, 'unique_if_count': 0},
+        'by_if': [],
+        'by_student': [],
+    }
+
+
+@app.route('/api/plan-if-library', methods=['GET', 'POST'])
+@limiter.limit("60 per minute")
+@login_required
+def plan_if_library():
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    if request.method == 'GET':
+        q = (request.args.get('q') or '').strip()
+        query = PlanIfLibrary.query
+        if q:
+            like = f"%{q.lower()}%"
+            query = query.filter(db.func.lower(PlanIfLibrary.text).like(like))
+        rows = query.order_by(PlanIfLibrary.usage_count.desc(), PlanIfLibrary.text.asc()).limit(40).all()
+        return jsonify([{'id': r.id, 'text': r.text, 'usage_count': r.usage_count or 0} for r in rows])
+
+    data = request.json or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'error': 'text is required'}), 400
+    entry = upsert_plan_if_library(text)
+    db.session.commit()
+    return jsonify({'id': entry.id, 'text': entry.text, 'usage_count': entry.usage_count}), 201
+
+
+@app.route('/api/students/<int:student_id>/plan', methods=['GET', 'PUT'])
+@limiter.limit("60 per minute")
+@login_required
+def student_plan(student_id):
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    student = Student.query.get_or_404(student_id)
+
+    if request.method == 'GET':
+        plan = StudentPlan.query.filter_by(student_id=student.id).first()
+        return jsonify(serialize_plan(plan) if plan else {
+            'id': None, 'student_id': student.id, 'rows': [], 'updated_at': None
+        })
+
+    data = request.json or {}
+    rows_data = data.get('rows')
+    if not isinstance(rows_data, list):
+        return jsonify({'error': 'rows must be an array'}), 400
+
+    plan = StudentPlan.query.filter_by(student_id=student.id).first()
+    if not plan:
+        plan = StudentPlan(student_id=student.id)
+        db.session.add(plan)
+        db.session.flush()
+
+    # Replace rows
+    StudentPlanRow.query.filter_by(plan_id=plan.id).delete()
+    for idx, raw in enumerate(rows_data):
+        if_text = (raw.get('if_text') or '').strip()
+        then_text = (raw.get('then_text') or '').strip()
+        has_threshold = bool(raw.get('has_threshold'))
+        ttype = (raw.get('threshold_type') or '').strip() or None
+        if has_threshold and ttype and ttype not in THRESHOLD_TYPES:
+            return jsonify({'error': f'Invalid threshold_type: {ttype}'}), 400
+        thr_pct = raw.get('threshold_percent')
+        if has_threshold and thr_pct is not None and thr_pct != '':
+            try:
+                thr_pct = float(thr_pct)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'threshold_percent must be a number'}), 400
+        else:
+            thr_pct = None if not has_threshold else thr_pct
+
+        row = StudentPlanRow(
+            plan_id=plan.id,
+            sort_order=int(raw.get('sort_order', idx)),
+            if_text=if_text,
+            then_text=then_text,
+            has_threshold=has_threshold,
+            threshold_percent=thr_pct if has_threshold else None,
+            threshold_type=ttype if has_threshold else None,
+            cutoff_time=(raw.get('cutoff_time') or None) if has_threshold else None,
+            dow_start=(raw.get('dow_start') or None) if has_threshold else None,
+            dow_end=(raw.get('dow_end') or None) if has_threshold else None,
+            consecutive_n=int(raw['consecutive_n']) if has_threshold and raw.get('consecutive_n') not in (None, '') else None,
+            days_needed=int(raw['days_needed']) if has_threshold and raw.get('days_needed') not in (None, '') else None,
+            window_days=int(raw['window_days']) if has_threshold and raw.get('window_days') not in (None, '') else None,
+            period_time_range=(raw.get('period_time_range') or None) if has_threshold else None,
+            period_location=(raw.get('period_location') or None) if has_threshold else None,
+            star_category=(raw.get('star_category') or None) if has_threshold else None,
+        )
+        if has_threshold and ttype == 'category_specific' and not row.star_category:
+            return jsonify({'error': 'star_category is required for category_specific thresholds'}), 400
+        db.session.add(row)
+        if if_text:
+            upsert_plan_if_library(if_text)
+
+    plan.updated_by_user_id = current_user.id
+    plan.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(serialize_plan(plan))
+
+
+@app.route('/api/students/<int:student_id>/plan/evaluate', methods=['POST'])
+@limiter.limit("60 per minute")
+@login_required
+def student_plan_evaluate(student_id):
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    Student.query.get_or_404(student_id)
+    data = request.json or {}
+    eval_date = date.today()
+    if data.get('date'):
+        try:
+            eval_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'date must be YYYY-MM-DD'}), 400
+    evaluate_and_record_plan_thresholds(student_id, eval_date=eval_date)
+    return jsonify({'active_mets': get_active_plan_mets(student_id, eval_date=eval_date)})
+
+
+@app.route('/api/students/<int:student_id>/plan/active-mets', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def student_plan_active_mets(student_id):
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    Student.query.get_or_404(student_id)
+    eval_date = date.today()
+    date_str = request.args.get('date')
+    if date_str:
+        try:
+            eval_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'date must be YYYY-MM-DD'}), 400
+    return jsonify({'active_mets': get_active_plan_mets(student_id, eval_date=eval_date)})
+
+
+@app.route('/api/plan-threshold-events/<int:event_id>/deliver', methods=['POST'])
+@limiter.limit("60 per minute")
+@login_required
+def deliver_plan_threshold_event(event_id):
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    evt = PlanThresholdEvent.query.get_or_404(event_id)
+    if evt.delivered_at:
+        return jsonify({'message': 'Already delivered', 'event_id': evt.id}), 200
+    evt.delivered_at = datetime.utcnow()
+    evt.delivered_by_user_id = current_user.id
+    db.session.commit()
+    return jsonify({
+        'event_id': evt.id,
+        'delivered_at': evt.delivered_at.isoformat(),
+        'delivered_by_user_id': evt.delivered_by_user_id,
+    })
+
+
+@app.route('/api/students/<int:student_id>/plan/delivery-history', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def student_plan_delivery_history(student_id):
+    if current_user.role not in ('staff', 'admin') and not (
+        current_user.role == 'student' and current_user.student_id == student_id
+    ):
+        return jsonify({'error': 'Permission denied'}), 403
+    Student.query.get_or_404(student_id)
+    events = (
+        PlanThresholdEvent.query
+        .filter_by(student_id=student_id)
+        .order_by(PlanThresholdEvent.met_at.desc())
+        .limit(200)
+        .all()
+    )
+    out = []
+    for evt in events:
+        row = evt.plan_row
+        delivered_by_name = None
+        if evt.delivered_by_user_id:
+            u = User.query.get(evt.delivered_by_user_id)
+            if u:
+                delivered_by_name = u.name or u.username
+        out.append({
+            'event_id': evt.id,
+            'if_text': row.if_text if row else evt.if_normalized,
+            'then_text': row.then_text if row else '',
+            'window_key': evt.window_key,
+            'met_at': evt.met_at.isoformat() if evt.met_at else None,
+            'delivered_at': evt.delivered_at.isoformat() if evt.delivered_at else None,
+            'delivered_by': delivered_by_name,
+            'is_delivered': bool(evt.delivered_at),
+        })
+    return jsonify({'history': out})
 
 
 @app.route('/api/admin/purge-student-emails', methods=['POST'])
@@ -5614,6 +6274,14 @@ def summary():
         if staff_context_name:
             result['staff_context'] = staff_context_name
         result['api_build'] = SUMMARY_API_BUILD
+        try:
+            plan_sids = list({r.student_id for r in all_records_raw if r.student_id}) if all_records_raw else []
+            if not plan_sids and student_id:
+                plan_sids = [student_id]
+            result['plan_threshold_stats'] = build_plan_threshold_stats(plan_sids)
+        except Exception as _plan_err:
+            app.logger.warning(f"plan_threshold_stats failed: {_plan_err}")
+            result['plan_threshold_stats'] = empty_plan_threshold_stats()
         resp = jsonify(result)
         resp.headers['X-Summary-Api-Build'] = SUMMARY_API_BUILD
         return resp
@@ -5621,6 +6289,14 @@ def summary():
     def _summary_response(resp_dict):
         if staff_context_name:
             resp_dict['staff_context'] = staff_context_name
+        try:
+            plan_sids = list({r.student_id for r in all_records_raw if r.student_id}) if all_records_raw else []
+            if not plan_sids and student_id:
+                plan_sids = [student_id]
+            resp_dict['plan_threshold_stats'] = build_plan_threshold_stats(plan_sids)
+        except Exception as _plan_err:
+            app.logger.warning(f"plan_threshold_stats failed: {_plan_err}")
+            resp_dict['plan_threshold_stats'] = empty_plan_threshold_stats()
         return jsonify(resp_dict)
 
     # Filter by timeframe and handle comparison modes
