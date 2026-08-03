@@ -22979,7 +22979,7 @@ function buildOverviewDashboardCardHtml(data) {
                     <div class="overview-level-ups-sub" data-level-ups-sub>ready to level up</div>
                 </div>
             </div>
-            <div class="overview-beige-panel overview-fenzies-panel" title="Fenzies">
+            <div class="overview-beige-panel overview-stat overview-fenzies-panel" data-overview-key="frenzies" title="Fenzies">
                 <div class="overview-panel-kicker">Fenzies</div>
                 <div class="overview-fenzies-body">
                     <div class="overview-fenzies-count">${totalFenzies}</div>
@@ -23384,7 +23384,8 @@ function attachOverviewCardInteractions(container, data) {
         resets: 'resets',
         trigger_times: 'trigger_times',
         level_ups: 'level_ups',
-        plan_thresholds: 'plan_thresholds'
+        plan_thresholds: 'plan_thresholds',
+        frenzies: 'frenzies_card'
     };
 
     const STORAGE_KEY = 'summary_overview_selected_stats_v1';
@@ -25567,6 +25568,7 @@ function attachOverviewCardInteractions(container, data) {
             const yellowRows = payload.yellow_to_green || [];
             const greenRows = payload.green_to_blue || [];
             const showPromote = !!(payload.can_level_up && canPromote);
+            card.classList.toggle('level-ups-card--with-actions', showPromote);
 
             const buildSection = (title, rows, emptyText, tone) => {
                 const sectionClass = `level-ups-section level-ups-section--${tone}`;
@@ -25602,7 +25604,7 @@ function attachOverviewCardInteractions(container, data) {
                         <td class="level-ups-col-name">${escapeHtml(row.name || '')}</td>
                         <td class="level-ups-col-days">${daysLogged}/${daysRequired}</td>
                         <td class="level-ups-col-avg">${escapeHtml(avgText)}</td>
-                        <td class="level-ups-col-needed">${escapeHtml(neededText)}</td>
+                        <td class="level-ups-col-needed"><span class="level-ups-needed-text">${escapeHtml(neededText)}</span></td>
                         ${actionCell}
                     </tr>`;
                 }).join('');
