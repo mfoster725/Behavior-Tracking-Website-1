@@ -22632,6 +22632,7 @@ function buildOverviewDashboardCardHtml(data) {
     const totalDays = data.total_days || 0;
     const infractions = data.infractions || data.additional_info?.infractions || {};
     const totalInfractions = Object.values(infractions).reduce((s, c) => s + Number(c) || 0, 0);
+    const totalFenzies = Number(data.total_frenzies) || 0;
     const reminders = data.additional_info?.total_reminders || 0;
     const resets = data.additional_info?.total_resets || 0;
     const attendance = data.attendance_summary || {};
@@ -22969,11 +22970,20 @@ function buildOverviewDashboardCardHtml(data) {
                     </div>
                 </div>
             </div>
+        </div>
+        <div class="overview-rich-row overview-rich-secondary">
             <div class="overview-beige-panel overview-stat overview-level-ups-panel" data-overview-key="level_ups" title="Level Up’s">
                 <div class="overview-panel-kicker">Level Up’s</div>
                 <div class="overview-level-ups-body">
                     <div class="overview-level-ups-count" data-level-ups-eligible-count>—</div>
                     <div class="overview-level-ups-sub" data-level-ups-sub>ready to level up</div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-fenzies-panel" title="Fenzies">
+                <div class="overview-panel-kicker">Fenzies</div>
+                <div class="overview-fenzies-body">
+                    <div class="overview-fenzies-count">${totalFenzies}</div>
+                    <div class="overview-fenzies-sub">recorded</div>
                 </div>
             </div>
         </div>
@@ -25558,10 +25568,11 @@ function attachOverviewCardInteractions(container, data) {
             const greenRows = payload.green_to_blue || [];
             const showPromote = !!(payload.can_level_up && canPromote);
 
-            const buildSection = (title, rows, emptyText) => {
+            const buildSection = (title, rows, emptyText, tone) => {
+                const sectionClass = `level-ups-section level-ups-section--${tone}`;
                 if (!rows.length) {
                     return `
-                        <div class="level-ups-section">
+                        <div class="${sectionClass}">
                             <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
                             <p class="level-ups-empty">${escapeHtml(emptyText)}</p>
                         </div>
@@ -25583,8 +25594,7 @@ function attachOverviewCardInteractions(container, data) {
                             : '<td class="level-ups-col-action"></td>')
                         : '';
                     return `<tr data-student-id="${row.id}">
-                        <td>${escapeHtml(row.name || '')}</td>
-                        <td>${escapeHtml(formatCardColorLabel(row.card_color))}</td>
+                        <td class="level-ups-col-name">${escapeHtml(row.name || '')}</td>
                         <td class="level-ups-col-days">${daysLogged}/${daysRequired}</td>
                         <td class="level-ups-col-avg">${escapeHtml(avgText)}</td>
                         <td class="level-ups-col-needed">${escapeHtml(neededText)}</td>
@@ -25592,17 +25602,16 @@ function attachOverviewCardInteractions(container, data) {
                     </tr>`;
                 }).join('');
                 return `
-                    <div class="level-ups-section">
+                    <div class="${sectionClass}">
                         <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
                         <div class="level-ups-table-wrap">
                             <table class="level-ups-table">
                                 <thead>
                                     <tr>
-                                        <th>Student</th>
-                                        <th>Current</th>
-                                        <th>Days</th>
-                                        <th>Average</th>
-                                        <th>Progress</th>
+                                        <th class="level-ups-col-name">Student</th>
+                                        <th class="level-ups-col-days">Days</th>
+                                        <th class="level-ups-col-avg">Avg</th>
+                                        <th class="level-ups-col-needed">Progress</th>
                                         ${headAction}
                                     </tr>
                                 </thead>
@@ -25618,8 +25627,8 @@ function attachOverviewCardInteractions(container, data) {
                     Students level up when their average STAR % over the previous 30 school days with data is 90% or higher.
                     Excused days are excluded; unexcused days count as 0%.
                 </p>
-                ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.')}
-                ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.')}
+                ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.', 'yellow')}
+                ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.', 'green')}
             `;
 
             if (showPromote) {
