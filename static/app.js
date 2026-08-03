@@ -25614,9 +25614,9 @@ function attachOverviewCardInteractions(container, data) {
                                 <thead>
                                     <tr>
                                         <th class="level-ups-col-name">Student</th>
-                                        <th class="level-ups-col-days">Qualifying Days</th>
+                                        <th class="level-ups-col-days">Qualifying<br>Days</th>
                                         <th class="level-ups-col-avg">Avg</th>
-                                        <th class="level-ups-col-needed">Days Needed</th>
+                                        <th class="level-ups-col-needed">Days<br>Needed</th>
                                         ${headAction}
                                     </tr>
                                 </thead>
