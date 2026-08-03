@@ -6124,7 +6124,10 @@ a.dashboard-compare-toggle {
     font-size: 0.74rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+    line-height: 1.25;
     background: transparent;
 }
 
