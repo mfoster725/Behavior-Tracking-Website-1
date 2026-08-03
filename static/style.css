@@ -6112,7 +6112,7 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 8px 7px 4px;
+    padding: 7px 14px;
     text-align: left;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6125,6 +6125,7 @@ a.dashboard-compare-toggle {
     text-transform: uppercase;
     letter-spacing: 0.03em;
     white-space: nowrap;
+    background: transparent;
 }
 
 .level-ups-card .level-ups-col-name {
@@ -6133,6 +6134,7 @@ a.dashboard-compare-toggle {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-align: center;
 }
 
 .level-ups-card .level-ups-col-days,
@@ -6152,7 +6154,7 @@ a.dashboard-compare-toggle {
     width: 1%;
     white-space: nowrap;
     text-align: right;
-    padding-right: 4px;
+    padding-right: 8px;
 }
 
 .level-ups-card .level-up-btn {
@@ -10366,6 +10368,10 @@ tr[data-aggregate-day-label] {
 #summary-view #point-card-data-container table td.numeric-cell {
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+#summary-view .level-ups-card .level-ups-table .level-ups-col-name {
+    text-align: center;
 }
 
 /* Purpose/results tag cloud */
