@@ -6105,14 +6105,14 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-table {
     width: 100%;
-    table-layout: fixed;
+    table-layout: auto;
     border-collapse: collapse;
     font-size: 0.82rem;
 }
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 6px;
+    padding: 7px 8px 7px 4px;
     text-align: left;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6123,36 +6123,36 @@ a.dashboard-compare-toggle {
     color: var(--text-secondary);
     font-size: 0.74rem;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.level-ups-card .level-ups-col-name {
-    width: 28%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-}
-
-.level-ups-card .level-ups-col-days {
-    width: 4.25rem;
+    letter-spacing: 0.03em;
     white-space: nowrap;
 }
 
+.level-ups-card .level-ups-col-name {
+    width: 1%;
+    max-width: 9.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.level-ups-card .level-ups-col-days,
 .level-ups-card .level-ups-col-avg {
-    width: 3.75rem;
+    width: 1%;
     white-space: nowrap;
 }
 
 .level-ups-card .level-ups-col-needed {
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    width: 99%;
     line-height: 1.35;
+    overflow-wrap: break-word;
+    word-break: normal;
 }
 
 .level-ups-card .level-ups-col-action {
-    width: 5.75rem;
+    width: 1%;
     white-space: nowrap;
     text-align: right;
-    padding-right: 0;
+    padding-right: 4px;
 }
 
 .level-ups-card .level-up-btn {
