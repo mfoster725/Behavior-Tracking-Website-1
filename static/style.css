@@ -6061,21 +6061,21 @@ a.dashboard-compare-toggle {
 }
 
 .dashboard-card.level-ups-card.overview-extra-card {
-    width: max-content;
+    /* Tight content width, never wider than the masonry column. */
+    width: min(100%, 25.5rem);
     max-width: 100%;
+    overflow: visible;
+    box-sizing: border-box;
 }
 
 .level-ups-card .level-ups-card-body {
-    /* Size the card to the tables; intro wraps to that width. */
-    display: inline-grid;
-    grid-template-columns: max-content;
-    justify-items: stretch;
-    max-width: 100%;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .level-ups-card .level-ups-intro {
-    width: 0;
-    min-width: 100%;
     margin: 0 0 14px 0;
     font-size: 0.85rem;
     color: var(--text-secondary);
@@ -6083,12 +6083,14 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-section {
-    width: max-content;
+    width: 100%;
     max-width: 100%;
+    min-width: 0;
     margin-bottom: 14px;
-    padding: 8px 6px 6px;
+    padding: 8px 4px 6px;
     border-radius: 8px;
     border: 1px solid transparent;
+    box-sizing: border-box;
 }
 
 .level-ups-card .level-ups-section--yellow {
@@ -6115,24 +6117,25 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-table-wrap {
-    width: fit-content;
+    width: 100%;
     max-width: 100%;
-    overflow-x: auto;
+    min-width: 0;
+    overflow: visible;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.55);
+    box-sizing: border-box;
 }
 
 .level-ups-card .level-ups-table {
-    width: max-content;
-    max-width: 100%;
-    table-layout: auto;
+    width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 0.82rem;
 }
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 6px;
+    padding: 7px 4px;
     text-align: center;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6154,47 +6157,61 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-name {
-    width: 1%;
-    max-width: 9.5rem;
+    width: 3.25rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding-left: 2px;
+    padding-right: 2px;
 }
 
-.level-ups-card .level-ups-col-days,
-.level-ups-card .level-ups-col-avg {
-    width: 1%;
+.level-ups-card .level-ups-col-days {
+    width: 4.5rem;
     white-space: nowrap;
     text-align: center;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.level-ups-card .level-ups-col-avg {
+    width: 3rem;
+    white-space: nowrap;
+    text-align: center;
+    padding-left: 2px;
+    padding-right: 2px;
 }
 
 .level-ups-card .level-ups-col-needed {
-    /* Prefer wrapped copy up to this width; do not absorb leftover card space. */
-    width: 16rem;
-    max-width: 16rem;
+    width: auto;
+    padding-left: 6px;
+    padding-right: 2px;
+    text-align: left;
+    vertical-align: middle;
     line-height: 1.35;
+}
+
+.level-ups-card .level-ups-needed-text {
+    display: block;
+    max-width: 100%;
     overflow-wrap: break-word;
     word-break: normal;
-    text-align: left;
-    padding-left: 8px;
-    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-table th.level-ups-col-needed {
-    text-align: left;
+    text-align: center;
 }
 
 .level-ups-card .level-ups-col-action {
-    width: 1%;
+    width: 5.25rem;
     white-space: nowrap;
     text-align: center;
-    padding-left: 6px;
-    padding-right: 4px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.level-ups-card.level-ups-card--with-actions {
+    width: min(100%, 30.5rem);
 }
 
 .level-ups-card .level-up-btn {
@@ -10415,7 +10432,10 @@ tr[data-aggregate-day-label] {
     text-align: center;
 }
 
-#summary-view .level-ups-card .level-ups-table th.level-ups-col-needed,
+#summary-view .level-ups-card .level-ups-table th.level-ups-col-needed {
+    text-align: center;
+}
+
 #summary-view .level-ups-card .level-ups-table td.level-ups-col-needed {
     text-align: left;
 }
