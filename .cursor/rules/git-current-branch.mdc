@@ -1,0 +1,28 @@
+---
+description: Commit, push, and merge target the current branch unless another is named
+alwaysApply: true
+---
+
+# Git: use the current branch by default
+
+When the user says **commit**, **push**, **merge**, **clean**, or similar without naming a branch:
+
+- Do it on the **branch they are currently on**
+- Do **not** create a new feature branch
+- Do **not** open a PR to main unless they ask
+- If they are on `main`, commit and push to `main`
+
+When they name a target (**main**, another branch, or “merge into X”):
+
+- Use that named branch / destination instead
+
+## Examples
+
+- On `main`, “commit and push” → commit on `main`, push `origin main`
+- On `fix/foo`, “commit, push, merge” → commit/push `fix/foo`; merge only if they said merge (into the branch they named, or as they specified)
+- “merge to main” / “push to main” → target `main` even if currently on another branch
+
+## Do not
+
+- Spin up a side branch just because they asked to commit or push
+- Assume every push needs a PR into `main`
