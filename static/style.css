@@ -6069,7 +6069,7 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-section {
     margin-bottom: 14px;
-    padding: 10px 10px 8px;
+    padding: 8px 6px 6px;
     border-radius: 8px;
     border: 1px solid transparent;
 }
@@ -6085,14 +6085,14 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-section-title {
-    margin: 0 0 2px 0;
+    margin: 0 0 2px 4px;
     font-size: 0.95rem;
     font-weight: 600;
     color: var(--text-primary);
 }
 
 .level-ups-card .level-ups-empty {
-    margin: 4px 0 0;
+    margin: 4px 4px 0;
     font-size: 0.85rem;
     color: var(--text-secondary);
 }
@@ -6104,16 +6104,15 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-table {
-    width: max-content;
-    max-width: 100%;
-    table-layout: auto;
+    width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 0.82rem;
 }
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 6px;
+    padding: 7px 4px;
     text-align: center;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6135,37 +6134,46 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-name {
-    width: 1%;
-    max-width: 9.5rem;
+    width: 18%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
+    padding-left: 6px;
+    padding-right: 2px;
 }
 
-.level-ups-card .level-ups-col-days,
-.level-ups-card .level-ups-col-avg {
-    width: 1%;
+.level-ups-card .level-ups-col-days {
+    width: 14%;
     white-space: nowrap;
     text-align: center;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.level-ups-card .level-ups-col-avg {
+    width: 10%;
+    white-space: nowrap;
+    text-align: center;
+    padding-left: 2px;
+    padding-right: 4px;
 }
 
 .level-ups-card .level-ups-col-needed {
-    width: 1%;
-    max-width: 12.5rem;
+    width: auto;
     line-height: 1.35;
     overflow-wrap: break-word;
     word-break: normal;
     text-align: center;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding-left: 6px;
+    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-col-action {
-    width: 1%;
+    width: 5.5rem;
     white-space: nowrap;
     text-align: center;
-    padding-left: 6px;
+    padding-left: 4px;
     padding-right: 4px;
 }
 
