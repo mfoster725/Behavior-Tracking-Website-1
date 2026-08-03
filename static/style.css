@@ -6060,8 +6060,20 @@ a.dashboard-compare-toggle {
     line-height: 1.25;
 }
 
+.dashboard-card.level-ups-card.overview-extra-card {
+    width: max-content;
+    max-width: 100%;
+}
+
+.level-ups-card .level-ups-card-body {
+    /* Size the card to the tables; intro wraps to that width. */
+    display: inline-grid;
+    grid-template-columns: max-content;
+    justify-items: stretch;
+    max-width: 100%;
+}
+
 .level-ups-card .level-ups-intro {
-    /* Shrink-wrap the card to the tables; wrap this copy to that width. */
     width: 0;
     min-width: 100%;
     margin: 0 0 14px 0;
@@ -6071,7 +6083,7 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-section {
-    width: fit-content;
+    width: max-content;
     max-width: 100%;
     margin-bottom: 14px;
     padding: 8px 6px 6px;
@@ -6162,7 +6174,8 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-needed {
-    width: 1%;
+    /* Prefer wrapped copy up to this width; do not absorb leftover card space. */
+    width: 16rem;
     max-width: 16rem;
     line-height: 1.35;
     overflow-wrap: break-word;
