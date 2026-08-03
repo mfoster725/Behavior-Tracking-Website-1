@@ -6104,7 +6104,8 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-table {
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
     table-layout: auto;
     border-collapse: collapse;
     font-size: 0.82rem;
@@ -6112,7 +6113,7 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 14px;
+    padding: 7px 10px;
     text-align: left;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6128,7 +6129,9 @@ a.dashboard-compare-toggle {
     overflow-wrap: normal;
     word-break: normal;
     line-height: 1.25;
+    text-align: center;
     background: transparent;
+    cursor: help;
 }
 
 .level-ups-card .level-ups-col-name {
@@ -6147,17 +6150,20 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-needed {
-    width: 99%;
+    width: auto;
+    max-width: 20rem;
     line-height: 1.35;
     overflow-wrap: break-word;
     word-break: normal;
+    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-col-action {
     width: 1%;
     white-space: nowrap;
     text-align: right;
-    padding-right: 8px;
+    padding-left: 8px;
+    padding-right: 6px;
 }
 
 .level-ups-card .level-up-btn {
@@ -10374,6 +10380,10 @@ tr[data-aggregate-day-label] {
 }
 
 #summary-view .level-ups-card .level-ups-table .level-ups-col-name {
+    text-align: center;
+}
+
+#summary-view .level-ups-card .level-ups-table th {
     text-align: center;
 }
 
