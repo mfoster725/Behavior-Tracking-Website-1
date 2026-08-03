@@ -25585,9 +25585,14 @@ function attachOverviewCardInteractions(container, data) {
                     const avg = row.average_percent;
                     const avgText = (avg == null || Number.isNaN(Number(avg))) ? '—' : `${Number(avg).toFixed(1)}%`;
                     const needed = Number(row.days_at_90_needed || 0);
+                    const minDayPct = row.min_day_percent;
+                    const minDayPctText = (minDayPct == null || Number.isNaN(Number(minDayPct)))
+                        ? '90'
+                        : (Number(minDayPct) % 1 === 0 ? String(Number(minDayPct)) : Number(minDayPct).toFixed(1));
+                    const quickest = Number(row.days_at_100_needed || needed);
                     const neededText = row.eligible
                         ? 'Eligible now'
-                        : `${needed} more day${needed === 1 ? '' : 's'} with 90% or more to level up`;
+                        : `${needed} more day${needed === 1 ? '' : 's'} with at least ${minDayPctText}% to level up (quickest: ${quickest} day${quickest === 1 ? '' : 's'} at 100%)`;
                     const actionCell = showPromote
                         ? (row.eligible
                             ? `<td class="level-ups-col-action"><button type="button" class="btn-primary level-up-btn" data-level-up-student-id="${row.id}">Level Up</button></td>`
@@ -25609,9 +25614,9 @@ function attachOverviewCardInteractions(container, data) {
                                 <thead>
                                     <tr>
                                         <th class="level-ups-col-name">Student</th>
-                                        <th class="level-ups-col-days">Days</th>
+                                        <th class="level-ups-col-days">Qualifying Days</th>
                                         <th class="level-ups-col-avg">Avg</th>
-                                        <th class="level-ups-col-needed">Progress</th>
+                                        <th class="level-ups-col-needed">Days Needed</th>
                                         ${headAction}
                                     </tr>
                                 </thead>
@@ -25624,8 +25629,8 @@ function attachOverviewCardInteractions(container, data) {
 
             body.innerHTML = `
                 <p class="level-ups-intro">
-                    Students level up when their average STAR % over the previous 30 school days with data is 90% or higher.
-                    Excused days are excluded; unexcused days count as 0%.
+                    Qualifying days are the longest stretch of consecutive school days with data whose average STAR % is 90% or higher.
+                    Students level up at 30 qualifying days. Excused days are excluded; unexcused days count as 0%.
                 </p>
                 ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.', 'yellow')}
                 ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.', 'green')}

@@ -29,6 +29,7 @@ from datetime import datetime, date, timedelta, timezone
 from functools import wraps
 from decimal import Decimal
 import re
+import math
 import secrets
 import csv
 import json
@@ -11723,45 +11724,118 @@ def _average_or_none(values):
     return sum(values) / float(len(values))
 
 
-def _days_at_90_needed_for_level_up(daily_pcts_newest_first, window=LEVEL_UP_WINDOW_DAYS, threshold=LEVEL_UP_AVERAGE_THRESHOLD):
+def _longest_qualifying_day_stretch(daily_pcts_chrono, threshold=LEVEL_UP_AVERAGE_THRESHOLD):
     """
-    How many additional future days at exactly 90% are needed until the rolling
-    window has `window` days and averages >= threshold.
+    Longest contiguous stretch of days whose average is >= threshold.
+
+    daily_pcts_chrono: oldest -> newest school days with data.
+    Returns (length, average_of_that_stretch, sum_of_that_stretch).
+    A later high day can "rescue" earlier weaker days if the full contiguous
+    average stays at or above threshold (e.g. a 60% day followed by 130%).
     """
-    window = int(window)
+    values = [float(v) for v in (daily_pcts_chrono or [])]
+    n = len(values)
+    if n == 0:
+        return 0, None, 0.0
+
     threshold = float(threshold)
-    sim = list(daily_pcts_newest_first[:window])
+    best_len = 0
+    best_avg = None
+    best_sum = 0.0
+    for start in range(n):
+        total = 0.0
+        for end in range(start, n):
+            total += values[end]
+            length = end - start + 1
+            avg = total / float(length)
+            if avg < threshold:
+                continue
+            if length > best_len or (length == best_len and (best_avg is None or avg > best_avg)):
+                best_len = length
+                best_avg = avg
+                best_sum = total
+    return best_len, best_avg, best_sum
 
-    def is_eligible(vals):
-        return len(vals) >= window and _average_or_none(vals) >= threshold
 
-    if is_eligible(sim):
+def _min_daily_percent_to_finish_level_up(
+    qualifying_sum,
+    qualifying_len,
+    target=LEVEL_UP_WINDOW_DAYS,
+    threshold=LEVEL_UP_AVERAGE_THRESHOLD,
+):
+    """
+    Lowest equal daily % for the remaining (target - qualifying_len) days so the
+    combined average over `target` days stays >= threshold.
+    """
+    target = int(target)
+    threshold = float(threshold)
+    remaining = target - int(qualifying_len)
+    if remaining <= 0:
+        return 0.0
+    # (sum + remaining * x) / target >= threshold
+    raw = ((threshold * target) - float(qualifying_sum)) / float(remaining)
+    floored = max(0.0, raw)
+    # Ceil to 1 decimal so displayed % is enough to stay at/above threshold.
+    return math.ceil(floored * 10.0 - 1e-9) / 10.0
+
+
+def _days_at_percent_to_finish_level_up(
+    daily_pcts_chrono,
+    daily_percent=100.0,
+    target=LEVEL_UP_WINDOW_DAYS,
+    threshold=LEVEL_UP_AVERAGE_THRESHOLD,
+):
+    """
+    Fewest future days at `daily_percent` (appended newest) until a contiguous
+    qualifying stretch of `target` days exists.
+    """
+    target = int(target)
+    threshold = float(threshold)
+    daily_percent = float(daily_percent)
+    sim = [float(v) for v in (daily_pcts_chrono or [])]
+    length, _, _ = _longest_qualifying_day_stretch(sim, threshold=threshold)
+    if length >= target:
         return 0
 
-    # Worst case: replace the entire window with 90% days.
-    max_steps = window * 2
+    max_steps = target * 2
     needed = 0
     while needed < max_steps:
         needed += 1
-        sim = [threshold] + sim
-        if len(sim) > window:
-            sim = sim[:window]
-        if is_eligible(sim):
+        sim.append(daily_percent)
+        length, _, _ = _longest_qualifying_day_stretch(sim, threshold=threshold)
+        if length >= target:
             return needed
     return needed
 
 
 def _compute_level_up_progress(daily_pcts_newest_first):
-    window = list(daily_pcts_newest_first[:LEVEL_UP_WINDOW_DAYS])
-    days_logged = len(window)
-    average = _average_or_none(window)
-    eligible = days_logged >= LEVEL_UP_WINDOW_DAYS and average is not None and average >= LEVEL_UP_AVERAGE_THRESHOLD
-    days_needed = 0 if eligible else _days_at_90_needed_for_level_up(daily_pcts_newest_first)
+    # Qualifying days are measured chronologically (oldest -> newest).
+    chrono = list(reversed(daily_pcts_newest_first or []))
+    qualifying_len, qualifying_avg, qualifying_sum = _longest_qualifying_day_stretch(chrono)
+    days_logged = min(int(qualifying_len), LEVEL_UP_WINDOW_DAYS)
+    eligible = qualifying_len >= LEVEL_UP_WINDOW_DAYS
+    days_needed = 0 if eligible else (LEVEL_UP_WINDOW_DAYS - days_logged)
+    min_day_percent = None
+    days_at_100_needed = 0
+    if not eligible:
+        # If there is no qualifying stretch yet, remaining days must each average
+        # to the threshold (treated as starting from sum 0 / length 0).
+        min_day_percent = _min_daily_percent_to_finish_level_up(
+            qualifying_sum if qualifying_len > 0 else 0.0,
+            days_logged,
+        )
+        # Quickest path: perfect days going forward may rescue older days into a
+        # longer stretch. Extending the current stretch at 100% never takes more
+        # than `days_needed` days when the stretch already averages >= threshold.
+        simulated_100 = _days_at_percent_to_finish_level_up(chrono, daily_percent=100.0)
+        days_at_100_needed = min(int(simulated_100), int(days_needed))
     return {
         'days_logged': days_logged,
         'days_required': LEVEL_UP_WINDOW_DAYS,
-        'average_percent': round(average, 1) if average is not None else None,
+        'average_percent': round(qualifying_avg, 1) if qualifying_avg is not None else None,
         'days_at_90_needed': days_needed,
+        'min_day_percent': min_day_percent,
+        'days_at_100_needed': days_at_100_needed,
         'eligible': eligible,
     }
 
@@ -11784,6 +11858,8 @@ def _build_level_up_entry(student, records):
         'days_required': progress['days_required'],
         'average_percent': progress['average_percent'],
         'days_at_90_needed': progress['days_at_90_needed'],
+        'min_day_percent': progress.get('min_day_percent'),
+        'days_at_100_needed': progress.get('days_at_100_needed'),
         'eligible': progress['eligible'],
         'card_level_reset_at': reset_at.isoformat() if reset_at else None,
     }
@@ -11797,8 +11873,8 @@ def level_ups():
     """
     Level-up progress for selected students (Yellow→Green and Green→Blue).
 
-    Eligibility: average STAR % over the previous 30 school days with data >= 90%.
-    Excused days are excluded; unexcused days count as 0%.
+    Eligibility: a contiguous stretch of 30 school days with data whose average
+    STAR % is 90% or higher. Excused days are excluded; unexcused days count as 0%.
     """
     from sqlalchemy.orm import joinedload
 
