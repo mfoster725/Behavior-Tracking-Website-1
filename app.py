@@ -11810,7 +11810,8 @@ def _days_at_percent_to_finish_level_up(
 
 def _compute_level_up_progress(daily_pcts_newest_first):
     # Qualifying days are measured chronologically (oldest -> newest).
-    chrono = list(reversed(daily_pcts_newest_first or []))
+    newest_first = list(daily_pcts_newest_first or [])
+    chrono = list(reversed(newest_first))
     qualifying_len, qualifying_avg, qualifying_sum = _longest_qualifying_day_stretch(chrono)
     days_logged = min(int(qualifying_len), LEVEL_UP_WINDOW_DAYS)
     eligible = qualifying_len >= LEVEL_UP_WINDOW_DAYS
@@ -11829,10 +11830,19 @@ def _compute_level_up_progress(daily_pcts_newest_first):
         # than `days_needed` days when the stretch already averages >= threshold.
         simulated_100 = _days_at_percent_to_finish_level_up(chrono, daily_percent=100.0)
         days_at_100_needed = min(int(simulated_100), int(days_needed))
+
+    if qualifying_avg is not None:
+        average_percent = round(qualifying_avg, 1)
+    else:
+        # No qualifying stretch yet: show the current (most recent) 30-day average.
+        recent_window = newest_first[:LEVEL_UP_WINDOW_DAYS]
+        recent_avg = _average_or_none(recent_window)
+        average_percent = round(recent_avg, 1) if recent_avg is not None else None
+
     return {
         'days_logged': days_logged,
         'days_required': LEVEL_UP_WINDOW_DAYS,
-        'average_percent': round(qualifying_avg, 1) if qualifying_avg is not None else None,
+        'average_percent': average_percent,
         'days_at_90_needed': days_needed,
         'min_day_percent': min_day_percent,
         'days_at_100_needed': days_at_100_needed,

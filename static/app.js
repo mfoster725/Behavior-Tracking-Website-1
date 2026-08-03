@@ -25613,10 +25613,10 @@ function attachOverviewCardInteractions(container, data) {
                             <table class="level-ups-table">
                                 <thead>
                                     <tr>
-                                        <th class="level-ups-col-name">Student</th>
-                                        <th class="level-ups-col-days">Qualifying<br>Days</th>
-                                        <th class="level-ups-col-avg">Avg</th>
-                                        <th class="level-ups-col-needed">Days<br>Needed</th>
+                                        <th class="level-ups-col-name" title="Student name">Student</th>
+                                        <th class="level-ups-col-days" title="Longest stretch of consecutive school days with data whose average STAR % is 90% or higher, out of the 30 needed to level up. Excused days are excluded; unexcused days count as 0%.">Qualifying<br>Days</th>
+                                        <th class="level-ups-col-avg" title="Average STAR % of the current qualifying stretch. If there are no qualifying days yet, this is the student's average over their most recent school days with data (up to 30).">Avg</th>
+                                        <th class="level-ups-col-needed" title="How many more days are needed to reach 30 qualifying days, and the lowest equal daily % that keeps the full 30-day average at 90% or higher. Quickest is how soon they can finish if every upcoming day is 100%.">Days<br>Needed</th>
                                         ${headAction}
                                     </tr>
                                 </thead>
