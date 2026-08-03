@@ -6061,6 +6061,9 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-intro {
+    /* Shrink-wrap the card to the tables; wrap this copy to that width. */
+    width: 0;
+    min-width: 100%;
     margin: 0 0 14px 0;
     font-size: 0.85rem;
     color: var(--text-secondary);
@@ -6068,6 +6071,8 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-section {
+    width: fit-content;
+    max-width: 100%;
     margin-bottom: 14px;
     padding: 8px 6px 6px;
     border-radius: 8px;
@@ -6098,21 +6103,24 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-table-wrap {
-    overflow-x: hidden;
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.55);
 }
 
 .level-ups-card .level-ups-table {
-    width: 100%;
-    table-layout: fixed;
+    width: max-content;
+    max-width: 100%;
+    table-layout: auto;
     border-collapse: collapse;
     font-size: 0.82rem;
 }
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 4px;
+    padding: 7px 6px;
     text-align: center;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
@@ -6134,39 +6142,34 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-name {
-    width: 4.5rem;
+    width: 1%;
+    max-width: 9.5rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
     padding-left: 4px;
-    padding-right: 2px;
+    padding-right: 4px;
 }
 
-.level-ups-card .level-ups-col-days {
-    width: 5.5rem;
-    white-space: nowrap;
-    text-align: center;
-    padding-left: 2px;
-    padding-right: 2px;
-}
-
+.level-ups-card .level-ups-col-days,
 .level-ups-card .level-ups-col-avg {
-    width: 3rem;
+    width: 1%;
     white-space: nowrap;
     text-align: center;
-    padding-left: 2px;
+    padding-left: 4px;
     padding-right: 4px;
 }
 
 .level-ups-card .level-ups-col-needed {
-    width: auto;
+    width: 1%;
+    max-width: 16rem;
     line-height: 1.35;
     overflow-wrap: break-word;
     word-break: normal;
     text-align: left;
     padding-left: 8px;
-    padding-right: 4px;
+    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-table th.level-ups-col-needed {
@@ -6174,10 +6177,10 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-action {
-    width: 5.5rem;
+    width: 1%;
     white-space: nowrap;
     text-align: center;
-    padding-left: 4px;
+    padding-left: 6px;
     padding-right: 4px;
 }
 
