@@ -6060,11 +6060,202 @@ a.dashboard-compare-toggle {
     line-height: 1.25;
 }
 
+/* Frenzies Card Styles */
+.overview-fenzies-panel.overview-stat-selected {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-color: #f59e0b;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+}
+
+.frenzies-card {
+    margin-top: 16px;
+}
+
+.frenzies-breakdown-tabs-wrap {
+    margin-bottom: 12px;
+}
+
+.frenzies-breakdown-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+    overflow-x: auto;
+}
+
+.frenzies-breakdown-tab {
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.frenzies-breakdown-tab:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.frenzies-breakdown-tab.active {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    font-weight: 600;
+    border-bottom: 2px solid var(--accent);
+}
+
+.frenzies-view-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.frenzies-view-btn {
+    padding: 4px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+}
+
+.frenzies-view-btn:hover {
+    color: var(--text-primary);
+}
+
+.frenzies-view-btn.active {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.frenzies-severity-graph {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin: 16px 0;
+}
+
+.frenzies-severity-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+
+.frenzies-severity-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.frenzies-severity-legend-item:hover {
+    background: var(--bg-elevated);
+}
+
+.frenzies-severity-legend-label {
+    flex: 1;
+    font-size: 0.85rem;
+}
+
+.frenzies-severity-legend-count {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.frenzies-duration-summary {
+    display: flex;
+    gap: 24px;
+    padding: 12px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    margin-bottom: 16px;
+}
+
+.frenzies-title-hint {
+    display: inline-flex;
+}
+
+/* Frenzies drill tabs */
+.frenzies-tabs-container {
+    display: flex;
+    gap: 4px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    overflow-x: auto;
+}
+
+.frenzies-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.frenzies-tab:hover {
+    background: var(--bg);
+    border-color: var(--accent);
+}
+
+.frenzies-tab.active {
+    background: var(--bg);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+
+.frenzies-tab-close {
+    margin-left: 4px;
+    font-size: 1.2rem;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.15s ease;
+}
+
+.frenzies-tab-close:hover {
+    opacity: 1;
+}
+
+.frenzies-tab-panels {
+    margin-top: 12px;
+}
+
+.frenzies-tab-panel {
+    display: none;
+    padding: 12px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
+}
+
+.frenzies-tab-panel.active {
+    display: block;
+}
+
 .dashboard-card.level-ups-card.overview-extra-card {
     /* Tight content width, never wider than the masonry column. */
     width: min(100%, 25.5rem);
     max-width: 100%;
-    overflow: visible;
+    overflow: hidden;
     box-sizing: border-box;
 }
 
@@ -6157,35 +6348,40 @@ a.dashboard-compare-toggle {
 }
 
 .level-ups-card .level-ups-col-name {
-    width: 3.25rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: center;
-    padding-left: 2px;
-    padding-right: 2px;
-}
-
-.level-ups-card .level-ups-col-days {
+    /* Fit "STUDENT" header; ellipsis only on long name cells below. */
     width: 4.5rem;
     white-space: nowrap;
     text-align: center;
-    padding-left: 2px;
-    padding-right: 2px;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+.level-ups-card .level-ups-table td.level-ups-col-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.level-ups-card .level-ups-col-days {
+    width: 4.75rem;
+    white-space: nowrap;
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-col-avg {
-    width: 3rem;
+    width: 2.75rem;
     white-space: nowrap;
     text-align: center;
-    padding-left: 2px;
+    padding-left: 6px;
     padding-right: 2px;
 }
 
 .level-ups-card .level-ups-col-needed {
     width: auto;
-    padding-left: 6px;
-    padding-right: 2px;
+    /* Gutter after Avg; column fills remaining width to the section edge. */
+    padding-left: 2rem;
+    padding-right: 4px;
     text-align: left;
     vertical-align: middle;
     line-height: 1.35;
