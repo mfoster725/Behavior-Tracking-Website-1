@@ -6113,8 +6113,8 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
-    padding: 7px 10px;
-    text-align: left;
+    padding: 7px 6px;
+    text-align: center;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
@@ -6147,23 +6147,26 @@ a.dashboard-compare-toggle {
 .level-ups-card .level-ups-col-avg {
     width: 1%;
     white-space: nowrap;
+    text-align: center;
 }
 
 .level-ups-card .level-ups-col-needed {
-    width: auto;
-    max-width: 20rem;
+    width: 1%;
+    max-width: 12.5rem;
     line-height: 1.35;
     overflow-wrap: break-word;
     word-break: normal;
-    padding-right: 6px;
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 4px;
 }
 
 .level-ups-card .level-ups-col-action {
     width: 1%;
     white-space: nowrap;
-    text-align: right;
-    padding-left: 8px;
-    padding-right: 6px;
+    text-align: center;
+    padding-left: 6px;
+    padding-right: 4px;
 }
 
 .level-ups-card .level-up-btn {
@@ -10379,11 +10382,8 @@ tr[data-aggregate-day-label] {
     font-variant-numeric: tabular-nums;
 }
 
-#summary-view .level-ups-card .level-ups-table .level-ups-col-name {
-    text-align: center;
-}
-
-#summary-view .level-ups-card .level-ups-table th {
+#summary-view .level-ups-card .level-ups-table th,
+#summary-view .level-ups-card .level-ups-table td {
     text-align: center;
 }
 
