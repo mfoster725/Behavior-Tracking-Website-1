@@ -75,7 +75,7 @@ except ImportError:
     Image = None
 
 app = Flask(__name__)
-SUMMARY_API_BUILD = 'frenzy-heatmap-v4-info-period'
+SUMMARY_API_BUILD = 'frenzies-card-v1'
 
 
 def _env_truthy(name):
@@ -3788,6 +3788,13 @@ def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
     details = (stats_behavior or {}).get('frenzy_cell_details_by_time_by_day')
     if isinstance(details, dict):
         out['frenzy_cell_details_by_time_by_day'] = copy.deepcopy(details)
+    # Deep-copy new frenzy card aggregation fields
+    for key in ('frenzies_by_severity', 'frenzies_by_time', 'frenzies_by_day',
+                'frenzies_by_location', 'frenzies_by_purpose', 'frenzies_by_duration_bucket',
+                'frenzies_duration_summary', 'infractions_for_frenzies', 'frenzies_severity_totals'):
+        val = (stats_behavior or {}).get(key)
+        if val is not None:
+            out[key] = copy.deepcopy(val)
     return out
 
 
@@ -4399,6 +4406,305 @@ def summary():
                 bucket['purpose_breakdown'].get(purpose_name, 0) + 1
             )
 
+    def _frenzy_duration_bucket(minutes):
+        """Classify frenzy duration into buckets."""
+        try:
+            m = int(minutes or 0)
+        except (TypeError, ValueError):
+            m = 0
+        if m <= 5:
+            return '0-5'
+        elif m <= 10:
+            return '6-10'
+        elif m <= 20:
+            return '11-20'
+        else:
+            return '21+'
+
+    def _period_infraction_counts_for_frenzy(period, info_data):
+        """Aggregate infraction type->count from period.infractions + info.infractions + legacy infraction1/2."""
+        counts = {}
+        for inf in (getattr(period, 'infractions', None) or []):
+            inf_type = (getattr(inf, 'type', None) or '').strip()
+            if inf_type:
+                inf_count = getattr(inf, 'count', 1) or 1
+                try:
+                    inf_count = int(inf_count)
+                except (TypeError, ValueError):
+                    inf_count = 1
+                counts[inf_type] = counts.get(inf_type, 0) + inf_count
+        inf_arr = (info_data or {}).get('infractions')
+        if isinstance(inf_arr, list):
+            for inf_item in inf_arr:
+                if not isinstance(inf_item, dict):
+                    continue
+                inf_type = (inf_item.get('type') or '').strip()
+                if inf_type:
+                    try:
+                        inf_count = int(inf_item.get('count', 1))
+                    except (ValueError, TypeError):
+                        inf_count = 1
+                    counts[inf_type] = counts.get(inf_type, 0) + inf_count
+        legacy1 = (info_data or {}).get('infraction1')
+        if legacy1:
+            legacy1 = (str(legacy1 or '')).strip()
+            if legacy1:
+                counts[legacy1] = counts.get(legacy1, 0) + 1
+        legacy2 = (info_data or {}).get('infraction2')
+        if legacy2:
+            legacy2 = (str(legacy2 or '')).strip()
+            if legacy2:
+                counts[legacy2] = counts.get(legacy2, 0) + 1
+        return counts
+
+    def _build_frenzy_card_aggregates(record_list):
+        """Build comprehensive frenzy card statistics from FrenzyEvents and info-period frenzies."""
+        weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+        
+        total_frenzies = 0
+        frenzies_by_severity = {}
+        for s in range(1, 6):
+            frenzies_by_severity[str(s)] = {
+                'count': 0,
+                'total_duration': 0,
+                'avg_duration': 0,
+                'by_time': {},
+                'by_day_of_week': {day: 0 for day in weekdays},
+                'by_location': {},
+                'purpose_breakdown': {},
+                'infractions_breakdown': {},
+            }
+        
+        frenzies_by_time = {}
+        frenzies_by_day = {day: {'count': 0, 'total_duration': 0, 'avg_duration': 0, 'severity_breakdown': {}} for day in weekdays}
+        frenzies_by_location = {}
+        frenzies_by_purpose = {}
+        frenzies_by_duration_bucket = {}
+        
+        total_duration = 0
+        total_count = 0
+        infractions_for_frenzies = {}
+        frenzies_severity_totals = {'1': 0, '2': 0, '3': 0, '4': 0, '5': 0}
+        
+        def ensure_bucket(bucket_dict, key, init_keys=None):
+            if key not in bucket_dict:
+                bucket_dict[key] = {
+                    'count': 0,
+                    'total_duration': 0,
+                    'avg_duration': 0,
+                    'severity_breakdown': {},
+                }
+                if init_keys:
+                    for k in init_keys:
+                        bucket_dict[key][k] = {}
+            return bucket_dict[key]
+        
+        for record in record_list:
+            day_of_week = record.day_of_week
+            is_weekday = day_of_week in weekdays
+            
+            for frenzy in (getattr(record, 'frenzies', None) or []):
+                sev = getattr(frenzy, 'severity', None)
+                if sev is None:
+                    sev = 1
+                try:
+                    sev_int = max(1, min(5, int(sev)))
+                except (TypeError, ValueError):
+                    sev_int = 1
+                sev_key = str(sev_int)
+                
+                duration = getattr(frenzy, 'duration_minutes', None) or 0
+                try:
+                    duration = int(duration)
+                except (TypeError, ValueError):
+                    duration = 0
+                
+                total_frenzies += 1
+                total_count += 1
+                total_duration += duration
+                frenzies_severity_totals[sev_key] = frenzies_severity_totals.get(sev_key, 0) + 1
+                
+                sev_bucket = frenzies_by_severity[sev_key]
+                sev_bucket['count'] += 1
+                sev_bucket['total_duration'] += duration
+                
+                time_label = (getattr(frenzy, 'time_range', None) or '').strip() or 'Unknown'
+                time_bucket = ensure_bucket(frenzies_by_time, time_label)
+                time_bucket['count'] += 1
+                time_bucket['total_duration'] += duration
+                time_bucket['severity_breakdown'][sev_key] = time_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                
+                sev_bucket['by_time'][time_label] = sev_bucket['by_time'].get(time_label, 0) + 1
+                
+                if is_weekday:
+                    sev_bucket['by_day_of_week'][day_of_week] += 1
+                    day_bucket = frenzies_by_day[day_of_week]
+                    day_bucket['count'] += 1
+                    day_bucket['total_duration'] += duration
+                    day_bucket['severity_breakdown'][sev_key] = day_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                
+                location = (getattr(frenzy, 'location', None) or '').strip() or 'Unknown'
+                loc_bucket = ensure_bucket(frenzies_by_location, location)
+                loc_bucket['count'] += 1
+                loc_bucket['total_duration'] += duration
+                loc_bucket['severity_breakdown'][sev_key] = loc_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                sev_bucket['by_location'][location] = sev_bucket['by_location'].get(location, 0) + 1
+                
+                purpose1 = getattr(frenzy, 'purpose', None)
+                purpose2 = getattr(frenzy, 'purpose2', None)
+                for purp in (purpose1, purpose2):
+                    if purp:
+                        purp = (str(purp or '')).strip()
+                        if purp:
+                            purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
+                            purp_bucket['count'] += 1
+                            purp_bucket['total_duration'] += duration
+                            purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                            sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
+                
+                dur_bucket_key = _frenzy_duration_bucket(duration)
+                dur_bucket = ensure_bucket(frenzies_by_duration_bucket, dur_bucket_key)
+                dur_bucket['count'] += 1
+                dur_bucket['total_duration'] += duration
+                dur_bucket['severity_breakdown'][sev_key] = dur_bucket['severity_breakdown'].get(sev_key, 0) + 1
+            
+            for period in (getattr(record, 'periods', None) or []):
+                info_data = None
+                try:
+                    info_raw = getattr(period, 'info', None)
+                    if info_raw:
+                        info_data = json.loads(info_raw)
+                except (TypeError, ValueError, AttributeError):
+                    info_data = None
+                
+                if not _info_json_truthy((info_data or {}).get('frenzy')):
+                    continue
+                
+                info_sev = _period_info_frenzy_severity_int(info_data)
+                if info_sev is None:
+                    info_sev = 1
+                sev_key = str(info_sev)
+                
+                duration = 0
+                try:
+                    duration = int((info_data or {}).get('duration_minutes', 0))
+                except (TypeError, ValueError):
+                    duration = 0
+                
+                total_frenzies += 1
+                total_count += 1
+                total_duration += duration
+                frenzies_severity_totals[sev_key] = frenzies_severity_totals.get(sev_key, 0) + 1
+                
+                sev_bucket = frenzies_by_severity[sev_key]
+                sev_bucket['count'] += 1
+                sev_bucket['total_duration'] += duration
+                
+                time_label = (getattr(period, 'time_range', None) or '').strip() or 'Unknown'
+                time_bucket = ensure_bucket(frenzies_by_time, time_label)
+                time_bucket['count'] += 1
+                time_bucket['total_duration'] += duration
+                time_bucket['severity_breakdown'][sev_key] = time_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                
+                sev_bucket['by_time'][time_label] = sev_bucket['by_time'].get(time_label, 0) + 1
+                
+                if is_weekday:
+                    sev_bucket['by_day_of_week'][day_of_week] += 1
+                    day_bucket = frenzies_by_day[day_of_week]
+                    day_bucket['count'] += 1
+                    day_bucket['total_duration'] += duration
+                    day_bucket['severity_breakdown'][sev_key] = day_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                
+                location = (info_data or {}).get('alternate_location') or (info_data or {}).get('location')
+                if not location:
+                    location = getattr(period, 'location', None)
+                location = (str(location or '')).strip() or 'Unknown'
+                loc_bucket = ensure_bucket(frenzies_by_location, location)
+                loc_bucket['count'] += 1
+                loc_bucket['total_duration'] += duration
+                loc_bucket['severity_breakdown'][sev_key] = loc_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                sev_bucket['by_location'][location] = sev_bucket['by_location'].get(location, 0) + 1
+                
+                purpose_values = _purpose_values_from_info(info_data)
+                for purp in purpose_values:
+                    if purp:
+                        purp = (str(purp or '')).strip()
+                        if purp:
+                            purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
+                            purp_bucket['count'] += 1
+                            purp_bucket['total_duration'] += duration
+                            purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                            sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
+                
+                dur_bucket_key = _frenzy_duration_bucket(duration)
+                dur_bucket = ensure_bucket(frenzies_by_duration_bucket, dur_bucket_key)
+                dur_bucket['count'] += 1
+                dur_bucket['total_duration'] += duration
+                dur_bucket['severity_breakdown'][sev_key] = dur_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                
+                inf_counts = _period_infraction_counts_for_frenzy(period, info_data)
+                for inf_type, inf_count in inf_counts.items():
+                    infractions_for_frenzies[inf_type] = infractions_for_frenzies.get(inf_type, 0) + inf_count
+                    sev_bucket['infractions_breakdown'][inf_type] = sev_bucket['infractions_breakdown'].get(inf_type, 0) + inf_count
+        
+        for s in range(1, 6):
+            sev_key = str(s)
+            sev_bucket = frenzies_by_severity[sev_key]
+            if sev_bucket['count'] > 0:
+                sev_bucket['avg_duration'] = round(sev_bucket['total_duration'] / sev_bucket['count'], 1)
+        
+        for time_label, time_bucket in frenzies_by_time.items():
+            if time_bucket['count'] > 0:
+                time_bucket['avg_duration'] = round(time_bucket['total_duration'] / time_bucket['count'], 1)
+        
+        for day, day_bucket in frenzies_by_day.items():
+            if day_bucket['count'] > 0:
+                day_bucket['avg_duration'] = round(day_bucket['total_duration'] / day_bucket['count'], 1)
+        
+        for loc, loc_bucket in frenzies_by_location.items():
+            if loc_bucket['count'] > 0:
+                loc_bucket['avg_duration'] = round(loc_bucket['total_duration'] / loc_bucket['count'], 1)
+        
+        for purp, purp_bucket in frenzies_by_purpose.items():
+            if purp_bucket['count'] > 0:
+                purp_bucket['avg_duration'] = round(purp_bucket['total_duration'] / purp_bucket['count'], 1)
+        
+        for dur_key, dur_bucket in frenzies_by_duration_bucket.items():
+            if dur_bucket['count'] > 0:
+                dur_bucket['avg_duration'] = round(dur_bucket['total_duration'] / dur_bucket['count'], 1)
+        
+        avg_duration = round(total_duration / total_count, 1) if total_count > 0 else 0
+        
+        return {
+            'total_frenzies': total_frenzies,
+            'frenzies_by_severity': frenzies_by_severity,
+            'frenzies_by_time': frenzies_by_time,
+            'frenzies_by_day': frenzies_by_day,
+            'frenzies_by_location': frenzies_by_location,
+            'frenzies_by_purpose': frenzies_by_purpose,
+            'frenzies_by_duration_bucket': frenzies_by_duration_bucket,
+            'frenzies_duration_summary': {
+                'total_duration': total_duration,
+                'avg_duration': avg_duration,
+                'total_count': total_count,
+            },
+            'infractions_for_frenzies': infractions_for_frenzies,
+            'frenzies_severity_totals': frenzies_severity_totals,
+        }
+
+    def _attach_frenzy_card_fields(result, stats):
+        """Copy frenzy card aggregates from stats into response dict."""
+        result['total_frenzies'] = stats.get('total_frenzies', 0)
+        result['frenzies_by_severity'] = stats.get('frenzies_by_severity', {})
+        result['frenzies_by_time'] = stats.get('frenzies_by_time', {})
+        result['frenzies_by_day'] = stats.get('frenzies_by_day', {})
+        result['frenzies_by_location'] = stats.get('frenzies_by_location', {})
+        result['frenzies_by_purpose'] = stats.get('frenzies_by_purpose', {})
+        result['frenzies_by_duration_bucket'] = stats.get('frenzies_by_duration_bucket', {})
+        result['frenzies_duration_summary'] = stats.get('frenzies_duration_summary', {})
+        result['infractions_for_frenzies'] = stats.get('infractions_for_frenzies', {})
+        result['frenzies_severity_totals'] = stats.get('frenzies_severity_totals', {})
+
     def calculate_summary_stats_lite(record_list):
         """Faster summary aggregation used for dashboard loads."""
         weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
@@ -4474,8 +4780,6 @@ def summary():
                 total_accountability += ap
                 total_relationships += rp
                 total_possible += pp
-                if period.frenzy:
-                    total_frenzies += 1
 
                 class_name = period.location or 'Unknown'
                 time_label = (period.time_range or '').strip() or 'Unknown'
@@ -4743,6 +5047,8 @@ def summary():
             frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
             frenzy_cell_details_by_time_by_day[day] = formatted_details
 
+        frenzy_card = _build_frenzy_card_aggregates(record_list)
+
         return {
             'total_days': len(record_list),
             'totals': {
@@ -4760,7 +5066,7 @@ def summary():
                 'overall': round(overall_percent, 1)
             },
             'infractions': total_infractions,
-            'total_frenzies': total_frenzies,
+            'total_frenzies': frenzy_card['total_frenzies'],
             'additional_info': additional_info,
             'by_day_of_week': by_day_of_week_formatted,
             'by_class': by_class_formatted,
@@ -4769,6 +5075,15 @@ def summary():
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
             'infractions_by_type': {},
+            'frenzies_by_severity': frenzy_card['frenzies_by_severity'],
+            'frenzies_by_time': frenzy_card['frenzies_by_time'],
+            'frenzies_by_day': frenzy_card['frenzies_by_day'],
+            'frenzies_by_location': frenzy_card['frenzies_by_location'],
+            'frenzies_by_purpose': frenzy_card['frenzies_by_purpose'],
+            'frenzies_by_duration_bucket': frenzy_card['frenzies_by_duration_bucket'],
+            'frenzies_duration_summary': frenzy_card['frenzies_duration_summary'],
+            'infractions_for_frenzies': frenzy_card['infractions_for_frenzies'],
+            'frenzies_severity_totals': frenzy_card['frenzies_severity_totals'],
         }
     
     # Helper function to calculate summary stats for a set of records
@@ -4947,10 +5262,7 @@ def summary():
 
                 # Track which classes most often occur in each time period
                 time_data['class_counts'][class_name] = time_data['class_counts'].get(class_name, 0) + 1
-                
-                if period.frenzy:
-                    total_frenzies += 1
-                
+
                 # Count infractions from period.infractions relationship
                 # Collect infractions for this period so we can later associate
                 # them with reminders / resets when present.
@@ -5575,6 +5887,8 @@ def summary():
                 entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
                 entry['by_day_of_week'][day_label] = entry['by_day_of_week'].get(day_label, 0) + cnt
 
+        frenzy_card = _build_frenzy_card_aggregates(record_list)
+
         return {
             'total_days': len(record_list),
             'totals': {
@@ -5592,7 +5906,7 @@ def summary():
                 'overall': round(overall_percent, 1)
             },
             'infractions': total_infractions,
-            'total_frenzies': total_frenzies,
+            'total_frenzies': frenzy_card['total_frenzies'],
             'additional_info': additional_info,
             'by_day_of_week': by_day_of_week_formatted,
             'by_class': by_class_formatted,
@@ -5601,6 +5915,15 @@ def summary():
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
             'infractions_by_type': infractions_by_type,
+            'frenzies_by_severity': frenzy_card['frenzies_by_severity'],
+            'frenzies_by_time': frenzy_card['frenzies_by_time'],
+            'frenzies_by_day': frenzy_card['frenzies_by_day'],
+            'frenzies_by_location': frenzy_card['frenzies_by_location'],
+            'frenzies_by_purpose': frenzy_card['frenzies_by_purpose'],
+            'frenzies_by_duration_bucket': frenzy_card['frenzies_by_duration_bucket'],
+            'frenzies_duration_summary': frenzy_card['frenzies_duration_summary'],
+            'infractions_for_frenzies': frenzy_card['infractions_for_frenzies'],
+            'frenzies_severity_totals': frenzy_card['frenzies_severity_totals'],
         }
 
     def _overview_previous_stats_payload(prev_stats):
@@ -6263,6 +6586,7 @@ def summary():
             'attendance_summary': attendance_summary,
             'attendance_by_day_of_week': attendance_by_day,
         }
+        _attach_frenzy_card_fields(result, stats)
         overview_trends = None
         prev_stats_for_trigger = None
         if period == '30day':
@@ -6425,6 +6749,7 @@ def summary():
             'attendance_summary': attendance_summary_cur,
             'attendance_by_day_of_week': attendance_by_day_cur,
         }
+        _attach_frenzy_card_fields(weekly_resp, stats)
         if overview_trends:
             weekly_resp['overview_trends'] = overview_trends
             log_infraction_bucket_trend_values(overview_trends)
@@ -6497,6 +6822,7 @@ def summary():
             'attendance_summary': attendance_summary_cur,
             'attendance_by_day_of_week': attendance_by_day_cur,
         }
+        _attach_frenzy_card_fields(tf30_resp, stats)
         if overview_trends:
             tf30_resp['overview_trends'] = overview_trends
             log_infraction_bucket_trend_values(overview_trends)
@@ -6723,6 +7049,7 @@ def summary():
             'attendance_summary': attendance_summary_all,
             'attendance_by_day_of_week': attendance_by_day_all,
         }
+        _attach_frenzy_card_fields(resp_alltime, stats)
         prev_stats_alltime = get_prior_window_prev_stats(attendance_records_all)
         if overview_trends_all:
             resp_alltime['overview_trends'] = overview_trends_all
