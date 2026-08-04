@@ -12006,6 +12006,9 @@ LEVEL_UP_NEXT_COLOR = {
     'yellow': 'green',
     'green': 'blue',
 }
+# Short-lived response cache so Overview teaser + restored card share one compute.
+_LEVEL_UPS_RESPONSE_CACHE = {}
+_LEVEL_UPS_RESPONSE_CACHE_TTL_SEC = 45.0
 
 
 def _normalize_card_color(card_color):
@@ -12393,6 +12396,20 @@ def level_ups():
     staff_id = request.args.get('staff_id', type=int)
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
 
+    cache_key = (
+        getattr(current_user, 'id', None),
+        student_id,
+        staff_id,
+        managed_by_me,
+    )
+    cached = _LEVEL_UPS_RESPONSE_CACHE.get(cache_key)
+    if cached:
+        payload, cached_at = cached
+        if (time.time() - cached_at) <= _LEVEL_UPS_RESPONSE_CACHE_TTL_SEC:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            print(f"level-ups cache hit in {elapsed_ms}ms", flush=True)
+            return jsonify(payload)
+
     selected_ids = _resolve_student_scope(
         student_id=student_id,
         staff_id=staff_id,
@@ -12462,14 +12479,14 @@ def level_ups():
         flush=True,
     )
 
-    return jsonify({
+    payload = {
         'yellow_to_green': yellow_to_green,
         'green_to_blue': green_to_blue,
         'eligible_count': eligible_count,
         'can_level_up': can_manage_level_ups(current_user),
-        'server_build': 'level-ups-fast-v2',
-        'compute_ms': elapsed_ms,
-    })
+    }
+    _LEVEL_UPS_RESPONSE_CACHE[cache_key] = (payload, time.time())
+    return jsonify(payload)
 
 
 @app.route('/api/students/<int:student_id>/level-up', methods=['POST'])
@@ -12506,6 +12523,7 @@ def level_up_student(student_id):
     student.card_level_reset_at = date.today()
     # Keep model in sync if card_color was previously null/invalid.
     db.session.commit()
+    _LEVEL_UPS_RESPONSE_CACHE.clear()
 
     log_phi_access(
         action='UPDATE',
@@ -12872,5 +12890,5 @@ if __name__ == '__main__':
             print(f"Migration check completed (table may not exist yet or column already exists): {e}")
     port = int(os.environ.get('PORT', 5000))
     print(f"Flask server starting on port {port} (Ctrl+C to stop)...", flush=True)
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 
