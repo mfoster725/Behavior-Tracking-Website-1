@@ -75,7 +75,54 @@ except ImportError:
     Image = None
 
 app = Flask(__name__)
-SUMMARY_API_BUILD = 'frenzies-card-v1'
+SUMMARY_API_BUILD = 'frenzies-card-v3'
+FRENZY_MISSING_LABEL = 'Not recorded'
+# "Unknown" was never a real location option — only an old empty-field fallback in reports code.
+_FRENZY_LEGACY_LOCATION_SENTINELS = frozenset({'unknown'})
+
+
+def frenzy_label_or_missing(value):
+    """Keep stored labels (including literal 'Unknown'); only empty/missing uses FRENZY_MISSING_LABEL."""
+    if value is None:
+        return FRENZY_MISSING_LABEL
+    text = str(value).strip()
+    return text if text else FRENZY_MISSING_LABEL
+
+
+def frenzy_location_label(value):
+    """Normalize frenzy location: blank or legacy 'Unknown' sentinel → Not recorded."""
+    text = frenzy_label_or_missing(value)
+    if text.casefold() in _FRENZY_LEGACY_LOCATION_SENTINELS:
+        return FRENZY_MISSING_LABEL
+    return text
+
+
+def frenzy_purpose_labels_from_event(purpose1, purpose2=None):
+    labels = []
+    for purp in (purpose1, purpose2):
+        text = (str(purp or '')).strip()
+        if text:
+            labels.append(text)
+    return labels if labels else [FRENZY_MISSING_LABEL]
+
+
+def frenzy_purpose_labels_from_info(info_data):
+    labels = []
+    purposes = (info_data or {}).get('purposes')
+    if isinstance(purposes, list):
+        labels.extend(purposes)
+    for key in ('purpose1', 'purpose2'):
+        p = (info_data or {}).get(key)
+        if p:
+            labels.append(p)
+    cleaned = []
+    seen = set()
+    for label in labels:
+        text = (str(label or '')).strip()
+        if text and text not in seen:
+            seen.add(text)
+            cleaned.append(text)
+    return cleaned if cleaned else [FRENZY_MISSING_LABEL]
 
 
 def _env_truthy(name):
@@ -4401,7 +4448,7 @@ def summary():
         sev_key = str(sev_int)
         bucket['severity_breakdown'][sev_key] = bucket['severity_breakdown'].get(sev_key, 0) + 1
         for purpose_val in purpose_values:
-            purpose_name = (str(purpose_val or '')).strip() or 'Unknown'
+            purpose_name = frenzy_label_or_missing(purpose_val)
             bucket['purpose_breakdown'][purpose_name] = (
                 bucket['purpose_breakdown'].get(purpose_name, 0) + 1
             )
@@ -4528,7 +4575,7 @@ def summary():
                 sev_bucket['count'] += 1
                 sev_bucket['total_duration'] += duration
                 
-                time_label = (getattr(frenzy, 'time_range', None) or '').strip() or 'Unknown'
+                time_label = (getattr(frenzy, 'time_range', None) or '').strip() or FRENZY_MISSING_LABEL
                 time_bucket = ensure_bucket(frenzies_by_time, time_label)
                 time_bucket['count'] += 1
                 time_bucket['total_duration'] += duration
@@ -4543,24 +4590,23 @@ def summary():
                     day_bucket['total_duration'] += duration
                     day_bucket['severity_breakdown'][sev_key] = day_bucket['severity_breakdown'].get(sev_key, 0) + 1
                 
-                location = (getattr(frenzy, 'location', None) or '').strip() or 'Unknown'
+                location = frenzy_location_label(getattr(frenzy, 'location', None))
                 loc_bucket = ensure_bucket(frenzies_by_location, location)
                 loc_bucket['count'] += 1
                 loc_bucket['total_duration'] += duration
                 loc_bucket['severity_breakdown'][sev_key] = loc_bucket['severity_breakdown'].get(sev_key, 0) + 1
                 sev_bucket['by_location'][location] = sev_bucket['by_location'].get(location, 0) + 1
                 
-                purpose1 = getattr(frenzy, 'purpose', None)
-                purpose2 = getattr(frenzy, 'purpose2', None)
-                for purp in (purpose1, purpose2):
-                    if purp:
-                        purp = (str(purp or '')).strip()
-                        if purp:
-                            purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
-                            purp_bucket['count'] += 1
-                            purp_bucket['total_duration'] += duration
-                            purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
-                            sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
+                purpose_labels = frenzy_purpose_labels_from_event(
+                    getattr(frenzy, 'purpose', None),
+                    getattr(frenzy, 'purpose2', None),
+                )
+                for purp in purpose_labels:
+                    purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
+                    purp_bucket['count'] += 1
+                    purp_bucket['total_duration'] += duration
+                    purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                    sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
                 
                 dur_bucket_key = _frenzy_duration_bucket(duration)
                 dur_bucket = ensure_bucket(frenzies_by_duration_bucket, dur_bucket_key)
@@ -4600,7 +4646,7 @@ def summary():
                 sev_bucket['count'] += 1
                 sev_bucket['total_duration'] += duration
                 
-                time_label = (getattr(period, 'time_range', None) or '').strip() or 'Unknown'
+                time_label = (getattr(period, 'time_range', None) or '').strip() or FRENZY_MISSING_LABEL
                 time_bucket = ensure_bucket(frenzies_by_time, time_label)
                 time_bucket['count'] += 1
                 time_bucket['total_duration'] += duration
@@ -4618,23 +4664,19 @@ def summary():
                 location = (info_data or {}).get('alternate_location') or (info_data or {}).get('location')
                 if not location:
                     location = getattr(period, 'location', None)
-                location = (str(location or '')).strip() or 'Unknown'
+                location = frenzy_location_label(location)
                 loc_bucket = ensure_bucket(frenzies_by_location, location)
                 loc_bucket['count'] += 1
                 loc_bucket['total_duration'] += duration
                 loc_bucket['severity_breakdown'][sev_key] = loc_bucket['severity_breakdown'].get(sev_key, 0) + 1
                 sev_bucket['by_location'][location] = sev_bucket['by_location'].get(location, 0) + 1
                 
-                purpose_values = _purpose_values_from_info(info_data)
-                for purp in purpose_values:
-                    if purp:
-                        purp = (str(purp or '')).strip()
-                        if purp:
-                            purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
-                            purp_bucket['count'] += 1
-                            purp_bucket['total_duration'] += duration
-                            purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
-                            sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
+                for purp in frenzy_purpose_labels_from_info(info_data):
+                    purp_bucket = ensure_bucket(frenzies_by_purpose, purp)
+                    purp_bucket['count'] += 1
+                    purp_bucket['total_duration'] += duration
+                    purp_bucket['severity_breakdown'][sev_key] = purp_bucket['severity_breakdown'].get(sev_key, 0) + 1
+                    sev_bucket['purpose_breakdown'][purp] = sev_bucket['purpose_breakdown'].get(purp, 0) + 1
                 
                 dur_bucket_key = _frenzy_duration_bucket(duration)
                 dur_bucket = ensure_bucket(frenzies_by_duration_bucket, dur_bucket_key)
@@ -4760,7 +4802,7 @@ def summary():
                         sev_int = int(sev)
                     except (TypeError, ValueError):
                         continue
-                    time_label = (getattr(frenzy, 'time_range', '') or '').strip() or 'Unknown'
+                    time_label = (getattr(frenzy, 'time_range', '') or '').strip() or FRENZY_MISSING_LABEL
                     _accumulate_frenzy_severity_for_cell(
                         frenzy_severity_by_time_by_day[day_of_week],
                         time_label,
@@ -4781,8 +4823,8 @@ def summary():
                 total_relationships += rp
                 total_possible += pp
 
-                class_name = period.location or 'Unknown'
-                time_label = (period.time_range or '').strip() or 'Unknown'
+                class_name = period.location or FRENZY_MISSING_LABEL
+                time_label = (period.time_range or '').strip() or FRENZY_MISSING_LABEL
 
                 if class_name not in by_class:
                     by_class[class_name] = {
@@ -4911,7 +4953,7 @@ def summary():
                     if is_weekday:
                         info_sev = _period_info_frenzy_severity_int(info_data)
                         if info_sev is not None:
-                            info_time_label = (period.time_range or '').strip() or 'Unknown'
+                            info_time_label = (period.time_range or '').strip() or FRENZY_MISSING_LABEL
                             _accumulate_frenzy_severity_for_cell(
                                 frenzy_severity_by_time_by_day[day_of_week],
                                 info_time_label,
@@ -5154,7 +5196,7 @@ def summary():
                         sev_int = int(sev)
                     except (TypeError, ValueError):
                         continue
-                    time_label = (frenzy.time_range or '').strip() or 'Unknown'
+                    time_label = (frenzy.time_range or '').strip() or FRENZY_MISSING_LABEL
                     _accumulate_frenzy_severity_for_cell(
                         frenzy_severity_by_time_by_day[day_of_week],
                         time_label,
@@ -5171,7 +5213,7 @@ def summary():
 
                 # Normalize time period label (matches point card data tables)
                 raw_time_period = (period.time_range or '').strip()
-                time_label = raw_time_period or 'Unknown'
+                time_label = raw_time_period or FRENZY_MISSING_LABEL
 
                 # Initialize time bucket if needed
                 if time_label not in by_time:
@@ -5235,7 +5277,7 @@ def summary():
                         dt_bucket['total_days'] += 1
                 
                 # Track class statistics for this period
-                class_name = period.location or 'Unknown'
+                class_name = period.location or FRENZY_MISSING_LABEL
                 if class_name not in by_class:
                     by_class[class_name] = {
                         'total_days': 0,
@@ -5304,14 +5346,14 @@ def summary():
                         dt_bucket['infractions'][infraction.infraction_type] += infraction.count
                     
                     # Track infractions by class
-                    class_name = period.location or 'Unknown'
+                    class_name = period.location or FRENZY_MISSING_LABEL
                     if infraction.infraction_type not in by_class[class_name]['infractions']:
                         by_class[class_name]['infractions'][infraction.infraction_type] = 0
                     by_class[class_name]['infractions'][infraction.infraction_type] += infraction.count
 
                     # Track infractions by time period
                     raw_time_period = (period.time_range or '').strip()
-                    time_label = raw_time_period or 'Unknown'
+                    time_label = raw_time_period or FRENZY_MISSING_LABEL
                     if time_label not in by_time:
                         by_time[time_label] = {
                             'total_days': 0,
@@ -5386,14 +5428,14 @@ def summary():
                                 dt_bucket['infractions'][infraction_type] += count
                             
                             # Track infractions by class
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
 
                             # Track infractions by time period
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5458,14 +5500,14 @@ def summary():
                                 dt_bucket['infractions'][infraction_type] += count
                             
                             # Track infractions by class
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
 
                             # Track infractions by time period
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5527,13 +5569,13 @@ def summary():
                                 if infraction_type not in dt_bucket['infractions']:
                                     dt_bucket['infractions'][infraction_type] = 0
                                 dt_bucket['infractions'][infraction_type] += count
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             if infraction_type not in by_class[class_name]['infractions']:
                                 by_class[class_name]['infractions'][infraction_type] = 0
                             by_class[class_name]['infractions'][infraction_type] += count
                             # Track infractions by time period
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5563,10 +5605,10 @@ def summary():
                             has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             by_class[class_name]['total_reminders'] += 1
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5587,10 +5629,10 @@ def summary():
                             has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             by_class[class_name]['total_reminders'] += 1
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5611,10 +5653,10 @@ def summary():
                             has_reminder_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_reminders'] += 1
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             by_class[class_name]['total_reminders'] += 1
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5638,10 +5680,10 @@ def summary():
                             has_reset_for_period = True
                             if is_weekday:
                                 by_day_of_week[day_of_week]['total_resets'] += 1
-                            class_name = period.location or 'Unknown'
+                            class_name = period.location or FRENZY_MISSING_LABEL
                             by_class[class_name]['total_resets'] += 1
                             raw_time_period = (period.time_range or '').strip()
-                            time_label = raw_time_period or 'Unknown'
+                            time_label = raw_time_period or FRENZY_MISSING_LABEL
                             if time_label not in by_time:
                                 by_time[time_label] = {
                                     'total_days': 0,
@@ -5662,7 +5704,7 @@ def summary():
                         if is_weekday:
                             info_sev = _period_info_frenzy_severity_int(info_data)
                             if info_sev is not None:
-                                info_time_label = (period.time_range or '').strip() or 'Unknown'
+                                info_time_label = (period.time_range or '').strip() or FRENZY_MISSING_LABEL
                                 _accumulate_frenzy_severity_for_cell(
                                     frenzy_severity_by_time_by_day[day_of_week],
                                     info_time_label,
@@ -8629,21 +8671,21 @@ def frenzy_stats():
                     stats['by_day'][day]['duration'] += frenzy.duration_minutes or 0
                 
                 # By time
-                time_range = frenzy.time_range or 'Unknown'
+                time_range = frenzy.time_range or FRENZY_MISSING_LABEL
                 if time_range not in stats['by_time']:
                     stats['by_time'][time_range] = {'count': 0, 'duration': 0}
                 stats['by_time'][time_range]['count'] += 1
                 stats['by_time'][time_range]['duration'] += frenzy.duration_minutes or 0
                 
                 # By location
-                location = frenzy.location or 'Unknown'
+                location = frenzy_location_label(frenzy.location)
                 if location not in stats['by_location']:
                     stats['by_location'][location] = {'count': 0, 'duration': 0}
                 stats['by_location'][location]['count'] += 1
                 stats['by_location'][location]['duration'] += frenzy.duration_minutes or 0
                 
                 # By purpose
-                purpose = frenzy.purpose or 'Unknown'
+                purpose = frenzy.purpose or FRENZY_MISSING_LABEL
                 if purpose not in stats['by_purpose']:
                     stats['by_purpose'][purpose] = {'count': 0, 'duration': 0}
                 stats['by_purpose'][purpose]['count'] += 1
@@ -8683,9 +8725,9 @@ def frenzy_stats():
                             # By location - check INFO column first, then period.location
                             location = info_data.get('location') or info_data.get('alternate_location')
                             if not location or (isinstance(location, str) and not location.strip()):
-                                location = period.location or 'Unknown'
+                                location = frenzy_location_label(period.location)
                             else:
-                                location = str(location).strip() if location else 'Unknown'
+                                location = frenzy_location_label(location)
                             
                             if location not in stats['by_location']:
                                 stats['by_location'][location] = {'count': 0, 'duration': 0}
@@ -8693,19 +8735,9 @@ def frenzy_stats():
                             stats['by_location'][location]['duration'] += duration
                             
                             # Collect purposes from INFO column
-                            purpose1 = info_data.get('purpose1')
-                            if purpose1 and str(purpose1).strip():
-                                all_purposes.append(str(purpose1).strip())
-                                purpose_str = str(purpose1).strip()
-                                if purpose_str not in stats['by_purpose']:
-                                    stats['by_purpose'][purpose_str] = {'count': 0, 'duration': 0}
-                                stats['by_purpose'][purpose_str]['count'] += 1
-                                stats['by_purpose'][purpose_str]['duration'] += duration
-                            
-                            purpose2 = info_data.get('purpose2')
-                            if purpose2 and str(purpose2).strip():
-                                all_purposes.append(str(purpose2).strip())
-                                purpose_str = str(purpose2).strip()
+                            info_purpose_labels = frenzy_purpose_labels_from_info(info_data)
+                            for purpose_str in info_purpose_labels:
+                                all_purposes.append(purpose_str)
                                 if purpose_str not in stats['by_purpose']:
                                     stats['by_purpose'][purpose_str] = {'count': 0, 'duration': 0}
                                 stats['by_purpose'][purpose_str]['count'] += 1

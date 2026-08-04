@@ -806,7 +806,7 @@ function attachNavAndHamburger() {
             e.preventDefault();
             e.stopPropagation();
             toggleNavMenu();
-        }, true);
+        });
     }
 
     document.addEventListener('click', function navAndHamburgerClick(e) {
@@ -818,12 +818,10 @@ function attachNavAndHamburger() {
                 document.body.classList.remove('nav-menu-open');
                 return;
             }
-            var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
-            if (hamburger) {
-                toggleNavMenu();
+            if (e.target.closest('#nav-hamburger')) {
                 return;
             }
-            if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav') && !e.target.closest('#nav-hamburger')) {
+            if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav')) {
                 document.body.classList.remove('nav-menu-open');
             }
         });
@@ -19260,6 +19258,9 @@ const DASHBOARD_COLORS = {
     palette: ['#ff3b30', '#007aff', '#34c759', '#ffcc00', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
 
+/** Frenzy severity 1–5 colors (matches trigger-time / heatmap severity scale). */
+const FRENZY_SEVERITY_COLORS = ['#369E2C', '#7EB851', '#BCB432', '#E3AA30', '#BB2317'];
+
 // Use the exact same STAR colors as the Overview STAR Percent gauge
 const STAR_CHART_BAR_COLORS = [
     '#ff3b30', // safety
@@ -20552,7 +20553,7 @@ function buildSegmentedDonutSvg(segments, options = {}) {
         });
 
     // Add a small bleed margin so stroke/separators never clip at outer edges.
-    return `<svg class="overview-donut-svg" viewBox="-1.5 -1.5 103 103" aria-hidden="true">${paths.join('')}${separatorRects.join('')}</svg>`;
+    return `<svg class="overview-donut-svg" width="${sizePx}" height="${sizePx}" viewBox="-1.5 -1.5 103 103" aria-hidden="true">${paths.join('')}${separatorRects.join('')}</svg>`;
 }
 
 function overviewTrendDeltaClass(metric, delta) {
@@ -23364,7 +23365,7 @@ function scheduleMasonryLayoutAfterResize(grid) {
     });
 }
 
-function buildFrenziesCard(data) {
+function buildFrenziesCard(data, masonryGrid = null) {
     const card = document.createElement('div');
     card.className = 'dashboard-card infractions-card frenzies-card overview-extra-card';
     card.dataset.overviewCard = 'frenzies_card';
@@ -23379,8 +23380,8 @@ function buildFrenziesCard(data) {
     const frenziesDurationSummary = data.frenzies_duration_summary || {};
     const frenziesSeverityTotals = data.frenzies_severity_totals || {};
     const infractionsForFrenzies = data.infractions_for_frenzies || {};
-    
-    const grid = card.closest('.dashboard-card-grid');
+
+    const getMasonryGrid = () => masonryGrid || card.closest('.dashboard-card-grid');
 
     const severityLabels = {
         1: 'Para',
@@ -23389,43 +23390,52 @@ function buildFrenziesCard(data) {
         4: 'Administration',
         5: 'SRO'
     };
-    const severityColors = ['#94a3b8', '#7c8fa3', '#5b6f85', '#3d5168', '#243447'];
+    const severityColors = FRENZY_SEVERITY_COLORS;
 
     const OVERVIEW_HINT_KEY = 'frenzies_overview_click_hint_seen';
     const overviewHintSeen = localStorage.getItem(OVERVIEW_HINT_KEY);
-    const overviewHintMsg = 'Click a breakdown row to see complementary dimensions and connected infractions.';
+    const overviewHintMsg = 'Click a row to see breakdowns by time of day, day of week, and related details.';
     const overviewHintMsgAttr = overviewHintMsg.replace(/"/g, '&quot;');
     const overviewTitleHintBlock = `
-        <div class="infractions-click-hint infractions-title-hint frenzies-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
+        <div class="infractions-click-hint infractions-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
             <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
             <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
         </div>`;
     const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
 
     const getSeverityColor = (sev) => severityColors[Number(sev) - 1] || severityColors[0];
+    const emptyMsg = `<p style="color:var(--text-secondary);font-size:0.875rem;">No frenzies for this period.</p>`;
 
     // Build severity breakdown (graph + table) using frenziesSeverityTotals
-    let severityGraphHtml = '';
-    let severityTableHtml = '';
-    const severityKeys = Object.keys(frenziesSeverityTotals).filter(k => frenziesSeverityTotals[k] > 0).sort((a, b) => Number(a) - Number(b));
+    let severityGraphHtml = emptyMsg;
+    let severityTableHtml = emptyMsg;
+    const severityKeys = Object.keys(frenziesSeverityTotals || {}).filter(k => Number(frenziesSeverityTotals[k]) > 0).sort((a, b) => Number(a) - Number(b));
     if (severityKeys.length > 0) {
         const severitySegments = severityKeys.map(sev => ({
             value: frenziesSeverityTotals[sev],
             color: getSeverityColor(sev),
-            title: `${severityLabels[sev] || sev}: ${frenziesSeverityTotals[sev]} (${Math.round((frenziesSeverityTotals[sev] / totalFrenzies) * 100)}%)`
+            title: `${sev} - ${severityLabels[sev] || sev}: ${frenziesSeverityTotals[sev]} (${Math.round((frenziesSeverityTotals[sev] / Math.max(totalFrenzies, 1)) * 100)}%)`
         }));
-        const donutSvg = buildSegmentedDonutSvg(severitySegments, { sizePx: 140, ringPx: 24 });
+        const frenzySeverityDonutPx = 175;
+        const frenzySeverityRingPx = 30;
+        const donutSvg = buildSegmentedDonutSvg(severitySegments, { sizePx: frenzySeverityDonutPx, ringPx: frenzySeverityRingPx });
         const legendItems = severityKeys.map(sev => {
             const count = frenziesSeverityTotals[sev];
-            const pct = Math.round((count / totalFrenzies) * 100);
+            const pct = Math.round((count / Math.max(totalFrenzies, 1)) * 100);
             return `<div class="infractions-severity-legend-item frenzies-severity-legend-item" data-frenzy-drill-severity="${escapeHtml(sev)}" style="cursor:pointer;">
                 <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
-                <span class="infractions-severity-legend-label">${escapeHtml(severityLabels[sev] || sev)}</span>
+                <span class="infractions-severity-legend-label">${escapeHtml(`${sev} - ${severityLabels[sev] || sev}`)}</span>
                 <span class="infractions-severity-legend-count">${count} (${pct}%)</span>
             </div>`;
         }).join('');
         severityGraphHtml = `<div class="infractions-severity-graph frenzies-severity-graph" style="display:flex;align-items:center;gap:24px;">
-            <div class="infractions-severity-donut">${donutSvg}</div>
+            <div class="frenzies-severity-donut-wrap" style="--frenzy-severity-donut-px:${frenzySeverityDonutPx}px;position:relative;width:${frenzySeverityDonutPx}px;height:${frenzySeverityDonutPx}px;min-width:${frenzySeverityDonutPx}px;min-height:${frenzySeverityDonutPx}px;flex-shrink:0;">
+                ${donutSvg}
+                <div class="overview-donut-center">
+                    <div class="overview-donut-total">${totalFrenzies}</div>
+                    <div class="frenzies-severity-donut-sub">frenzies</div>
+                </div>
+            </div>
             <div class="infractions-severity-legend frenzies-severity-legend">${legendItems}</div>
         </div>`;
 
@@ -23440,15 +23450,12 @@ function buildFrenziesCard(data) {
             const sevEntry = frenziesBySeverity[sev] || {};
             const avgMin = Number(sevEntry.avg_duration) || 0;
             severityTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-severity="${escapeHtml(sev)}" style="cursor:pointer;">
-                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(severityLabels[sev] || sev)}</td>
+                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(`${sev} - ${severityLabels[sev] || sev}`)}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${frenziesSeverityTotals[sev]}</span></td>
                 <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
             </tr>`;
         });
         severityTableHtml += `</tbody></table>`;
-    } else {
-        severityGraphHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No severity breakdown available.</p>`;
-        severityTableHtml = severityGraphHtml;
     }
 
     // Build Time breakdown (horizontal stacked bars) using severity_breakdown
@@ -23458,8 +23465,8 @@ function buildFrenziesCard(data) {
         entry: frenziesByTime[p] || {}
     })).filter(s => (Number(s.entry.count) || 0) > 0);
 
-    let timeGraphHtml = '';
-    let timeTableHtml = '';
+    let timeGraphHtml = emptyMsg;
+    let timeTableHtml = emptyMsg;
     if (timeSlots.length > 0) {
         const maxTimeTotal = Math.max(...timeSlots.map(s => Number(s.entry.count) || 0), 1);
         const axisMax = niceCeilingAxisMax(maxTimeTotal);
@@ -23512,14 +23519,14 @@ function buildFrenziesCard(data) {
         });
         timeTableHtml += `</tbody></table>`;
     } else {
-        timeGraphHtml = timeTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No time breakdown available.</p>`;
+        timeGraphHtml = timeTableHtml = emptyMsg;
     }
 
     // Build Day breakdown (vertical stacked bars)
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     const daySlots = dayOrder.map(d => ({ label: d, entry: frenziesByDay[d] || {} })).filter(s => (Number(s.entry.count) || 0) > 0);
-    let dayGraphHtml = '';
-    let dayTableHtml = '';
+    let dayGraphHtml = emptyMsg;
+    let dayTableHtml = emptyMsg;
     if (daySlots.length > 0) {
         const maxDayTotal = Math.max(...daySlots.map(s => Number(s.entry.count) || 0), 1);
         const axisMax = niceCeilingAxisMax(maxDayTotal);
@@ -23570,13 +23577,13 @@ function buildFrenziesCard(data) {
         });
         dayTableHtml += `</tbody></table>`;
     } else {
-        dayGraphHtml = dayTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No day breakdown available.</p>`;
+        dayGraphHtml = dayTableHtml = emptyMsg;
     }
 
     // Build Location breakdown
     const locationEntries = Object.entries(frenziesByLocation).map(([k, v]) => ({ key: k, entry: v })).filter(e => (Number(e.entry.count) || 0) > 0).sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
-    let locationGraphHtml = '';
-    let locationTableHtml = '';
+    let locationGraphHtml = emptyMsg;
+    let locationTableHtml = emptyMsg;
     if (locationEntries.length > 0) {
         const maxLocTotal = Math.max(...locationEntries.map(e => Number(e.entry.count) || 0), 1);
         const axisMax = niceCeilingAxisMax(maxLocTotal);
@@ -23629,13 +23636,13 @@ function buildFrenziesCard(data) {
         });
         locationTableHtml += `</tbody></table>`;
     } else {
-        locationGraphHtml = locationTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No location breakdown available.</p>`;
+        locationGraphHtml = locationTableHtml = emptyMsg;
     }
 
     // Build Purpose breakdown
     const purposeEntries = Object.entries(frenziesByPurpose).map(([k, v]) => ({ key: k, entry: v })).filter(e => (Number(e.entry.count) || 0) > 0).sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
-    let purposeGraphHtml = '';
-    let purposeTableHtml = '';
+    let purposeGraphHtml = emptyMsg;
+    let purposeTableHtml = emptyMsg;
     if (purposeEntries.length > 0) {
         const maxPurposeTotal = Math.max(...purposeEntries.map(e => Number(e.entry.count) || 0), 1);
         const axisMax = niceCeilingAxisMax(maxPurposeTotal);
@@ -23688,7 +23695,7 @@ function buildFrenziesCard(data) {
         });
         purposeTableHtml += `</tbody></table>`;
     } else {
-        purposeGraphHtml = purposeTableHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;">No purpose breakdown available.</p>`;
+        purposeGraphHtml = purposeTableHtml = emptyMsg;
     }
 
     // Build Duration breakdown with summary strip
@@ -23696,7 +23703,7 @@ function buildFrenziesCard(data) {
     const durationEntries = durationBuckets.map(b => ({ key: b, entry: frenziesByDurationBucket[b] || {} })).filter(e => (Number(e.entry.count) || 0) > 0);
     const totalDurationMinutes = Number(frenziesDurationSummary.total_duration) || 0;
     const avgDurationMinutes = Number(frenziesDurationSummary.avg_duration) || 0;
-    const durationSummaryHtml = `<div class="frenzies-duration-summary" style="display:flex;gap:24px;padding:12px;background:var(--bg-elevated);border-radius:6px;margin-bottom:16px;">
+    const durationSummaryHtml = totalFrenzies > 0 ? `<div class="frenzies-duration-summary" style="display:flex;gap:24px;margin-bottom:16px;">
         <div style="flex:1;">
             <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Total Duration</div>
             <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);">${totalDurationMinutes} min</div>
@@ -23705,10 +23712,10 @@ function buildFrenziesCard(data) {
             <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Average Duration</div>
             <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);">${avgDurationMinutes.toFixed(1)} min</div>
         </div>
-    </div>`;
+    </div>` : '';
 
-    let durationGraphHtml = '';
-    let durationTableHtml = '';
+    let durationGraphHtml = emptyMsg;
+    let durationTableHtml = emptyMsg;
     if (durationEntries.length > 0) {
         const maxDurTotal = Math.max(...durationEntries.map(e => Number(e.entry.count) || 0), 1);
         const axisMax = niceCeilingAxisMax(maxDurTotal);
@@ -23761,147 +23768,151 @@ function buildFrenziesCard(data) {
         });
         durationTableHtml += `</tbody></table>`;
     } else {
-        durationGraphHtml = durationSummaryHtml + `<p style="color:var(--text-secondary);font-size:0.875rem;">No duration breakdown available.</p>`;
+        durationGraphHtml = durationSummaryHtml + emptyMsg;
         durationTableHtml = durationGraphHtml;
     }
 
-    // Build main HTML with tab structure
-    const emptyHtml = `<p style="color:var(--text-secondary);font-size:0.875rem;margin:16px 0;">No frenzies for this period.</p>`;
-    const hasData = totalFrenzies > 0;
+    // Infractions-matching shell: always show Graph/Table + Severity|Time|Day|Location|Purpose|Duration
+    const overviewBreakdownTabsHtml = `
+        <div class="infractions-overview-breakdown-tabs frenzies-overview-breakdown-tabs" role="tablist" aria-label="Group frenzies">
+            <button type="button" class="infractions-overview-breakdown-tab active" data-frenzies-overview-breakdown="severity" role="tab" aria-selected="true">Severity</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="time" role="tab" aria-selected="false">Time</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="day" role="tab" aria-selected="false">Day</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="location" role="tab" aria-selected="false">Location</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="purpose" role="tab" aria-selected="false">Purpose</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="duration" role="tab" aria-selected="false">Duration</button>
+        </div>`;
+    const overviewTabBody = `${overviewFirstTimeText}${overviewBreakdownTabsHtml}
+        <div data-frenzies-panel="graph">
+            <div data-frenzies-breakdown-panel="severity">${severityGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="time" hidden>${timeGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="day" hidden>${dayGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="location" hidden>${locationGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="purpose" hidden>${purposeGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="duration" hidden>${durationGraphHtml}</div>
+        </div>
+        <div data-frenzies-panel="table" hidden>
+            <div data-frenzies-breakdown-panel="severity">${severityTableHtml}</div>
+            <div data-frenzies-breakdown-panel="time" hidden>${timeTableHtml}</div>
+            <div data-frenzies-breakdown-panel="day" hidden>${dayTableHtml}</div>
+            <div data-frenzies-breakdown-panel="location" hidden>${locationTableHtml}</div>
+            <div data-frenzies-breakdown-panel="purpose" hidden>${purposeTableHtml}</div>
+            <div data-frenzies-breakdown-panel="duration" hidden>${durationTableHtml}</div>
+        </div>`;
 
     card.innerHTML = `
-        <div class="dashboard-card-header" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-            <h3 class="dashboard-card-title" style="flex:1;margin:0;">Frenzies</h3>
-            ${overviewTitleHintBlock}
-            <div class="infractions-view-toggle frenzies-view-toggle" role="tablist" style="display:flex;gap:4px;background:var(--bg-elevated);border-radius:6px;padding:2px;">
-                <button class="infractions-view-btn frenzies-view-btn active" data-frenzies-view="graph" role="tab" aria-selected="true" style="padding:4px 12px;border:none;background:transparent;cursor:pointer;border-radius:4px;font-size:0.85rem;">Graph</button>
-                <button class="infractions-view-btn frenzies-view-btn" data-frenzies-view="table" role="tab" aria-selected="false" style="padding:4px 12px;border:none;background:transparent;cursor:pointer;border-radius:4px;font-size:0.85rem;">Table</button>
-            </div>
-        </div>
-        ${overviewFirstTimeText}
-        ${!hasData ? emptyHtml : `
-        <div class="infractions-tabs infractions-tabs--detail-only frenzies-tabs" role="tablist" hidden></div>
-        <div class="infractions-tab-panels frenzies-tab-panels">
-            <div class="infractions-tab-panel frenzies-tab-panel active" data-tab-panel="overview">
-                <div class="infractions-breakdown-tabs-wrap frenzies-breakdown-tabs-wrap" style="margin-bottom:12px;">
-                    <div class="infractions-breakdown-tabs frenzies-breakdown-tabs" role="tablist" style="display:flex;gap:4px;border-bottom:1px solid var(--border);padding-bottom:4px;overflow-x:auto;">
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab active" data-frenzies-overview-breakdown="severity" role="tab" aria-selected="true">Severity</button>
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab" data-frenzies-overview-breakdown="time" role="tab" aria-selected="false">Time</button>
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab" data-frenzies-overview-breakdown="day" role="tab" aria-selected="false">Day</button>
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab" data-frenzies-overview-breakdown="location" role="tab" aria-selected="false">Location</button>
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab" data-frenzies-overview-breakdown="purpose" role="tab" aria-selected="false">Purpose</button>
-                        <button class="infractions-breakdown-tab frenzies-breakdown-tab" data-frenzies-overview-breakdown="duration" role="tab" aria-selected="false">Duration</button>
-                    </div>
+        <div class="dashboard-breakdown-card-inner">
+            <div class="dashboard-card-header infractions-card-header">
+                <div class="infractions-card-header-left">
+                    <h3 class="dashboard-card-title">Frenzies</h3>
+                    ${overviewTitleHintBlock}
                 </div>
-                <div class="frenzies-content">
-                    <div data-frenzies-panel="graph" style="display:block;">
-                        <div data-frenzies-breakdown-panel="severity">${severityGraphHtml}</div>
-                        <div data-frenzies-breakdown-panel="time" hidden>${timeGraphHtml}</div>
-                        <div data-frenzies-breakdown-panel="day" hidden>${dayGraphHtml}</div>
-                        <div data-frenzies-breakdown-panel="location" hidden>${locationGraphHtml}</div>
-                        <div data-frenzies-breakdown-panel="purpose" hidden>${purposeGraphHtml}</div>
-                        <div data-frenzies-breakdown-panel="duration" hidden>${durationGraphHtml}</div>
-                    </div>
-                    <div data-frenzies-panel="table" hidden>
-                        <div data-frenzies-breakdown-panel="severity">${severityTableHtml}</div>
-                        <div data-frenzies-breakdown-panel="time" hidden>${timeTableHtml}</div>
-                        <div data-frenzies-breakdown-panel="day" hidden>${dayTableHtml}</div>
-                        <div data-frenzies-breakdown-panel="location" hidden>${locationTableHtml}</div>
-                        <div data-frenzies-breakdown-panel="purpose" hidden>${purposeTableHtml}</div>
-                        <div data-frenzies-breakdown-panel="duration" hidden>${durationTableHtml}</div>
+                <div class="infractions-overview-header-view-toggle frenzies-overview-header-view-toggle">
+                    <div class="view-mode-toggle" role="tablist" aria-label="Frenzies overview view mode">
+                        <button type="button" class="view-mode-toggle-btn active" data-frenzies-view="graph" role="tab" aria-selected="true">Graph</button>
+                        <button type="button" class="view-mode-toggle-btn" data-frenzies-view="table" role="tab" aria-selected="false">Table</button>
                     </div>
                 </div>
             </div>
-        </div>
-        `}
-    `;
+            <div class="infractions-tabs infractions-tabs--detail-only frenzies-tabs" role="tablist" hidden></div>
+            <div class="infractions-tab-panels frenzies-tab-panels">
+                <div class="infractions-tab-panel infractions-tab-overview frenzies-tab-panel is-active" data-tab-panel="overview">
+                    ${overviewTabBody}
+                </div>
+            </div>
+        </div>`;
 
-    if (!hasData) return card;
-
-    // Wire interactions
+    // Wire interactions (always — chrome is always present)
     const tabsContainer = card.querySelector('.frenzies-tabs');
     const tabPanelsContainer = card.querySelector('.frenzies-tab-panels');
-    const viewToggleWrap = card.querySelector('.frenzies-view-toggle');
+    const overviewHeaderToggle = card.querySelector('.frenzies-overview-header-view-toggle');
 
-    // Hide view toggle when not on overview
-    const syncViewToggleVisibility = () => {
-        const onOverview = Array.from(tabPanelsContainer.querySelectorAll('.frenzies-tab-panel')).some(p => p.dataset.tabPanel === 'overview' && p.classList.contains('active'));
-        if (viewToggleWrap) viewToggleWrap.style.display = onOverview ? 'flex' : 'none';
+    const relayoutMasonry = () => {
+        const gridEl = getMasonryGrid();
+        if (typeof scheduleMasonryLayoutAfterResize === 'function' && gridEl) {
+            scheduleMasonryLayoutAfterResize(gridEl);
+        }
     };
 
-    // Tab management
+    const syncFrenziesTabsRow = () => {
+        if (!tabsContainer) return;
+        tabsContainer.hidden = tabsContainer.querySelectorAll('.infractions-tab, .frenzies-tab').length === 0;
+    };
+    const syncViewToggleVisibility = () => {
+        const onOverview = !!card.querySelector('.infractions-tab-panel.infractions-tab-overview.is-active, .frenzies-tab-panel.is-active[data-tab-panel="overview"]');
+        if (overviewHeaderToggle) overviewHeaderToggle.hidden = !onOverview;
+    };
+
     const setActiveTab = (tabName) => {
-        card.querySelectorAll('.frenzies-tab').forEach(t => {
+        card.querySelectorAll('.infractions-tab, .frenzies-tab').forEach(t => {
             const active = t.dataset.tab === tabName;
             t.classList.toggle('active', active);
             t.setAttribute('aria-selected', active ? 'true' : 'false');
         });
-        card.querySelectorAll('.frenzies-tab-panel').forEach(p => {
-            p.classList.toggle('active', p.dataset.tabPanel === tabName);
+        card.querySelectorAll('.infractions-tab-panel, .frenzies-tab-panel').forEach(p => {
+            const active = p.dataset.tabPanel === tabName;
+            p.classList.toggle('is-active', active);
+            p.classList.toggle('active', active);
         });
         syncViewToggleVisibility();
-        if (typeof scheduleMasonryLayoutAfterResize === 'function' && grid) {
-            scheduleMasonryLayoutAfterResize(grid);
-        }
+        syncFrenziesTabsRow();
+        relayoutMasonry();
     };
 
     const wireTabClicks = () => {
-        card.querySelectorAll('.frenzies-tab').forEach(tab => {
-            const closeBtn = tab.querySelector('.infractions-tab-close, .frenzies-tab-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', (e) => {
+        card.querySelectorAll('.infractions-tab, .frenzies-tab').forEach(tab => {
+            if (tab._frenziesWired) return;
+            tab._frenziesWired = true;
+            tab.addEventListener('click', (e) => {
+                const closeBtn = e.target.closest('.infractions-tab-close, .frenzies-tab-close');
+                if (closeBtn) {
                     e.stopPropagation();
                     const tabName = tab.dataset.tab;
-                    const panel = card.querySelector(`.frenzies-tab-panel[data-tab-panel="${tabName}"]`);
+                    if (tabName === 'overview') return;
+                    const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${tabName}"], .frenzies-tab-panel[data-tab-panel="${tabName}"]`);
                     if (panel) panel.remove();
                     tab.remove();
-                    if (!card.querySelector('.frenzies-tab')) {
-                        tabsContainer.hidden = true;
+                    if (!card.querySelector('.infractions-tab.active, .frenzies-tab.active')) {
                         setActiveTab('overview');
-                    } else {
-                        const firstTab = card.querySelector('.frenzies-tab');
-                        if (firstTab) setActiveTab(firstTab.dataset.tab);
                     }
-                });
-                return;
-            }
-            tab.addEventListener('click', () => {
-                if (tab.disabled) return;
-                const tabName = tab.dataset.tab;
-                if (!tabName) return;
-                setActiveTab(tabName);
+                    syncFrenziesTabsRow();
+                    return;
+                }
+                setActiveTab(tab.dataset.tab);
             });
         });
     };
 
     wireTabClicks();
+    syncViewToggleVisibility();
+    syncFrenziesTabsRow();
 
     // Graph/Table view toggle
     const viewButtons = card.querySelectorAll('[data-frenzies-view]');
-    const graphPanel = card.querySelector('[data-frenzies-panel="graph"]');
-    const tablePanel = card.querySelector('[data-frenzies-panel="table"]');
     viewButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.frenziesView;
             const isGraph = view === 'graph';
-            if (graphPanel) graphPanel.hidden = !isGraph;
-            if (tablePanel) tablePanel.hidden = isGraph;
+            card.querySelectorAll('[data-frenzies-panel]').forEach(host => {
+                host.hidden = host.getAttribute('data-frenzies-panel') !== view;
+            });
             viewButtons.forEach(b => {
                 const active = b.dataset.frenziesView === view;
                 b.classList.toggle('active', active);
                 b.setAttribute('aria-selected', active ? 'true' : 'false');
             });
+            if (typeof scheduleInfractionBarPixelLayout === 'function') {
+                scheduleInfractionBarPixelLayout(card);
+            }
+            relayoutMasonry();
         });
     });
 
     // Breakdown tab switching
     const syncBreakdownPanels = (mode) => {
-        ['graph', 'table'].forEach(kind => {
-            const host = card.querySelector(`[data-frenzies-panel="${kind}"]`);
-            if (!host) return;
+        card.querySelectorAll('[data-frenzies-panel]').forEach(host => {
             host.querySelectorAll('[data-frenzies-breakdown-panel]').forEach(panel => {
-                const match = panel.dataset.frenziesBreakdownPanel === mode;
-                panel.hidden = !match;
+                panel.hidden = panel.dataset.frenziesBreakdownPanel !== mode;
             });
         });
         card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
@@ -23909,6 +23920,10 @@ function buildFrenziesCard(data) {
             btn.classList.toggle('active', active);
             btn.setAttribute('aria-selected', active ? 'true' : 'false');
         });
+        if (typeof scheduleInfractionBarPixelLayout === 'function') {
+            scheduleInfractionBarPixelLayout(card);
+        }
+        relayoutMasonry();
     };
     card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -23919,7 +23934,7 @@ function buildFrenziesCard(data) {
     });
     syncBreakdownPanels('severity');
 
-    // Hint popover interactions
+    // Hint popover
     card.addEventListener('click', e => {
         const icon = e.target.closest('.infractions-hint-icon');
         if (icon) {
@@ -23936,19 +23951,12 @@ function buildFrenziesCard(data) {
                 p.setAttribute('aria-hidden', 'true');
             });
             if (!isOpen) {
-                const cardEl = hintDiv.closest('.frenzies-card') || card;
-                const cardRect = cardEl.getBoundingClientRect();
-                const hintRect = hintDiv.getBoundingClientRect();
-                const padding = 16;
-                const maxW = Math.max(200, Math.min(480, cardRect.right - hintRect.left - padding));
-                popover.style.maxWidth = maxW + 'px';
                 popover.style.display = 'block';
                 popover.setAttribute('aria-hidden', 'false');
             }
             return;
         }
-        const inPopover = e.target.closest('.infractions-hint-popover');
-        if (!inPopover) {
+        if (!e.target.closest('.infractions-hint-popover')) {
             card.querySelectorAll('.infractions-hint-popover').forEach(p => {
                 p.style.display = 'none';
                 p.setAttribute('aria-hidden', 'true');
@@ -26276,7 +26284,6 @@ function attachOverviewCardInteractions(container, data) {
             const yellowRows = payload.yellow_to_green || [];
             const greenRows = payload.green_to_blue || [];
             const showPromote = !!(payload.can_level_up && canPromote);
-            card.classList.toggle('level-ups-card--with-actions', showPromote);
 
             const buildSection = (title, rows, emptyText, tone) => {
                 const sectionClass = `level-ups-section level-ups-section--${tone}`;
@@ -26288,7 +26295,10 @@ function attachOverviewCardInteractions(container, data) {
                         </div>
                     `;
                 }
-                const headAction = showPromote ? '<th class="level-ups-col-action"></th>' : '';
+                const gapTh = '<th class="level-ups-col-gap" aria-hidden="true"></th>';
+                const gapTd = '<td class="level-ups-col-gap" aria-hidden="true"></td>';
+                const gapAfterAvgTh = '<th class="level-ups-col-gap-after-avg" aria-hidden="true"></th>';
+                const gapAfterAvgTd = '<td class="level-ups-col-gap-after-avg" aria-hidden="true"></td>';
                 const bodyRows = rows.map((row) => {
                     const daysLogged = Number(row.days_logged || 0);
                     const daysRequired = Number(row.days_required || 30);
@@ -26300,20 +26310,25 @@ function attachOverviewCardInteractions(container, data) {
                         ? '90'
                         : (Number(minDayPct) % 1 === 0 ? String(Number(minDayPct)) : Number(minDayPct).toFixed(1));
                     const quickest = Number(row.days_at_100_needed || needed);
-                    const neededText = row.eligible
-                        ? 'Eligible now'
-                        : `${needed} more day${needed === 1 ? '' : 's'} with at least ${minDayPctText}% to level up (quickest: ${quickest} day${quickest === 1 ? '' : 's'} at 100%)`;
-                    const actionCell = showPromote
-                        ? (row.eligible
-                            ? `<td class="level-ups-col-action"><button type="button" class="btn-primary level-up-btn" data-level-up-student-id="${row.id}">Level Up</button></td>`
-                            : '<td class="level-ups-col-action"></td>')
-                        : '';
+                    let neededHtml;
+                    if (row.eligible) {
+                        const eligibleLabel = escapeHtml('Eligible now!');
+                        if (showPromote) {
+                            neededHtml = `<span class="level-ups-needed-eligible"><span class="level-ups-needed-eligible-text">${eligibleLabel}</span><button type="button" class="btn-primary level-up-btn" data-level-up-student-id="${row.id}">Level Up</button></span>`;
+                        } else {
+                            neededHtml = `<span class="level-ups-needed-eligible-text">${eligibleLabel}</span>`;
+                        }
+                    } else {
+                        neededHtml = `<span class="level-ups-needed-line">${escapeHtml(`${needed} more day${needed === 1 ? '' : 's'} with at least ${minDayPctText}% to level up`)}</span><span class="level-ups-needed-line">${escapeHtml(`${quickest} day${quickest === 1 ? '' : 's'} with 100%`)}</span>`;
+                    }
                     return `<tr data-student-id="${row.id}">
                         <td class="level-ups-col-name">${escapeHtml(row.name || '')}</td>
+                        ${gapTd}
                         <td class="level-ups-col-days">${daysLogged}/${daysRequired}</td>
+                        ${gapTd}
                         <td class="level-ups-col-avg">${escapeHtml(avgText)}</td>
-                        <td class="level-ups-col-needed"><span class="level-ups-needed-text">${escapeHtml(neededText)}</span></td>
-                        ${actionCell}
+                        ${gapAfterAvgTd}
+                        <td class="level-ups-col-needed"><span class="level-ups-needed-text">${neededHtml}</span></td>
                     </tr>`;
                 }).join('');
                 return `
@@ -26321,13 +26336,24 @@ function attachOverviewCardInteractions(container, data) {
                         <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
                         <div class="level-ups-table-wrap">
                             <table class="level-ups-table">
+                                <colgroup>
+                                    <col class="level-ups-col-name">
+                                    <col class="level-ups-col-gap">
+                                    <col class="level-ups-col-days">
+                                    <col class="level-ups-col-gap">
+                                    <col class="level-ups-col-avg">
+                                    <col class="level-ups-col-gap-after-avg">
+                                    <col class="level-ups-col-needed">
+                                </colgroup>
                                 <thead>
                                     <tr>
                                         <th class="level-ups-col-name" title="Student name">Student</th>
+                                        ${gapTh}
                                         <th class="level-ups-col-days" title="Longest stretch of consecutive school days with data whose average STAR % is 90% or higher, out of the 30 needed to level up. Excused days are excluded; unexcused days count as 0%.">Qualifying<br>Days</th>
+                                        ${gapTh}
                                         <th class="level-ups-col-avg" title="Average STAR % of the current qualifying stretch. If there are no qualifying days yet, this is the student's average over their most recent school days with data (up to 30).">Avg</th>
+                                        ${gapAfterAvgTh}
                                         <th class="level-ups-col-needed" title="How many more days are needed to reach 30 qualifying days, and the lowest equal daily % that keeps the full 30-day average at 90% or higher. Quickest is how soon they can finish if every upcoming day is 100%.">Days<br>Needed</th>
-                                        ${headAction}
                                     </tr>
                                 </thead>
                                 <tbody>${bodyRows}</tbody>
@@ -26471,11 +26497,29 @@ function attachOverviewCardInteractions(container, data) {
             // Starbucks: only visual selection, no extra card
             box.classList.toggle('overview-stat-selected');
         } else if (key === 'frenzies') {
-            const opened = toggleExtraCard('frenzies_card', () => buildFrenziesCard(data));
+            const opened = toggleExtraCard('frenzies_card', () => {
+                const card = buildFrenziesCard(data, grid);
+                grid.appendChild(card);
+                if (typeof scheduleInfractionBarPixelLayout === 'function') {
+                    scheduleInfractionBarPixelLayout(card);
+                }
+                if (typeof wireInfractionsChartHoverTips === 'function') {
+                    wireInfractionsChartHoverTips(card);
+                }
+                if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                    scheduleMasonryLayoutAfterResize(grid);
+                }
+            });
             box.classList.toggle('overview-stat-selected', opened);
             if (opened) {
                 selectionOrder = selectionOrder.filter(k => k !== 'frenzies');
                 selectionOrder.push('frenzies');
+                if (!restore) {
+                    const frenziesCard = container.querySelector('.frenzies-card');
+                    if (frenziesCard && typeof frenziesCard.scrollIntoView === 'function') {
+                        frenziesCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
             } else {
                 selectionOrder = selectionOrder.filter(k => k !== 'frenzies');
             }

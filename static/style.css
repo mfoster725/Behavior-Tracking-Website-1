@@ -6029,8 +6029,15 @@ a.dashboard-compare-toggle {
 }
 
 .overview-fenzies-panel {
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
     display: flex;
     flex-direction: column;
+}
+
+.overview-fenzies-panel:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .overview-level-ups-body,
@@ -6062,9 +6069,9 @@ a.dashboard-compare-toggle {
 
 /* Frenzies Card Styles */
 .overview-fenzies-panel.overview-stat-selected {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    border-color: #f59e0b;
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+    background-color: var(--bg-surface);
+    border-color: var(--accent);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
 }
 
 .frenzies-card {
@@ -6144,6 +6151,48 @@ a.dashboard-compare-toggle {
     margin: 16px 0;
 }
 
+.frenzies-card .frenzies-severity-donut-wrap {
+    position: relative;
+    flex-shrink: 0;
+    width: var(--frenzy-severity-donut-px, 175px) !important;
+    height: var(--frenzy-severity-donut-px, 175px) !important;
+    min-width: var(--frenzy-severity-donut-px, 175px);
+    min-height: var(--frenzy-severity-donut-px, 175px);
+}
+
+.frenzies-card .frenzies-severity-donut-wrap .overview-donut-svg {
+    width: var(--frenzy-severity-donut-px, 175px) !important;
+    height: var(--frenzy-severity-donut-px, 175px) !important;
+    max-width: none !important;
+    max-height: none !important;
+    display: block;
+}
+
+.frenzies-card .frenzies-severity-donut-wrap .overview-donut-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.frenzies-card .frenzies-severity-donut-wrap .overview-donut-total {
+    font-size: 1.35rem;
+    line-height: 1;
+    font-weight: 700;
+}
+
+.frenzies-card .frenzies-severity-donut-sub {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    line-height: 1.1;
+    margin-top: 2px;
+}
+
 .frenzies-severity-legend {
     display: flex;
     flex-direction: column;
@@ -6179,9 +6228,7 @@ a.dashboard-compare-toggle {
 .frenzies-duration-summary {
     display: flex;
     gap: 24px;
-    padding: 12px;
-    background: var(--bg-elevated);
-    border-radius: 6px;
+    padding: 0 0 12px;
     margin-bottom: 16px;
 }
 
@@ -6242,21 +6289,27 @@ a.dashboard-compare-toggle {
 
 .frenzies-tab-panel {
     display: none;
-    padding: 12px;
-    background: var(--bg-elevated);
-    border-radius: 6px;
 }
 
-.frenzies-tab-panel.active {
+.frenzies-tab-panel.active,
+.frenzies-card .frenzies-tab-panel.is-active {
     display: block;
 }
 
 .dashboard-card.level-ups-card.overview-extra-card {
-    /* Tight content width, never wider than the masonry column. */
+    /* Full column width — override overview-extra-card max-content shrink-wrap. */
     width: min(100%, 25.5rem);
     max-width: 100%;
-    overflow: hidden;
+    display: block;
+    overflow: visible;
     box-sizing: border-box;
+    --lu-col-name: 72px;
+    --lu-col-days: 76px;
+    --lu-col-avg: 44px;
+    --lu-col-action: 0px;
+    --lu-gutter: 10px;
+    --lu-gutter-after-avg: 8px;
+    --lu-gutter-avg-needed: calc(var(--lu-gutter) + var(--lu-gutter-after-avg));
 }
 
 .level-ups-card .level-ups-card-body {
@@ -6319,15 +6372,45 @@ a.dashboard-compare-toggle {
 
 .level-ups-card .level-ups-table {
     width: 100%;
+    max-width: 100%;
     table-layout: fixed;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.82rem;
+}
+
+.level-ups-card col.level-ups-col-name {
+    width: var(--lu-col-name);
+}
+
+.level-ups-card col.level-ups-col-days {
+    width: var(--lu-col-days);
+}
+
+.level-ups-card col.level-ups-col-avg {
+    width: var(--lu-col-avg);
+}
+
+.level-ups-card col.level-ups-col-gap {
+    width: var(--lu-gutter);
+}
+
+.level-ups-card col.level-ups-col-gap-after-avg {
+    width: var(--lu-gutter-avg-needed);
+}
+
+.level-ups-card col.level-ups-col-needed {
+    width: auto;
+}
+
+.level-ups-card col.level-ups-col-action {
+    width: var(--lu-col-action);
 }
 
 .level-ups-card .level-ups-table th,
 .level-ups-card .level-ups-table td {
     padding: 7px 4px;
-    text-align: center;
+    text-align: left;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
@@ -6342,72 +6425,73 @@ a.dashboard-compare-toggle {
     overflow-wrap: normal;
     word-break: normal;
     line-height: 1.25;
-    text-align: center;
+    text-align: left;
     background: transparent;
     cursor: help;
 }
 
 .level-ups-card .level-ups-col-name {
-    /* Fit "STUDENT" header; ellipsis only on long name cells below. */
-    width: 4.5rem;
-    white-space: nowrap;
-    text-align: center;
-    padding-left: 4px;
-    padding-right: 4px;
-}
-
-.level-ups-card .level-ups-table td.level-ups-col-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .level-ups-card .level-ups-col-days {
-    width: 4.75rem;
     white-space: nowrap;
-    text-align: center;
-    padding-left: 4px;
-    padding-right: 6px;
 }
 
 .level-ups-card .level-ups-col-avg {
-    width: 2.75rem;
     white-space: nowrap;
-    text-align: center;
-    padding-left: 6px;
-    padding-right: 2px;
+}
+
+.level-ups-card .level-ups-col-gap,
+.level-ups-card .level-ups-col-gap-after-avg {
+    padding: 0;
+    border: none;
+    background: transparent;
 }
 
 .level-ups-card .level-ups-col-needed {
     width: auto;
-    /* Gutter after Avg; column fills remaining width to the section edge. */
-    padding-left: 2rem;
-    padding-right: 4px;
-    text-align: left;
     vertical-align: middle;
     line-height: 1.35;
+    padding-left: 6px;
+    padding-right: 2px;
 }
 
 .level-ups-card .level-ups-needed-text {
-    display: block;
-    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    max-width: none;
     overflow-wrap: break-word;
     word-break: normal;
 }
 
-.level-ups-card .level-ups-table th.level-ups-col-needed {
-    text-align: center;
+.level-ups-card .level-ups-needed-eligible {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.level-ups-card .level-ups-needed-text .level-up-btn {
+    padding: 4px 8px;
+    font-size: 0.68rem;
+    max-width: 100%;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .level-ups-card .level-ups-col-action {
-    width: 5.25rem;
     white-space: nowrap;
-    text-align: center;
-    padding-left: 2px;
-    padding-right: 2px;
 }
 
 .level-ups-card.level-ups-card--with-actions {
     width: min(100%, 30.5rem);
+    --lu-col-action: 84px;
 }
 
 .level-ups-card .level-up-btn {
@@ -8508,6 +8592,14 @@ a.dashboard-compare-toggle {
     max-width: calc(33% - 10px);
     min-width: 0;
     display: block;
+}
+
+/* Level Up's card must span the masonry column, not shrink-wrap to table content. */
+.dashboard-card.overview-extra-card[data-overview-card="level_ups"] {
+    width: min(100%, 25.5rem);
+    max-width: 100%;
+    display: block;
+    box-sizing: border-box;
 }
 
 /* STAR Performance should stay the same column width as Overview
@@ -10625,14 +10717,6 @@ tr[data-aggregate-day-label] {
 
 #summary-view .level-ups-card .level-ups-table th,
 #summary-view .level-ups-card .level-ups-table td {
-    text-align: center;
-}
-
-#summary-view .level-ups-card .level-ups-table th.level-ups-col-needed {
-    text-align: center;
-}
-
-#summary-view .level-ups-card .level-ups-table td.level-ups-col-needed {
     text-align: left;
 }
 
