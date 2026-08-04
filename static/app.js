@@ -20084,14 +20084,24 @@ function updateLevelUpsOverviewTeaser(overviewCard, data) {
 
 async function refreshLevelUpsOverviewTeaser(overviewCard) {
     if (!overviewCard) return;
-    try {
-        const data = await fetchLevelUpsData();
+    // Share one in-flight request so opening the card can reuse teaser data
+    // instead of waiting on a second full /api/level-ups round-trip.
+    const loadPromise = fetchLevelUpsData().then((data) => {
         overviewCard._levelUpsData = data;
         updateLevelUpsOverviewTeaser(overviewCard, data);
+        return data;
+    });
+    overviewCard._levelUpsPromise = loadPromise;
+    try {
+        await loadPromise;
     } catch (err) {
         console.warn('Unable to load Level Up’s teaser:', err);
         const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
         if (countEl) countEl.textContent = '—';
+    } finally {
+        if (overviewCard._levelUpsPromise === loadPromise) {
+            overviewCard._levelUpsPromise = null;
+        }
     }
 }
 
@@ -23009,15 +23019,17 @@ function renderSummarySingle(container, data) {
     window.currentSummaryTrendRecords = [];
     wireSummaryBehaviorTrendCard();
 
+    const overviewCardEl = container.querySelector('.overview-card');
+    // Kick off Level Up’s fetch before restoring overview cards so a persisted
+    // Level Up’s panel can reuse the same in-flight request instead of doubling it.
+    if (overviewCardEl) {
+        refreshLevelUpsOverviewTeaser(overviewCardEl);
+    }
+
     try {
         attachOverviewCardInteractions(container, data);
     } catch (e) {
         console.error('Error wiring overview card interactions:', e);
-    }
-
-    const overviewCardEl = container.querySelector('.overview-card');
-    if (overviewCardEl) {
-        refreshLevelUpsOverviewTeaser(overviewCardEl);
     }
 
     const gridEl = container.querySelector('.dashboard-card-grid');
@@ -23373,6 +23385,85 @@ function scheduleMasonryLayoutAfterResize(grid) {
     });
 }
 
+/** Label used server-side for blank frenzy time / location / purpose (`FRENZY_MISSING_LABEL`). */
+const FRENZY_NOT_RECORDED_LABEL = 'Not recorded';
+
+function isFrenzyNotRecordedLabel(label) {
+    return String(label || '').trim().toLowerCase() === FRENZY_NOT_RECORDED_LABEL.toLowerCase();
+}
+
+/**
+ * Horizontal stacked severity bars + matching table for Frenzies Time / Location / Purpose.
+ * @param {Array<{label: string, entry: object}>} slots
+ * @param {{ severityKeys: string[], getSeverityColor: Function, severityLabels: object, emptyMsg: string, tableHeader: string, drillAttr: string, chartClass?: string }} opts
+ */
+function buildFrenziesHstarBreakdown(slots, opts) {
+    const {
+        severityKeys,
+        getSeverityColor,
+        severityLabels,
+        emptyMsg,
+        tableHeader,
+        drillAttr,
+        chartClass = '',
+    } = opts;
+    if (!slots || !slots.length) {
+        return { graphHtml: emptyMsg, tableHtml: emptyMsg };
+    }
+    const maxTotal = Math.max(...slots.map((s) => Number(s.entry.count) || 0), 1);
+    const axisMax = niceCeilingAxisMax(maxTotal);
+    const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+        ${severityKeys.map((sev) => `<span class="infractions-bar-legend-item">
+            <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
+            ${escapeHtml(severityLabels[sev] || sev)}
+        </span>`).join('')}
+    </div>`;
+    const rowsHtml = slots.map((slot) => {
+        const slotTotal = Number(slot.entry.count) || 0;
+        const barPct = axisMax > 0 ? Math.min(100, (slotTotal / axisMax) * 100) : 0;
+        const sevBreakdown = slot.entry.severity_breakdown || {};
+        const segmentsHtml = severityKeys.map((sev) => {
+            const count = sevBreakdown[sev] || 0;
+            if (!count) return '';
+            const segPct = slotTotal > 0 ? (count / slotTotal) * 100 : 0;
+            return `<div class="infractions-hstar-segment" style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
+        }).join('');
+        return `<div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
+            <div class="infractions-hstar-slot">
+                <div class="infractions-hstar-bar-row">
+                    <div class="infractions-hstar-bar" style="width:${barPct}%">
+                        <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
+                    </div>
+                    <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${slotTotal}</span></span>
+                </div>
+            </div>`;
+    }).join('');
+    const tickDivisions = 5;
+    const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
+    const xTicksHtml = tickLabels.map((n) => `<span>${n}</span>`).join('');
+    const chartClassAttr = chartClass ? ` ${chartClass}` : '';
+    const graphHtml = `<div class="infractions-hstar-chart${chartClassAttr}">${barLegendHtml}<div class="infractions-hstar-body">${rowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
+
+    let tableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+        <thead><tr>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">${escapeHtml(tableHeader)}</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
+        </tr></thead>
+        <tbody>`;
+    slots.forEach((slot) => {
+        const slotTotal = Number(slot.entry.count) || 0;
+        const avgMin = Number(slot.entry.avg_duration) || 0;
+        tableHtml += `<tr class="dashboard-breakdown-item" ${drillAttr}="${escapeHtml(slot.label)}" style="cursor:pointer;">
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slotTotal}</span></td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
+        </tr>`;
+    });
+    tableHtml += `</tbody></table>`;
+    return { graphHtml, tableHtml };
+}
+
 function buildFrenziesCard(data, masonryGrid = null) {
     const card = document.createElement('div');
     card.className = 'dashboard-card infractions-card frenzies-card overview-extra-card';
@@ -23466,25 +23557,76 @@ function buildFrenziesCard(data, masonryGrid = null) {
         severityTableHtml += `</tbody></table>`;
     }
 
-    // Build Time breakdown (horizontal stacked bars) using severity_breakdown
+    // Build Time / Location / Purpose (horizontal stacked bars) — can hide "Not recorded"
     const allTimeKeys = new Set([...SCHEDULE_PERIODS, ...Object.keys(frenziesByTime)]);
-    const timeSlots = Array.from(allTimeKeys).map(p => ({
+    const allTimeSlots = Array.from(allTimeKeys).map(p => ({
         label: p,
         entry: frenziesByTime[p] || {}
     })).filter(s => (Number(s.entry.count) || 0) > 0);
+    const allLocationSlots = Object.entries(frenziesByLocation)
+        .map(([k, v]) => ({ label: k, entry: v }))
+        .filter(e => (Number(e.entry.count) || 0) > 0)
+        .sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
+    const allPurposeSlots = Object.entries(frenziesByPurpose)
+        .map(([k, v]) => ({ label: k, entry: v }))
+        .filter(e => (Number(e.entry.count) || 0) > 0)
+        .sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
+    const hasNotRecordedData = [...allTimeSlots, ...allLocationSlots, ...allPurposeSlots]
+        .some(s => isFrenzyNotRecordedLabel(s.label));
 
-    let timeGraphHtml = emptyMsg;
-    let timeTableHtml = emptyMsg;
-    if (timeSlots.length > 0) {
-        const maxTimeTotal = Math.max(...timeSlots.map(s => Number(s.entry.count) || 0), 1);
-        const axisMax = niceCeilingAxisMax(maxTimeTotal);
+    const hstarOptsBase = { severityKeys, getSeverityColor, severityLabels, emptyMsg };
+    const buildNrSensitivePanels = (ignoreNotRecorded) => {
+        const keep = (slots) => ignoreNotRecorded
+            ? slots.filter(s => !isFrenzyNotRecordedLabel(s.label))
+            : slots;
+        const timeBuilt = buildFrenziesHstarBreakdown(keep(allTimeSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Time',
+            drillAttr: 'data-frenzy-drill-time',
+        });
+        const locationBuilt = buildFrenziesHstarBreakdown(keep(allLocationSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Location',
+            drillAttr: 'data-frenzy-drill-location',
+        });
+        const purposeBuilt = buildFrenziesHstarBreakdown(keep(allPurposeSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Purpose',
+            drillAttr: 'data-frenzy-drill-purpose',
+        });
+        return {
+            timeGraphHtml: timeBuilt.graphHtml,
+            timeTableHtml: timeBuilt.tableHtml,
+            locationGraphHtml: locationBuilt.graphHtml,
+            locationTableHtml: locationBuilt.tableHtml,
+            purposeGraphHtml: purposeBuilt.graphHtml,
+            purposeTableHtml: purposeBuilt.tableHtml,
+        };
+    };
+    const {
+        timeGraphHtml,
+        timeTableHtml,
+        locationGraphHtml,
+        locationTableHtml,
+        purposeGraphHtml,
+        purposeTableHtml,
+    } = buildNrSensitivePanels(false);
+
+    // Build Day breakdown (horizontal stacked bars — same as Time / Location)
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const daySlots = dayOrder.map(d => ({ label: d, entry: frenziesByDay[d] || {} })).filter(s => (Number(s.entry.count) || 0) > 0);
+    let dayGraphHtml = emptyMsg;
+    let dayTableHtml = emptyMsg;
+    if (daySlots.length > 0) {
+        const maxDayTotal = Math.max(...daySlots.map(s => Number(s.entry.count) || 0), 1);
+        const axisMax = niceCeilingAxisMax(maxDayTotal);
         const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
             ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
                 <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
                 ${escapeHtml(severityLabels[sev] || sev)}
             </span>`).join('')}
         </div>`;
-        const timeRowsHtml = timeSlots.map(slot => {
+        const dayRowsHtml = daySlots.map(slot => {
             const slotTotal = Number(slot.entry.count) || 0;
             const barPct = axisMax > 0 ? Math.min(100, (slotTotal / axisMax) * 100) : 0;
             const sevBreakdown = slot.entry.severity_breakdown || {};
@@ -23507,65 +23649,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
         const tickDivisions = 5;
         const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
         const xTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
-        timeGraphHtml = `<div class="infractions-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${timeRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
-
-        timeTableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-            <thead><tr>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Time</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
-            </tr></thead>
-            <tbody>`;
-        timeSlots.forEach(slot => {
-            const slotTotal = Number(slot.entry.count) || 0;
-            const avgMin = Number(slot.entry.avg_duration) || 0;
-            timeTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-time="${escapeHtml(slot.label)}" style="cursor:pointer;">
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slotTotal}</span></td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
-            </tr>`;
-        });
-        timeTableHtml += `</tbody></table>`;
-    } else {
-        timeGraphHtml = timeTableHtml = emptyMsg;
-    }
-
-    // Build Day breakdown (vertical stacked bars)
-    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const daySlots = dayOrder.map(d => ({ label: d, entry: frenziesByDay[d] || {} })).filter(s => (Number(s.entry.count) || 0) > 0);
-    let dayGraphHtml = emptyMsg;
-    let dayTableHtml = emptyMsg;
-    if (daySlots.length > 0) {
-        const maxDayTotal = Math.max(...daySlots.map(s => Number(s.entry.count) || 0), 1);
-        const axisMax = niceCeilingAxisMax(maxDayTotal);
-        const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
-            ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
-                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
-                ${escapeHtml(severityLabels[sev] || sev)}
-            </span>`).join('')}
-        </div>`;
-        const dayColsHtml = daySlots.map(slot => {
-            const slotTotal = Number(slot.entry.count) || 0;
-            const barPct = axisMax > 0 ? Math.min(100, (slotTotal / axisMax) * 100) : 0;
-            const sevBreakdown = slot.entry.severity_breakdown || {};
-            const segmentsHtml = severityKeys.map(sev => {
-                const count = sevBreakdown[sev] || 0;
-                if (!count) return '';
-                const segPct = slotTotal > 0 ? (count / slotTotal) * 100 : 0;
-                return `<div style="height:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
-            }).join('');
-            return `<div class="infractions-vstar-col">
-                <div class="infractions-vstar-bar-col" style="height:200px;display:flex;flex-direction:column;justify-content:flex-end;">
-                    <div class="infractions-vstar-bar" style="height:${barPct}%;display:flex;flex-direction:column-reverse;">${segmentsHtml}</div>
-                </div>
-                <div class="infractions-vstar-label">${escapeHtml(slot.label.slice(0, 3))}</div>
-                <div class="infractions-vstar-count">${slotTotal}</div>
-            </div>`;
-        }).join('');
-        const tickDivisions = 5;
-        const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions)).reverse();
-        const yTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
-        dayGraphHtml = `<div class="infractions-vstar-chart">${barLegendHtml}<div class="infractions-vstar-body" style="display:flex;gap:8px;"><div class="infractions-vstar-y-axis" style="display:flex;flex-direction:column;justify-content:space-between;padding-right:8px;font-size:0.75rem;color:var(--text-secondary);">${yTicksHtml}</div><div class="infractions-vstar-cols" style="display:flex;gap:12px;flex:1;">${dayColsHtml}</div></div></div>`;
+        dayGraphHtml = `<div class="infractions-hstar-chart frenzies-day-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${dayRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
 
         dayTableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
             <thead><tr>
@@ -23586,124 +23670,6 @@ function buildFrenziesCard(data, masonryGrid = null) {
         dayTableHtml += `</tbody></table>`;
     } else {
         dayGraphHtml = dayTableHtml = emptyMsg;
-    }
-
-    // Build Location breakdown
-    const locationEntries = Object.entries(frenziesByLocation).map(([k, v]) => ({ key: k, entry: v })).filter(e => (Number(e.entry.count) || 0) > 0).sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
-    let locationGraphHtml = emptyMsg;
-    let locationTableHtml = emptyMsg;
-    if (locationEntries.length > 0) {
-        const maxLocTotal = Math.max(...locationEntries.map(e => Number(e.entry.count) || 0), 1);
-        const axisMax = niceCeilingAxisMax(maxLocTotal);
-        const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
-            ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
-                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
-                ${escapeHtml(severityLabels[sev] || sev)}
-            </span>`).join('')}
-        </div>`;
-        const locationRowsHtml = locationEntries.map(loc => {
-            const locTotal = Number(loc.entry.count) || 0;
-            const barPct = axisMax > 0 ? Math.min(100, (locTotal / axisMax) * 100) : 0;
-            const sevBreakdown = loc.entry.severity_breakdown || {};
-            const segmentsHtml = severityKeys.map(sev => {
-                const count = sevBreakdown[sev] || 0;
-                if (!count) return '';
-                const segPct = locTotal > 0 ? (count / locTotal) * 100 : 0;
-                return `<div style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
-            }).join('');
-            return `<div class="infractions-hstar-label">${escapeHtml(loc.key)}</div>
-                <div class="infractions-hstar-slot">
-                    <div class="infractions-hstar-bar-row">
-                        <div class="infractions-hstar-bar" style="width:${barPct}%">
-                            <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
-                        </div>
-                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${locTotal}</span></span>
-                    </div>
-                </div>`;
-        }).join('');
-        const tickDivisions = 5;
-        const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
-        const xTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
-        locationGraphHtml = `<div class="infractions-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${locationRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
-
-        locationTableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-            <thead><tr>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Location</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
-            </tr></thead>
-            <tbody>`;
-        locationEntries.forEach(loc => {
-            const locTotal = Number(loc.entry.count) || 0;
-            const avgMin = Number(loc.entry.avg_duration) || 0;
-            locationTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-location="${escapeHtml(loc.key)}" style="cursor:pointer;">
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(loc.key)}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${locTotal}</span></td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
-            </tr>`;
-        });
-        locationTableHtml += `</tbody></table>`;
-    } else {
-        locationGraphHtml = locationTableHtml = emptyMsg;
-    }
-
-    // Build Purpose breakdown
-    const purposeEntries = Object.entries(frenziesByPurpose).map(([k, v]) => ({ key: k, entry: v })).filter(e => (Number(e.entry.count) || 0) > 0).sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
-    let purposeGraphHtml = emptyMsg;
-    let purposeTableHtml = emptyMsg;
-    if (purposeEntries.length > 0) {
-        const maxPurposeTotal = Math.max(...purposeEntries.map(e => Number(e.entry.count) || 0), 1);
-        const axisMax = niceCeilingAxisMax(maxPurposeTotal);
-        const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
-            ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
-                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
-                ${escapeHtml(severityLabels[sev] || sev)}
-            </span>`).join('')}
-        </div>`;
-        const purposeRowsHtml = purposeEntries.map(purpose => {
-            const purposeTotal = Number(purpose.entry.count) || 0;
-            const barPct = axisMax > 0 ? Math.min(100, (purposeTotal / axisMax) * 100) : 0;
-            const sevBreakdown = purpose.entry.severity_breakdown || {};
-            const segmentsHtml = severityKeys.map(sev => {
-                const count = sevBreakdown[sev] || 0;
-                if (!count) return '';
-                const segPct = purposeTotal > 0 ? (count / purposeTotal) * 100 : 0;
-                return `<div style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
-            }).join('');
-            return `<div class="infractions-hstar-label">${escapeHtml(purpose.key)}</div>
-                <div class="infractions-hstar-slot">
-                    <div class="infractions-hstar-bar-row">
-                        <div class="infractions-hstar-bar" style="width:${barPct}%">
-                            <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
-                        </div>
-                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${purposeTotal}</span></span>
-                    </div>
-                </div>`;
-        }).join('');
-        const tickDivisions = 5;
-        const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
-        const xTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
-        purposeGraphHtml = `<div class="infractions-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${purposeRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
-
-        purposeTableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
-            <thead><tr>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Purpose</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
-            </tr></thead>
-            <tbody>`;
-        purposeEntries.forEach(purpose => {
-            const purposeTotal = Number(purpose.entry.count) || 0;
-            const avgMin = Number(purpose.entry.avg_duration) || 0;
-            purposeTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-purpose="${escapeHtml(purpose.key)}" style="cursor:pointer;">
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(purpose.key)}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${purposeTotal}</span></td>
-                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
-            </tr>`;
-        });
-        purposeTableHtml += `</tbody></table>`;
-    } else {
-        purposeGraphHtml = purposeTableHtml = emptyMsg;
     }
 
     // Build Duration breakdown with summary strip
@@ -23816,6 +23782,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
                     ${overviewTitleHintBlock}
                 </div>
                 <div class="infractions-overview-header-view-toggle frenzies-overview-header-view-toggle">
+                    ${hasNotRecordedData ? `<button type="button" class="frenzies-ignore-nr-btn" data-frenzies-ignore-nr aria-pressed="false" title="Hide Not recorded rows in Time, Location, and Purpose">Ignore Not recorded</button>` : ''}
                     <div class="view-mode-toggle" role="tablist" aria-label="Frenzies overview view mode">
                         <button type="button" class="view-mode-toggle-btn active" data-frenzies-view="graph" role="tab" aria-selected="true">Graph</button>
                         <button type="button" class="view-mode-toggle-btn" data-frenzies-view="table" role="tab" aria-selected="false">Table</button>
@@ -23900,7 +23867,6 @@ function buildFrenziesCard(data, masonryGrid = null) {
     viewButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.frenziesView;
-            const isGraph = view === 'graph';
             card.querySelectorAll('[data-frenzies-panel]').forEach(host => {
                 host.hidden = host.getAttribute('data-frenzies-panel') !== view;
             });
@@ -23933,15 +23899,42 @@ function buildFrenziesCard(data, masonryGrid = null) {
         }
         relayoutMasonry();
     };
-    card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const mode = btn.dataset.frenziesOverviewBreakdown;
-            if (!mode) return;
-            syncBreakdownPanels(mode);
+    const wireBreakdownTabs = () => {
+        card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
+            if (btn._frenziesBreakdownWired) return;
+            btn._frenziesBreakdownWired = true;
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.frenziesOverviewBreakdown;
+                if (!mode) return;
+                syncBreakdownPanels(mode);
+            });
         });
-    });
+    };
+    wireBreakdownTabs();
     syncBreakdownPanels('severity');
 
+    // Ignore "Not recorded" (Time / Location / Purpose)
+    const ignoreNrBtn = card.querySelector('[data-frenzies-ignore-nr]');
+    if (ignoreNrBtn) {
+        ignoreNrBtn.addEventListener('click', () => {
+            const next = ignoreNrBtn.getAttribute('aria-pressed') !== 'true';
+            ignoreNrBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+            ignoreNrBtn.classList.toggle('active', next);
+            const activeBreakdown = card.querySelector('[data-frenzies-overview-breakdown].active')?.dataset?.frenziesOverviewBreakdown || 'severity';
+            const panels = buildNrSensitivePanels(next);
+            const setPanel = (mode, view, html) => {
+                const el = card.querySelector(`[data-frenzies-panel="${view}"] [data-frenzies-breakdown-panel="${mode}"]`);
+                if (el) el.innerHTML = html;
+            };
+            setPanel('time', 'graph', panels.timeGraphHtml);
+            setPanel('time', 'table', panels.timeTableHtml);
+            setPanel('location', 'graph', panels.locationGraphHtml);
+            setPanel('location', 'table', panels.locationTableHtml);
+            setPanel('purpose', 'graph', panels.purposeGraphHtml);
+            setPanel('purpose', 'table', panels.purposeTableHtml);
+            syncBreakdownPanels(activeBreakdown);
+        });
+    }
     // Hint popover
     card.addEventListener('click', e => {
         const icon = e.target.closest('.infractions-hint-icon');
@@ -26425,9 +26418,15 @@ function attachOverviewCardInteractions(container, data) {
 
         const loadAndRender = async () => {
             try {
-                const payload = await fetchLevelUpsData();
-                overviewCard._levelUpsData = payload;
-                updateLevelUpsOverviewTeaser(overviewCard, payload);
+                let payload = overviewCard._levelUpsData;
+                if (!payload && overviewCard._levelUpsPromise) {
+                    payload = await overviewCard._levelUpsPromise;
+                }
+                if (!payload) {
+                    payload = await fetchLevelUpsData();
+                    overviewCard._levelUpsData = payload;
+                    updateLevelUpsOverviewTeaser(overviewCard, payload);
+                }
                 renderTables(payload);
             } catch (err) {
                 console.error(err);

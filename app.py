@@ -12016,29 +12016,29 @@ def _normalize_card_color(card_color):
     return 'yellow'
 
 
-def _daily_star_overall_percent_for_level_up(record):
+def _daily_star_overall_percent_from_totals(
+    status,
+    total_safety,
+    total_teamwork,
+    total_accountability,
+    total_relationships,
+    total_possible,
+):
     """
-    Daily STAR overall % for level-up windows.
+    Daily STAR overall % for level-up windows from pre-aggregated period totals.
     Excused days are excluded (None). Unexcused days count as 0%.
     Present days use the same STAR category average as summary/incentive tracking.
     """
-    status = _record_attendance_status_norm(record)
     if status == 'excused':
         return None
     if status == 'unexcused':
         return 0.0
 
-    total_safety = 0
-    total_teamwork = 0
-    total_accountability = 0
-    total_relationships = 0
-    total_possible = 0
-    for period in getattr(record, 'periods', None) or []:
-        total_safety += int(period.safety_points or 0)
-        total_teamwork += int(period.teamwork_points or 0)
-        total_accountability += int(period.accountability_points or 0)
-        total_relationships += int(period.relationships_points or 0)
-        total_possible += int(period.points_possible or 4)
+    total_safety = int(total_safety or 0)
+    total_teamwork = int(total_teamwork or 0)
+    total_accountability = int(total_accountability or 0)
+    total_relationships = int(total_relationships or 0)
+    total_possible = int(total_possible or 0)
 
     if total_possible <= 0:
         return 0.0
@@ -12053,6 +12053,104 @@ def _daily_star_overall_percent_for_level_up(record):
     accountability_percent = (total_accountability / max_per_category) * 100.0
     relationships_percent = (total_relationships / max_per_category) * 100.0
     return (safety_percent + teamwork_percent + accountability_percent + relationships_percent) / 4.0
+
+
+def _daily_star_overall_percent_for_level_up(record):
+    """Daily STAR overall % for level-up windows from a DailyRecord + periods."""
+    status = _record_attendance_status_norm(record)
+    total_safety = 0
+    total_teamwork = 0
+    total_accountability = 0
+    total_relationships = 0
+    total_possible = 0
+    for period in getattr(record, 'periods', None) or []:
+        total_safety += int(period.safety_points or 0)
+        total_teamwork += int(period.teamwork_points or 0)
+        total_accountability += int(period.accountability_points or 0)
+        total_relationships += int(period.relationships_points or 0)
+        total_possible += int(period.points_possible or 4)
+    return _daily_star_overall_percent_from_totals(
+        status,
+        total_safety,
+        total_teamwork,
+        total_accountability,
+        total_relationships,
+        total_possible,
+    )
+
+
+def _level_up_attendance_status_from_row(attendance_status, present):
+    """Normalize attendance for aggregated level-up rows (mirrors DailyRecord helper)."""
+    if attendance_status:
+        return attendance_status
+    return 'present' if present else 'unexcused'
+
+
+def _load_level_up_daily_rows(student_ids, min_date=None):
+    """
+    Load per-day STAR totals for level-up calc without hydrating PeriodRecord rows.
+    Returns rows newest-first: (student_id, date, attendance_status, present, totals...).
+    """
+    from sqlalchemy import func
+
+    if not student_ids:
+        return []
+
+    query = (
+        db.session.query(
+            DailyRecord.student_id,
+            DailyRecord.date,
+            DailyRecord.attendance_status,
+            DailyRecord.present,
+            func.coalesce(func.sum(PeriodRecord.safety_points), 0),
+            func.coalesce(func.sum(PeriodRecord.teamwork_points), 0),
+            func.coalesce(func.sum(PeriodRecord.accountability_points), 0),
+            func.coalesce(func.sum(PeriodRecord.relationships_points), 0),
+            func.coalesce(func.sum(PeriodRecord.points_possible), 0),
+        )
+        .outerjoin(PeriodRecord, PeriodRecord.daily_record_id == DailyRecord.id)
+        .filter(DailyRecord.student_id.in_(student_ids))
+    )
+    if min_date is not None:
+        # Strictly after reset dates; callers pass the earliest relevant reset.
+        query = query.filter(DailyRecord.date > min_date)
+
+    return (
+        query.group_by(
+            DailyRecord.id,
+            DailyRecord.student_id,
+            DailyRecord.date,
+            DailyRecord.attendance_status,
+            DailyRecord.present,
+        )
+        .order_by(DailyRecord.date.desc())
+        .all()
+    )
+
+
+def _level_up_days_with_data_from_rows(rows, reset_at=None):
+    """
+    Return daily overall percents newest-first for school days with data.
+    Only dates after card_level_reset_at are included when a reset exists.
+    """
+    by_date = {}
+    for row in rows or []:
+        record_date = row[1]
+        if record_date is None:
+            continue
+        if reset_at and record_date <= reset_at:
+            continue
+        status = _level_up_attendance_status_from_row(row[2], row[3])
+        pct = _daily_star_overall_percent_from_totals(
+            status, row[4], row[5], row[6], row[7], row[8]
+        )
+        if pct is None:
+            continue
+        # Prefer the latest processed row if duplicates ever appear.
+        by_date[record_date] = float(pct)
+
+    ordered_dates = sorted(by_date.keys(), reverse=True)
+    return [by_date[d] for d in ordered_dates]
 
 
 def _level_up_days_with_data(records, reset_at=None):
@@ -12091,6 +12189,9 @@ def _longest_qualifying_day_stretch(daily_pcts_chrono, threshold=LEVEL_UP_AVERAG
     Returns (length, average_of_that_stretch, sum_of_that_stretch).
     A later high day can "rescue" earlier weaker days if the full contiguous
     average stays at or above threshold (e.g. a 60% day followed by 130%).
+
+    Uses an O(n log n) longest-subarray search on (value - threshold) prefix
+    sums, then picks the highest-average window among that best length.
     """
     values = [float(v) for v in (daily_pcts_chrono or [])]
     n = len(values)
@@ -12098,21 +12199,58 @@ def _longest_qualifying_day_stretch(daily_pcts_chrono, threshold=LEVEL_UP_AVERAG
         return 0, None, 0.0
 
     threshold = float(threshold)
+    # Transform: avg >= T  <=>  sum(v - T) >= 0 over the window.
+    pref = [0.0] * (n + 1)
+    for i, value in enumerate(values):
+        pref[i + 1] = pref[i] + (value - threshold)
+
+    # Fenwick tree over compressed prefix ranks storing the minimum index seen.
+    ranked = {v: i + 1 for i, v in enumerate(sorted(set(pref)))}
+    size = len(ranked)
+    bit = [n + 5] * (size + 2)
+
+    def bit_update(index, val):
+        while index <= size:
+            if val < bit[index]:
+                bit[index] = val
+            index += index & -index
+
+    def bit_query(index):
+        best = n + 5
+        while index > 0:
+            if bit[index] < best:
+                best = bit[index]
+            index -= index & -index
+        return best
+
     best_len = 0
+    for right in range(n + 1):
+        left = bit_query(ranked[pref[right]])
+        if left <= n:
+            length = right - left
+            if length > best_len:
+                best_len = length
+        bit_update(ranked[pref[right]], right)
+
+    if best_len <= 0:
+        return 0, None, 0.0
+
+    # Among all windows of best_len with avg >= threshold, prefer the highest avg.
     best_avg = None
     best_sum = 0.0
-    for start in range(n):
-        total = 0.0
-        for end in range(start, n):
-            total += values[end]
-            length = end - start + 1
-            avg = total / float(length)
-            if avg < threshold:
-                continue
-            if length > best_len or (length == best_len and (best_avg is None or avg > best_avg)):
-                best_len = length
-                best_avg = avg
-                best_sum = total
+    window_sum = sum(values[:best_len])
+    for start in range(0, n - best_len + 1):
+        if start > 0:
+            window_sum += values[start + best_len - 1] - values[start - 1]
+        avg = window_sum / float(best_len)
+        if avg < threshold:
+            continue
+        if best_avg is None or avg > best_avg:
+            best_avg = avg
+            best_sum = window_sum
+
+    if best_avg is None:
+        return 0, None, 0.0
     return best_len, best_avg, best_sum
 
 
@@ -12157,14 +12295,20 @@ def _days_at_percent_to_finish_level_up(
         return 0
 
     max_steps = target * 2
-    needed = 0
-    while needed < max_steps:
-        needed += 1
-        sim.append(daily_percent)
-        length, _, _ = _longest_qualifying_day_stretch(sim, threshold=threshold)
+    # Appending more high-% days is monotonic for "has a qualifying stretch",
+    # so binary search the minimal day count instead of simulating step-by-step.
+    lo, hi = 1, max_steps
+    answer = max_steps
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        trial = sim + ([daily_percent] * mid)
+        length, _, _ = _longest_qualifying_day_stretch(trial, threshold=threshold)
         if length >= target:
-            return needed
-    return needed
+            answer = mid
+            hi = mid - 1
+        else:
+            lo = mid + 1
+    return answer
 
 
 def _compute_level_up_progress(daily_pcts_newest_first):
@@ -12209,13 +12353,12 @@ def _compute_level_up_progress(daily_pcts_newest_first):
     }
 
 
-def _build_level_up_entry(student, records):
+def _build_level_up_entry(student, daily_pcts):
     color = _normalize_card_color(getattr(student, 'card_color', None))
     if color == 'blue':
         return None
 
     reset_at = getattr(student, 'card_level_reset_at', None)
-    daily_pcts = _level_up_days_with_data(records, reset_at=reset_at)
     progress = _compute_level_up_progress(daily_pcts)
     next_color = LEVEL_UP_NEXT_COLOR.get(color)
     return {
@@ -12245,8 +12388,7 @@ def level_ups():
     Eligibility: a contiguous stretch of 30 school days with data whose average
     STAR % is 90% or higher. Excused days are excluded; unexcused days count as 0%.
     """
-    from sqlalchemy.orm import joinedload
-
+    started = time.perf_counter()
     student_id = request.args.get('student_id', type=int)
     staff_id = request.args.get('staff_id', type=int)
     managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
@@ -12281,20 +12423,23 @@ def level_ups():
         })
 
     student_ids = [s.id for s in students]
-    records = (
-        DailyRecord.query.filter(DailyRecord.student_id.in_(student_ids))
-        .options(joinedload(DailyRecord.periods))
-        .order_by(DailyRecord.date.desc())
-        .all()
-    )
-    records_by_student = {}
-    for record in records:
-        records_by_student.setdefault(record.student_id, []).append(record)
+    # When every student has a reset date, skip older history entirely.
+    reset_dates = [s.card_level_reset_at for s in students if s.card_level_reset_at]
+    min_date = min(reset_dates) if reset_dates and len(reset_dates) == len(students) else None
+
+    rows = _load_level_up_daily_rows(student_ids, min_date=min_date)
+    rows_by_student = {}
+    for row in rows:
+        rows_by_student.setdefault(row[0], []).append(row)
 
     yellow_to_green = []
     green_to_blue = []
     for student in students:
-        entry = _build_level_up_entry(student, records_by_student.get(student.id, []))
+        daily_pcts = _level_up_days_with_data_from_rows(
+            rows_by_student.get(student.id, []),
+            reset_at=student.card_level_reset_at,
+        )
+        entry = _build_level_up_entry(student, daily_pcts)
         if not entry:
             continue
         if entry['card_color'] == 'yellow':
@@ -12310,11 +12455,20 @@ def level_ups():
     green_to_blue.sort(key=sort_key)
     eligible_count = sum(1 for row in yellow_to_green + green_to_blue if row.get('eligible'))
 
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    print(
+        f"level-ups computed in {elapsed_ms}ms "
+        f"(students={len(students)} rows={len(rows)} eligible={eligible_count})",
+        flush=True,
+    )
+
     return jsonify({
         'yellow_to_green': yellow_to_green,
         'green_to_blue': green_to_blue,
         'eligible_count': eligible_count,
         'can_level_up': can_manage_level_ups(current_user),
+        'server_build': 'level-ups-fast-v2',
+        'compute_ms': elapsed_ms,
     })
 
 
@@ -12324,8 +12478,6 @@ def level_ups():
 @api_json_errors
 def level_up_student(student_id):
     """Promote an eligible student to the next card color and restart the 30-day window."""
-    from sqlalchemy.orm import joinedload
-
     if not can_manage_level_ups(current_user):
         return jsonify({'error': 'Only case managers and admins can level up students'}), 403
 
@@ -12342,13 +12494,10 @@ def level_up_student(student_id):
     if not next_color:
         return jsonify({'error': 'Student is already at the highest card level'}), 400
 
-    records = (
-        DailyRecord.query.filter_by(student_id=student_id)
-        .options(joinedload(DailyRecord.periods))
-        .order_by(DailyRecord.date.desc())
-        .all()
-    )
-    entry = _build_level_up_entry(student, records)
+    min_date = student.card_level_reset_at
+    rows = _load_level_up_daily_rows([student_id], min_date=min_date)
+    daily_pcts = _level_up_days_with_data_from_rows(rows, reset_at=min_date)
+    entry = _build_level_up_entry(student, daily_pcts)
     if not entry or not entry.get('eligible'):
         return jsonify({'error': 'Student is not eligible to level up yet'}), 400
 
