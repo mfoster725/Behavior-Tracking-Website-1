@@ -747,6 +747,14 @@ function canManageLevelUps() {
     return isAdmin() || isCaseManagerUser();
 }
 
+function levelUpButtonColorClass(nextColor) {
+    const color = String(nextColor || '').trim().toLowerCase();
+    if (color === 'yellow' || color === 'green' || color === 'blue') {
+        return `level-up-btn--${color}`;
+    }
+    return '';
+}
+
 function canEdit() {
     return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
 }
@@ -26314,7 +26322,9 @@ function attachOverviewCardInteractions(container, data) {
                     if (row.eligible) {
                         const eligibleLabel = escapeHtml('Eligible now!');
                         if (showPromote) {
-                            neededHtml = `<span class="level-ups-needed-eligible"><span class="level-ups-needed-eligible-text">${eligibleLabel}</span><button type="button" class="btn-primary level-up-btn" data-level-up-student-id="${row.id}">Level Up</button></span>`;
+                            const targetColor = row.next_card_color || (tone === 'yellow' ? 'green' : 'blue');
+                            const colorClass = levelUpButtonColorClass(targetColor);
+                            neededHtml = `<span class="level-ups-needed-eligible"><span class="level-ups-needed-eligible-text">${eligibleLabel}</span><button type="button" class="level-up-btn ${colorClass}" data-level-up-student-id="${row.id}" data-level-up-target-color="${escapeHtml(targetColor)}">Level Up</button></span>`;
                         } else {
                             neededHtml = `<span class="level-ups-needed-eligible-text">${eligibleLabel}</span>`;
                         }
