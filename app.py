@@ -8251,6 +8251,13 @@ def _clip_import_field(value, max_len):
     return str(value).strip()[:max_len]
 
 
+def _import_missing_required_message(row_index, name, missing_what):
+    name = (name or '').strip()
+    if name:
+        return f"Row {row_index} ({name}): missing {missing_what}."
+    return f"Row {row_index}: missing {missing_what}."
+
+
 def _set_imported_password(user, password):
     """Use PBKDF2 for bulk CSV imports. Default scrypt is too slow for a roster-sized file."""
     user.password_hash = generate_password_hash(password, method='pbkdf2:sha256:80000')
@@ -8569,7 +8576,12 @@ def import_users():
             case_manager_name = (row[4] or '').strip() if len(row) > 4 else ''
 
             if not user_number or not name:
-                errors.append(f"Row {row_index}: missing User Number or Name.")
+                if not user_number and not name:
+                    errors.append(_import_missing_required_message(row_index, '', 'User Number and Name'))
+                elif not user_number:
+                    errors.append(_import_missing_required_message(row_index, name, 'User Number'))
+                else:
+                    errors.append(_import_missing_required_message(row_index, '', 'Name'))
                 return
 
             if role not in valid_roles:
@@ -8678,7 +8690,12 @@ def import_users():
             district = (row[2] or '').strip() if len(row) > 2 else ''
 
             if not user_number or not name:
-                errors.append(f"Row {idx}: missing User Number or Name.")
+                if not user_number and not name:
+                    errors.append(_import_missing_required_message(idx, '', 'User Number and Name'))
+                elif not user_number:
+                    errors.append(_import_missing_required_message(idx, name, 'User Number'))
+                else:
+                    errors.append(_import_missing_required_message(idx, '', 'Name'))
                 continue
 
             if user_number in seen_numbers:
@@ -8778,10 +8795,10 @@ def import_users():
                 card_color = _clip_import_field((row[3] or '').lower() if len(row) > 3 else '', 20)
 
                 if not lunch_number:
-                    errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
+                    errors.append(_import_missing_required_message(idx, initials, 'lunch number'))
                     continue
                 if not initials:
-                    errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
+                    errors.append(_import_missing_required_message(idx, '', 'initials'))
                     continue
 
                 if lunch_number in seen_numbers:
