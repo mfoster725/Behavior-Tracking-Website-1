@@ -1791,6 +1791,7 @@ async function switchView(viewName) {
         loadUsers();
         loadQuarterConfig();
         loadSchoolYearConfig();
+        loadSchoolBilling();
     }
     
     // If switching to schedules view, initialize schedules
@@ -8671,6 +8672,10 @@ function renderImportResults(data, type) {
     const success = data.success || [];
     const errors = data.errors || [];
     const warnings = data.warnings || [];
+    const updatedCount = data.updated_count || 0;
+    const duplicateCount = data.duplicate_count || 0;
+    const updatedNames = data.updated_names || [];
+    const personLabel = type === 'student' ? 'student' : 'user';
 
     if (success.length > 0) {
         const heading =
@@ -8699,6 +8704,21 @@ function renderImportResults(data, type) {
             });
         }
         html += '</tbody></table></div>';
+    }
+
+    if (updatedCount > 0) {
+        html += `<div class="import-results-info"><strong>${updatedCount} ${personLabel}${updatedCount === 1 ? ' was' : 's were'} updated</strong> with information from this file.`;
+        if (updatedNames.length > 0) {
+            html += `<br>${updatedNames.join(', ')}`;
+        }
+        html += '</div>';
+    }
+
+    if (duplicateCount > 0) {
+        const noun = duplicateCount === 1 ? 'duplicate' : 'duplicates';
+        const skippedVerb = duplicateCount === 1 ? 'was' : 'were';
+        const already = duplicateCount === 1 ? `that ${personLabel} is` : `those ${personLabel}s are`;
+        html += `<div class="import-results-info"><strong>${duplicateCount} ${noun}</strong> in this batch ${skippedVerb} skipped because ${already} already in the system with the same information.</div>`;
     }
 
     if (warnings.length > 0) {
@@ -13632,6 +13652,126 @@ function editOutsideStaffUser(userId, name, username, district) {
     }
 }
 
+function billingStatusLabel(status) {
+    const labels = {
+        inactive: 'Not subscribed',
+        incomplete: 'Checkout incomplete',
+        incomplete_expired: 'Checkout expired',
+        trialing: 'Trial',
+        active: 'Active',
+        past_due: 'Past due',
+        canceled: 'Canceled',
+        unpaid: 'Unpaid',
+        paused: 'Paused'
+    };
+    return labels[status] || (status || 'Unknown');
+}
+
+function formatBillingDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function setBillingMessage(text, type) {
+    const msg = document.getElementById('billing-msg');
+    if (!msg) return;
+    if (!text) {
+        msg.style.display = 'none';
+        msg.textContent = '';
+        return;
+    }
+    msg.style.display = 'block';
+    msg.textContent = text;
+    msg.style.color = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#64748b');
+}
+
+async function loadSchoolBilling() {
+    const box = document.getElementById('billing-status-box');
+    if (!box || !window.currentUser || window.currentUser.role !== 'admin') return;
+    try {
+        const response = await fetch('/api/billing/status');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${data.error || 'Could not load billing status.'}</p>`;
+            return;
+        }
+        const active = data.status === 'active' || data.status === 'trialing';
+        const banner = document.getElementById('billing-unpaid-banner');
+        if (banner) banner.style.display = (data.configured && !active) ? 'block' : 'none';
+        const period = formatBillingDate(data.current_period_end);
+        const parts = [
+            `<div><strong>Status:</strong> ${billingStatusLabel(data.status)}</div>`
+        ];
+        if (data.price_label) parts.push(`<div><strong>Plan:</strong> ${data.price_label}</div>`);
+        if (period) {
+            parts.push(`<div><strong>${data.cancel_at_period_end ? 'Ends' : 'Renews'}:</strong> ${period}</div>`);
+        }
+        if (data.customer_email) parts.push(`<div><strong>Billing email:</strong> ${data.customer_email}</div>`);
+        if (!data.configured) {
+            parts.push('<div style="margin-top:8px;color:#b45309;">Stripe is not configured yet. Add STRIPE_SECRET_KEY and STRIPE_PRICE_ID on the Render web service.</div>');
+        }
+        box.innerHTML = `<div style="display:grid;gap:6px;font-size:14px;">${parts.join('')}</div>`;
+        const emailInput = document.getElementById('billing-email');
+        if (emailInput && data.customer_email && !emailInput.value) {
+            emailInput.value = data.customer_email;
+        }
+        const subscribeBtn = document.getElementById('billing-subscribe-btn');
+        const portalBtn = document.getElementById('billing-portal-btn');
+        if (subscribeBtn) subscribeBtn.disabled = !data.configured || active;
+        if (portalBtn) portalBtn.disabled = !data.configured || !data.has_customer;
+    } catch (err) {
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Could not load billing status.</p>';
+    }
+}
+
+async function startSchoolSubscription() {
+    const subscribeBtn = document.getElementById('billing-subscribe-btn');
+    const emailInput = document.getElementById('billing-email');
+    setBillingMessage('');
+    if (subscribeBtn) subscribeBtn.disabled = true;
+    try {
+        const response = await fetch('/api/billing/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailInput ? emailInput.value.trim() : '' })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.url) {
+            setBillingMessage(data.error || 'Could not start checkout.', 'error');
+            if (subscribeBtn) subscribeBtn.disabled = false;
+            return;
+        }
+        window.location.href = data.url;
+    } catch (err) {
+        setBillingMessage('Could not start checkout.', 'error');
+        if (subscribeBtn) subscribeBtn.disabled = false;
+    }
+}
+
+async function openSchoolBillingPortal() {
+    const portalBtn = document.getElementById('billing-portal-btn');
+    setBillingMessage('');
+    if (portalBtn) portalBtn.disabled = true;
+    try {
+        const response = await fetch('/api/billing/portal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.url) {
+            setBillingMessage(data.error || 'Could not open billing portal.', 'error');
+            if (portalBtn) portalBtn.disabled = false;
+            return;
+        }
+        window.location.href = data.url;
+    } catch (err) {
+        setBillingMessage('Could not open billing portal.', 'error');
+        if (portalBtn) portalBtn.disabled = false;
+    }
+}
+
 function loadAdminStats(users) {
     const statsContainer = document.getElementById('admin-stats');
     if (!statsContainer) return;
@@ -13684,6 +13824,27 @@ function copyToClipboard(text) {
 
 // Event listeners for schedule management
 document.addEventListener('DOMContentLoaded', () => {
+    const subscribeBtn = document.getElementById('billing-subscribe-btn');
+    if (subscribeBtn) subscribeBtn.addEventListener('click', startSchoolSubscription);
+    const portalBtn = document.getElementById('billing-portal-btn');
+    if (portalBtn) portalBtn.addEventListener('click', openSchoolBillingPortal);
+    if (window.currentUser && window.currentUser.role === 'admin') {
+        loadSchoolBilling();
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const billing = params.get('billing');
+            if (billing === 'success') {
+                setBillingMessage('Payment received. Status updates after Stripe confirms the subscription.', 'success');
+                switchView('admin');
+            } else if (billing === 'canceled') {
+                setBillingMessage('Checkout canceled. No charge was made.', 'error');
+                switchView('admin');
+            } else if (billing === 'portal') {
+                switchView('admin');
+            }
+        } catch (e) {}
+    }
+
     // Initialize teacher schedule on page load (for staff/admin)
     // Note: Schedules will be rendered when schedules view is shown
     // We don't load here to avoid unnecessary API calls if user never visits schedules tab

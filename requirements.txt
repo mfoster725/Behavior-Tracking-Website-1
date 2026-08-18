@@ -12,3 +12,4 @@ pypdf==6.10.2
 pymupdf==1.27.2
 pytesseract==0.3.13
 Pillow==12.2.0
+stripe==15.5.0

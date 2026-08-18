@@ -21,7 +21,7 @@ if sys.platform == 'win32':
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text, event
+from sqlalchemy import text, event, func, or_
 from sqlalchemy.orm import selectinload, load_only, joinedload
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -73,6 +73,11 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
+
+try:
+    import stripe as stripe_sdk
+except ImportError:
+    stripe_sdk = None
 
 app = Flask(__name__)
 SUMMARY_API_BUILD = 'frenzies-card-v3'
@@ -225,6 +230,12 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
+
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '').strip()
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
+STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', '').strip()
+if stripe_sdk is not None and STRIPE_SECRET_KEY:
+    stripe_sdk.api_key = STRIPE_SECRET_KEY
 
 # Render/production sits behind a reverse proxy; trust X-Forwarded-* for HTTPS and cookies.
 if use_postgres_db:
@@ -1298,6 +1309,21 @@ class Transaction(db.Model):
     # Relationships
     student = db.relationship('Student', backref='transactions')
 
+
+class SiteSubscription(db.Model):
+    """Singleton row for this school's software subscription (Stripe)."""
+    __tablename__ = 'site_subscription'
+    id = db.Column(db.Integer, primary_key=True)
+    stripe_customer_id = db.Column(db.String(100), nullable=True)
+    stripe_subscription_id = db.Column(db.String(100), nullable=True)
+    status = db.Column(db.String(40), nullable=False, default='inactive')
+    price_id = db.Column(db.String(100), nullable=True)
+    current_period_end = db.Column(db.DateTime, nullable=True)
+    cancel_at_period_end = db.Column(db.Boolean, default=False, nullable=False)
+    customer_email = db.Column(db.String(200), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # Initialize database tables after all models are defined
 def init_db():
     """Initialize database tables if they don't exist"""
@@ -1758,6 +1784,223 @@ def index():
         date=date,
         must_change_password=getattr(current_user, 'must_change_password', False) and current_user.role == 'staff'
     )
+
+
+def _stripe_configured():
+    return bool(stripe_sdk is not None and STRIPE_SECRET_KEY and STRIPE_PRICE_ID)
+
+
+def _public_base_url():
+    env_url = (os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
+    if env_url:
+        return env_url
+    return request.host_url.rstrip('/')
+
+
+def _stripe_get(obj, key, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _stripe_id(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return _stripe_get(value, 'id')
+
+
+def get_site_subscription():
+    row = SiteSubscription.query.order_by(SiteSubscription.id.asc()).first()
+    if row is None:
+        row = SiteSubscription(status='inactive')
+        db.session.add(row)
+        db.session.commit()
+    return row
+
+
+def _period_end_from_subscription(sub):
+    ts = _stripe_get(sub, 'current_period_end')
+    if not ts:
+        items = _stripe_get(sub, 'items') or {}
+        data = _stripe_get(items, 'data') if not isinstance(items, dict) else items.get('data')
+        if not data and isinstance(items, dict):
+            data = items.get('data')
+        if data:
+            ts = _stripe_get(data[0], 'current_period_end')
+    if not ts:
+        return None
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).replace(tzinfo=None)
+
+
+def _apply_stripe_subscription(sub):
+    row = get_site_subscription()
+    row.stripe_subscription_id = _stripe_id(_stripe_get(sub, 'id')) or row.stripe_subscription_id
+    row.stripe_customer_id = _stripe_id(_stripe_get(sub, 'customer')) or row.stripe_customer_id
+    row.status = _stripe_get(sub, 'status') or row.status
+    row.cancel_at_period_end = bool(_stripe_get(sub, 'cancel_at_period_end') or False)
+    row.current_period_end = _period_end_from_subscription(sub)
+    items = _stripe_get(sub, 'items') or {}
+    data = items.get('data') if isinstance(items, dict) else _stripe_get(items, 'data')
+    if data:
+        price = _stripe_get(data[0], 'price')
+        price_id = _stripe_get(price, 'id') if price is not None else None
+        if price_id:
+            row.price_id = price_id
+    row.updated_at = datetime.utcnow()
+    db.session.commit()
+    return row
+
+
+def _billing_status_payload():
+    row = get_site_subscription()
+    price_label = None
+    if _stripe_configured():
+        try:
+            price = stripe_sdk.Price.retrieve(STRIPE_PRICE_ID)
+            amount = (getattr(price, 'unit_amount', None) or 0) / 100.0
+            recurring = getattr(price, 'recurring', None)
+            interval = getattr(recurring, 'interval', None) if recurring else 'month'
+            currency = (getattr(price, 'currency', None) or 'usd').upper()
+            if currency == 'USD':
+                price_label = f"${amount:.2f} / {interval}"
+            else:
+                price_label = f"{amount:.2f} {currency} / {interval}"
+        except Exception:
+            app.logger.exception('Could not load Stripe price %s', STRIPE_PRICE_ID)
+    period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
+    return {
+        'configured': _stripe_configured(),
+        'status': row.status or 'inactive',
+        'cancel_at_period_end': bool(row.cancel_at_period_end),
+        'current_period_end': period_end,
+        'has_customer': bool(row.stripe_customer_id),
+        'price_label': price_label,
+        'customer_email': row.customer_email,
+    }
+
+
+@app.route('/api/billing/status', methods=['GET'])
+@login_required
+@admin_required
+def billing_status():
+    return jsonify(_billing_status_payload())
+
+
+@app.route('/api/billing/checkout', methods=['POST'])
+@limiter.limit("10 per hour")
+@login_required
+@admin_required
+def billing_checkout():
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID on the web service.'
+        }), 400
+    row = get_site_subscription()
+    if (row.status or '') in ('active', 'trialing'):
+        return jsonify({'error': 'A subscription is already active. Use Manage billing to change it.'}), 400
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or row.customer_email or '').strip()
+    base = _public_base_url()
+    kwargs = {
+        'mode': 'subscription',
+        'line_items': [{'price': STRIPE_PRICE_ID, 'quantity': 1}],
+        'success_url': base + '/?billing=success',
+        'cancel_url': base + '/?billing=canceled',
+        'client_reference_id': str(current_user.id),
+        'allow_promotion_codes': True,
+        'metadata': {'site': 'behavior-tracking', 'admin_user_id': str(current_user.id)},
+    }
+    if row.stripe_customer_id:
+        kwargs['customer'] = row.stripe_customer_id
+    elif email:
+        kwargs['customer_email'] = email
+    try:
+        session = stripe_sdk.checkout.Session.create(**kwargs)
+    except Exception as e:
+        app.logger.exception('Stripe checkout session failed')
+        return jsonify({'error': 'Could not start checkout', 'detail': str(e)}), 400
+    return jsonify({'url': session.url})
+
+
+@app.route('/api/billing/portal', methods=['POST'])
+@limiter.limit("20 per hour")
+@login_required
+@admin_required
+def billing_portal():
+    if not _stripe_configured():
+        return jsonify({'error': 'Stripe is not configured.'}), 400
+    row = get_site_subscription()
+    if not row.stripe_customer_id:
+        return jsonify({'error': 'No billing customer yet. Subscribe first.'}), 400
+    try:
+        portal = stripe_sdk.billing_portal.Session.create(
+            customer=row.stripe_customer_id,
+            return_url=_public_base_url() + '/?billing=portal',
+        )
+    except Exception as e:
+        app.logger.exception('Stripe billing portal failed')
+        return jsonify({
+            'error': 'Could not open billing portal. Enable it in the Stripe Dashboard under Settings → Billing → Customer portal.',
+            'detail': str(e),
+        }), 400
+    return jsonify({'url': portal.url})
+
+
+@app.route('/api/stripe/webhook', methods=['POST'])
+@limiter.exempt
+def stripe_webhook():
+    if stripe_sdk is None or not STRIPE_WEBHOOK_SECRET:
+        return jsonify({'error': 'Webhook not configured'}), 400
+    payload = request.get_data(as_text=True)
+    sig = request.headers.get('Stripe-Signature', '')
+    try:
+        event = stripe_sdk.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        app.logger.exception('Stripe webhook signature verification failed')
+        return jsonify({'error': 'Invalid signature'}), 400
+
+    event_type = event.get('type') if isinstance(event, dict) else getattr(event, 'type', None)
+    obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+
+    try:
+        if event_type == 'checkout.session.completed':
+            mode = _stripe_get(obj, 'mode')
+            if mode == 'subscription':
+                row = get_site_subscription()
+                customer_id = _stripe_id(_stripe_get(obj, 'customer'))
+                sub_id = _stripe_id(_stripe_get(obj, 'subscription'))
+                email = _stripe_get(obj, 'customer_details')
+                email_value = _stripe_get(email, 'email') if email is not None else None
+                if not email_value:
+                    email_value = _stripe_get(obj, 'customer_email')
+                if customer_id:
+                    row.stripe_customer_id = customer_id
+                if email_value:
+                    row.customer_email = email_value
+                db.session.commit()
+                if sub_id:
+                    sub = stripe_sdk.Subscription.retrieve(sub_id)
+                    _apply_stripe_subscription(sub)
+        elif event_type in (
+            'customer.subscription.created',
+            'customer.subscription.updated',
+            'customer.subscription.deleted',
+        ):
+            _apply_stripe_subscription(obj)
+        elif event_type in ('invoice.paid', 'invoice.payment_failed'):
+            sub_id = _stripe_id(_stripe_get(obj, 'subscription'))
+            if sub_id:
+                sub = stripe_sdk.Subscription.retrieve(sub_id)
+                _apply_stripe_subscription(sub)
+    except Exception:
+        app.logger.exception('Stripe webhook handler failed for %s', event_type)
+        return jsonify({'error': 'Webhook handler failed'}), 500
+
+    return jsonify({'received': True})
 
 
 @app.route('/insights')
@@ -7973,6 +8216,243 @@ def generate_student_username(initials: str) -> str:
     return candidate
 
 
+def normalize_import_identifier(value):
+    """Normalize CSV identifiers: trim whitespace and Excel numeric suffixes like '12345.0'."""
+    if value is None:
+        return ''
+    s = str(value).strip()
+    if len(s) > 2 and s.endswith('.0'):
+        whole = s[:-2]
+        if whole.isdigit() or (whole.startswith('-') and whole[1:].isdigit()):
+            s = whole
+    return s
+
+
+def _import_str_eq(left, right):
+    return (left or '').strip() == (right or '').strip()
+
+
+def _user_number_match_filter(user_number):
+    """Match a stored user_number, including Excel-style '12345.0' and extra whitespace."""
+    variants = [user_number]
+    if user_number and not user_number.endswith('.0'):
+        variants.append(f'{user_number}.0')
+    return or_(User.user_number.in_(variants), func.trim(User.user_number) == user_number)
+
+
+def _find_staff_for_import(user_number, name, *, outside_staff=False):
+    """Match staff by user number; if none, unique same-name staff with no user number."""
+    if user_number:
+        by_number = User.query.filter(
+            User.role == 'staff',
+            User.is_outside_staff == outside_staff,
+            _user_number_match_filter(user_number),
+        ).first()
+        if by_number:
+            return by_number
+        conflict = User.query.filter(
+            _user_number_match_filter(user_number),
+            or_(User.role != 'staff', User.is_outside_staff != outside_staff),
+        ).first()
+        if conflict:
+            return conflict
+    if not name:
+        return None
+    unnamed = User.query.filter(
+        User.role == 'staff',
+        User.is_outside_staff == outside_staff,
+        func.lower(User.name) == name.strip().lower(),
+        or_(User.user_number.is_(None), User.user_number == ''),
+    ).all()
+    return unnamed[0] if len(unnamed) == 1 else None
+
+
+def _staff_import_conflict(existing, *, outside_staff=False):
+    if existing is None:
+        return None
+    if existing.role != 'staff' or bool(existing.is_outside_staff) != outside_staff:
+        kind = 'an outside staff' if existing.is_outside_staff else existing.role
+        return f"already exists as {kind} account"
+    return None
+
+
+STUDENT_TEAM_COLUMNS = (
+    ('Case Manager', 4),
+    ('Case Manager', 5),
+    ('Practitioner', 6),
+    ('Practitioner', 7),
+    ('Professional', 8),
+    ('Group Leader', 9),
+)
+
+
+def _parse_student_team_members(row):
+    members = []
+    for role_name, col_idx in STUDENT_TEAM_COLUMNS:
+        if len(row) > col_idx:
+            val = (row[col_idx] or '').strip()
+            if val:
+                members.append((role_name, val))
+    return members
+
+
+def _sync_student_team_members(student_id, members):
+    """Replace a student's team members when the CSV set differs. Returns True if changed."""
+    existing = TeamMember.query.filter_by(student_id=student_id).all()
+    existing_pairs = sorted((tm.role or '', tm.name or '') for tm in existing)
+    new_pairs = sorted(members)
+    if existing_pairs == new_pairs:
+        return False
+    keep_by_key = {}
+    for tm in existing:
+        key = (tm.role or '', tm.name or '')
+        keep_by_key.setdefault(key, []).append(tm)
+    for tm in existing:
+        db.session.delete(tm)
+    for role_name, name in members:
+        key = (role_name, name)
+        email = None
+        email_status = None
+        if keep_by_key.get(key):
+            old = keep_by_key[key].pop(0)
+            email = old.email
+            email_status = old.email_status
+        db.session.add(TeamMember(
+            student_id=student_id,
+            role=role_name,
+            name=name,
+            email=email,
+            email_status=email_status,
+        ))
+    return True
+
+
+def _resolve_case_manager_id(case_manager_name):
+    if not case_manager_name:
+        return None
+    return (
+        User.query.filter(
+            User.designation == 'Case Manager',
+            func.lower(User.name) == case_manager_name.strip().lower(),
+        )
+        .first()
+    )
+
+
+def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, warnings):
+    """Update an existing staff user from CSV. Returns True if any field changed."""
+    changed = False
+    if not _import_str_eq(user.user_number, user_number):
+        user.user_number = user_number
+        changed = True
+    if not _import_str_eq(user.name, name):
+        user.name = name
+        changed = True
+    if not _import_str_eq(user.designation, role):
+        user.designation = role
+        changed = True
+
+    desired_grades = None
+    if role == 'Case Manager' and grades_taught:
+        desired_grades = normalize_grades_taught(grades_taught) or None
+    if not _import_str_eq(user.grades_taught, desired_grades):
+        user.grades_taught = desired_grades
+        changed = True
+
+    desired_cm_id = None
+    if role == 'Paraprofessional':
+        if case_manager_name:
+            cm = _resolve_case_manager_id(case_manager_name)
+            if cm:
+                desired_cm_id = cm.id
+            else:
+                desired_cm_id = user.linked_case_manager_id
+                warnings.append(
+                    f"{name}: Case Manager '{case_manager_name}' was not found. "
+                    "You can assign a Case Manager manually in User Management."
+                )
+        else:
+            desired_cm_id = user.linked_case_manager_id
+    if user.linked_case_manager_id != desired_cm_id:
+        user.linked_case_manager_id = desired_cm_id
+        changed = True
+    return changed
+
+
+def _apply_outside_staff_import_updates(user, *, user_number, name, district):
+    changed = False
+    if not _import_str_eq(user.user_number, user_number):
+        user.user_number = user_number
+        changed = True
+    if not _import_str_eq(user.name, name):
+        user.name = name
+        changed = True
+    if not _import_str_eq(user.district, district):
+        user.district = district or None
+        changed = True
+    return changed
+
+
+def _lunch_number_match_filter(lunch_number):
+    variants = [lunch_number]
+    if lunch_number and not lunch_number.endswith('.0'):
+        variants.append(f'{lunch_number}.0')
+    return or_(Student.lunch_number.in_(variants), func.trim(Student.lunch_number) == lunch_number)
+
+
+def _find_student_for_import(lunch_number, initials):
+    if lunch_number:
+        by_lunch = Student.query.filter(_lunch_number_match_filter(lunch_number)).first()
+        if by_lunch:
+            return by_lunch
+    if not initials:
+        return None
+    unnamed = Student.query.filter(
+        func.lower(Student.name) == initials.strip().lower(),
+        or_(Student.lunch_number.is_(None), Student.lunch_number == ''),
+    ).all()
+    return unnamed[0] if len(unnamed) == 1 else None
+
+
+def _student_user_for(student):
+    return User.query.filter_by(student_id=student.id, role='student').first()
+
+
+def _apply_student_import_updates(student, *, lunch_number, initials, grade, card_color, team_members):
+    changed = False
+    if not _import_str_eq(student.lunch_number, lunch_number):
+        student.lunch_number = lunch_number
+        changed = True
+    if not _import_str_eq(student.name, initials):
+        student.name = initials
+        changed = True
+    if not _import_str_eq(student.grade, grade):
+        student.grade = grade or None
+        changed = True
+    desired_color = card_color or None
+    if not _import_str_eq(student.card_color, desired_color):
+        student.card_color = desired_color
+        changed = True
+    user = _student_user_for(student)
+    if user and not _import_str_eq(user.name, initials):
+        user.name = initials
+        changed = True
+    if team_members and _sync_student_team_members(student.id, team_members):
+        changed = True
+    return changed
+
+
+def _import_users_payload(success, errors, warnings, updated_names, duplicate_count):
+    return {
+        'success': success,
+        'errors': errors,
+        'warnings': warnings,
+        'updated_count': len(updated_names),
+        'updated_names': updated_names,
+        'duplicate_count': duplicate_count,
+    }
+
+
 @app.route('/api/import-users', methods=['POST'])
 @login_required
 def import_users():
@@ -7987,7 +8467,7 @@ def import_users():
         return jsonify({'error': 'File and type are required'}), 400
 
     try:
-        content = file.read().decode('utf-8')
+        content = file.read().decode('utf-8-sig')
         csv_reader = csv.reader(StringIO(content))
         rows = list(csv_reader)
     except Exception as e:
@@ -8000,6 +8480,9 @@ def import_users():
     success = []
     errors = []
     warnings = []
+    updated_names = []
+    duplicate_count = 0
+    seen_numbers = set()
 
     if import_type == 'staff':
         valid_roles = {'Case Manager', 'Practitioner', 'Paraprofessional', 'Professional'}
@@ -8010,9 +8493,10 @@ def import_users():
         para_rows = [r for r in staff_rows if len(r) > 2 and r[2].strip() == 'Paraprofessional']
 
         def process_staff_row(row, row_index):
+            nonlocal duplicate_count
             if not row or all(not (c or '').strip() for c in row):
                 return
-            user_number = (row[0] or '').strip() if len(row) > 0 else ''
+            user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
             role = (row[2] or '').strip() if len(row) > 2 else ''
             grades_taught = (row[3] or '').strip() if len(row) > 3 else ''
@@ -8029,14 +8513,33 @@ def import_users():
                 )
                 return
 
-            existing = User.query.filter_by(user_number=user_number).first()
-            if existing:
+            if user_number in seen_numbers:
+                duplicate_count += 1
+                return
+            seen_numbers.add(user_number)
+
+            existing = _find_staff_for_import(user_number, name, outside_staff=False)
+            conflict = _staff_import_conflict(existing, outside_staff=False)
+            if conflict:
                 errors.append(
-                    f"{name} was not added due to duplicate User Number ({user_number}). "
-                    "This user may already exist in the system. To resolve: check the User Management "
-                    "tab for an existing user with this number. If you need to update their info, edit "
-                    "them there. If this is a different person, assign a unique User Number."
+                    f"{name} was not added: User Number {user_number} {conflict}."
                 )
+                return
+
+            if existing:
+                changed = _apply_staff_import_updates(
+                    existing,
+                    user_number=user_number,
+                    name=name,
+                    role=role,
+                    grades_taught=grades_taught,
+                    case_manager_name=case_manager_name,
+                    warnings=warnings,
+                )
+                if changed:
+                    updated_names.append(name)
+                else:
+                    duplicate_count += 1
                 return
 
             username = generate_staff_username(name)
@@ -8054,16 +8557,7 @@ def import_users():
             )
 
             if role == 'Paraprofessional' and case_manager_name:
-                # Case insensitive match on name
-                from sqlalchemy import func
-
-                cm = (
-                    User.query.filter(
-                        User.designation == 'Case Manager',
-                        func.lower(User.name) == case_manager_name.lower(),
-                    )
-                    .first()
-                )
+                cm = _resolve_case_manager_id(case_manager_name)
                 if cm:
                     user.linked_case_manager_id = cm.id
                 else:
@@ -8095,7 +8589,7 @@ def import_users():
             process_staff_row(row, idx)
 
         db.session.commit()
-        return jsonify({'success': success, 'errors': errors, 'warnings': warnings}), 200
+        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'outside_staff':
         # CSV columns: A=User Number, B=Name, C=District
@@ -8103,7 +8597,7 @@ def import_users():
         for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
             if not row or all(not (c or '').strip() for c in row):
                 continue
-            user_number = (row[0] or '').strip() if len(row) > 0 else ''
+            user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
             district = (row[2] or '').strip() if len(row) > 2 else ''
 
@@ -8111,12 +8605,30 @@ def import_users():
                 errors.append(f"Row {idx}: missing User Number or Name.")
                 continue
 
-            existing = User.query.filter_by(user_number=user_number).first()
-            if existing:
+            if user_number in seen_numbers:
+                duplicate_count += 1
+                continue
+            seen_numbers.add(user_number)
+
+            existing = _find_staff_for_import(user_number, name, outside_staff=True)
+            conflict = _staff_import_conflict(existing, outside_staff=True)
+            if conflict:
                 errors.append(
-                    f"{name} was not added due to duplicate User Number ({user_number}). "
-                    "This user may already exist in the system."
+                    f"{name} was not added: User Number {user_number} {conflict}."
                 )
+                continue
+
+            if existing:
+                changed = _apply_outside_staff_import_updates(
+                    existing,
+                    user_number=user_number,
+                    name=name,
+                    district=district,
+                )
+                if changed:
+                    updated_names.append(name)
+                else:
+                    duplicate_count += 1
                 continue
 
             username = generate_staff_username(name)
@@ -8144,14 +8656,14 @@ def import_users():
             )
 
         db.session.commit()
-        return jsonify({'success': success, 'errors': errors, 'warnings': warnings}), 200
+        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'student':
         student_rows = rows[header_offset:]
         for idx, row in enumerate(student_rows, start=header_offset + 1):
             if not row or all(not (c or '').strip() for c in row):
                 continue
-            lunch_number = (row[0] or '').strip() if len(row) > 0 else ''
+            lunch_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             initials = (row[1] or '').strip() if len(row) > 1 else ''
             grade = (row[2] or '').strip() if len(row) > 2 else ''
             card_color = (row[3] or '').strip().lower() if len(row) > 3 else ''
@@ -8163,14 +8675,27 @@ def import_users():
                 errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
                 continue
 
-            existing_student = Student.query.filter_by(lunch_number=lunch_number).first()
+            if lunch_number in seen_numbers:
+                duplicate_count += 1
+                continue
+            seen_numbers.add(lunch_number)
+
+            existing_student = _find_student_for_import(lunch_number, initials)
+            team_members = _parse_student_team_members(row)
+
             if existing_student:
-                errors.append(
-                    f"{initials} (Lunch #{lunch_number}) was not added due to duplicate Lunch Number. "
-                    "This student may already exist. To resolve: check User Management for an existing student "
-                    "with this lunch number. If you need to update their info, edit them there. If this is a "
-                    "different student, assign a unique Lunch Number."
+                changed = _apply_student_import_updates(
+                    existing_student,
+                    lunch_number=lunch_number,
+                    initials=initials,
+                    grade=grade,
+                    card_color=card_color,
+                    team_members=team_members,
                 )
+                if changed:
+                    updated_names.append(initials)
+                else:
+                    duplicate_count += 1
                 continue
 
             student = Student(
@@ -8194,21 +8719,8 @@ def import_users():
             user.set_password(password)
             db.session.add(user)
 
-            # Team members: E/F case managers, G/H practitioners, I professional, J group leader
-            role_map = [
-                ('Case Manager', 4),
-                ('Case Manager', 5),
-                ('Practitioner', 6),
-                ('Practitioner', 7),
-                ('Professional', 8),
-                ('Group Leader', 9),
-            ]
-            for role_name, col_idx in role_map:
-                if len(row) > col_idx:
-                    val = (row[col_idx] or '').strip()
-                    if val:
-                        tm = TeamMember(student_id=student.id, role=role_name, name=val)
-                        db.session.add(tm)
+            for role_name, member_name in team_members:
+                db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
 
             success.append(
                 {
@@ -8221,7 +8733,7 @@ def import_users():
             )
 
         db.session.commit()
-        return jsonify({'success': success, 'errors': errors}), 200
+        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     else:
         return jsonify({'error': 'Invalid import type'}), 400
