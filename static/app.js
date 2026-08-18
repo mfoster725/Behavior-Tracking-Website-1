@@ -8818,7 +8818,7 @@ async function importStudentCSV() {
     const container = document.getElementById('import-results');
     if (!input || !container) return;
 
-    if (!input.files || input.files.length === 0) {
+    if (!input.files || !input.files.length) {
         showMessage('Please select a student CSV file to import.', 'error');
         return;
     }
@@ -8835,7 +8835,14 @@ async function importStudentCSV() {
             method: 'POST',
             body: formData
         });
-        const data = await response.json();
+        const text = await response.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (parseErr) {
+            container.innerHTML = `<div class="import-results-error">Error importing student CSV (HTTP ${response.status}). Please try again.</div>`;
+            return;
+        }
         if (!response.ok) {
             container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
             return;

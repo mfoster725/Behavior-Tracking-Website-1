@@ -8228,6 +8228,32 @@ def normalize_import_identifier(value):
     return s
 
 
+def _clip_import_field(value, max_len):
+    if value is None:
+        return ''
+    return str(value).strip()[:max_len]
+
+
+def _read_uploaded_csv(file_storage):
+    """Decode an uploaded CSV with common Excel encodings."""
+    raw = file_storage.read()
+    if isinstance(raw, str):
+        content = raw
+    else:
+        content = None
+        last_error = None
+        for encoding in ('utf-8-sig', 'utf-8', 'cp1252', 'latin-1'):
+            try:
+                content = raw.decode(encoding)
+                break
+            except UnicodeDecodeError as e:
+                last_error = e
+        if content is None:
+            raise UnicodeDecodeError('utf-8', raw or b'', 0, 1, str(last_error or 'unknown encoding'))
+    content = content.replace('\x00', '')
+    return list(csv.reader(StringIO(content)))
+
+
 def _import_str_eq(left, right):
     return (left or '').strip() == (right or '').strip()
 
@@ -8290,15 +8316,16 @@ def _parse_student_team_members(row):
     members = []
     for role_name, col_idx in STUDENT_TEAM_COLUMNS:
         if len(row) > col_idx:
-            val = (row[col_idx] or '').strip()
+            val = _clip_import_field(row[col_idx], 100)
             if val:
                 members.append((role_name, val))
     return members
 
 
-def _sync_student_team_members(student_id, members):
+def _sync_student_team_members(student_id, members, existing=None):
     """Replace a student's team members when the CSV set differs. Returns True if changed."""
-    existing = TeamMember.query.filter_by(student_id=student_id).all()
+    if existing is None:
+        existing = TeamMember.query.filter_by(student_id=student_id).all()
     existing_pairs = sorted((tm.role or '', tm.name or '') for tm in existing)
     new_pairs = sorted(members)
     if existing_pairs == new_pairs:
@@ -8418,7 +8445,7 @@ def _student_user_for(student):
     return User.query.filter_by(student_id=student.id, role='student').first()
 
 
-def _apply_student_import_updates(student, *, lunch_number, initials, grade, card_color, team_members):
+def _apply_student_import_updates(student, *, lunch_number, initials, grade, card_color, team_members, user=None, existing_team=None):
     changed = False
     if not _import_str_eq(student.lunch_number, lunch_number):
         student.lunch_number = lunch_number
@@ -8433,11 +8460,12 @@ def _apply_student_import_updates(student, *, lunch_number, initials, grade, car
     if not _import_str_eq(student.card_color, desired_color):
         student.card_color = desired_color
         changed = True
-    user = _student_user_for(student)
+    if user is None:
+        user = _student_user_for(student)
     if user and not _import_str_eq(user.name, initials):
         user.name = initials
         changed = True
-    if team_members and _sync_student_team_members(student.id, team_members):
+    if team_members and _sync_student_team_members(student.id, team_members, existing=existing_team):
         changed = True
     return changed
 
@@ -8467,9 +8495,7 @@ def import_users():
         return jsonify({'error': 'File and type are required'}), 400
 
     try:
-        content = file.read().decode('utf-8-sig')
-        csv_reader = csv.reader(StringIO(content))
-        rows = list(csv_reader)
+        rows = _read_uploaded_csv(file)
     except Exception as e:
         return jsonify({'error': f'Failed to read CSV: {e}'}), 400
 
@@ -8582,13 +8608,23 @@ def import_users():
         for idx, row in enumerate(non_para_rows, start=header_offset + 1):
             process_staff_row(row, idx)
         # Commit so Case Managers exist
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception('Staff CSV import failed on first pass')
+            return jsonify({'error': f'Import failed: {e}'}), 500
 
         # Second pass: Paraprofessionals
         for idx, row in enumerate(para_rows, start=header_offset + 1):
             process_staff_row(row, idx)
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception('Staff CSV import failed')
+            return jsonify({'error': f'Import failed: {e}'}), 500
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'outside_staff':
@@ -8655,85 +8691,131 @@ def import_users():
                 }
             )
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception('Outside staff CSV import failed')
+            return jsonify({'error': f'Import failed: {e}'}), 500
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'student':
-        student_rows = rows[header_offset:]
-        for idx, row in enumerate(student_rows, start=header_offset + 1):
-            if not row or all(not (c or '').strip() for c in row):
-                continue
-            lunch_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
-            initials = (row[1] or '').strip() if len(row) > 1 else ''
-            grade = (row[2] or '').strip() if len(row) > 2 else ''
-            card_color = (row[3] or '').strip().lower() if len(row) > 3 else ''
-
-            if not lunch_number:
-                errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
-                continue
-            if not initials:
-                errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
-                continue
-
-            if lunch_number in seen_numbers:
-                duplicate_count += 1
-                continue
-            seen_numbers.add(lunch_number)
-
-            existing_student = _find_student_for_import(lunch_number, initials)
-            team_members = _parse_student_team_members(row)
-
-            if existing_student:
-                changed = _apply_student_import_updates(
-                    existing_student,
-                    lunch_number=lunch_number,
-                    initials=initials,
-                    grade=grade,
-                    card_color=card_color,
-                    team_members=team_members,
-                )
-                if changed:
-                    updated_names.append(initials)
+        try:
+            all_students = Student.query.all()
+            students_by_lunch = {}
+            unnamed_by_name = {}
+            for existing in all_students:
+                key = normalize_import_identifier(existing.lunch_number)
+                if key:
+                    students_by_lunch.setdefault(key, existing)
+                    students_by_lunch.setdefault(f'{key}.0', existing)
                 else:
+                    nkey = (existing.name or '').strip().lower()
+                    if nkey:
+                        unnamed_by_name.setdefault(nkey, []).append(existing)
+
+            users_by_student_id = {
+                u.student_id: u
+                for u in User.query.filter(User.role == 'student', User.student_id.isnot(None)).all()
+            }
+            team_by_student_id = {}
+            for tm in TeamMember.query.all():
+                team_by_student_id.setdefault(tm.student_id, []).append(tm)
+
+            student_rows = rows[header_offset:]
+            for idx, row in enumerate(student_rows, start=header_offset + 1):
+                if not row or all(not (c or '').strip() for c in row):
+                    continue
+                lunch_number = _clip_import_field(normalize_import_identifier(row[0] if len(row) > 0 else ''), 50)
+                initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
+                grade = _clip_import_field(row[2] if len(row) > 2 else '', 20)
+                card_color = _clip_import_field((row[3] or '').lower() if len(row) > 3 else '', 20)
+
+                if not lunch_number:
+                    errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
+                    continue
+                if not initials:
+                    errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
+                    continue
+
+                if lunch_number in seen_numbers:
                     duplicate_count += 1
-                continue
+                    continue
+                seen_numbers.add(lunch_number)
 
-            student = Student(
-                name=initials,
-                grade=grade or None,
-                card_color=card_color or None,
-                lunch_number=lunch_number,
-            )
-            db.session.add(student)
-            db.session.flush()
+                existing_student = students_by_lunch.get(lunch_number)
+                if not existing_student:
+                    name_matches = unnamed_by_name.get(initials.strip().lower()) or []
+                    if len(name_matches) == 1:
+                        existing_student = name_matches[0]
+                team_members = _parse_student_team_members(row)
 
-            username = generate_student_username(initials)
-            password = f"{initials.upper()}{lunch_number}"
+                try:
+                    with db.session.begin_nested():
+                        if existing_student:
+                            changed = _apply_student_import_updates(
+                                existing_student,
+                                lunch_number=lunch_number,
+                                initials=initials,
+                                grade=grade,
+                                card_color=card_color,
+                                team_members=team_members,
+                                user=users_by_student_id.get(existing_student.id),
+                                existing_team=team_by_student_id.get(existing_student.id, []),
+                            )
+                            students_by_lunch[lunch_number] = existing_student
+                            if changed:
+                                updated_names.append(initials)
+                            else:
+                                duplicate_count += 1
+                            continue
 
-            user = User(
-                name=initials,
-                username=username,
-                role='student',
-                student_id=student.id,
-            )
-            user.set_password(password)
-            db.session.add(user)
+                        student = Student(
+                            name=initials,
+                            grade=grade or None,
+                            card_color=card_color or None,
+                            lunch_number=lunch_number,
+                        )
+                        db.session.add(student)
+                        db.session.flush()
 
-            for role_name, member_name in team_members:
-                db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
+                        username = generate_student_username(initials)
+                        password = f"{initials.upper()}{lunch_number}"
 
-            success.append(
-                {
-                    'initials': initials,
-                    'username': username,
-                    'password': password,
-                    'lunch_number': lunch_number,
-                    'grade': grade,
-                }
-            )
+                        user = User(
+                            name=initials,
+                            username=username,
+                            role='student',
+                            student_id=student.id,
+                        )
+                        user.set_password(password)
+                        db.session.add(user)
+                        db.session.flush()
 
-        db.session.commit()
-        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
+                        for role_name, member_name in team_members:
+                            db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
+
+                        students_by_lunch[lunch_number] = student
+                        users_by_student_id[student.id] = user
+                        success.append(
+                            {
+                                'initials': initials,
+                                'username': username,
+                                'password': password,
+                                'lunch_number': lunch_number,
+                                'grade': grade,
+                            }
+                        )
+                except Exception as row_err:
+                    app.logger.exception('Student CSV row %s failed', idx)
+                    errors.append(f"Row {idx} ({initials or lunch_number}) could not be imported: {row_err}")
+
+            db.session.commit()
+            return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception('Student CSV import failed')
+            return jsonify({'error': f'Import failed: {e}'}), 500
 
     else:
         return jsonify({'error': 'Invalid import type'}), 400
