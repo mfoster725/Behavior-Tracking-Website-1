@@ -265,6 +265,23 @@ def unauthorized():
         return jsonify({'error': 'Authentication required', 'login_required': True}), 401
     return redirect(url_for('login', next=request.url))
 
+
+@app.errorhandler(429)
+def _ratelimit_error(e):
+    description = getattr(e, 'description', None) or str(e)
+    return jsonify({'error': f'Too many requests. {description}'}), 429
+
+
+@app.errorhandler(500)
+def _api_internal_error(e):
+    original = getattr(e, 'original_exception', None) or e
+    app.logger.exception('Unhandled server error on %s', getattr(request, 'path', ''))
+    if request.path.startswith('/api/'):
+        text = str(original).strip()
+        name = type(original).__name__
+        return jsonify({'error': f'{name}: {text}' if text else name}), 500
+    return ('Internal Server Error', 500)
+
 # SQLite performance tuning for local development.
 # Safe no-op for Postgres environments.
 if str(app.config.get('SQLALCHEMY_DATABASE_URI', '')).startswith('sqlite'):
@@ -8470,6 +8487,12 @@ def _apply_student_import_updates(student, *, lunch_number, initials, grade, car
     return changed
 
 
+def _import_exception_message(e):
+    text = str(e).strip()
+    name = type(e).__name__
+    return f'{name}: {text}' if text else name
+
+
 def _import_users_payload(success, errors, warnings, updated_names, duplicate_count):
     return {
         'success': success,
@@ -8482,6 +8505,7 @@ def _import_users_payload(success, errors, warnings, updated_names, duplicate_co
 
 
 @app.route('/api/import-users', methods=['POST'])
+@limiter.limit("30 per minute")
 @login_required
 def import_users():
     """Import staff, outside staff, or student users from CSV."""
@@ -8613,7 +8637,7 @@ def import_users():
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Staff CSV import failed on first pass')
-            return jsonify({'error': f'Import failed: {e}'}), 500
+            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
 
         # Second pass: Paraprofessionals
         for idx, row in enumerate(para_rows, start=header_offset + 1):
@@ -8624,7 +8648,7 @@ def import_users():
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Staff CSV import failed')
-            return jsonify({'error': f'Import failed: {e}'}), 500
+            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'outside_staff':
@@ -8696,126 +8720,105 @@ def import_users():
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Outside staff CSV import failed')
-            return jsonify({'error': f'Import failed: {e}'}), 500
+            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'student':
-        try:
-            all_students = Student.query.all()
-            students_by_lunch = {}
-            unnamed_by_name = {}
-            for existing in all_students:
-                key = normalize_import_identifier(existing.lunch_number)
-                if key:
-                    students_by_lunch.setdefault(key, existing)
-                    students_by_lunch.setdefault(f'{key}.0', existing)
-                else:
-                    nkey = (existing.name or '').strip().lower()
-                    if nkey:
-                        unnamed_by_name.setdefault(nkey, []).append(existing)
+        student_rows = rows[header_offset:]
+        for idx, row in enumerate(student_rows, start=header_offset + 1):
+            if not row or all(not (c or '').strip() for c in row):
+                continue
+            lunch_number = _clip_import_field(normalize_import_identifier(row[0] if len(row) > 0 else ''), 50)
+            initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
+            grade = _clip_import_field(row[2] if len(row) > 2 else '', 20)
+            card_color = _clip_import_field((row[3] or '').lower() if len(row) > 3 else '', 20)
 
-            users_by_student_id = {
-                u.student_id: u
-                for u in User.query.filter(User.role == 'student', User.student_id.isnot(None)).all()
-            }
-            team_by_student_id = {}
-            for tm in TeamMember.query.all():
-                team_by_student_id.setdefault(tm.student_id, []).append(tm)
+            if not lunch_number:
+                errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
+                continue
+            if not initials:
+                errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
+                continue
 
-            student_rows = rows[header_offset:]
-            for idx, row in enumerate(student_rows, start=header_offset + 1):
-                if not row or all(not (c or '').strip() for c in row):
-                    continue
-                lunch_number = _clip_import_field(normalize_import_identifier(row[0] if len(row) > 0 else ''), 50)
-                initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
-                grade = _clip_import_field(row[2] if len(row) > 2 else '', 20)
-                card_color = _clip_import_field((row[3] or '').lower() if len(row) > 3 else '', 20)
+            if lunch_number in seen_numbers:
+                duplicate_count += 1
+                continue
+            seen_numbers.add(lunch_number)
 
-                if not lunch_number:
-                    errors.append(f"Row {idx}: missing or invalid lunch number. Every student must have a lunch number.")
-                    continue
-                if not initials:
-                    errors.append(f"Row {idx}: missing initials for Lunch #{lunch_number}.")
-                    continue
-
-                if lunch_number in seen_numbers:
-                    duplicate_count += 1
-                    continue
-                seen_numbers.add(lunch_number)
-
-                existing_student = students_by_lunch.get(lunch_number)
+            team_members = _parse_student_team_members(row)
+            try:
+                existing_student = Student.query.filter(
+                    Student.lunch_number.in_([lunch_number, f'{lunch_number}.0'])
+                ).first()
                 if not existing_student:
-                    name_matches = unnamed_by_name.get(initials.strip().lower()) or []
+                    name_matches = Student.query.filter(
+                        func.lower(Student.name) == initials.lower(),
+                        or_(Student.lunch_number.is_(None), Student.lunch_number == ''),
+                    ).all()
                     if len(name_matches) == 1:
                         existing_student = name_matches[0]
-                team_members = _parse_student_team_members(row)
 
-                try:
-                    with db.session.begin_nested():
-                        if existing_student:
-                            changed = _apply_student_import_updates(
-                                existing_student,
-                                lunch_number=lunch_number,
-                                initials=initials,
-                                grade=grade,
-                                card_color=card_color,
-                                team_members=team_members,
-                                user=users_by_student_id.get(existing_student.id),
-                                existing_team=team_by_student_id.get(existing_student.id, []),
-                            )
-                            students_by_lunch[lunch_number] = existing_student
-                            if changed:
-                                updated_names.append(initials)
-                            else:
-                                duplicate_count += 1
-                            continue
+                if existing_student:
+                    changed = _apply_student_import_updates(
+                        existing_student,
+                        lunch_number=lunch_number,
+                        initials=initials,
+                        grade=grade,
+                        card_color=card_color,
+                        team_members=team_members,
+                    )
+                    db.session.commit()
+                    if changed:
+                        updated_names.append(initials)
+                    else:
+                        duplicate_count += 1
+                    continue
 
-                        student = Student(
-                            name=initials,
-                            grade=grade or None,
-                            card_color=card_color or None,
-                            lunch_number=lunch_number,
-                        )
-                        db.session.add(student)
-                        db.session.flush()
+                student = Student(
+                    name=initials,
+                    grade=grade or None,
+                    card_color=card_color or None,
+                    lunch_number=lunch_number,
+                    directory_info_opt_out=False,
+                )
+                db.session.add(student)
+                db.session.flush()
 
-                        username = generate_student_username(initials)
-                        password = f"{initials.upper()}{lunch_number}"
+                username = generate_student_username(initials)
+                password = f"{initials.upper()}{lunch_number}"
 
-                        user = User(
-                            name=initials,
-                            username=username,
-                            role='student',
-                            student_id=student.id,
-                        )
-                        user.set_password(password)
-                        db.session.add(user)
-                        db.session.flush()
+                user = User(
+                    name=initials,
+                    username=username,
+                    role='student',
+                    student_id=student.id,
+                    is_outside_staff=False,
+                    must_change_password=False,
+                )
+                user.set_password(password)
+                db.session.add(user)
 
-                        for role_name, member_name in team_members:
-                            db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
+                for role_name, member_name in team_members:
+                    db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
 
-                        students_by_lunch[lunch_number] = student
-                        users_by_student_id[student.id] = user
-                        success.append(
-                            {
-                                'initials': initials,
-                                'username': username,
-                                'password': password,
-                                'lunch_number': lunch_number,
-                                'grade': grade,
-                            }
-                        )
-                except Exception as row_err:
-                    app.logger.exception('Student CSV row %s failed', idx)
-                    errors.append(f"Row {idx} ({initials or lunch_number}) could not be imported: {row_err}")
+                db.session.commit()
+                success.append(
+                    {
+                        'initials': initials,
+                        'username': username,
+                        'password': password,
+                        'lunch_number': lunch_number,
+                        'grade': grade,
+                    }
+                )
+            except Exception as row_err:
+                db.session.rollback()
+                app.logger.exception('Student CSV row %s failed', idx)
+                errors.append(
+                    f"Row {idx} ({initials or lunch_number}) could not be imported: {_import_exception_message(row_err)}"
+                )
 
-            db.session.commit()
-            return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception('Student CSV import failed')
-            return jsonify({'error': f'Import failed: {e}'}), 500
+        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     else:
         return jsonify({'error': 'Invalid import type'}), 400

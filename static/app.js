@@ -9047,6 +9047,16 @@ function renderImportResults(data, type) {
     container.style.display = 'block';
 }
 
+function importFailureMessage(data, response, rawText) {
+    if (data && (data.error || data.message)) {
+        return data.error || data.message;
+    }
+    if (rawText && rawText.charAt(0) !== '<' && rawText.length < 500) {
+        return rawText;
+    }
+    return `Import failed (HTTP ${response.status})`;
+}
+
 async function importStaffCSV() {
     const input = document.getElementById('import-staff-file');
     const container = document.getElementById('import-results');
@@ -9071,7 +9081,7 @@ async function importStaffCSV() {
         });
         const data = await response.json();
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response)}</div>`;
             return;
         }
         renderImportResults(data, 'staff');
@@ -9105,7 +9115,7 @@ async function importOutsideStaffCSV() {
         });
         const data = await response.json();
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response)}</div>`;
             return;
         }
         renderImportResults(data, 'outside_staff');
@@ -9142,11 +9152,11 @@ async function importStudentCSV() {
         try {
             data = text ? JSON.parse(text) : {};
         } catch (parseErr) {
-            container.innerHTML = `<div class="import-results-error">Error importing student CSV (HTTP ${response.status}). Please try again.</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage({}, response, text)}</div>`;
             return;
         }
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response, text)}</div>`;
             return;
         }
         renderImportResults(data, 'student');
