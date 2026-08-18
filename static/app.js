@@ -391,11 +391,58 @@ let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
 let dailyAutosaveTimer = null; // Debounce timer for daily-entry autosave
+let dailyWriteChain = Promise.resolve(); // Serialize daily saves/clears so a clear cannot be overwritten
+let dailyWriteGeneration = 0; // Bumped on Clear All so in-flight saves are ignored
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
 const STAR_ENTRY_MODE_KEY = 'starEntryMode'; // localStorage: 'student' | 'period'
+const STAR_COLUMN_CRITERIA = {
+    s: {
+        letter: 'S',
+        title: 'Safety',
+        color: '#B91C1C',
+        items: [
+            'Keep hands, feet, and objects to self',
+            'Use self control and a calm body',
+            'Stay in assigned area',
+            'Ask for a cooldown',
+            'Be awake and alert'
+        ]
+    },
+    t: {
+        letter: 'T',
+        title: 'Teamwork',
+        color: '#1E40AF',
+        items: [
+            'Follow directions',
+            'Participate'
+        ]
+    },
+    a: {
+        letter: 'A',
+        title: 'Accountability',
+        color: '#047857',
+        items: [
+            'Take ownership of choices and accept feedback',
+            'Stay on task',
+            'Use indoor voice',
+            'Have supplies ready',
+            'Complete assignments'
+        ]
+    },
+    r: {
+        letter: 'R',
+        title: 'Relationships',
+        color: '#B45309',
+        items: [
+            'Use appropriate language',
+            'Respect others',
+            'Be supportive and encouraging'
+        ]
+    }
+};
 let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
 let starNavKeydownBound = false;
 let starZeroWarningKeydownBound = false;
@@ -1187,6 +1234,7 @@ function setupEventListeners() {
         }
 
         initStarEntryModeToggle();
+        initUiHoverTips();
         initStarNavModals();
 
         ensureDailyGridDelegatedListeners();
@@ -2942,7 +2990,9 @@ async function loadDailyData() {
 
         // If all visible students have already been submitted, we don't need to load anything
         if (nonSubmittedVisibleIds.size === 0) {
-            renderDailyGrid();
+            if (requestToken === dailyLoadRequestToken) {
+                renderDailyGrid();
+            }
             return;
         }
 
@@ -2975,11 +3025,9 @@ async function loadDailyData() {
         if (requestToken !== dailyLoadRequestToken) {
             return;
         }
-        
-        // Initialize attendance data for current date if not exists
-        if (!attendanceData[currentDate]) {
-            attendanceData[currentDate] = {};
-        }
+
+        const nextDailyData = {};
+        const attendanceUpdates = {};
 
         // Map records by student, but only for visible, non-submitted students
         allRecords.forEach(record => {
@@ -2994,23 +3042,18 @@ async function loadDailyData() {
                 return;
             }
 
-            dailyData[studentId] = {};
+            nextDailyData[studentId] = {};
 
             // Load attendance status - prefer attendance_status, fallback to present boolean for backward compatibility
             if (record.attendance_status) {
-                attendanceData[currentDate][studentId] = record.attendance_status;
+                attendanceUpdates[studentId] = record.attendance_status;
             } else if (record.present !== undefined) {
                 // Migration: convert old present boolean to new attendance_status
-                attendanceData[currentDate][studentId] = record.present ? 'present' : 'unexcused';
-            } else {
-                // Default to present if not set
-                if (!attendanceData[currentDate][studentId]) {
-                    attendanceData[currentDate][studentId] = 'present';
-                }
+                attendanceUpdates[studentId] = record.present ? 'present' : 'unexcused';
             }
 
             record.periods.forEach(period => {
-                dailyData[studentId][period.time_range] = {
+                nextDailyData[studentId][period.time_range] = {
                     s: period.safety_points,
                     t: period.teamwork_points,
                     a: period.accountability_points,
@@ -3018,6 +3061,18 @@ async function loadDailyData() {
                     info: period.info || ''
                 };
             });
+        });
+
+        if (requestToken !== dailyLoadRequestToken) {
+            return;
+        }
+
+        dailyData = nextDailyData;
+        if (!attendanceData[currentDate]) {
+            attendanceData[currentDate] = {};
+        }
+        Object.keys(attendanceUpdates).forEach(studentId => {
+            attendanceData[currentDate][studentId] = attendanceUpdates[studentId];
         });
     } catch (error) {
         if (error && error.name === 'AbortError') {
@@ -3097,6 +3152,21 @@ function calculateStudentPercentages(studentId) {
     return percentages;
 }
 
+function isDailyStudentFilterActive() {
+    return !!(dailyEntrySearchQuery && dailyEntrySearchQuery.trim()) || !!dailyEntryManagedByMe;
+}
+
+function getVisibleDailyStudents() {
+    // When a search / managed-by-me filter is active, never fall back to the full roster.
+    if (isDailyStudentFilterActive()) {
+        return Array.isArray(filteredDailyStudents) ? filteredDailyStudents : [];
+    }
+    if (Array.isArray(filteredDailyStudents) && filteredDailyStudents.length > 0) {
+        return filteredDailyStudents;
+    }
+    return Array.isArray(allStudents) ? allStudents : [];
+}
+
 function renderDailyGrid() {
     const header = document.getElementById('daily-header');
     const body = document.getElementById('daily-body');
@@ -3111,7 +3181,7 @@ function renderDailyGrid() {
     body.innerHTML = '';
 
     // Use filtered students for display
-    const studentsToDisplay = filteredDailyStudents && filteredDailyStudents.length > 0 ? filteredDailyStudents : allStudents;
+    const studentsToDisplay = getVisibleDailyStudents();
     
     if (!studentsToDisplay || studentsToDisplay.length === 0) {
         return;
@@ -3776,6 +3846,144 @@ function initStarEntryModeToggle() {
     syncStarEntryModeToggle();
 }
 
+function getUiHoverTipEl() {
+    let el = document.getElementById('ui-hover-tip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'ui-hover-tip';
+        el.className = 'ui-hover-tip';
+        el.setAttribute('role', 'tooltip');
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function hideUiHoverTip() {
+    const tip = document.getElementById('ui-hover-tip');
+    if (!tip) return;
+    tip.style.display = 'none';
+    tip.innerHTML = '';
+    tip.setAttribute('aria-hidden', 'true');
+    delete tip.dataset.tipKey;
+}
+
+function positionUiHoverTip(tip, anchor) {
+    if (!tip || !anchor) return;
+    tip.style.display = 'block';
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    const margin = 8;
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + (rect.width / 2) - (tipRect.width / 2);
+    let top = rect.bottom + margin;
+    if (top + tipRect.height > window.innerHeight - 8) {
+        top = rect.top - tipRect.height - margin;
+    }
+    left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - tipRect.height - 8));
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+}
+
+function starColumnCriteriaHtml(category) {
+    const meta = STAR_COLUMN_CRITERIA[category];
+    if (!meta) return '';
+    const items = meta.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+    return `<div class="ui-hover-tip-title" style="color:${meta.color}">${escapeHtml(meta.letter)} — ${escapeHtml(meta.title)}</div><ul>${items}</ul>`;
+}
+
+function resolveUiHoverTipSource(node) {
+    const el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el || typeof el.closest !== 'function') return null;
+
+    const modeBtn = el.closest('.star-entry-mode-btn[data-tooltip]');
+    if (modeBtn) {
+        const text = (modeBtn.getAttribute('data-tooltip') || '').trim();
+        if (!text) return null;
+        return { el: modeBtn, key: `mode:${modeBtn.id || text}`, html: escapeHtml(text) };
+    }
+
+    const inEntryGrid = el.closest('#daily-grid, #students-grid, #period-entry-view, #entry-view');
+    if (!inEntryGrid) return null;
+
+    const header = el.closest('.star-category-header');
+    if (header && STAR_COLUMN_CRITERIA[header.dataset.category]) {
+        const category = header.dataset.category;
+        return { el: header, key: `star:${category}`, html: starColumnCriteriaHtml(category) };
+    }
+
+    const input = el.closest('.daily-input');
+    if (input && STAR_COLUMN_CRITERIA[input.dataset.category]) {
+        const category = input.dataset.category;
+        return {
+            el: input.closest('.daily-data-cell') || input,
+            key: `star:${category}`,
+            html: starColumnCriteriaHtml(category)
+        };
+    }
+
+    const percent = el.closest('.daily-percent-cell, .period-percent-cell');
+    if (percent && STAR_COLUMN_CRITERIA[percent.dataset.category]) {
+        const category = percent.dataset.category;
+        return { el: percent, key: `star:${category}`, html: starColumnCriteriaHtml(category) };
+    }
+
+    return null;
+}
+
+function showUiHoverTip(source) {
+    if (!source || !source.el || !source.html) {
+        hideUiHoverTip();
+        return;
+    }
+    const tip = getUiHoverTipEl();
+    if (tip.dataset.tipKey !== source.key) {
+        tip.innerHTML = source.html;
+        tip.dataset.tipKey = source.key;
+    }
+    tip.setAttribute('aria-hidden', 'false');
+    positionUiHoverTip(tip, source.el);
+}
+
+function initUiHoverTips() {
+    if (window.__uiHoverTipsBound) return;
+    window.__uiHoverTipsBound = true;
+
+    let currentSourceEl = null;
+
+    document.addEventListener('mouseover', (e) => {
+        const source = resolveUiHoverTipSource(e.target);
+        if (!source) return;
+        if (source.el === currentSourceEl) return;
+        currentSourceEl = source.el;
+        showUiHoverTip(source);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+        if (!currentSourceEl) return;
+        const next = resolveUiHoverTipSource(e.relatedTarget);
+        if (next && next.el === currentSourceEl) return;
+        currentSourceEl = next ? next.el : null;
+        if (next) {
+            showUiHoverTip(next);
+        } else {
+            hideUiHoverTip();
+        }
+    });
+
+    document.addEventListener('scroll', () => {
+        currentSourceEl = null;
+        hideUiHoverTip();
+    }, true);
+
+    window.addEventListener('blur', () => {
+        currentSourceEl = null;
+        hideUiHoverTip();
+    });
+}
+
 function initStarNavModals() {
     const navModal = document.getElementById('star-nav-modal');
     if (navModal && navModal.dataset.bound !== 'true') {
@@ -4223,6 +4431,12 @@ function updateDailyAutosaveStatus(text) {
     }
 }
 
+function enqueueDailyWrite(task) {
+    const run = dailyWriteChain.then(task, task);
+    dailyWriteChain = run.catch(function () { /* keep the write queue alive after errors */ });
+    return run;
+}
+
 function scheduleDailyAutosave() {
     if (!currentDate) {
         return;
@@ -4237,18 +4451,26 @@ function scheduleDailyAutosave() {
 
     dailyAutosaveTimer = setTimeout(async () => {
         dailyAutosaveTimer = null;
+        const generation = dailyWriteGeneration;
         try {
-            await saveDailyAllData({ silent: true, fromAutosave: true });
-            updateDailyAutosaveStatus('All changes saved');
+            await enqueueDailyWrite(function () {
+                return saveDailyAllData({ silent: true, fromAutosave: true });
+            });
+            if (generation === dailyWriteGeneration) {
+                updateDailyAutosaveStatus('All changes saved');
+            }
         } catch (error) {
             console.error('Auto-save error for daily data:', error);
-            updateDailyAutosaveStatus('Auto-save failed');
+            if (generation === dailyWriteGeneration) {
+                updateDailyAutosaveStatus('Auto-save failed');
+            }
         }
     }, 1500);
 }
 
 async function saveDailyAllData(options = {}) {
     const { silent = false, fromAutosave = false } = options;
+    const generation = dailyWriteGeneration;
 
     if (!currentDate) {
         if (!silent) {
@@ -4313,6 +4535,10 @@ async function saveDailyAllData(options = {}) {
         }
     });
 
+    if (generation !== dailyWriteGeneration) {
+        return;
+    }
+
     if (savePromises.length === 0) {
         if (!silent) {
             showMessage('No data to save', 'info');
@@ -4322,6 +4548,9 @@ async function saveDailyAllData(options = {}) {
 
     try {
         await Promise.all(savePromises);
+        if (generation !== dailyWriteGeneration) {
+            return;
+        }
         if (!silent) {
             showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
         }
@@ -4458,10 +4687,83 @@ async function submitStudentData(e) {
     }
 }
 
-function clearDailyAllData() {
-    if (confirm('Clear all data for this day?')) {
-        dailyData = {};
-        renderDailyGrid();
+async function persistClearedDailyRecords(studentIds, dateToClear) {
+    const savePromises = studentIds.map(function (studentId) {
+        const attendance = attendanceData[dateToClear]?.[studentId] || 'present';
+        return fetch('/api/daily-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: parseInt(studentId, 10),
+                date: dateToClear,
+                attendance_status: attendance,
+                periods: [],
+                frenzies: []
+            })
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error('Failed to clear daily record (' + response.status + ')');
+            }
+            return response;
+        });
+    });
+    await Promise.all(savePromises);
+    invalidateDailyLoadCache(dateToClear);
+}
+
+async function clearDailyAllData() {
+    const visibleStudents = getVisibleDailyStudents();
+    const studentIdsToClear = visibleStudents
+        .map(function (student) { return student && student.id; })
+        .filter(function (id) { return id !== undefined && id !== null && id !== ''; })
+        .map(function (id) { return String(id); })
+        .filter(function (id) { return dailyData[id] !== undefined; });
+
+    if (studentIdsToClear.length === 0) {
+        alert('No visible students to clear');
+        return;
+    }
+
+    const confirmLabel = studentIdsToClear.length === 1
+        ? 'Clear all data for this visible student?'
+        : `Clear all data for the ${studentIdsToClear.length} visible students? Other students will not be changed.`;
+    if (!confirm(confirmLabel)) {
+        return;
+    }
+
+    if (dailyAutosaveTimer) {
+        clearTimeout(dailyAutosaveTimer);
+        dailyAutosaveTimer = null;
+    }
+
+    const dateToClear = currentDate;
+    const idsToClear = new Set(studentIdsToClear);
+
+    // Only remove the students currently on screen; keep everyone else's in-memory data.
+    Object.keys(dailyData).forEach(function (studentId) {
+        if (idsToClear.has(String(studentId))) {
+            delete dailyData[studentId];
+        }
+    });
+
+    renderDailyGrid();
+    invalidateDailyLoadCache(dateToClear);
+
+    if (!dateToClear) {
+        updateDailyAutosaveStatus('All changes saved');
+        return;
+    }
+
+    updateDailyAutosaveStatus('Saving...');
+    try {
+        await enqueueDailyWrite(function () {
+            return persistClearedDailyRecords(studentIdsToClear, dateToClear);
+        });
+        updateDailyAutosaveStatus('All changes saved');
+    } catch (error) {
+        console.error('Error clearing daily data:', error);
+        updateDailyAutosaveStatus('Auto-save failed');
+        showMessage('Error clearing data. Please try again.', 'error');
     }
 }
 
