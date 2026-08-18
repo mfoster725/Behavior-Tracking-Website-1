@@ -9048,6 +9048,9 @@ function renderImportResults(data, type) {
 }
 
 function importFailureMessage(data, response, rawText) {
+    if (response && (response.status === 502 || response.status === 504)) {
+        return 'The import timed out. Please wait a few seconds and try again.';
+    }
     if (data && (data.error || data.message)) {
         return data.error || data.message;
     }
