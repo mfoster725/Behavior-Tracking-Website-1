@@ -7793,26 +7793,143 @@ def _coerce_year(two_or_four_digit_year: int):
     return 2000 + two_or_four_digit_year
 
 
-def _extract_month_markers(text: str):
-    markers = []
-    month_lookup = {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
+def _normalize_calendar_text(text: str) -> str:
+    """Normalize quote/dash variants so month headers like AUGUST '26 match reliably."""
+    if not text:
+        return ''
+    replacements = {
+        '\u2018': "'",
+        '\u2019': "'",
+        '\u201b': "'",
+        '\u2032': "'",
+        '\ufffd': "'",
+        '\u00b4': "'",
+        '`': "'",
+        '\u2013': '-',
+        '\u2014': '-',
+        '\u00a0': ' ',
+        '\u202f': ' ',
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return text
 
-    # Accept typical quote separators before 2-4 digit year, including replacement char seen in some PDFs.
-    year_sep_chars = "'‘’`´�"
-    for match in re.finditer(
-        r'\b(' + '|'.join(month_lookup.keys()) + r')\b(?:[^\S\r\n]*[' + year_sep_chars + r']?[^\S\r\n]*(\d{2,4}))?',
+
+def _extract_school_year_span(text: str):
+    """Return (start_year, end_year) from headers such as '2026-2027 School Year'."""
+    if not text:
+        return None, None
+    match = re.search(r'\b(20\d{2})\s*[-/]\s*(20\d{2}|\d{2})\b', text)
+    if match:
+        start = int(match.group(1))
+        end_raw = int(match.group(2))
+        end = end_raw if end_raw >= 100 else _coerce_year(end_raw)
+        if end == start:
+            end = start + 1
+        if end == start + 1:
+            return start, end
+    match = re.search(
+        r'\b(?:SY|school\s*year)\s*(\d{2,4})\s*[-/]\s*(\d{2,4})\b',
         text,
         flags=re.IGNORECASE
-    ):
+    )
+    if match:
+        start = _coerce_year(int(match.group(1)))
+        end = _coerce_year(int(match.group(2)))
+        if end == start:
+            end = start + 1
+        if end == start + 1:
+            return start, end
+    return None, None
+
+
+def _year_for_school_month(month: int, start_year: int, end_year: int) -> int:
+    # Typical US school year: Aug-Dec belong to the start year, Jan-Jul to the end year.
+    return start_year if month >= 8 else end_year
+
+
+def _month_lookup():
+    return {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
+
+
+def _parse_month_header_year(quoted_year, four_digit_year):
+    year_token = quoted_year or four_digit_year
+    if not year_token:
+        return None
+    return _coerce_year(int(year_token))
+
+
+def _is_plausible_calendar_year(year, start_year=None, end_year=None):
+    if year is None:
+        return False
+    if start_year is not None and end_year is not None:
+        return (start_year - 1) <= year <= (end_year + 1)
+    return 2000 <= year <= 2100
+
+
+def _extract_month_markers(text: str):
+    markers = []
+    month_lookup = _month_lookup()
+    month_alt = '|'.join(month_lookup.keys())
+    # Month headers at line start. Years must stay on that same line:
+    # AUGUST '26 or AUGUST 2026 — never the event day from the following line.
+    pattern = re.compile(
+        rf'(?im)^\s*({month_alt})\b(?:[^\S\r\n]*\'(\d{{2,4}})|[^\S\r\n]+(20\d{{2}}))?'
+    )
+    for match in pattern.finditer(text or ''):
         month_name = match.group(1).upper()
-        year_token = match.group(2)
-        year = _coerce_year(int(year_token)) if year_token else None
+        year = _parse_month_header_year(match.group(2), match.group(3))
         markers.append({
             'pos': match.start(),
             'month': month_lookup[month_name],
             'year': year
         })
     return sorted(markers, key=lambda m: m['pos'])
+
+
+def _backfill_month_marker_years(markers, start_year=None, end_year=None):
+    """Fill years on bare month headers using nearby 'MONTH YY' labels or the school-year span."""
+    if not markers:
+        return markers
+
+    for marker in markers:
+        if marker.get('year') is not None and not _is_plausible_calendar_year(
+            marker['year'], start_year, end_year
+        ):
+            marker['year'] = None
+
+    years_present = sorted({m['year'] for m in markers if m.get('year')})
+    if start_year is None or end_year is None:
+        if len(years_present) >= 2:
+            start_year = start_year or years_present[0]
+            end_year = end_year or years_present[-1]
+        elif len(years_present) == 1:
+            only = years_present[0]
+            months_with_year = {m['month'] for m in markers if m.get('year') == only}
+            if any(month >= 8 for month in months_with_year):
+                start_year = start_year or only
+                end_year = end_year or (only + 1)
+            else:
+                end_year = end_year or only
+                start_year = start_year or (only - 1)
+
+    for marker in markers:
+        if marker.get('year') is not None:
+            continue
+        closest = None
+        closest_dist = None
+        for other in markers:
+            if other['month'] != marker['month'] or other.get('year') is None:
+                continue
+            dist = abs(other['pos'] - marker['pos'])
+            if closest_dist is None or dist < closest_dist:
+                closest = other
+                closest_dist = dist
+        if closest:
+            marker['year'] = closest['year']
+        elif start_year is not None and end_year is not None:
+            marker['year'] = _year_for_school_month(marker['month'], start_year, end_year)
+    return markers
 
 
 def _closest_month_marker(markers, char_pos: int):
@@ -7829,24 +7946,48 @@ def _closest_month_marker(markers, char_pos: int):
     return markers[0]
 
 
+def _event_day_near_keyword(text: str, match: re.Match):
+    """Prefer the leading day on the keyword line (e.g. '31 First Day of School')."""
+    line_start = text.rfind('\n', 0, match.start()) + 1
+    line_end = text.find('\n', match.end())
+    if line_end == -1:
+        line_end = len(text)
+    line = text[line_start:line_end]
+
+    leading = re.match(r'^\s*(\d{1,2})(?:\s*[-/]\s*\d{1,2})?\b', line)
+    if leading:
+        day = int(leading.group(1))
+        if 1 <= day <= 31:
+            return day
+
+    prev_lines = [ln.strip() for ln in text[:line_start].splitlines() if ln.strip()]
+    if prev_lines and re.fullmatch(r'\d{1,2}', prev_lines[-1]):
+        day = int(prev_lines[-1])
+        if 1 <= day <= 31:
+            return day
+
+    left = text[max(0, match.start() - 20):match.start()]
+    nums = re.findall(r'\b(\d{1,2})\b', left)
+    if nums:
+        day = int(nums[-1])
+        if 1 <= day <= 31:
+            return day
+    return None
+
+
 def _extract_day_for_keyword_with_month_context(text: str, keyword_pattern: str, markers):
     match = re.search(keyword_pattern, text, flags=re.IGNORECASE)
     if not match:
         return None
 
-    window_start = max(0, match.start() - 60)
-    window_end = min(len(text), match.end() + 20)
-    left_window = text[window_start:match.start()]
-
-    day_candidates = re.findall(r'\b([0-2]?\d|3[01])\b', left_window)
-    if not day_candidates:
+    day = _event_day_near_keyword(text, match)
+    if day is None:
         return None
 
     marker = _closest_month_marker(markers, match.start())
     if not marker or not marker.get('year'):
         return None
 
-    day = int(day_candidates[-1])
     try:
         return date(marker['year'], marker['month'], day)
     except ValueError:
@@ -7854,25 +7995,28 @@ def _extract_day_for_keyword_with_month_context(text: str, keyword_pattern: str,
 
 
 def _extract_date_from_patterns(text: str, patterns, markers):
+    # Prefer "31 First Day of School" under a month header before hunting for
+    # full dates, which can falsely match later stamps such as "Adopted: 01/26/2026".
     for pattern in patterns:
-        parsed = _extract_date_after_keyword(text, pattern)
+        parsed = _extract_day_for_keyword_with_month_context(text, pattern, markers)
         if parsed:
             return parsed
     for pattern in patterns:
-        parsed = _extract_day_for_keyword_with_month_context(text, pattern, markers)
+        parsed = _extract_date_after_keyword(text, pattern)
         if parsed:
             return parsed
     return None
 
 
-def _extract_date_from_line_fallback(text: str, keyword_tokens):
+def _extract_date_from_line_fallback(text: str, keyword_tokens, start_year=None, end_year=None):
     """
     OCR/layout fallback:
     - Walk line-by-line
     - Keep nearest month/year context
     - When a line looks like target keyword, try to resolve day from same or nearby lines
     """
-    month_lookup = {name.upper(): idx for idx, name in enumerate(_calendar.month_name) if name}
+    month_lookup = _month_lookup()
+    month_alt = '|'.join(month_lookup.keys())
     lines = [ln.strip() for ln in (text or '').splitlines() if ln and ln.strip()]
     if not lines:
         return None
@@ -7883,18 +8027,20 @@ def _extract_date_from_line_fallback(text: str, keyword_tokens):
     def _line_matches_tokens(line: str):
         normalized = re.sub(r'[^a-z0-9 ]+', ' ', line.lower())
         normalized = re.sub(r'\s+', ' ', normalized).strip()
-        return all(tok in normalized for tok in keyword_tokens)
+        return all(re.search(rf'\b{re.escape(tok)}\b', normalized) for tok in keyword_tokens)
 
     for i, line in enumerate(lines):
-        # Update month/year context if this line contains one.
-        for month_name, month_num in month_lookup.items():
-            m = re.search(rf'\b{month_name}\b(?:\s*[\'’]?\s*(\d{{2,4}}))?', line.upper())
-            if m:
-                current_month = month_num
-                year_token = m.group(1)
-                if year_token:
-                    current_year = _coerce_year(int(year_token))
-                break
+        header = re.match(
+            rf'^({month_alt})\b(?:\s*\'(\d{{2,4}})|\s+(20\d{{2}}))?',
+            line.upper()
+        )
+        if header:
+            current_month = month_lookup[header.group(1)]
+            parsed_year = _parse_month_header_year(header.group(2), header.group(3))
+            if parsed_year and _is_plausible_calendar_year(parsed_year, start_year, end_year):
+                current_year = parsed_year
+            elif start_year is not None and end_year is not None:
+                current_year = _year_for_school_month(current_month, start_year, end_year)
 
         if not _line_matches_tokens(line):
             continue
@@ -7902,18 +8048,16 @@ def _extract_date_from_line_fallback(text: str, keyword_tokens):
         if current_month is None or current_year is None:
             continue
 
-        # Search for day in local neighborhood (before/same/after lines).
-        neighborhood = []
-        for j in range(max(0, i - 2), min(len(lines), i + 3)):
-            neighborhood.append(lines[j])
-        neighborhood_text = ' '.join(neighborhood)
-        day_candidates = [int(d) for d in re.findall(r'\b([0-2]?\d|3[01])\b', neighborhood_text)]
-        if not day_candidates:
-            continue
+        ordered_candidates = []
+        leading = re.match(r'^(\d{1,2})(?:\s*[-/]\s*\d{1,2})?\b', line)
+        if leading:
+            ordered_candidates.append(int(leading.group(1)))
+        for day in [int(d) for d in re.findall(r'\b([0-2]?\d|3[01])\b', line)]:
+            if day not in ordered_candidates:
+                ordered_candidates.append(day)
+        if not ordered_candidates and i > 0 and re.fullmatch(r'\d{1,2}', lines[i - 1]):
+            ordered_candidates.append(int(lines[i - 1]))
 
-        # Prefer the smallest-distance candidate to the keyword line by trying current line first.
-        same_line_days = [int(d) for d in re.findall(r'\b([0-2]?\d|3[01])\b', line)]
-        ordered_candidates = same_line_days + [d for d in day_candidates if d not in same_line_days]
         for day in ordered_candidates:
             try:
                 return date(current_year, current_month, day)
@@ -8069,13 +8213,19 @@ def extract_school_year_from_calendar_pdf():
             return jsonify({'error': 'Uploaded PDF is empty.'}), 400
 
         full_text, extractor_used = _extract_text_from_pdf_bytes(pdf_bytes)
+        full_text = _normalize_calendar_text(full_text)
 
         if not full_text.strip():
             return jsonify({
                 'error': 'Could not extract text from the PDF. If this is scanned, install Tesseract OCR and retry.'
             }), 400
 
-        month_markers = _extract_month_markers(full_text)
+        school_start_year, school_end_year = _extract_school_year_span(full_text)
+        month_markers = _backfill_month_marker_years(
+            _extract_month_markers(full_text),
+            school_start_year,
+            school_end_year
+        )
 
         first_day_patterns = [
             r'first\s*day\s*(?:of\s*)?school',
@@ -8086,17 +8236,17 @@ def extract_school_year_from_calendar_pdf():
             r'last\s*day'
         ]
         q1_patterns = [
-            r'end\s*quarter\s*1',
+            r'end\s*(?:of\s*)?quarter\s*1',
             r'quarter\s*1\s*end[s]?',
             r'q1\s*end[s]?'
         ]
         q2_patterns = [
-            r'end\s*quarter\s*2',
+            r'end\s*(?:of\s*)?quarter\s*2',
             r'quarter\s*2\s*end[s]?',
             r'q2\s*end[s]?'
         ]
         q3_patterns = [
-            r'end\s*quarter\s*3',
+            r'end\s*(?:of\s*)?quarter\s*3',
             r'quarter\s*3\s*end[s]?',
             r'q3\s*end[s]?'
         ]
@@ -8108,15 +8258,25 @@ def extract_school_year_from_calendar_pdf():
         q3_end = _extract_date_from_patterns(full_text, q3_patterns, month_markers)
 
         if first_day is None:
-            first_day = _extract_date_from_line_fallback(full_text, ['first', 'day', 'school'])
+            first_day = _extract_date_from_line_fallback(
+                full_text, ['first', 'day', 'school'], school_start_year, school_end_year
+            )
         if last_day is None:
-            last_day = _extract_date_from_line_fallback(full_text, ['last', 'day', 'school'])
+            last_day = _extract_date_from_line_fallback(
+                full_text, ['last', 'day', 'school'], school_start_year, school_end_year
+            )
         if q1_end is None:
-            q1_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '1'])
+            q1_end = _extract_date_from_line_fallback(
+                full_text, ['end', 'quarter', '1'], school_start_year, school_end_year
+            )
         if q2_end is None:
-            q2_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '2'])
+            q2_end = _extract_date_from_line_fallback(
+                full_text, ['end', 'quarter', '2'], school_start_year, school_end_year
+            )
         if q3_end is None:
-            q3_end = _extract_date_from_line_fallback(full_text, ['end', 'quarter', '3'])
+            q3_end = _extract_date_from_line_fallback(
+                full_text, ['end', 'quarter', '3'], school_start_year, school_end_year
+            )
 
         if first_day is None or last_day is None:
             return jsonify({
