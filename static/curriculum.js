@@ -384,23 +384,16 @@
             return;
         }
         const title = assignment.lesson ? assignment.lesson.title : 'Lesson';
+        const slug = assignment.lesson && assignment.lesson.slug;
+        const actions = slug === 'read_paycheck'
+            ? '<div class="curriculum-actions"><button type="button" class="btn-secondary" id="curriculum-help-btn">I need help</button></div>'
+            : '<div class="curriculum-actions">' +
+                '<button type="button" class="btn-primary" id="curriculum-complete-btn">Submit</button>' +
+                '<button type="button" class="btn-secondary" id="curriculum-help-btn">I need help</button>' +
+                '</div>';
         el.innerHTML = '<h3>' + esc(title) + '</h3>' + lessonFormHtml(assignment) +
-            (assignment.lesson && assignment.lesson.slug !== 'read_paycheck'
-                ? '<div class="curriculum-actions">' +
-                    '<button type="button" class="btn-primary" id="curriculum-complete-btn">Submit</button>' +
-                    '<button type="button" class="btn-secondary" id="curriculum-help-btn">I need help</button>' +
-                    '</div>'
-                : '<div class="curriculum-actions">' +
-                    (document.getElementById('curriculum-help-btn') ? '' : '<button type="button" class="btn-secondary" id="curriculum-help-btn">I need help</button>') +
-                    '</div>') +
+            actions +
             '<div class="curriculum-error" id="curriculum-lesson-error"></div>';
-
-        // read_paycheck already includes its own actions; avoid duplicate help if injected twice
-        if (assignment.lesson && assignment.lesson.slug === 'read_paycheck') {
-            el.innerHTML = '<h3>' + esc(title) + '</h3>' + lessonFormHtml(assignment) +
-                '<div class="curriculum-actions"><button type="button" class="btn-secondary" id="curriculum-help-btn">I need help</button></div>' +
-                '<div class="curriculum-error" id="curriculum-lesson-error"></div>';
-        }
 
         startIfNeeded(assignment);
         wireOpportunitySelects();
