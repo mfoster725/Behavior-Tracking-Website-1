@@ -82,6 +82,7 @@
                 <button type="button" class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
                 <button type="button" class="nav-btn" data-view="bank-account">Bank Account</button>
+                <button type="button" class="nav-btn" data-view="curriculum">Curriculum</button>
                 <button type="button" class="nav-btn" data-view="marketplace">Marketplace</button>
                 {% if user.role == 'admin' %}
                 <button type="button" class="nav-btn" data-view="admin">Admin Panel</button>
@@ -955,6 +956,54 @@
                     >
                         <p style="margin: 0; color: #94a3b8;">No plan rewards delivered yet.</p>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Curriculum View -->
+        <div id="curriculum-view" class="view">
+            <div class="form-section accounts-ui curriculum-section">
+                <h2 style="margin-bottom: 8px;">Curriculum</h2>
+                <p class="curriculum-lede">Lessons about the money from your actual week — paychecks, saving, and spending.</p>
+
+                {% if user.role in ['staff', 'admin'] %}
+                <div id="curriculum-staff-bar" class="curriculum-staff-bar">
+                    <div class="curriculum-staff-row">
+                        <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
+                            <label for="curriculum-student-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Student</label>
+                            <input
+                                type="text"
+                                id="curriculum-student-search-input"
+                                placeholder="Search or select student"
+                                autocomplete="off"
+                                autocapitalize="none"
+                                spellcheck="false"
+                                style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
+                            >
+                            <div class="curriculum-student-autocomplete-dropdown bank-search-autocomplete-dropdown"></div>
+                        </div>
+                        <label class="curriculum-managed-label">
+                            <input type="checkbox" id="curriculum-managed-by-me-checkbox">
+                            <span>Show students managed by me</span>
+                        </label>
+                    </div>
+                    <div class="curriculum-staff-row">
+                        <label for="curriculum-assign-lesson" style="font-size: 13px; color: #64748b;">Assign lesson</label>
+                        <select id="curriculum-assign-lesson" style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px;"></select>
+                        <button type="button" id="curriculum-assign-one-btn" class="btn-primary">Assign to this student</button>
+                        <button type="button" id="curriculum-assign-list-btn" class="btn-secondary">Assign to list</button>
+                    </div>
+                    <p id="curriculum-staff-status" class="curriculum-staff-status"></p>
+                    <div id="curriculum-roster-wrap" class="curriculum-roster-wrap"></div>
+                </div>
+                <p id="curriculum-no-student-msg" style="margin: 8px 0 16px; color: #64748b;">Select a student to view their lessons.</p>
+                {% endif %}
+
+                <div id="curriculum-student-body" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %}">
+                    <div id="curriculum-money-story" class="curriculum-story-grid"></div>
+                    <div id="curriculum-goal-card" class="curriculum-card"></div>
+                    <div id="curriculum-current-lesson" class="curriculum-card"></div>
+                    <div id="curriculum-history" class="curriculum-card"></div>
                 </div>
             </div>
         </div>
@@ -2054,6 +2103,7 @@
 
     <script src="{{ url_for('static', filename='app.js') }}?v=csvimport4"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
+    <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric1"></script>
 </body>
 </html>
 

@@ -1910,6 +1910,18 @@ async function switchView(viewName) {
 
         handleBankAccountView();
     }
+    if (viewName === 'curriculum') {
+        const currManaged = document.getElementById('curriculum-managed-by-me-checkbox');
+        if (currManaged && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            if (!currManaged.checked) {
+                currManaged.checked = true;
+                currManaged.dispatchEvent(new Event('change'));
+            }
+        }
+        if (typeof window.loadCurriculumView === 'function') {
+            window.loadCurriculumView();
+        }
+    }
     if (viewName === 'marketplace') {
         // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
         const marketplaceManagedByMeCheckbox = document.getElementById('marketplace-managed-by-me-checkbox');
@@ -18506,7 +18518,7 @@ function loadNotifications() {
         var listEl = document.getElementById('notifications-list');
         if (!listEl) return;
         listEl.innerHTML = list.slice(0, 30).map(function (n) {
-            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
+            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
                 '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
                 '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
                 '</div>';
@@ -18514,7 +18526,14 @@ function loadNotifications() {
         listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
             el.addEventListener('click', function () {
                 var id = parseInt(el.getAttribute('data-notification-id'), 10);
+                var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
                 fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
+                if (assignmentId) {
+                    window.curriculumFocusAssignmentId = assignmentId;
+                    if (typeof switchView === 'function') switchView('curriculum');
+                    var dropdownEl = document.getElementById('notifications-dropdown');
+                    if (dropdownEl) dropdownEl.style.display = 'none';
+                }
             });
         });
     });

@@ -1150,6 +1150,44 @@ def seed_plan_if_library():
             print(f"seed_plan_if_library failed: {e}")
 
 
+def seed_curriculum_lessons(commit=True):
+    """Insert or refresh the six financial-literacy lessons."""
+    from curriculum_lib import LESSON_SEEDS
+    inserted = 0
+    try:
+        for data in LESSON_SEEDS:
+            existing = CurriculumLesson.query.filter_by(slug=data['slug']).first()
+            if existing:
+                existing.title = data['title']
+                existing.skill_name = data['skill_name']
+                existing.student_prompt = data['student_prompt']
+                existing.staff_script = data['staff_script']
+                existing.sort_order = data['sort_order']
+                if existing.is_active is None:
+                    existing.is_active = True
+                continue
+            db.session.add(CurriculumLesson(
+                slug=data['slug'],
+                title=data['title'],
+                skill_name=data['skill_name'],
+                student_prompt=data['student_prompt'],
+                staff_script=data['staff_script'],
+                sort_order=data['sort_order'],
+                is_active=True,
+            ))
+            inserted += 1
+        if commit:
+            db.session.commit()
+    except Exception as e:
+        if commit:
+            db.session.rollback()
+        try:
+            app.logger.warning(f"seed_curriculum_lessons failed: {e}")
+        except Exception:
+            print(f"seed_curriculum_lessons failed: {e}")
+    return inserted
+
+
 class Paycheck(db.Model):
     __tablename__ = 'paychecks'
     id = db.Column(db.Integer, primary_key=True)
@@ -1173,6 +1211,64 @@ class Paycheck(db.Model):
     # Relationships
     student = db.relationship('Student', backref='paychecks')
     transactions = db.relationship('Transaction', backref='paycheck', lazy=True)
+
+
+class CurriculumLesson(db.Model):
+    __tablename__ = 'curriculum_lessons'
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(50), nullable=False, unique=True)
+    title = db.Column(db.String(200), nullable=False)
+    skill_name = db.Column(db.String(100), nullable=False)
+    student_prompt = db.Column(db.Text, nullable=True)
+    staff_script = db.Column(db.Text, nullable=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+
+class CurriculumAssignment(db.Model):
+    __tablename__ = 'curriculum_assignments'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    lesson_id = db.Column(db.Integer, db.ForeignKey('curriculum_lessons.id'), nullable=False, index=True)
+    assigned_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    source = db.Column(db.String(20), nullable=False, default='staff')  # paycheck | staff
+    paycheck_id = db.Column(db.Integer, db.ForeignKey('paychecks.id'), nullable=True, index=True)
+    status = db.Column(db.String(20), nullable=False, default='assigned')  # assigned, in_progress, completed, needs_help
+    responses_json = db.Column(db.Text, nullable=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship('Student', backref='curriculum_assignments')
+    lesson = db.relationship('CurriculumLesson', backref='assignments')
+    assigned_by = db.relationship('User', foreign_keys=[assigned_by_user_id])
+    paycheck = db.relationship('Paycheck', backref='curriculum_assignments')
+
+    __table_args__ = (
+        db.Index(
+            'ix_curriculum_assign_paycheck',
+            'student_id',
+            'lesson_id',
+            'paycheck_id',
+            unique=True,
+        ),
+    )
+
+
+class SavingsGoal(db.Model):
+    __tablename__ = 'savings_goals'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    marketplace_item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=True)
+    custom_label = db.Column(db.String(200), nullable=True)
+    target_amount = db.Column(db.Numeric(10, 2), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    student = db.relationship('Student', backref='savings_goals')
+    marketplace_item = db.relationship('MarketplaceItem')
+
 
 # Admin-managed lookup tables for Marketplace
 class MarketplaceItemType(db.Model):
@@ -1304,11 +1400,13 @@ class Notification(db.Model):
     title = db.Column(db.String(200), nullable=False)
     body = db.Column(db.Text, nullable=True)
     purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True)
+    curriculum_assignment_id = db.Column(db.Integer, db.ForeignKey('curriculum_assignments.id'), nullable=True)
     read_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     user = db.relationship('User', backref='notifications')
     purchase_order = db.relationship('PurchaseOrder', backref='notification_records')
+    curriculum_assignment = db.relationship('CurriculumAssignment', backref='notification_records')
 
 class Transaction(db.Model):
     __tablename__ = 'transactions'
@@ -1341,6 +1439,35 @@ class SiteSubscription(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+def ensure_curriculum_schema():
+    """Add notifications.curriculum_assignment_id on existing databases."""
+    try:
+        is_postgres = 'postgresql' in str(db.engine.url).lower()
+        with db.engine.connect() as conn:
+            if is_postgres:
+                conn.execute(text(
+                    "ALTER TABLE notifications "
+                    "ADD COLUMN IF NOT EXISTS curriculum_assignment_id INTEGER"
+                ))
+            else:
+                try:
+                    rows = conn.execute(text("PRAGMA table_info(notifications)")).fetchall()
+                    cols = {row[1] for row in rows}
+                    if rows and 'curriculum_assignment_id' not in cols:
+                        conn.execute(text(
+                            "ALTER TABLE notifications "
+                            "ADD COLUMN curriculum_assignment_id INTEGER"
+                        ))
+                except Exception:
+                    pass
+            conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure curriculum schema: {e}")
+        except Exception:
+            print(f"Failed to ensure curriculum schema: {e}")
+
+
 # Initialize database tables after all models are defined
 def init_db():
     """Initialize database tables if they don't exist"""
@@ -1364,6 +1491,11 @@ def init_db():
                 seed_plan_if_library()
             except Exception as seed_err:
                 print(f"Note: plan if library seed skipped: {seed_err}", flush=True)
+            try:
+                ensure_curriculum_schema()
+                seed_curriculum_lessons()
+            except Exception as seed_err:
+                print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
             print("Database tables created/verified", flush=True)
             
             # Ensure OutsideStaffStudent table exists and run migrations
@@ -10754,16 +10886,18 @@ def get_student_case_manager(student_id):
     return None
 
 
-def create_purchase_notification(student_user_id, notification_type, title, body, purchase_order_id=None):
-    """Create an in-app notification for a student (user_id of student's login)."""
+def create_purchase_notification(student_user_id, notification_type, title, body, purchase_order_id=None, curriculum_assignment_id=None):
+    """Create an in-app notification for a user (usually the student's login)."""
     n = Notification(
         user_id=student_user_id,
         type=notification_type,
         title=title,
         body=body,
-        purchase_order_id=purchase_order_id
+        purchase_order_id=purchase_order_id,
+        curriculum_assignment_id=curriculum_assignment_id,
     )
     db.session.add(n)
+    return n
 
 
 def notify_support_team_purchase_order_pending(student_id, purchase_order_id, item_name):
@@ -11038,6 +11172,153 @@ def get_paycheck(paycheck_id):
         'created_at': utc_isoformat(paycheck.created_at)
     })
 
+
+def _curriculum_lesson(slug):
+    return CurriculumLesson.query.filter_by(slug=slug, is_active=True).first()
+
+
+def _serialize_curriculum_lesson(lesson):
+    if not lesson:
+        return None
+    return {
+        'id': lesson.id,
+        'slug': lesson.slug,
+        'title': lesson.title,
+        'skill_name': lesson.skill_name,
+        'student_prompt': lesson.student_prompt,
+        'staff_script': lesson.staff_script,
+        'sort_order': lesson.sort_order,
+    }
+
+
+def _parse_assignment_responses(assignment):
+    if not assignment or not assignment.responses_json:
+        return None
+    try:
+        return json.loads(assignment.responses_json)
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_curriculum_assignment(assignment):
+    if not assignment:
+        return None
+    lesson = assignment.lesson
+    return {
+        'id': assignment.id,
+        'student_id': assignment.student_id,
+        'lesson_id': assignment.lesson_id,
+        'lesson': _serialize_curriculum_lesson(lesson),
+        'assigned_by_user_id': assignment.assigned_by_user_id,
+        'source': assignment.source,
+        'paycheck_id': assignment.paycheck_id,
+        'status': assignment.status,
+        'responses': _parse_assignment_responses(assignment),
+        'started_at': utc_isoformat(assignment.started_at),
+        'completed_at': utc_isoformat(assignment.completed_at),
+        'created_at': utc_isoformat(assignment.created_at),
+    }
+
+
+def _paycheck_live_snapshot(paycheck):
+    if not paycheck:
+        return None
+    citation_list = list_weekly_citations(
+        paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end
+    )
+    live_count = len(citation_list)
+    live_deduction = Decimal(str(live_count * 2))
+    if not paycheck.is_verified and paycheck.deposited_at is None:
+        live_avg = calculate_weekly_star_percent(
+            paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end
+        )
+        live_base = (live_avg / 100) * Decimal('100')
+        live_final = live_base - live_deduction
+        avg_pct = live_avg
+        base_pay_val = live_base
+    else:
+        avg_pct = paycheck.average_star_percent
+        base_pay_val = paycheck.base_pay
+        live_final = paycheck.base_pay - live_deduction
+    return {
+        'id': paycheck.id,
+        'pay_period_start': paycheck.pay_period_start.isoformat(),
+        'pay_period_end': paycheck.pay_period_end.isoformat(),
+        'average_star_percent': float(avg_pct or 0),
+        'base_pay': float(base_pay_val or 0),
+        'citation_count': live_count,
+        'citation_list': citation_list,
+        'citation_deduction': float(live_deduction),
+        'final_pay': float(live_final or 0),
+        'is_verified': bool(paycheck.is_verified),
+        'deposited_at': utc_isoformat(paycheck.deposited_at),
+        'worksheet_completed': bool(paycheck.worksheet_completed),
+    }
+
+
+def ensure_paycheck_curriculum_assignment(paycheck, notify=False):
+    """Create the read-paycheck lesson for this paycheck if missing."""
+    if not paycheck:
+        return None
+    lesson = _curriculum_lesson('read_paycheck')
+    if not lesson:
+        return None
+    existing = CurriculumAssignment.query.filter_by(
+        student_id=paycheck.student_id,
+        lesson_id=lesson.id,
+        paycheck_id=paycheck.id,
+    ).first()
+    if existing:
+        return existing
+    assignment = CurriculumAssignment(
+        student_id=paycheck.student_id,
+        lesson_id=lesson.id,
+        assigned_by_user_id=None,
+        source='paycheck',
+        paycheck_id=paycheck.id,
+        status='assigned',
+    )
+    if paycheck.is_verified or paycheck.deposited_at:
+        assignment.status = 'completed'
+        assignment.completed_at = paycheck.deposited_at or datetime.utcnow()
+    db.session.add(assignment)
+    db.session.flush()
+    if notify and assignment.status != 'completed':
+        student_user = User.query.filter_by(
+            role='student', student_id=paycheck.student_id
+        ).first()
+        if student_user:
+            start = paycheck.pay_period_start.isoformat()
+            end = paycheck.pay_period_end.isoformat()
+            create_purchase_notification(
+                student_user.id,
+                'curriculum_paycheck',
+                'Your paycheck is ready',
+                f'Complete your paycheck worksheet for {start} to {end}, then your lesson.',
+                curriculum_assignment_id=assignment.id,
+            )
+    return assignment
+
+
+def complete_read_paycheck_assignments(student_id, paycheck_id):
+    lesson = _curriculum_lesson('read_paycheck')
+    if not lesson:
+        return
+    open_rows = CurriculumAssignment.query.filter(
+        CurriculumAssignment.student_id == student_id,
+        CurriculumAssignment.lesson_id == lesson.id,
+        CurriculumAssignment.status != 'completed',
+    ).all()
+    now = datetime.utcnow()
+    for row in open_rows:
+        if row.paycheck_id not in (None, paycheck_id):
+            continue
+        row.status = 'completed'
+        row.completed_at = now
+        if not row.paycheck_id:
+            row.paycheck_id = paycheck_id
+
+
 def run_paycheck_generation(target_date=None):
     """
     Generate paychecks for all students for a Mon–Fri pay period.
@@ -11049,6 +11330,7 @@ def run_paycheck_generation(target_date=None):
     Returns:
         tuple: (generated_count, pay_period_start, pay_period_end)
     """
+    seed_curriculum_lessons(commit=False)
     if target_date is not None:
         if isinstance(target_date, str):
             target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
@@ -11091,6 +11373,7 @@ def run_paycheck_generation(target_date=None):
         paycheck.citation_deduction = citation_deduction
         paycheck.final_pay = final_pay
         generated_count += 1
+        ensure_paycheck_curriculum_assignment(paycheck, notify=False)
 
     # 2. Create new paychecks only for students who have active user accounts and
     #    do not yet have a paycheck for this period.
@@ -11120,6 +11403,8 @@ def run_paycheck_generation(target_date=None):
             final_pay=final_pay
         )
         db.session.add(paycheck)
+        db.session.flush()
+        ensure_paycheck_curriculum_assignment(paycheck, notify=True)
         generated_count += 1
 
     db.session.commit()
@@ -11290,8 +11575,9 @@ def verify_paycheck(paycheck_id):
             description=f'Paycheck deposit for {paycheck.pay_period_start} - {paycheck.pay_period_end}'
         )
         db.session.add(transaction)
+        complete_read_paycheck_assignments(paycheck.student_id, paycheck.id)
         db.session.commit()
-        
+
         return jsonify({
             'verified': True,
             'message': 'Worksheet verified! Deposit completed.',
@@ -11313,6 +11599,501 @@ def verify_paycheck(paycheck_id):
             'errors': errors,
             'message': 'Some calculations are incorrect. Please review and try again.'
         }), 400
+
+# Curriculum: financial literacy lessons on top of paychecks / bank / marketplace
+
+def _curriculum_resolve_student_id(explicit_id=None):
+    if current_user.role == 'student':
+        return current_user.student_id
+    student_id = explicit_id
+    if student_id is None:
+        student_id = request.args.get('student_id', type=int)
+    if student_id is None and request.is_json:
+        student_id = (request.json or {}).get('student_id')
+        if student_id is not None:
+            try:
+                student_id = int(student_id)
+            except (TypeError, ValueError):
+                student_id = None
+    if not student_id:
+        return None
+    if not has_student_access(current_user, student_id):
+        return False
+    return student_id
+
+
+def _serialize_savings_goal(goal, balance=None):
+    if not goal:
+        return None
+    target = float(goal.target_amount or 0)
+    bal = float(balance) if balance is not None else None
+    item = goal.marketplace_item
+    progress = None
+    if bal is not None and target > 0:
+        progress = min(1.0, max(0.0, bal / target))
+    return {
+        'id': goal.id,
+        'student_id': goal.student_id,
+        'marketplace_item_id': goal.marketplace_item_id,
+        'item_name': item.name if item else None,
+        'item_price': float(item.price) if item else None,
+        'custom_label': goal.custom_label,
+        'target_amount': target,
+        'is_active': bool(goal.is_active),
+        'progress': progress,
+        'created_at': utc_isoformat(goal.created_at),
+        'completed_at': utc_isoformat(goal.completed_at),
+    }
+
+
+def _curriculum_money_story(student_id):
+    account = get_or_create_bank_account(student_id)
+    since = datetime.utcnow() - timedelta(days=30)
+    purchases = Transaction.query.filter(
+        Transaction.student_id == student_id,
+        Transaction.transaction_type == 'purchase',
+        Transaction.created_at >= since,
+    ).order_by(Transaction.created_at.desc()).all()
+    spent_30d = sum(abs(float(t.amount or 0)) for t in purchases)
+    paychecks = Paycheck.query.filter_by(student_id=student_id).order_by(
+        Paycheck.pay_period_start.desc(), Paycheck.id.desc()
+    ).limit(8).all()
+    this_pay = _paycheck_live_snapshot(paychecks[0]) if paychecks else None
+    prev_pay = _paycheck_live_snapshot(paychecks[1]) if len(paychecks) > 1 else None
+    direction = 'none'
+    delta = None
+    if this_pay and prev_pay:
+        delta = round(this_pay['final_pay'] - prev_pay['final_pay'], 2)
+        if delta > 0.009:
+            direction = 'up'
+        elif delta < -0.009:
+            direction = 'down'
+        else:
+            direction = 'same'
+    goal = SavingsGoal.query.filter_by(student_id=student_id, is_active=True).order_by(
+        SavingsGoal.created_at.desc()
+    ).first()
+    weeks_to_goal = None
+    if goal and this_pay and this_pay['final_pay'] > 0:
+        remaining = max(0.0, float(goal.target_amount) - float(account.balance))
+        weeks_to_goal = int((remaining + this_pay['final_pay'] - 0.001) // this_pay['final_pay']) if remaining > 0 else 0
+    student = Student.query.get(student_id)
+    return {
+        'student': {'id': student_id, 'name': student.name if student else ''},
+        'balance': float(account.balance or 0),
+        'spent_30d': round(spent_30d, 2),
+        'this_paycheck': this_pay,
+        'previous_paycheck': prev_pay,
+        'pay_change': {
+            'direction': direction,
+            'delta': delta,
+            'zero_citation_pay': this_pay['base_pay'] if this_pay else None,
+        },
+        'goal': _serialize_savings_goal(goal, account.balance),
+        'weeks_to_goal': weeks_to_goal,
+        'recent_purchases': [{
+            'id': t.id,
+            'amount': abs(float(t.amount or 0)),
+            'description': t.description or 'Purchase',
+            'created_at': utc_isoformat(t.created_at),
+        } for t in purchases[:12]],
+    }
+
+
+def _upsert_active_goal(student_id, target_amount, marketplace_item_id=None, custom_label=None):
+    if target_amount is None or Decimal(str(target_amount)) <= 0:
+        return None, 'Enter a target amount greater than zero.'
+    item = None
+    if marketplace_item_id:
+        item = MarketplaceItem.query.get(marketplace_item_id)
+        if not item:
+            return None, 'Marketplace item not found.'
+        if not custom_label:
+            custom_label = item.name
+        if not target_amount:
+            target_amount = item.price
+    active = SavingsGoal.query.filter_by(student_id=student_id, is_active=True).all()
+    for old in active:
+        old.is_active = False
+    goal = SavingsGoal(
+        student_id=student_id,
+        marketplace_item_id=item.id if item else None,
+        custom_label=(custom_label or '').strip() or None,
+        target_amount=Decimal(str(target_amount)),
+        is_active=True,
+    )
+    db.session.add(goal)
+    db.session.flush()
+    return goal, None
+
+
+def _validate_lesson_responses(slug, responses, story):
+    responses = responses or {}
+    this_pay = story.get('this_paycheck') or {}
+    prev_pay = story.get('previous_paycheck')
+    change = story.get('pay_change') or {}
+    balance = float(story.get('balance') or 0)
+    tolerance = 0.05
+
+    if slug == 'read_paycheck':
+        if this_pay.get('is_verified') or this_pay.get('deposited_at'):
+            return None
+        return 'Finish the paycheck worksheet in Bank Account first.'
+
+    if slug == 'why_pay_changed':
+        try:
+            this_entered = float(responses.get('this_take_home'))
+            compare_entered = float(responses.get('compare_take_home'))
+            diff_entered = float(responses.get('difference'))
+        except (TypeError, ValueError):
+            return 'Fill in this week, the comparison week, and the difference.'
+        this_actual = float(this_pay.get('final_pay') or 0)
+        if abs(this_entered - this_actual) > tolerance:
+            return 'This week’s take-home does not match your paycheck.'
+        if prev_pay:
+            compare_actual = float(prev_pay.get('final_pay') or 0)
+        else:
+            compare_actual = float(change.get('zero_citation_pay') or this_pay.get('base_pay') or 0)
+        if abs(compare_entered - compare_actual) > tolerance:
+            return 'The comparison amount does not match.'
+        expected_diff = round(this_actual - compare_actual, 2)
+        if abs(diff_entered - expected_diff) > tolerance:
+            return 'Check the difference (this week minus the comparison).'
+        why = (responses.get('why') or '').strip()
+        if len(why) < 3:
+            return 'Write a short note about why pay changed — or why it stayed the same.'
+        return None
+
+    if slug == 'save_or_buy':
+        decision = (responses.get('decision') or '').strip().lower()
+        if decision not in ('buy', 'wait', 'goal'):
+            return 'Choose buy, wait, or set as a goal.'
+        try:
+            item_id = int(responses.get('item_id'))
+            price = float(responses.get('item_price'))
+        except (TypeError, ValueError):
+            return 'Pick a marketplace item.'
+        item = MarketplaceItem.query.get(item_id)
+        if not item:
+            return 'That item is not in the marketplace.'
+        if abs(price - float(item.price)) > 0.01:
+            return 'Item price does not match the catalog.'
+        if decision == 'buy' and balance + 0.001 < float(item.price):
+            return 'You do not have enough to buy that yet. Choose wait or set it as a goal.'
+        return None
+
+    if slug == 'opportunity_cost':
+        try:
+            a_id = int(responses.get('item_id_a'))
+            b_id = int(responses.get('item_id_b'))
+        except (TypeError, ValueError):
+            return 'Pick two items.'
+        if a_id == b_id:
+            return 'Pick two different items.'
+        item_a = MarketplaceItem.query.get(a_id)
+        item_b = MarketplaceItem.query.get(b_id)
+        if not item_a or not item_b:
+            return 'One of those items is not in the marketplace.'
+        can_both = bool(responses.get('can_buy_both'))
+        combined = float(item_a.price) + float(item_b.price)
+        actually_can = balance + 0.001 >= combined
+        if can_both != actually_can:
+            if actually_can:
+                return 'Your balance covers both. Mark that you can buy both, or pick more expensive items.'
+            return 'Your balance cannot cover both. Uncheck that and choose which one you would buy.'
+        if not actually_can:
+            choice = responses.get('choice')
+            try:
+                choice_id = int(choice)
+            except (TypeError, ValueError):
+                return 'Choose which item you would buy.'
+            if choice_id not in (a_id, b_id):
+                return 'Your choice has to be one of the two items.'
+            reason = (responses.get('reason') or '').strip()
+            if len(reason) < 3:
+                return 'Say what you are giving up.'
+        return None
+
+    if slug == 'needs_vs_wants':
+        tags = responses.get('tags')
+        if not isinstance(tags, list) or len(tags) < 1:
+            return 'Tag at least one item as a need or a want.'
+        for tag in tags:
+            kind = (tag.get('kind') if isinstance(tag, dict) else None) or ''
+            if kind not in ('need', 'want'):
+                return 'Each item needs to be tagged need or want.'
+        return None
+
+    if slug == 'savings_goal':
+        try:
+            target = float(responses.get('target_amount'))
+        except (TypeError, ValueError):
+            return 'Enter a savings target.'
+        if target <= 0:
+            return 'Target has to be greater than zero.'
+        return None
+
+    return None
+
+
+@app.route('/api/curriculum/me', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def curriculum_me():
+    student_id = _curriculum_resolve_student_id()
+    if student_id is False:
+        return jsonify({'error': 'Access denied'}), 403
+    if not student_id:
+        return jsonify({'error': 'Select a student'}), 400
+    seed_curriculum_lessons()
+    story = _curriculum_money_story(student_id)
+    assignments = CurriculumAssignment.query.filter_by(student_id=student_id).order_by(
+        CurriculumAssignment.created_at.desc()
+    ).all()
+    lessons = CurriculumLesson.query.filter_by(is_active=True).order_by(CurriculumLesson.sort_order).all()
+    return jsonify({
+        'money_story': story,
+        'lessons': [_serialize_curriculum_lesson(l) for l in lessons],
+        'assignments': [_serialize_curriculum_assignment(a) for a in assignments],
+    })
+
+
+@app.route('/api/curriculum/lessons', methods=['GET'])
+@limiter.limit("60 per minute")
+@login_required
+def curriculum_lessons():
+    seed_curriculum_lessons()
+    lessons = CurriculumLesson.query.filter_by(is_active=True).order_by(CurriculumLesson.sort_order).all()
+    payload = [_serialize_curriculum_lesson(l) for l in lessons]
+    if current_user.role not in ('staff', 'admin'):
+        for row in payload:
+            row.pop('staff_script', None)
+    return jsonify(payload)
+
+
+@app.route('/api/curriculum/assignments', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def curriculum_assign():
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        return jsonify({'error': 'Outside staff cannot assign lessons'}), 403
+    data = request.get_json(silent=True) or {}
+    slug = (data.get('lesson_slug') or '').strip()
+    lesson = _curriculum_lesson(slug)
+    if not lesson:
+        return jsonify({'error': 'Unknown lesson'}), 400
+    raw_ids = data.get('student_ids') or []
+    if data.get('student_id') and not raw_ids:
+        raw_ids = [data.get('student_id')]
+    try:
+        student_ids = [int(sid) for sid in raw_ids]
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid student list'}), 400
+    student_ids = [sid for sid in student_ids if has_student_access(current_user, sid)]
+    if not student_ids:
+        return jsonify({'error': 'No students to assign'}), 400
+
+    created = []
+    for sid in student_ids:
+        paycheck_id = None
+        if slug == 'read_paycheck':
+            pending = Paycheck.query.filter_by(student_id=sid).filter(
+                Paycheck.deposited_at.is_(None)
+            ).order_by(Paycheck.pay_period_start.desc()).first()
+            if pending:
+                existing = CurriculumAssignment.query.filter_by(
+                    student_id=sid, lesson_id=lesson.id, paycheck_id=pending.id
+                ).first()
+                if existing and existing.status != 'completed':
+                    created.append(_serialize_curriculum_assignment(existing))
+                    continue
+                if not existing:
+                    paycheck_id = pending.id
+        assignment = CurriculumAssignment(
+            student_id=sid,
+            lesson_id=lesson.id,
+            assigned_by_user_id=current_user.id,
+            source='staff',
+            paycheck_id=paycheck_id,
+            status='assigned',
+        )
+        db.session.add(assignment)
+        db.session.flush()
+        student_user = User.query.filter_by(role='student', student_id=sid).first()
+        if student_user:
+            create_purchase_notification(
+                student_user.id,
+                'curriculum_assigned',
+                'New money lesson',
+                f'You have a new lesson: {lesson.title}.',
+                curriculum_assignment_id=assignment.id,
+            )
+        created.append(_serialize_curriculum_assignment(assignment))
+    db.session.commit()
+    return jsonify({'assignments': created, 'count': len(created)})
+
+
+@app.route('/api/curriculum/roster', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+@staff_required
+def curriculum_roster():
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    student_ids = _resolve_student_scope(managed_by_me=managed_by_me)
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        assigned = {a.student_id for a in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()}
+        student_ids = [sid for sid in student_ids if sid in assigned]
+    students = Student.query.filter(Student.id.in_(student_ids or [-1])).order_by(Student.name).all() if student_ids else []
+    lessons = CurriculumLesson.query.filter_by(is_active=True).order_by(CurriculumLesson.sort_order).all()
+    lesson_ids = [l.id for l in lessons]
+    rows = []
+    if students and lesson_ids:
+        assignments = CurriculumAssignment.query.filter(
+            CurriculumAssignment.student_id.in_([s.id for s in students]),
+            CurriculumAssignment.lesson_id.in_(lesson_ids),
+        ).order_by(CurriculumAssignment.created_at.desc()).all()
+        latest = {}
+        for a in assignments:
+            key = (a.student_id, a.lesson.slug if a.lesson else a.lesson_id)
+            if key not in latest:
+                latest[key] = a
+        for student in students:
+            lesson_status = {}
+            open_count = 0
+            needs_help = 0
+            for lesson in lessons:
+                a = latest.get((student.id, lesson.slug))
+                status = a.status if a else 'none'
+                lesson_status[lesson.slug] = {
+                    'status': status,
+                    'assignment_id': a.id if a else None,
+                }
+                if status in ('assigned', 'in_progress'):
+                    open_count += 1
+                if status == 'needs_help':
+                    needs_help += 1
+                    open_count += 1
+            rows.append({
+                'student_id': student.id,
+                'student_name': student.name,
+                'lessons': lesson_status,
+                'open_count': open_count,
+                'needs_help': needs_help,
+            })
+    return jsonify({
+        'lessons': [_serialize_curriculum_lesson(l) for l in lessons],
+        'students': rows,
+    })
+
+
+@app.route('/api/curriculum/assignments/<int:assignment_id>/start', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def curriculum_start(assignment_id):
+    assignment = CurriculumAssignment.query.get_or_404(assignment_id)
+    if not has_student_access(current_user, assignment.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    if assignment.status == 'assigned':
+        assignment.status = 'in_progress'
+        assignment.started_at = datetime.utcnow()
+        db.session.commit()
+    return jsonify(_serialize_curriculum_assignment(assignment))
+
+
+@app.route('/api/curriculum/assignments/<int:assignment_id>/needs-help', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def curriculum_needs_help(assignment_id):
+    assignment = CurriculumAssignment.query.get_or_404(assignment_id)
+    if not has_student_access(current_user, assignment.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    if assignment.status != 'completed':
+        assignment.status = 'needs_help'
+        db.session.commit()
+    return jsonify(_serialize_curriculum_assignment(assignment))
+
+
+@app.route('/api/curriculum/assignments/<int:assignment_id>/complete', methods=['POST'])
+@limiter.limit("30 per minute")
+@login_required
+def curriculum_complete(assignment_id):
+    assignment = CurriculumAssignment.query.get_or_404(assignment_id)
+    if not has_student_access(current_user, assignment.student_id):
+        return jsonify({'error': 'Access denied'}), 403
+    data = request.get_json(silent=True) or {}
+    responses = data.get('responses') or {}
+    story = _curriculum_money_story(assignment.student_id)
+    slug = assignment.lesson.slug if assignment.lesson else ''
+    error = _validate_lesson_responses(slug, responses, story)
+    if error:
+        return jsonify({'error': error}), 400
+    if slug == 'save_or_buy' and (responses.get('decision') or '').lower() == 'goal':
+        item_id = responses.get('item_id')
+        item = MarketplaceItem.query.get(item_id) if item_id else None
+        if item:
+            _upsert_active_goal(
+                assignment.student_id,
+                item.price,
+                marketplace_item_id=item.id,
+                custom_label=item.name,
+            )
+    if slug == 'savings_goal':
+        _upsert_active_goal(
+            assignment.student_id,
+            responses.get('target_amount'),
+            marketplace_item_id=responses.get('item_id'),
+            custom_label=responses.get('custom_label'),
+        )
+    assignment.responses_json = json.dumps(responses)
+    assignment.status = 'completed'
+    assignment.completed_at = datetime.utcnow()
+    if not assignment.started_at:
+        assignment.started_at = assignment.completed_at
+    db.session.commit()
+    return jsonify(_serialize_curriculum_assignment(assignment))
+
+
+@app.route('/api/curriculum/goals', methods=['GET', 'POST', 'PATCH'])
+@limiter.limit("30 per minute")
+@login_required
+def curriculum_goals():
+    student_id = _curriculum_resolve_student_id()
+    if student_id is False:
+        return jsonify({'error': 'Access denied'}), 403
+    if not student_id:
+        return jsonify({'error': 'Select a student'}), 400
+    account = get_or_create_bank_account(student_id)
+
+    if request.method == 'GET':
+        goal = SavingsGoal.query.filter_by(student_id=student_id, is_active=True).order_by(
+            SavingsGoal.created_at.desc()
+        ).first()
+        return jsonify(_serialize_savings_goal(goal, account.balance))
+
+    data = request.get_json(silent=True) or {}
+    if request.method == 'PATCH' and data.get('complete'):
+        goal = SavingsGoal.query.filter_by(student_id=student_id, is_active=True).order_by(
+            SavingsGoal.created_at.desc()
+        ).first()
+        if not goal:
+            return jsonify({'error': 'No active goal'}), 400
+        goal.is_active = False
+        goal.completed_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(_serialize_savings_goal(goal, account.balance))
+
+    goal, err = _upsert_active_goal(
+        student_id,
+        data.get('target_amount'),
+        marketplace_item_id=data.get('marketplace_item_id') or data.get('item_id'),
+        custom_label=data.get('custom_label'),
+    )
+    if err:
+        return jsonify({'error': err}), 400
+    db.session.commit()
+    return jsonify(_serialize_savings_goal(goal, account.balance))
+
 
 # Marketplace catalog: grade-filtered for student (or view-as student_id); staff can get all items with staff=1
 @app.route('/api/marketplace/catalog', methods=['GET'])
@@ -12363,6 +13144,7 @@ def get_notifications():
         'title': n.title,
         'body': n.body,
         'purchase_order_id': n.purchase_order_id,
+        'curriculum_assignment_id': n.curriculum_assignment_id,
         'read_at': utc_isoformat(n.read_at),
         'created_at': utc_isoformat(n.created_at)
     } for n in notifications])
@@ -13657,6 +14439,11 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         ensure_daily_query_indexes()
+        try:
+            ensure_curriculum_schema()
+            seed_curriculum_lessons()
+        except Exception as seed_err:
+            print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
         # Ensure OutsideStaffStudent table exists
         try:
             from sqlalchemy import inspect, text
