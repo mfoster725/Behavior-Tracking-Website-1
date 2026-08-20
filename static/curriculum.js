@@ -175,13 +175,13 @@
         const idPrefix = preview ? 'preview-cl-' : 'cl-';
 
         if (slug === 'read_paycheck') {
-            const deposited = thisPay && (thisPay.deposited_at || thisPay.is_verified);
             let html = staff + prompt +
                 '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'filled in from that week’s paycheck') + '</p>';
             if (preview) {
                 html += '<p>Students open Bank Account, complete the paycheck worksheet, and deposit when the numbers are right.</p>';
                 return html;
             }
+            const deposited = thisPay && (thisPay.deposited_at || thisPay.is_verified);
             html += (deposited
                     ? '<p>This paycheck is already deposited. You can mark the lesson done.</p>'
                     : '<p>Open Bank Account and complete the paycheck worksheet. Come back here after it deposits.</p>') +
