@@ -1008,6 +1008,16 @@
             </div>
         </div>
 
+        <div id="curriculum-lesson-preview-modal" class="modal">
+            <div class="modal-content curriculum-preview-modal-content">
+                <span class="close" id="curriculum-lesson-preview-close">&times;</span>
+                <p class="curriculum-preview-kicker">Lesson preview</p>
+                <h2 id="curriculum-lesson-preview-title">Lesson</h2>
+                <p class="muted" id="curriculum-lesson-preview-skill"></p>
+                <div id="curriculum-lesson-preview-body"></div>
+            </div>
+        </div>
+
         <!-- Marketplace View -->
         <div id="marketplace-view" class="view">
             <div class="form-section accounts-ui">
@@ -2103,6 +2113,6 @@
 
     <script src="{{ url_for('static', filename='app.js') }}?v=csvimport4"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
-    <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric2"></script>
+    <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric3"></script>
 </body>
 </html>

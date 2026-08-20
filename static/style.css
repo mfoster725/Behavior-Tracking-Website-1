@@ -11698,6 +11698,42 @@ ul.chartjs-legend.chartjs-legend--cols-3 li {
     color: #64748b;
     font-weight: 600;
 }
+.curriculum-lesson-title-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
+    text-align: left;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    white-space: nowrap;
+}
+.curriculum-lesson-title-btn:hover {
+    color: var(--accent-hover);
+}
+.curriculum-preview-modal-content {
+    max-width: 560px;
+}
+.curriculum-preview-kicker {
+    margin: 0 0 4px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+}
+.curriculum-preview-modal-content h2 {
+    margin: 0 0 4px;
+    padding-right: 2rem;
+}
+.curriculum-preview-note {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: #64748b;
+}
 .curriculum-status-pill {
     display: inline-block;
     padding: 2px 8px;

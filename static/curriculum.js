@@ -161,9 +161,10 @@
         }).join('');
     }
 
-    function lessonFormHtml(assignment) {
+    function lessonFormHtml(assignment, options) {
+        const preview = !!(options && options.preview);
         const slug = assignment.lesson && assignment.lesson.slug;
-        const story = state.data.money_story || {};
+        const story = (state.data && state.data.money_story) || {};
         const thisPay = story.this_paycheck;
         const prevPay = story.previous_paycheck;
         const change = story.pay_change || {};
@@ -171,18 +172,24 @@
             ? '<div class="curriculum-staff-script"><strong>Staff:</strong> ' + esc(assignment.lesson.staff_script) + '</div>'
             : '';
         const prompt = assignment.lesson ? '<p class="muted">' + esc(assignment.lesson.student_prompt) + '</p>' : '';
+        const idPrefix = preview ? 'preview-cl-' : 'cl-';
 
         if (slug === 'read_paycheck') {
             const deposited = thisPay && (thisPay.deposited_at || thisPay.is_verified);
-            return staff + prompt +
-                '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'no paycheck yet') + '</p>' +
-                (deposited
+            let html = staff + prompt +
+                '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'filled in from that week’s paycheck') + '</p>';
+            if (preview) {
+                html += '<p>Students open Bank Account, complete the paycheck worksheet, and deposit when the numbers are right.</p>';
+                return html;
+            }
+            html += (deposited
                     ? '<p>This paycheck is already deposited. You can mark the lesson done.</p>'
                     : '<p>Open Bank Account and complete the paycheck worksheet. Come back here after it deposits.</p>') +
                 '<div class="curriculum-actions">' +
                 '<button type="button" class="btn-secondary" id="curriculum-open-bank-btn">Open paycheck worksheet</button>' +
                 (deposited ? '<button type="button" class="btn-primary" id="curriculum-complete-btn">Mark done</button>' : '') +
                 '</div>';
+            return html;
         }
 
         if (slug === 'why_pay_changed') {
@@ -195,18 +202,20 @@
                     ? 'Pay went down from last week.'
                     : change.direction === 'same'
                         ? 'Pay matched last week.'
-                        : 'This looks like a first paycheck. Compare to pay with no citations.';
+                        : preview
+                            ? 'Students compare this week to last week. Pay can go up or down.'
+                            : 'This looks like a first paycheck. Compare to pay with no citations.';
             return staff + prompt +
                 '<p class="muted">' + esc(directionNote) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>This week’s take-home</label>' +
-                '<input type="number" step="0.01" id="cl-this-take-home" placeholder="0.00">' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'this-take-home" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
                 '<label>' + esc(compareLabel) + '</label>' +
-                '<input type="number" step="0.01" id="cl-compare-take-home" placeholder="0.00">' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'compare-take-home" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
                 '<label>Difference (this week minus comparison)</label>' +
-                '<input type="number" step="0.01" id="cl-difference" placeholder="0.00">' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'difference" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
                 '<label>Why did it change — or why did it stay the same?</label>' +
-                '<textarea id="cl-why"></textarea>' +
+                '<textarea id="' + idPrefix + 'why"' + (preview ? ' disabled' : '') + '></textarea>' +
                 '</div>';
         }
 
@@ -215,12 +224,12 @@
                 '<p class="muted">Balance ' + money(story.balance) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Item</label>' +
-                '<select id="cl-item">' + itemOptions() + '</select>' +
+                '<select id="' + idPrefix + 'item"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
                 '<label>Decision</label>' +
                 '<div class="curriculum-radio-row">' +
-                '<label><input type="radio" name="cl-decision" value="buy"> Buy now</label>' +
-                '<label><input type="radio" name="cl-decision" value="wait"> Wait</label>' +
-                '<label><input type="radio" name="cl-decision" value="goal"> Set as a goal</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="buy"' + (preview ? ' disabled' : '') + '> Buy now</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="wait"' + (preview ? ' disabled' : '') + '> Wait</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="goal"' + (preview ? ' disabled' : '') + '> Set as a goal</label>' +
                 '</div></div>';
         }
 
@@ -228,13 +237,13 @@
             return staff + prompt +
                 '<p class="muted">Balance ' + money(story.balance) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
-                '<label>Item A</label><select id="cl-item-a">' + itemOptions() + '</select>' +
-                '<label>Item B</label><select id="cl-item-b">' + itemOptions() + '</select>' +
-                '<label class="curriculum-managed-label"><input type="checkbox" id="cl-can-both"> I can buy both with my balance</label>' +
+                '<label>Item A</label><select id="' + idPrefix + 'item-a"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
+                '<label>Item B</label><select id="' + idPrefix + 'item-b"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
+                '<label class="curriculum-managed-label"><input type="checkbox" id="' + idPrefix + 'can-both"' + (preview ? ' disabled' : '') + '> I can buy both with my balance</label>' +
                 '<label>If you cannot buy both, which would you choose?</label>' +
-                '<select id="cl-choice"><option value="">Choose</option></select>' +
+                '<select id="' + idPrefix + 'choice"' + (preview ? ' disabled' : '') + '><option value="">Choose</option></select>' +
                 '<label>What are you giving up?</label>' +
-                '<textarea id="cl-reason"></textarea>' +
+                '<textarea id="' + idPrefix + 'reason"' + (preview ? ' disabled' : '') + '></textarea>' +
                 '</div>';
         }
 
@@ -246,14 +255,16 @@
                     return { id: 'item-' + item.id, amount: item.price, description: item.name };
                 });
             if (!rows.length) {
-                return staff + prompt + '<p class="muted">No purchases or catalog items to tag yet.</p>';
+                return staff + prompt + '<p class="muted">' + (preview
+                    ? 'Students tag their recent purchases as a need or a want. If they have not bought anything yet, they tag marketplace items instead.'
+                    : 'No purchases or catalog items to tag yet.') + '</p>';
             }
             const list = rows.map(function (row, idx) {
                 return '<div class="curriculum-tag-row" data-tag-id="' + esc(row.id) + '" data-label="' + esc(row.description) + '">' +
                     '<span>' + esc(row.description) + ' — ' + money(row.amount) + '</span>' +
                     '<span class="curriculum-radio-row">' +
-                    '<label><input type="radio" name="cl-tag-' + idx + '" value="need"> Need</label>' +
-                    '<label><input type="radio" name="cl-tag-' + idx + '" value="want"> Want</label>' +
+                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="need"' + (preview ? ' disabled' : '') + '> Need</label>' +
+                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="want"' + (preview ? ' disabled' : '') + '> Want</label>' +
                     '</span></div>';
             }).join('');
             return staff + prompt + '<div class="curriculum-lesson-form">' + list + '</div>';
@@ -265,11 +276,11 @@
                 '<p class="muted">Last take-home ' + money(takeHome) + '. Balance ' + money(story.balance) + '.</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Marketplace item (optional)</label>' +
-                '<select id="cl-goal-item">' + itemOptions() + '</select>' +
+                '<select id="' + idPrefix + 'goal-item"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
                 '<label>Target amount</label>' +
-                '<input type="number" step="0.01" id="cl-goal-amount" placeholder="0.00">' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'goal-amount" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
                 '<label>Label</label>' +
-                '<input type="text" id="cl-goal-label" placeholder="What are you saving for?">' +
+                '<input type="text" id="' + idPrefix + 'goal-label" placeholder="What are you saving for?"' + (preview ? ' disabled' : '') + '>' +
                 '</div>';
         }
 
@@ -473,7 +484,10 @@
             return;
         }
         let html = '<table class="curriculum-roster"><thead><tr><th>Student</th>';
-        lessons.forEach(function (l) { html += '<th>' + esc(l.title) + '</th>'; });
+        lessons.forEach(function (l) {
+            html += '<th><button type="button" class="curriculum-lesson-title-btn" data-lesson-slug="' +
+                esc(l.slug) + '" title="Preview this lesson">' + esc(l.title) + '</button></th>';
+        });
         html += '</tr></thead><tbody>';
         students.forEach(function (row) {
             html += '<tr data-student-id="' + row.student_id + '"><td>' + esc(row.student_name) + '</td>';
@@ -486,6 +500,13 @@
         });
         html += '</tbody></table>';
         wrap.innerHTML = html;
+        wrap.querySelectorAll('.curriculum-lesson-title-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showLessonPreview(btn.getAttribute('data-lesson-slug'));
+            });
+        });
         wrap.querySelectorAll('tr[data-student-id]').forEach(function (tr) {
             tr.style.cursor = 'pointer';
             tr.addEventListener('click', function () {
@@ -493,6 +514,41 @@
                 const name = tr.querySelector('td').textContent;
                 selectStudent(sid, name);
             });
+        });
+    }
+
+    function hideLessonPreview() {
+        const modal = document.getElementById('curriculum-lesson-preview-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function showLessonPreview(slug) {
+        const lessons = (state.roster && state.roster.lessons) || [];
+        const lesson = lessons.find(function (l) { return l.slug === slug; });
+        if (!lesson) return;
+        const modal = document.getElementById('curriculum-lesson-preview-modal');
+        const title = document.getElementById('curriculum-lesson-preview-title');
+        const skill = document.getElementById('curriculum-lesson-preview-skill');
+        const body = document.getElementById('curriculum-lesson-preview-body');
+        if (!modal || !title || !body) return;
+        title.textContent = lesson.title;
+        if (skill) skill.textContent = lesson.skill_name ? ('Skill: ' + lesson.skill_name) : '';
+        body.innerHTML = '<p class="curriculum-preview-note">This is what students will see. Their paycheck, balance, and marketplace fill in the numbers.</p>' +
+            lessonFormHtml({ lesson: lesson }, { preview: true });
+        modal.style.display = 'block';
+    }
+
+    function setupLessonPreviewModal() {
+        const modal = document.getElementById('curriculum-lesson-preview-modal');
+        const closeBtn = document.getElementById('curriculum-lesson-preview-close');
+        if (!modal || modal._curriculumPreviewBound) return;
+        modal._curriculumPreviewBound = true;
+        if (closeBtn) closeBtn.addEventListener('click', hideLessonPreview);
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) hideLessonPreview();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') hideLessonPreview();
         });
     }
 
@@ -653,6 +709,7 @@
         if (isStaff()) {
             setupStaffSearch();
             setupStaffAssign();
+            setupLessonPreviewModal();
             await loadRoster();
             if (state.studentId) await refreshStudent();
         } else {
