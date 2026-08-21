@@ -252,6 +252,7 @@
             let html = staff + prompt +
                 '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'no paycheck yet') + '</p>';
             if (walkthrough) {
+                html += '<p class="muted">Students complete this same worksheet in Bank Account.</p>';
                 html += paycheckWorksheetHtml(thisPay, idPrefix);
                 html += '<div class="curriculum-actions">' +
                     '<button type="button" class="btn-primary" id="walkthrough-check-btn">Check answers</button>' +
@@ -561,7 +562,7 @@
         let html = '<table class="curriculum-roster"><thead><tr><th>Student</th>';
         lessons.forEach(function (l) {
             html += '<th><button type="button" class="curriculum-lesson-title-btn" data-lesson-slug="' +
-                esc(l.slug) + '" title="Open this lesson">' + esc(l.title) + '</button></th>';
+                esc(l.slug) + '" title="Open the full lesson">' + esc(l.title) + '</button></th>';
         });
         html += '</tr></thead><tbody>';
         students.forEach(function (row) {
@@ -579,7 +580,7 @@
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                showLessonPreview(btn.getAttribute('data-lesson-slug'));
+                showFullLesson(btn.getAttribute('data-lesson-slug'));
             });
         });
         wrap.querySelectorAll('tr[data-student-id]').forEach(function (tr) {
@@ -643,7 +644,7 @@
             return null;
         }
         if (slug === 'needs_vs_wants') {
-            const rows = document.querySelectorAll('#curriculum-lesson-preview-body .curriculum-tag-row');
+            const rows = document.querySelectorAll('#curriculum-lesson-view-body .curriculum-tag-row');
             if (!rows.length) return 'Nothing to tag yet.';
             let missing = false;
             rows.forEach(function (row) {
@@ -660,10 +661,33 @@
         return null;
     }
 
+    function selectedStudentName() {
+        if (!state.studentId) return '';
+        const rows = (state.roster && state.roster.students) || [];
+        const row = rows.find(function (s) { return s.student_id === state.studentId; });
+        if (row && row.student_name) return row.student_name;
+        const input = document.getElementById('curriculum-student-search-input');
+        return input ? input.value.trim() : '';
+    }
+
+    function storyStripHtml(story) {
+        const s = story || {};
+        const pay = s.this_paycheck || {};
+        const change = s.pay_change || {};
+        let changeHint = 'No prior paycheck yet — compare to pay with zero citations.';
+        if (change.direction === 'up') changeHint = 'Up ' + money(change.delta) + ' from last week.';
+        if (change.direction === 'down') changeHint = 'Down ' + money(Math.abs(change.delta)) + ' from last week.';
+        if (change.direction === 'same') changeHint = 'Same take-home as last week.';
+        return '<div class="curriculum-stat"><p class="label">Balance</p><p class="value">' + money(s.balance) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">This week’s pay</p><p class="value">' + money(pay.final_pay) + '</p><p class="hint">' + esc(changeHint) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">Citations</p><p class="value">' + (pay.citation_count || 0) + '</p><p class="hint">Deduction ' + money(pay.citation_deduction) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">Spent (30 days)</p><p class="value">' + money(s.spent_30d) + '</p></div>';
+    }
+
     function wireWalkthroughLesson(slug, story) {
         wireOpportunitySelects('walk-cl-');
         wireGoalItemFill('walk-cl-');
-        const body = document.getElementById('curriculum-lesson-preview-body');
+        const body = document.getElementById('curriculum-lesson-view-body');
         if (body && !document.getElementById('walkthrough-check-btn')) {
             const actions = document.createElement('div');
             actions.className = 'curriculum-actions';
@@ -685,34 +709,40 @@
                     errEl.textContent = problem;
                 } else {
                     errEl.style.color = '#047857';
-                    errEl.textContent = 'That is the full lesson. Nothing is saved to a student from here.';
+                    errEl.textContent = 'That checks out. Nothing is saved to a student from here.';
                 }
             });
         }
     }
 
-    function hideLessonPreview() {
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
+    function hideFullLesson() {
+        const modal = document.getElementById('curriculum-lesson-view-modal');
         if (modal) modal.style.display = 'none';
     }
 
-    function showLessonPreview(slug) {
+    function showFullLesson(slug) {
         const lessons = (state.roster && state.roster.lessons) || [];
         const lesson = lessons.find(function (l) { return l.slug === slug; });
         if (!lesson) return;
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
-        const title = document.getElementById('curriculum-lesson-preview-title');
-        const skill = document.getElementById('curriculum-lesson-preview-skill');
-        const body = document.getElementById('curriculum-lesson-preview-body');
+        const modal = document.getElementById('curriculum-lesson-view-modal');
+        const title = document.getElementById('curriculum-lesson-view-title');
+        const skill = document.getElementById('curriculum-lesson-view-skill');
+        const storyEl = document.getElementById('curriculum-lesson-view-story');
+        const body = document.getElementById('curriculum-lesson-view-body');
         if (!modal || !title || !body) return;
         const story = walkthroughStory();
         const catalog = walkthroughCatalog();
-        const usingSample = story === SAMPLE_STORY || catalog === SAMPLE_CATALOG;
+        const usingLive = !!(state.data && state.data.money_story && state.data.money_story.this_paycheck);
+        const studentName = selectedStudentName();
         title.textContent = lesson.title;
         if (skill) {
-            skill.textContent = (lesson.skill_name ? lesson.skill_name : '') +
-                (usingSample ? (lesson.skill_name ? ' · ' : '') + 'Example numbers so you can walk through the full lesson' : '');
+            const skillName = lesson.skill_name || '';
+            const numbersNote = usingLive && studentName
+                ? 'Using ' + studentName + '’s paycheck and marketplace'
+                : 'This is the full lesson students complete';
+            skill.textContent = skillName ? (skillName + ' · ' + numbersNote) : numbersNote;
         }
+        if (storyEl) storyEl.innerHTML = storyStripHtml(story);
         body.innerHTML = lessonFormHtml({ lesson: lesson }, {
             walkthrough: true,
             story: story,
@@ -722,17 +752,17 @@
         modal.style.display = 'block';
     }
 
-    function setupLessonPreviewModal() {
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
-        const closeBtn = document.getElementById('curriculum-lesson-preview-close');
-        if (!modal || modal._curriculumPreviewBound) return;
-        modal._curriculumPreviewBound = true;
-        if (closeBtn) closeBtn.addEventListener('click', hideLessonPreview);
+    function setupLessonViewModal() {
+        const modal = document.getElementById('curriculum-lesson-view-modal');
+        const closeBtn = document.getElementById('curriculum-lesson-view-close');
+        if (!modal || modal._curriculumLessonViewBound) return;
+        modal._curriculumLessonViewBound = true;
+        if (closeBtn) closeBtn.addEventListener('click', hideFullLesson);
         modal.addEventListener('click', function (e) {
-            if (e.target === modal) hideLessonPreview();
+            if (e.target === modal) hideFullLesson();
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') hideLessonPreview();
+            if (e.key === 'Escape') hideFullLesson();
         });
     }
 
@@ -893,7 +923,7 @@
         if (isStaff()) {
             setupStaffSearch();
             setupStaffAssign();
-            setupLessonPreviewModal();
+            setupLessonViewModal();
             await loadRoster();
             if (state.studentId) await refreshStudent();
         } else {

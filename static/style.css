@@ -11715,19 +11715,25 @@ ul.chartjs-legend.chartjs-legend--cols-3 li {
 .curriculum-lesson-title-btn:hover {
     color: var(--accent-hover);
 }
-.curriculum-preview-modal-content {
-    max-width: 640px;
+.curriculum-lesson-view-modal-content {
+    max-width: 800px;
 }
-.curriculum-preview-kicker {
+.curriculum-lesson-view-kicker {
     margin: 0 0 4px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #64748b;
 }
-.curriculum-preview-modal-content h2 {
+.curriculum-lesson-view-modal-content h2 {
     margin: 0 0 4px;
     padding-right: 2rem;
+}
+.curriculum-lesson-view-modal-content .curriculum-story-grid {
+    margin-top: 16px;
+}
+.curriculum-lesson-view-modal-content .curriculum-card {
+    margin-bottom: 0;
 }
 .curriculum-citation-list {
     white-space: pre-line;
