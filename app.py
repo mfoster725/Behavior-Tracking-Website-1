@@ -1162,6 +1162,7 @@ def seed_curriculum_lessons(commit=True):
                 existing.skill_name = data['skill_name']
                 existing.student_prompt = data['student_prompt']
                 existing.staff_script = data['staff_script']
+                existing.teaching_body = data.get('teaching')
                 existing.sort_order = data['sort_order']
                 if existing.is_active is None:
                     existing.is_active = True
@@ -1172,6 +1173,7 @@ def seed_curriculum_lessons(commit=True):
                 skill_name=data['skill_name'],
                 student_prompt=data['student_prompt'],
                 staff_script=data['staff_script'],
+                teaching_body=data.get('teaching'),
                 sort_order=data['sort_order'],
                 is_active=True,
             ))
@@ -1221,6 +1223,7 @@ class CurriculumLesson(db.Model):
     skill_name = db.Column(db.String(100), nullable=False)
     student_prompt = db.Column(db.Text, nullable=True)
     staff_script = db.Column(db.Text, nullable=True)
+    teaching_body = db.Column(db.Text, nullable=True)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
 
@@ -1440,7 +1443,7 @@ class SiteSubscription(db.Model):
 
 
 def ensure_curriculum_schema():
-    """Add notifications.curriculum_assignment_id on existing databases."""
+    """Add curriculum columns on existing databases."""
     try:
         is_postgres = 'postgresql' in str(db.engine.url).lower()
         with db.engine.connect() as conn:
@@ -1448,6 +1451,10 @@ def ensure_curriculum_schema():
                 conn.execute(text(
                     "ALTER TABLE notifications "
                     "ADD COLUMN IF NOT EXISTS curriculum_assignment_id INTEGER"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE curriculum_lessons "
+                    "ADD COLUMN IF NOT EXISTS teaching_body TEXT"
                 ))
             else:
                 try:
@@ -1457,6 +1464,15 @@ def ensure_curriculum_schema():
                         conn.execute(text(
                             "ALTER TABLE notifications "
                             "ADD COLUMN curriculum_assignment_id INTEGER"
+                        ))
+                except Exception:
+                    pass
+                try:
+                    rows = conn.execute(text("PRAGMA table_info(curriculum_lessons)")).fetchall()
+                    cols = {row[1] for row in rows}
+                    if rows and 'teaching_body' not in cols:
+                        conn.execute(text(
+                            "ALTER TABLE curriculum_lessons ADD COLUMN teaching_body TEXT"
                         ))
                 except Exception:
                     pass
@@ -11187,6 +11203,7 @@ def _serialize_curriculum_lesson(lesson):
         'skill_name': lesson.skill_name,
         'student_prompt': lesson.student_prompt,
         'staff_script': lesson.staff_script,
+        'teaching': lesson.teaching_body,
         'sort_order': lesson.sort_order,
     }
 
@@ -11730,10 +11747,7 @@ def _upsert_active_goal(student_id, target_amount, marketplace_item_id=None, cus
 def _validate_lesson_responses(slug, responses, story):
     responses = responses or {}
     this_pay = story.get('this_paycheck') or {}
-    prev_pay = story.get('previous_paycheck')
-    change = story.get('pay_change') or {}
     balance = float(story.get('balance') or 0)
-    tolerance = 0.05
 
     if slug == 'read_paycheck':
         if this_pay.get('is_verified') or this_pay.get('deposited_at'):
@@ -11741,27 +11755,12 @@ def _validate_lesson_responses(slug, responses, story):
         return 'Finish the paycheck worksheet in Bank Account first.'
 
     if slug == 'why_pay_changed':
-        try:
-            this_entered = float(responses.get('this_take_home'))
-            compare_entered = float(responses.get('compare_take_home'))
-            diff_entered = float(responses.get('difference'))
-        except (TypeError, ValueError):
-            return 'Fill in this week, the comparison week, and the difference.'
-        this_actual = float(this_pay.get('final_pay') or 0)
-        if abs(this_entered - this_actual) > tolerance:
-            return 'This week’s take-home does not match your paycheck.'
-        if prev_pay:
-            compare_actual = float(prev_pay.get('final_pay') or 0)
-        else:
-            compare_actual = float(change.get('zero_citation_pay') or this_pay.get('base_pay') or 0)
-        if abs(compare_entered - compare_actual) > tolerance:
-            return 'The comparison amount does not match.'
-        expected_diff = round(this_actual - compare_actual, 2)
-        if abs(diff_entered - expected_diff) > tolerance:
-            return 'Check the difference (this week minus the comparison).'
+        cause = (responses.get('cause') or '').strip().lower()
+        if cause not in ('citations', 'star', 'both', 'same'):
+            return 'Pick what moved your pay.'
         why = (responses.get('why') or '').strip()
-        if len(why) < 3:
-            return 'Write a short note about why pay changed — or why it stayed the same.'
+        if len(why) < 8:
+            return 'Write why your pay changed — or why it stayed the same.'
         return None
 
     if slug == 'save_or_buy':
@@ -11822,6 +11821,9 @@ def _validate_lesson_responses(slug, responses, story):
             kind = (tag.get('kind') if isinstance(tag, dict) else None) or ''
             if kind not in ('need', 'want'):
                 return 'Each item needs to be tagged need or want.'
+        wait_want = (responses.get('wait_want') or '').strip()
+        if len(wait_want) < 2:
+            return 'Name one want that could wait. If every item is a need, say that.'
         return None
 
     if slug == 'savings_goal':
@@ -12028,6 +12030,24 @@ def curriculum_complete(assignment_id):
     error = _validate_lesson_responses(slug, responses, story)
     if error:
         return jsonify({'error': error}), 400
+    if slug == 'why_pay_changed':
+        this_pay = story.get('this_paycheck') or {}
+        prev_pay = story.get('previous_paycheck')
+        change = story.get('pay_change') or {}
+        this_actual = float(this_pay.get('final_pay') or 0)
+        if prev_pay:
+            compare_actual = float(prev_pay.get('final_pay') or 0)
+        else:
+            compare_actual = float(change.get('zero_citation_pay') or this_pay.get('base_pay') or 0)
+        responses = dict(responses)
+        responses['this_take_home'] = round(this_actual, 2)
+        responses['compare_take_home'] = round(compare_actual, 2)
+        responses['difference'] = round(this_actual - compare_actual, 2)
+        responses['this_paycheck'] = this_pay
+        responses['previous_paycheck'] = prev_pay or {
+            'label': 'Pay with zero citations',
+            'final_pay': compare_actual,
+        }
     if slug == 'save_or_buy' and (responses.get('decision') or '').lower() == 'goal':
         item_id = responses.get('item_id')
         item = MarketplaceItem.query.get(item_id) if item_id else None

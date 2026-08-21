@@ -169,6 +169,11 @@
         previous_paycheck: {
             pay_period_start: '2026-08-03',
             pay_period_end: '2026-08-07',
+            average_star_percent: 72,
+            base_pay: 72,
+            citation_count: 1,
+            citation_list: ['Off task'],
+            citation_deduction: 2,
             final_pay: 70,
         },
         pay_change: { direction: 'up', delta: 11.5, zero_citation_pay: 87.5 },
@@ -234,6 +239,106 @@
             '</div></div>';
     }
 
+    function periodLabel(pay) {
+        if (!pay || !pay.pay_period_start) return 'No paycheck yet';
+        return pay.pay_period_start + ' to ' + pay.pay_period_end;
+    }
+
+    function citationLine(pay) {
+        const count = pay && pay.citation_count != null ? pay.citation_count : 0;
+        const list = (pay && pay.citation_list) || [];
+        if (!count && !list.length) return '0 — none';
+        return count + ' — ' + (list.length ? list.join(', ') : 'see count');
+    }
+
+    function paycheckFactsHtml(pay, heading, emptyNote) {
+        if (!pay) {
+            return '<div class="curriculum-compare-card"><h4>' + esc(heading) + '</h4>' +
+                '<p class="muted">' + esc(emptyNote || 'No paycheck to show.') + '</p></div>';
+        }
+        return '<div class="curriculum-compare-card"><h4>' + esc(heading) + '</h4>' +
+            '<p class="muted">' + esc(periodLabel(pay)) + '</p>' +
+            '<dl class="curriculum-facts">' +
+            '<div><dt>STAR average</dt><dd>' + Number(pay.average_star_percent || 0).toFixed(2) + '%</dd></div>' +
+            '<div><dt>Base pay</dt><dd>' + money(pay.base_pay) + '</dd></div>' +
+            '<div><dt>Citations</dt><dd>' + esc(citationLine(pay)) + '</dd></div>' +
+            '<div><dt>Deduction ($2 each)</dt><dd>' + money(pay.citation_deduction) + '</dd></div>' +
+            '<div><dt>Take-home</dt><dd>' + money(pay.final_pay) + '</dd></div>' +
+            '</dl></div>';
+    }
+
+    const LESSON_TEACHING = {
+        read_paycheck:
+            'Your paycheck is math from this week. Not a random number.\n\n' +
+            'Base pay starts at $100, then gets multiplied by your STAR percent for the week. If the week was 80%, base pay is $80.\n\n' +
+            'Citations come off after that. Each citation is $2. Three citations is $6 off.\n\n' +
+            'Take-home is what is left: base pay minus that deduction. That is the number that hits your account when you deposit.\n\n' +
+            'The worksheet in Bank Account is the same math with this week’s numbers. Run it. Deposit when it is right.',
+        why_pay_changed:
+            'Pay moves for a reason. Two levers.\n\n' +
+            '- The week — STAR percent — sets base pay. A stronger week raises it. A weaker week lowers it.\n' +
+            '- Citations come off after. More citations, more money gone. Fewer citations, more of the base pay stays.\n\n' +
+            'If both moved, look at which one did more of the work. The two weeks are sitting right here. Read them. Then say what happened.',
+        save_or_buy:
+            'Cash in your account spends once. Buy the item today and that money is not there for anything else.\n\n' +
+            'First question: do you have enough? If the price is bigger than your balance, you cannot buy it today.\n\n' +
+            'Second question: even if you have enough, is today the day? Waiting keeps the money. Setting a goal puts a target on it so you do not spend it by accident.\n\n' +
+            'There is no trick answer. Pick a real item and make the call.',
+        opportunity_cost:
+            'Opportunity cost is the thing you do not get because you picked the other thing.\n\n' +
+            'If your balance covers both items, there is no trade yet. If it does not, choosing A means B stays on the shelf. B is the cost.\n\n' +
+            'Name the thing you are giving up. That is the whole skill.',
+        needs_vs_wants:
+            'A need gets you through the week. Food. Something required. Something that keeps you from getting stuck.\n\n' +
+            'A want is the rest. Headphones. Extra snacks. Nice-to-have. Wants are allowed. They just should not empty the account before needs are covered.\n\n' +
+            'Tag each item. Then look at the wants and pick one that could wait.',
+        savings_goal:
+            'A savings goal is a number you are aiming at — a marketplace item or a dollar amount.\n\n' +
+            'Last week’s take-home is the pace. Divide the target by that paycheck and you get a rough count of weeks, if you do not spend it first.\n\n' +
+            'You are not locking the money. You are naming the target so you can see if you are getting closer.',
+    };
+
+    function teachingHtml(lesson) {
+        const text = (lesson && lesson.teaching) || LESSON_TEACHING[lesson && lesson.slug] || '';
+        if (!text) return '';
+        const blocks = String(text).split(/\n\n+/);
+        const inner = blocks.map(function (block) {
+            const lines = block.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+            if (!lines.length) return '';
+            const bullets = lines.every(function (l) { return l.charAt(0) === '-' || l.charAt(0) === '•'; });
+            if (bullets) {
+                return '<ul>' + lines.map(function (l) {
+                    return '<li>' + esc(l.replace(/^[-•]\s*/, '')) + '</li>';
+                }).join('') + '</ul>';
+            }
+            return '<p>' + esc(lines.join(' ')) + '</p>';
+        }).join('');
+        return '<div class="curriculum-teach"><h4>The lesson</h4>' + inner + '</div>';
+    }
+
+    function payChangeSummaryHtml(thisPay, prevPay, change) {
+        const thisTake = Number((thisPay && thisPay.final_pay) || 0);
+        const compareTake = prevPay
+            ? Number(prevPay.final_pay || 0)
+            : Number((change && (change.zero_citation_pay || (thisPay && thisPay.base_pay))) || 0);
+        const diff = Math.round((thisTake - compareTake) * 100) / 100;
+        let moved = 'Take-home matched the comparison: ' + money(thisTake) + '.';
+        if (diff > 0.009) moved = 'Take-home went up ' + money(diff) + ' (' + money(compareTake) + ' → ' + money(thisTake) + ').';
+        if (diff < -0.009) moved = 'Take-home went down ' + money(Math.abs(diff)) + ' (' + money(compareTake) + ' → ' + money(thisTake) + ').';
+        const thisCit = thisPay ? (thisPay.citation_count || 0) : 0;
+        const prevCit = prevPay ? (prevPay.citation_count || 0) : 0;
+        const thisStar = thisPay ? Number(thisPay.average_star_percent || 0).toFixed(2) : '0.00';
+        let starLine = 'STAR this week: ' + thisStar + '%.';
+        if (prevPay && prevPay.average_star_percent != null) {
+            starLine = 'STAR: ' + thisStar + '% this week vs ' + Number(prevPay.average_star_percent).toFixed(2) + '% last week.';
+        }
+        const citLine = prevPay
+            ? 'Citations: ' + thisCit + ' this week vs ' + prevCit + ' last week.'
+            : 'Citations this week: ' + thisCit + '.';
+        return '<div class="curriculum-change-summary"><p>' + esc(moved) + '</p>' +
+            '<p class="muted">' + esc(starLine) + ' ' + esc(citLine) + '</p></div>';
+    }
+
     function lessonFormHtml(assignment, options) {
         const walkthrough = !!(options && options.walkthrough);
         const slug = assignment.lesson && assignment.lesson.slug;
@@ -245,12 +350,17 @@
         const staff = isStaff() && assignment.lesson && assignment.lesson.staff_script
             ? '<div class="curriculum-staff-script"><strong>Staff:</strong> ' + esc(assignment.lesson.staff_script) + '</div>'
             : '';
-        const prompt = assignment.lesson ? '<p class="muted">' + esc(assignment.lesson.student_prompt) + '</p>' : '';
+        const teach = teachingHtml(assignment.lesson);
+        const prompt = assignment.lesson && assignment.lesson.student_prompt
+            ? '<p class="curriculum-your-turn"><strong>Your turn.</strong> ' + esc(assignment.lesson.student_prompt) + '</p>'
+            : '';
         const idPrefix = walkthrough ? 'walk-cl-' : 'cl-';
 
         if (slug === 'read_paycheck') {
-            let html = staff + prompt +
-                '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'no paycheck yet') + '</p>';
+            let html = staff + teach +
+                '<div class="curriculum-compare">' +
+                paycheckFactsHtml(thisPay, 'This week', 'No paycheck yet.') +
+                '</div>' + prompt;
             if (walkthrough) {
                 html += '<p class="muted">Students complete this same worksheet in Bank Account.</p>';
                 html += paycheckWorksheetHtml(thisPay, idPrefix);
@@ -262,7 +372,7 @@
             const deposited = thisPay && (thisPay.deposited_at || thisPay.is_verified);
             html += (deposited
                     ? '<p>This paycheck is already deposited. You can mark the lesson done.</p>'
-                    : '<p>Open Bank Account and complete the paycheck worksheet. Come back here after it deposits.</p>') +
+                    : '<p>Open Bank Account and complete the paycheck worksheet with the numbers above.</p>') +
                 '<div class="curriculum-actions">' +
                 '<button type="button" class="btn-secondary" id="curriculum-open-bank-btn">Open paycheck worksheet</button>' +
                 (deposited ? '<button type="button" class="btn-primary" id="curriculum-complete-btn">Mark done</button>' : '') +
@@ -271,33 +381,42 @@
         }
 
         if (slug === 'why_pay_changed') {
-            const compareLabel = prevPay
-                ? 'Last week’s take-home (' + prevPay.pay_period_start + ' to ' + prevPay.pay_period_end + ')'
-                : 'Pay this week with zero citations';
-            const directionNote = change.direction === 'up'
-                ? 'Pay went up from last week.'
-                : change.direction === 'down'
-                    ? 'Pay went down from last week.'
-                    : change.direction === 'same'
-                        ? 'Pay matched last week.'
-                        : 'This looks like a first paycheck. Compare to pay with no citations.';
-            return staff + prompt +
-                '<p class="muted">' + esc(directionNote) + '</p>' +
+            const comparePay = prevPay || (thisPay ? {
+                pay_period_start: thisPay.pay_period_start,
+                pay_period_end: thisPay.pay_period_end,
+                average_star_percent: thisPay.average_star_percent,
+                base_pay: thisPay.base_pay,
+                citation_count: 0,
+                citation_list: [],
+                citation_deduction: 0,
+                final_pay: change.zero_citation_pay != null ? change.zero_citation_pay : thisPay.base_pay,
+            } : null);
+            const compareHeading = prevPay ? 'Last week' : 'This week with zero citations';
+            const compareEmpty = 'No comparison paycheck yet.';
+            return staff + teach +
+                '<div class="curriculum-compare">' +
+                paycheckFactsHtml(thisPay, 'This week', 'No paycheck yet.') +
+                paycheckFactsHtml(comparePay, compareHeading, compareEmpty) +
+                '</div>' +
+                payChangeSummaryHtml(thisPay, prevPay, change) +
+                prompt +
                 '<div class="curriculum-lesson-form">' +
-                '<label>This week’s take-home</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'this-take-home" placeholder="0.00">' +
-                '<label>' + esc(compareLabel) + '</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'compare-take-home" placeholder="0.00">' +
-                '<label>Difference (this week minus comparison)</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'difference" placeholder="0.00">' +
-                '<label>Why did it change — or why did it stay the same?</label>' +
-                '<textarea id="' + idPrefix + 'why"></textarea>' +
+                '<label>What moved your pay?</label>' +
+                '<div class="curriculum-radio-row">' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="star"> The week (STAR / base pay)</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="citations"> Citations</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="both"> Both</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="same"> It stayed about the same</label>' +
+                '</div>' +
+                '<label>In your words, why did it change — or why did it stay the same?</label>' +
+                '<textarea id="' + idPrefix + 'why" placeholder="Name the lever that did the work."></textarea>' +
                 '</div>';
         }
 
         if (slug === 'save_or_buy') {
-            return staff + prompt +
-                '<p class="muted">Balance ' + money(story.balance) + '</p>' +
+            return staff + teach +
+                '<p class="curriculum-money-ready">Your balance: <strong>' + money(story.balance) + '</strong></p>' +
+                prompt +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Item</label>' +
                 '<select id="' + idPrefix + 'item">' + itemOptions(null, catalog) + '</select>' +
@@ -310,8 +429,9 @@
         }
 
         if (slug === 'opportunity_cost') {
-            return staff + prompt +
-                '<p class="muted">Balance ' + money(story.balance) + '</p>' +
+            return staff + teach +
+                '<p class="curriculum-money-ready">Your balance: <strong>' + money(story.balance) + '</strong></p>' +
+                prompt +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Item A</label><select id="' + idPrefix + 'item-a">' + itemOptions(null, catalog) + '</select>' +
                 '<label>Item B</label><select id="' + idPrefix + 'item-b">' + itemOptions(null, catalog) + '</select>' +
@@ -331,7 +451,7 @@
                     return { id: 'item-' + item.id, amount: item.price, description: item.name };
                 });
             if (!rows.length) {
-                return staff + prompt + '<p class="muted">No purchases or catalog items to tag yet.</p>';
+                return staff + teach + prompt + '<p class="muted">No purchases or catalog items to tag yet.</p>';
             }
             const list = rows.map(function (row, idx) {
                 return '<div class="curriculum-tag-row" data-tag-id="' + esc(row.id) + '" data-label="' + esc(row.description) + '">' +
@@ -341,35 +461,51 @@
                     '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="want"> Want</label>' +
                     '</span></div>';
             }).join('');
-            return staff + prompt + '<div class="curriculum-lesson-form">' + list + '</div>';
+            return staff + teach + prompt + '<div class="curriculum-lesson-form">' + list +
+                '<label>Which want could wait?</label>' +
+                '<textarea id="' + idPrefix + 'wait-want" placeholder="Name one want that does not have to happen this week."></textarea>' +
+                '</div>';
         }
 
         if (slug === 'savings_goal') {
             const takeHome = thisPay ? thisPay.final_pay : 0;
-            return staff + prompt +
-                '<p class="muted">Last take-home ' + money(takeHome) + '. Balance ' + money(story.balance) + '.</p>' +
+            return staff + teach +
+                '<p class="curriculum-money-ready">Balance <strong>' + money(story.balance) +
+                '</strong> · last take-home <strong>' + money(takeHome) + '</strong></p>' +
+                prompt +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Marketplace item (optional)</label>' +
                 '<select id="' + idPrefix + 'goal-item">' + itemOptions(null, catalog) + '</select>' +
                 '<label>Target amount</label>' +
                 '<input type="number" step="0.01" id="' + idPrefix + 'goal-amount" placeholder="0.00">' +
+                '<p class="muted" id="' + idPrefix + 'goal-weeks"></p>' +
                 '<label>Label</label>' +
                 '<input type="text" id="' + idPrefix + 'goal-label" placeholder="What are you saving for?">' +
                 '</div>';
         }
 
-        return staff + prompt;
+        return staff + teach + prompt;
     }
 
     function collectResponses(assignment) {
         const slug = assignment.lesson && assignment.lesson.slug;
         if (slug === 'read_paycheck') return {};
         if (slug === 'why_pay_changed') {
+            const story = (state.data && state.data.money_story) || {};
+            const thisPay = story.this_paycheck || {};
+            const prevPay = story.previous_paycheck;
+            const change = story.pay_change || {};
+            const thisActual = Number(thisPay.final_pay || 0);
+            const compareActual = prevPay
+                ? Number(prevPay.final_pay || 0)
+                : Number(change.zero_citation_pay || thisPay.base_pay || 0);
+            const causeEl = document.querySelector('input[name="cl-cause"]:checked');
             return {
-                this_take_home: document.getElementById('cl-this-take-home').value,
-                compare_take_home: document.getElementById('cl-compare-take-home').value,
-                difference: document.getElementById('cl-difference').value,
-                why: document.getElementById('cl-why').value,
+                this_take_home: thisActual,
+                compare_take_home: compareActual,
+                difference: Math.round((thisActual - compareActual) * 100) / 100,
+                cause: causeEl && causeEl.value,
+                why: (document.getElementById('cl-why') && document.getElementById('cl-why').value) || '',
             };
         }
         if (slug === 'save_or_buy') {
@@ -404,7 +540,7 @@
                     kind: checked ? checked.value : '',
                 });
             });
-            return { tags: tags };
+            return { tags: tags, wait_want: (document.getElementById('cl-wait-want') && document.getElementById('cl-wait-want').value) || '' };
         }
         if (slug === 'savings_goal') {
             const sel = document.getElementById('cl-goal-item');
@@ -437,6 +573,25 @@
         b.addEventListener('change', refresh);
     }
 
+    function wireGoalWeeksHint(prefix, takeHome) {
+        prefix = prefix || 'cl-';
+        const amount = document.getElementById(prefix + 'goal-amount');
+        const hint = document.getElementById(prefix + 'goal-weeks');
+        if (!amount || !hint) return;
+        function refresh() {
+            const t = parseFloat(amount.value);
+            if (!(t > 0) || !(takeHome > 0)) {
+                hint.textContent = takeHome > 0 ? '' : 'No take-home to count from yet.';
+                return;
+            }
+            const weeks = Math.ceil(t / takeHome);
+            hint.textContent = 'At last take-home of ' + money(takeHome) + ', that is about ' +
+                weeks + ' paycheck' + (weeks === 1 ? '' : 's') + ' if you do not spend it.';
+        }
+        amount.addEventListener('input', refresh);
+        refresh();
+    }
+
     function wireGoalItemFill(prefix) {
         prefix = prefix || 'cl-';
         const sel = document.getElementById(prefix + 'goal-item');
@@ -449,6 +604,9 @@
             amount.value = opt.getAttribute('data-price') || '';
             if (label && !label.value) {
                 label.value = (opt.textContent || '').split(' — ')[0];
+            }
+            if (typeof amount.dispatchEvent === 'function') {
+                amount.dispatchEvent(new Event('input'));
             }
         });
     }
@@ -485,6 +643,8 @@
         startIfNeeded(assignment);
         wireOpportunitySelects();
         wireGoalItemFill();
+        const story = (state.data && state.data.money_story) || {};
+        wireGoalWeeksHint('cl-', story.this_paycheck ? story.this_paycheck.final_pay : 0);
 
         const bankBtn = document.getElementById('curriculum-open-bank-btn');
         if (bankBtn) {
@@ -618,16 +778,10 @@
             return null;
         }
         if (slug === 'why_pay_changed') {
-            const thisEntered = parseMoneyField(prefix + 'this-take-home');
-            const compareEntered = parseMoneyField(prefix + 'compare-take-home');
-            const diffEntered = parseMoneyField(prefix + 'difference');
-            const thisActual = Number(thisPay.final_pay || 0);
-            const compareActual = prevPay ? Number(prevPay.final_pay || 0) : Number(change.zero_citation_pay || thisPay.base_pay || 0);
-            if (Math.abs(thisEntered - thisActual) > tolerance) return 'This week’s take-home does not match the paycheck.';
-            if (Math.abs(compareEntered - compareActual) > tolerance) return 'The comparison amount does not match.';
-            if (Math.abs(diffEntered - (thisActual - compareActual)) > tolerance) return 'Difference is this week minus the comparison.';
+            const cause = document.querySelector('input[name="' + prefix + 'cause"]:checked');
+            if (!cause) return 'Pick what moved your pay.';
             const why = ((document.getElementById(prefix + 'why') || {}).value || '').trim();
-            if (why.length < 3) return 'Write a short note about why pay changed.';
+            if (why.length < 8) return 'Write why pay changed — or why it stayed the same.';
             return null;
         }
         if (slug === 'save_or_buy') {
@@ -651,6 +805,8 @@
                 if (!row.querySelector('input[type="radio"]:checked')) missing = true;
             });
             if (missing) return 'Tag each item as a need or a want.';
+            const waitWant = ((document.getElementById(prefix + 'wait-want') || {}).value || '').trim();
+            if (waitWant.length < 2) return 'Name one want that could wait.';
             return null;
         }
         if (slug === 'savings_goal') {
@@ -687,6 +843,7 @@
     function wireWalkthroughLesson(slug, story) {
         wireOpportunitySelects('walk-cl-');
         wireGoalItemFill('walk-cl-');
+        wireGoalWeeksHint('walk-cl-', story && story.this_paycheck ? story.this_paycheck.final_pay : 0);
         const body = document.getElementById('curriculum-lesson-view-body');
         if (body && !document.getElementById('walkthrough-check-btn')) {
             const actions = document.createElement('div');
