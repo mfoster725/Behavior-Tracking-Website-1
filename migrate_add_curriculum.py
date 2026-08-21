@@ -38,6 +38,7 @@ def migrate_sqlite(db_path):
                     skill_name VARCHAR(100) NOT NULL,
                     student_prompt TEXT,
                     staff_script TEXT,
+                    teaching_body TEXT,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     is_active BOOLEAN NOT NULL DEFAULT 1
                 )
@@ -107,18 +108,25 @@ def migrate_sqlite(db_path):
                 "REFERENCES curriculum_assignments(id)"
             )
 
+        cur.execute("PRAGMA table_info(curriculum_lessons)")
+        lesson_cols = {row[1] for row in cur.fetchall()}
+        if 'curriculum_lessons' in tables and 'teaching_body' not in lesson_cols:
+            print("Adding curriculum_lessons.teaching_body...")
+            cur.execute("ALTER TABLE curriculum_lessons ADD COLUMN teaching_body TEXT")
+
         inserted = 0
         for lesson in LESSON_SEEDS:
             cur.execute("SELECT id FROM curriculum_lessons WHERE slug = ?", (lesson['slug'],))
             if cur.fetchone():
                 cur.execute(
                     "UPDATE curriculum_lessons SET title=?, skill_name=?, student_prompt=?, "
-                    "staff_script=?, sort_order=? WHERE slug=?",
+                    "staff_script=?, teaching_body=?, sort_order=? WHERE slug=?",
                     (
                         lesson['title'],
                         lesson['skill_name'],
                         lesson['student_prompt'],
                         lesson['staff_script'],
+                        lesson.get('teaching'),
                         lesson['sort_order'],
                         lesson['slug'],
                     ),
@@ -126,14 +134,15 @@ def migrate_sqlite(db_path):
                 continue
             cur.execute(
                 "INSERT INTO curriculum_lessons "
-                "(slug, title, skill_name, student_prompt, staff_script, sort_order, is_active) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                "(slug, title, skill_name, student_prompt, staff_script, teaching_body, sort_order, is_active) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
                 (
                     lesson['slug'],
                     lesson['title'],
                     lesson['skill_name'],
                     lesson['student_prompt'],
                     lesson['staff_script'],
+                    lesson.get('teaching'),
                     lesson['sort_order'],
                 ),
             )

@@ -11889,3 +11889,83 @@ ul.chartjs-legend.chartjs-legend--cols-3 li {
     color: #334155;
     margin-bottom: 12px;
 }
+.curriculum-teach {
+    margin: 0 0 16px;
+}
+.curriculum-teach h4 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+}
+.curriculum-teach p,
+.curriculum-teach li {
+    font-size: 15px;
+    line-height: 1.5;
+    color: #334155;
+    margin: 0 0 10px;
+}
+.curriculum-teach ul {
+    margin: 0 0 12px;
+    padding-left: 1.2rem;
+}
+.curriculum-your-turn {
+    margin: 12px 0;
+    font-size: 15px;
+    color: #334155;
+}
+.curriculum-money-ready {
+    margin: 0 0 12px;
+    font-size: 15px;
+}
+.curriculum-compare {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 0 0 14px;
+}
+.curriculum-compare-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.curriculum-compare-card h4 {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+}
+.curriculum-facts {
+    margin: 8px 0 0;
+}
+.curriculum-facts div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+}
+.curriculum-facts div:last-child {
+    border-bottom: none;
+    font-weight: 700;
+}
+.curriculum-facts dt {
+    color: #64748b;
+}
+.curriculum-facts dd {
+    margin: 0;
+    text-align: right;
+}
+.curriculum-change-summary {
+    background: #eff6ff;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 0 0 14px;
+}
+.curriculum-change-summary p {
+    margin: 0;
+    font-size: 15px;
+    color: #1e3a8a;
+}
+.curriculum-change-summary .muted {
+    margin-top: 6px;
+    color: #1d4ed8;
+}
