@@ -151,8 +151,54 @@
         }
     }
 
-    function itemOptions(selectedId) {
-        const items = state.catalog || [];
+    const SAMPLE_STORY = {
+        balance: 42.50,
+        spent_30d: 18,
+        this_paycheck: {
+            pay_period_start: '2026-08-10',
+            pay_period_end: '2026-08-14',
+            average_star_percent: 87.5,
+            base_pay: 87.5,
+            citation_count: 3,
+            citation_list: ['Disruption', 'Language', 'Off task'],
+            citation_deduction: 6,
+            final_pay: 81.5,
+            is_verified: false,
+            deposited_at: null,
+        },
+        previous_paycheck: {
+            pay_period_start: '2026-08-03',
+            pay_period_end: '2026-08-07',
+            final_pay: 70,
+        },
+        pay_change: { direction: 'up', delta: 11.5, zero_citation_pay: 87.5 },
+        recent_purchases: [
+            { id: 'ex-1', amount: 8, description: 'Snack pass' },
+            { id: 'ex-2', amount: 15, description: 'Headphones' },
+            { id: 'ex-3', amount: 5, description: 'Late start coupon' },
+        ],
+    };
+    const SAMPLE_CATALOG = [
+        { id: 101, name: 'Snack pass', price: 5 },
+        { id: 102, name: 'Headphones', price: 15 },
+        { id: 103, name: 'Late start coupon', price: 8 },
+        { id: 104, name: 'Staff lunch', price: 25 },
+        { id: 105, name: 'Game time', price: 10 },
+    ];
+
+    function walkthroughStory() {
+        const live = state.data && state.data.money_story;
+        if (live && live.this_paycheck) return live;
+        return SAMPLE_STORY;
+    }
+
+    function walkthroughCatalog() {
+        if (state.catalog && state.catalog.length) return state.catalog;
+        return SAMPLE_CATALOG;
+    }
+
+    function itemOptions(selectedId, catalog) {
+        const items = catalog || state.catalog || [];
         if (!items.length) return '<option value="">No marketplace items visible</option>';
         return '<option value="">Select an item</option>' + items.map(function (item) {
             const sel = String(item.id) === String(selectedId) ? ' selected' : '';
@@ -161,10 +207,38 @@
         }).join('');
     }
 
+    function paycheckWorksheetHtml(thisPay, idPrefix) {
+        const pct = thisPay && thisPay.average_star_percent != null
+            ? Number(thisPay.average_star_percent).toFixed(2)
+            : '0.00';
+        const citations = (thisPay && thisPay.citation_list) || [];
+        const listHtml = citations.length ? esc(citations.join('\n')) : 'None';
+        return '<div class="curriculum-worksheet">' +
+            '<h4>Complete Your Paycheck Worksheet</h4>' +
+            '<p class="muted">Calculate your pay based on this week’s data and citations.</p>' +
+            '<div class="curriculum-lesson-form">' +
+            '<label>Base Pay</label>' +
+            '<p class="muted">Calculate your base pay: $100 × ' + esc(pct) + '% =</p>' +
+            '<input type="text" inputmode="decimal" id="' + idPrefix + 'base-pay" placeholder="$0.00">' +
+            '<label>Number of Citations</label>' +
+            '<p class="muted">Citations this week:</p>' +
+            '<div class="curriculum-citation-list">' + listHtml + '</div>' +
+            '<p class="muted">Count the citations above and enter the number below.</p>' +
+            '<input type="number" id="' + idPrefix + 'citations" placeholder="Enter citation count">' +
+            '<label>Citation Deduction</label>' +
+            '<p class="muted">Citations × $2 =</p>' +
+            '<input type="text" inputmode="decimal" id="' + idPrefix + 'deduction" placeholder="$0.00">' +
+            '<label>Final Pay</label>' +
+            '<p class="muted">Base Pay - Citation Deduction =</p>' +
+            '<input type="text" inputmode="decimal" id="' + idPrefix + 'final" placeholder="$0.00">' +
+            '</div></div>';
+    }
+
     function lessonFormHtml(assignment, options) {
-        const preview = !!(options && options.preview);
+        const walkthrough = !!(options && options.walkthrough);
         const slug = assignment.lesson && assignment.lesson.slug;
-        const story = (state.data && state.data.money_story) || {};
+        const story = (options && options.story) || (state.data && state.data.money_story) || {};
+        const catalog = (options && options.catalog) || state.catalog || [];
         const thisPay = story.this_paycheck;
         const prevPay = story.previous_paycheck;
         const change = story.pay_change || {};
@@ -172,13 +246,17 @@
             ? '<div class="curriculum-staff-script"><strong>Staff:</strong> ' + esc(assignment.lesson.staff_script) + '</div>'
             : '';
         const prompt = assignment.lesson ? '<p class="muted">' + esc(assignment.lesson.student_prompt) + '</p>' : '';
-        const idPrefix = preview ? 'preview-cl-' : 'cl-';
+        const idPrefix = walkthrough ? 'walk-cl-' : 'cl-';
 
         if (slug === 'read_paycheck') {
             let html = staff + prompt +
-                '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'filled in from that week’s paycheck') + '</p>';
-            if (preview) {
-                html += '<p>Students open Bank Account, complete the paycheck worksheet, and deposit when the numbers are right.</p>';
+                '<p>Period: ' + esc(thisPay ? thisPay.pay_period_start + ' to ' + thisPay.pay_period_end : 'no paycheck yet') + '</p>';
+            if (walkthrough) {
+                html += '<p class="muted">Students complete this same worksheet in Bank Account.</p>';
+                html += paycheckWorksheetHtml(thisPay, idPrefix);
+                html += '<div class="curriculum-actions">' +
+                    '<button type="button" class="btn-primary" id="walkthrough-check-btn">Check answers</button>' +
+                    '</div><div class="curriculum-error" id="walkthrough-lesson-error"></div>';
                 return html;
             }
             const deposited = thisPay && (thisPay.deposited_at || thisPay.is_verified);
@@ -202,20 +280,18 @@
                     ? 'Pay went down from last week.'
                     : change.direction === 'same'
                         ? 'Pay matched last week.'
-                        : preview
-                            ? 'Students compare this week to last week. Pay can go up or down.'
-                            : 'This looks like a first paycheck. Compare to pay with no citations.';
+                        : 'This looks like a first paycheck. Compare to pay with no citations.';
             return staff + prompt +
                 '<p class="muted">' + esc(directionNote) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>This week’s take-home</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'this-take-home" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'this-take-home" placeholder="0.00">' +
                 '<label>' + esc(compareLabel) + '</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'compare-take-home" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'compare-take-home" placeholder="0.00">' +
                 '<label>Difference (this week minus comparison)</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'difference" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'difference" placeholder="0.00">' +
                 '<label>Why did it change — or why did it stay the same?</label>' +
-                '<textarea id="' + idPrefix + 'why"' + (preview ? ' disabled' : '') + '></textarea>' +
+                '<textarea id="' + idPrefix + 'why"></textarea>' +
                 '</div>';
         }
 
@@ -224,12 +300,12 @@
                 '<p class="muted">Balance ' + money(story.balance) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Item</label>' +
-                '<select id="' + idPrefix + 'item"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
+                '<select id="' + idPrefix + 'item">' + itemOptions(null, catalog) + '</select>' +
                 '<label>Decision</label>' +
                 '<div class="curriculum-radio-row">' +
-                '<label><input type="radio" name="' + idPrefix + 'decision" value="buy"' + (preview ? ' disabled' : '') + '> Buy now</label>' +
-                '<label><input type="radio" name="' + idPrefix + 'decision" value="wait"' + (preview ? ' disabled' : '') + '> Wait</label>' +
-                '<label><input type="radio" name="' + idPrefix + 'decision" value="goal"' + (preview ? ' disabled' : '') + '> Set as a goal</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="buy"> Buy now</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="wait"> Wait</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'decision" value="goal"> Set as a goal</label>' +
                 '</div></div>';
         }
 
@@ -237,13 +313,13 @@
             return staff + prompt +
                 '<p class="muted">Balance ' + money(story.balance) + '</p>' +
                 '<div class="curriculum-lesson-form">' +
-                '<label>Item A</label><select id="' + idPrefix + 'item-a"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
-                '<label>Item B</label><select id="' + idPrefix + 'item-b"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
-                '<label class="curriculum-managed-label"><input type="checkbox" id="' + idPrefix + 'can-both"' + (preview ? ' disabled' : '') + '> I can buy both with my balance</label>' +
+                '<label>Item A</label><select id="' + idPrefix + 'item-a">' + itemOptions(null, catalog) + '</select>' +
+                '<label>Item B</label><select id="' + idPrefix + 'item-b">' + itemOptions(null, catalog) + '</select>' +
+                '<label class="curriculum-managed-label"><input type="checkbox" id="' + idPrefix + 'can-both"> I can buy both with my balance</label>' +
                 '<label>If you cannot buy both, which would you choose?</label>' +
-                '<select id="' + idPrefix + 'choice"' + (preview ? ' disabled' : '') + '><option value="">Choose</option></select>' +
+                '<select id="' + idPrefix + 'choice"><option value="">Choose</option></select>' +
                 '<label>What are you giving up?</label>' +
-                '<textarea id="' + idPrefix + 'reason"' + (preview ? ' disabled' : '') + '></textarea>' +
+                '<textarea id="' + idPrefix + 'reason"></textarea>' +
                 '</div>';
         }
 
@@ -251,20 +327,18 @@
             const purchases = story.recent_purchases || [];
             const rows = purchases.length
                 ? purchases
-                : (state.catalog || []).slice(0, 6).map(function (item) {
+                : (catalog || []).slice(0, 6).map(function (item) {
                     return { id: 'item-' + item.id, amount: item.price, description: item.name };
                 });
             if (!rows.length) {
-                return staff + prompt + '<p class="muted">' + (preview
-                    ? 'Students tag their recent purchases as a need or a want. If they have not bought anything yet, they tag marketplace items instead.'
-                    : 'No purchases or catalog items to tag yet.') + '</p>';
+                return staff + prompt + '<p class="muted">No purchases or catalog items to tag yet.</p>';
             }
             const list = rows.map(function (row, idx) {
                 return '<div class="curriculum-tag-row" data-tag-id="' + esc(row.id) + '" data-label="' + esc(row.description) + '">' +
                     '<span>' + esc(row.description) + ' — ' + money(row.amount) + '</span>' +
                     '<span class="curriculum-radio-row">' +
-                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="need"' + (preview ? ' disabled' : '') + '> Need</label>' +
-                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="want"' + (preview ? ' disabled' : '') + '> Want</label>' +
+                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="need"> Need</label>' +
+                    '<label><input type="radio" name="' + idPrefix + 'tag-' + idx + '" value="want"> Want</label>' +
                     '</span></div>';
             }).join('');
             return staff + prompt + '<div class="curriculum-lesson-form">' + list + '</div>';
@@ -276,11 +350,11 @@
                 '<p class="muted">Last take-home ' + money(takeHome) + '. Balance ' + money(story.balance) + '.</p>' +
                 '<div class="curriculum-lesson-form">' +
                 '<label>Marketplace item (optional)</label>' +
-                '<select id="' + idPrefix + 'goal-item"' + (preview ? ' disabled' : '') + '>' + itemOptions() + '</select>' +
+                '<select id="' + idPrefix + 'goal-item">' + itemOptions(null, catalog) + '</select>' +
                 '<label>Target amount</label>' +
-                '<input type="number" step="0.01" id="' + idPrefix + 'goal-amount" placeholder="0.00"' + (preview ? ' disabled' : '') + '>' +
+                '<input type="number" step="0.01" id="' + idPrefix + 'goal-amount" placeholder="0.00">' +
                 '<label>Label</label>' +
-                '<input type="text" id="' + idPrefix + 'goal-label" placeholder="What are you saving for?"' + (preview ? ' disabled' : '') + '>' +
+                '<input type="text" id="' + idPrefix + 'goal-label" placeholder="What are you saving for?">' +
                 '</div>';
         }
 
@@ -343,10 +417,11 @@
         return {};
     }
 
-    function wireOpportunitySelects() {
-        const a = document.getElementById('cl-item-a');
-        const b = document.getElementById('cl-item-b');
-        const choice = document.getElementById('cl-choice');
+    function wireOpportunitySelects(prefix) {
+        prefix = prefix || 'cl-';
+        const a = document.getElementById(prefix + 'item-a');
+        const b = document.getElementById(prefix + 'item-b');
+        const choice = document.getElementById(prefix + 'choice');
         if (!a || !b || !choice) return;
         function refresh() {
             const opts = [];
@@ -362,10 +437,11 @@
         b.addEventListener('change', refresh);
     }
 
-    function wireGoalItemFill() {
-        const sel = document.getElementById('cl-goal-item');
-        const amount = document.getElementById('cl-goal-amount');
-        const label = document.getElementById('cl-goal-label');
+    function wireGoalItemFill(prefix) {
+        prefix = prefix || 'cl-';
+        const sel = document.getElementById(prefix + 'goal-item');
+        const amount = document.getElementById(prefix + 'goal-amount');
+        const label = document.getElementById(prefix + 'goal-label');
         if (!sel || !amount) return;
         sel.addEventListener('change', function () {
             const opt = sel.options[sel.selectedIndex];
@@ -486,7 +562,7 @@
         let html = '<table class="curriculum-roster"><thead><tr><th>Student</th>';
         lessons.forEach(function (l) {
             html += '<th><button type="button" class="curriculum-lesson-title-btn" data-lesson-slug="' +
-                esc(l.slug) + '" title="Preview this lesson">' + esc(l.title) + '</button></th>';
+                esc(l.slug) + '" title="Open the full lesson">' + esc(l.title) + '</button></th>';
         });
         html += '</tr></thead><tbody>';
         students.forEach(function (row) {
@@ -504,7 +580,7 @@
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                showLessonPreview(btn.getAttribute('data-lesson-slug'));
+                showFullLesson(btn.getAttribute('data-lesson-slug'));
             });
         });
         wrap.querySelectorAll('tr[data-student-id]').forEach(function (tr) {
@@ -517,38 +593,176 @@
         });
     }
 
-    function hideLessonPreview() {
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
+    function parseMoneyField(id) {
+        const el = document.getElementById(id);
+        if (!el) return NaN;
+        return parseFloat(String(el.value).replace(/[^0-9.-]/g, ''));
+    }
+
+    function checkWalkthroughAnswers(slug, story) {
+        const prefix = 'walk-cl-';
+        const thisPay = (story && story.this_paycheck) || {};
+        const prevPay = story && story.previous_paycheck;
+        const change = (story && story.pay_change) || {};
+        const tolerance = 0.05;
+
+        if (slug === 'read_paycheck') {
+            const base = parseMoneyField(prefix + 'base-pay');
+            const citations = parseInt((document.getElementById(prefix + 'citations') || {}).value, 10);
+            const deduction = parseMoneyField(prefix + 'deduction');
+            const finalPay = parseMoneyField(prefix + 'final');
+            if (Math.abs(base - Number(thisPay.base_pay || 0)) > tolerance) return 'Check the base pay: $100 × this week’s percent.';
+            if (citations !== Number(thisPay.citation_count || 0)) return 'Count the citations again.';
+            if (Math.abs(deduction - Number(thisPay.citation_deduction || 0)) > tolerance) return 'Deduction is citations × $2.';
+            if (Math.abs(finalPay - Number(thisPay.final_pay || 0)) > tolerance) return 'Final pay is base pay minus the deduction.';
+            return null;
+        }
+        if (slug === 'why_pay_changed') {
+            const thisEntered = parseMoneyField(prefix + 'this-take-home');
+            const compareEntered = parseMoneyField(prefix + 'compare-take-home');
+            const diffEntered = parseMoneyField(prefix + 'difference');
+            const thisActual = Number(thisPay.final_pay || 0);
+            const compareActual = prevPay ? Number(prevPay.final_pay || 0) : Number(change.zero_citation_pay || thisPay.base_pay || 0);
+            if (Math.abs(thisEntered - thisActual) > tolerance) return 'This week’s take-home does not match the paycheck.';
+            if (Math.abs(compareEntered - compareActual) > tolerance) return 'The comparison amount does not match.';
+            if (Math.abs(diffEntered - (thisActual - compareActual)) > tolerance) return 'Difference is this week minus the comparison.';
+            const why = ((document.getElementById(prefix + 'why') || {}).value || '').trim();
+            if (why.length < 3) return 'Write a short note about why pay changed.';
+            return null;
+        }
+        if (slug === 'save_or_buy') {
+            const sel = document.getElementById(prefix + 'item');
+            const decision = document.querySelector('input[name="' + prefix + 'decision"]:checked');
+            if (!sel || !sel.value) return 'Pick an item.';
+            if (!decision) return 'Choose buy, wait, or set as a goal.';
+            return null;
+        }
+        if (slug === 'opportunity_cost') {
+            const a = document.getElementById(prefix + 'item-a');
+            const b = document.getElementById(prefix + 'item-b');
+            if (!a || !b || !a.value || !b.value || a.value === b.value) return 'Pick two different items.';
+            return null;
+        }
+        if (slug === 'needs_vs_wants') {
+            const rows = document.querySelectorAll('#curriculum-lesson-view-body .curriculum-tag-row');
+            if (!rows.length) return 'Nothing to tag yet.';
+            let missing = false;
+            rows.forEach(function (row) {
+                if (!row.querySelector('input[type="radio"]:checked')) missing = true;
+            });
+            if (missing) return 'Tag each item as a need or a want.';
+            return null;
+        }
+        if (slug === 'savings_goal') {
+            const amount = parseMoneyField(prefix + 'goal-amount');
+            if (!(amount > 0)) return 'Enter a savings target greater than zero.';
+            return null;
+        }
+        return null;
+    }
+
+    function selectedStudentName() {
+        if (!state.studentId) return '';
+        const rows = (state.roster && state.roster.students) || [];
+        const row = rows.find(function (s) { return s.student_id === state.studentId; });
+        if (row && row.student_name) return row.student_name;
+        const input = document.getElementById('curriculum-student-search-input');
+        return input ? input.value.trim() : '';
+    }
+
+    function storyStripHtml(story) {
+        const s = story || {};
+        const pay = s.this_paycheck || {};
+        const change = s.pay_change || {};
+        let changeHint = 'No prior paycheck yet — compare to pay with zero citations.';
+        if (change.direction === 'up') changeHint = 'Up ' + money(change.delta) + ' from last week.';
+        if (change.direction === 'down') changeHint = 'Down ' + money(Math.abs(change.delta)) + ' from last week.';
+        if (change.direction === 'same') changeHint = 'Same take-home as last week.';
+        return '<div class="curriculum-stat"><p class="label">Balance</p><p class="value">' + money(s.balance) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">This week’s pay</p><p class="value">' + money(pay.final_pay) + '</p><p class="hint">' + esc(changeHint) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">Citations</p><p class="value">' + (pay.citation_count || 0) + '</p><p class="hint">Deduction ' + money(pay.citation_deduction) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">Spent (30 days)</p><p class="value">' + money(s.spent_30d) + '</p></div>';
+    }
+
+    function wireWalkthroughLesson(slug, story) {
+        wireOpportunitySelects('walk-cl-');
+        wireGoalItemFill('walk-cl-');
+        const body = document.getElementById('curriculum-lesson-view-body');
+        if (body && !document.getElementById('walkthrough-check-btn')) {
+            const actions = document.createElement('div');
+            actions.className = 'curriculum-actions';
+            actions.innerHTML = '<button type="button" class="btn-primary" id="walkthrough-check-btn">Check answers</button>';
+            const err = document.createElement('div');
+            err.className = 'curriculum-error';
+            err.id = 'walkthrough-lesson-error';
+            body.appendChild(actions);
+            body.appendChild(err);
+        }
+        const checkBtn = document.getElementById('walkthrough-check-btn');
+        const errEl = document.getElementById('walkthrough-lesson-error');
+        if (checkBtn) {
+            checkBtn.addEventListener('click', function () {
+                const problem = checkWalkthroughAnswers(slug, story);
+                if (!errEl) return;
+                if (problem) {
+                    errEl.style.color = '#dc2626';
+                    errEl.textContent = problem;
+                } else {
+                    errEl.style.color = '#047857';
+                    errEl.textContent = 'That checks out. Nothing is saved to a student from here.';
+                }
+            });
+        }
+    }
+
+    function hideFullLesson() {
+        const modal = document.getElementById('curriculum-lesson-view-modal');
         if (modal) modal.style.display = 'none';
     }
 
-    function showLessonPreview(slug) {
+    function showFullLesson(slug) {
         const lessons = (state.roster && state.roster.lessons) || [];
         const lesson = lessons.find(function (l) { return l.slug === slug; });
         if (!lesson) return;
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
-        const title = document.getElementById('curriculum-lesson-preview-title');
-        const skill = document.getElementById('curriculum-lesson-preview-skill');
-        const body = document.getElementById('curriculum-lesson-preview-body');
+        const modal = document.getElementById('curriculum-lesson-view-modal');
+        const title = document.getElementById('curriculum-lesson-view-title');
+        const skill = document.getElementById('curriculum-lesson-view-skill');
+        const storyEl = document.getElementById('curriculum-lesson-view-story');
+        const body = document.getElementById('curriculum-lesson-view-body');
         if (!modal || !title || !body) return;
+        const story = walkthroughStory();
+        const catalog = walkthroughCatalog();
+        const usingLive = !!(state.data && state.data.money_story && state.data.money_story.this_paycheck);
+        const studentName = selectedStudentName();
         title.textContent = lesson.title;
-        if (skill) skill.textContent = lesson.skill_name ? ('Skill: ' + lesson.skill_name) : '';
-        body.innerHTML = '<p class="curriculum-preview-note">This is what students will see. Their paycheck, balance, and marketplace fill in the numbers.</p>' +
-            lessonFormHtml({ lesson: lesson }, { preview: true });
+        if (skill) {
+            const skillName = lesson.skill_name || '';
+            const numbersNote = usingLive && studentName
+                ? 'Using ' + studentName + '’s paycheck and marketplace'
+                : 'This is the full lesson students complete';
+            skill.textContent = skillName ? (skillName + ' · ' + numbersNote) : numbersNote;
+        }
+        if (storyEl) storyEl.innerHTML = storyStripHtml(story);
+        body.innerHTML = lessonFormHtml({ lesson: lesson }, {
+            walkthrough: true,
+            story: story,
+            catalog: catalog,
+        });
+        wireWalkthroughLesson(slug, story);
         modal.style.display = 'block';
     }
 
-    function setupLessonPreviewModal() {
-        const modal = document.getElementById('curriculum-lesson-preview-modal');
-        const closeBtn = document.getElementById('curriculum-lesson-preview-close');
-        if (!modal || modal._curriculumPreviewBound) return;
-        modal._curriculumPreviewBound = true;
-        if (closeBtn) closeBtn.addEventListener('click', hideLessonPreview);
+    function setupLessonViewModal() {
+        const modal = document.getElementById('curriculum-lesson-view-modal');
+        const closeBtn = document.getElementById('curriculum-lesson-view-close');
+        if (!modal || modal._curriculumLessonViewBound) return;
+        modal._curriculumLessonViewBound = true;
+        if (closeBtn) closeBtn.addEventListener('click', hideFullLesson);
         modal.addEventListener('click', function (e) {
-            if (e.target === modal) hideLessonPreview();
+            if (e.target === modal) hideFullLesson();
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') hideLessonPreview();
+            if (e.key === 'Escape') hideFullLesson();
         });
     }
 
@@ -709,7 +923,7 @@
         if (isStaff()) {
             setupStaffSearch();
             setupStaffAssign();
-            setupLessonPreviewModal();
+            setupLessonViewModal();
             await loadRoster();
             if (state.studentId) await refreshStudent();
         } else {

@@ -11715,24 +11715,39 @@ ul.chartjs-legend.chartjs-legend--cols-3 li {
 .curriculum-lesson-title-btn:hover {
     color: var(--accent-hover);
 }
-.curriculum-preview-modal-content {
-    max-width: 560px;
+.curriculum-lesson-view-modal-content {
+    max-width: 800px;
 }
-.curriculum-preview-kicker {
+.curriculum-lesson-view-kicker {
     margin: 0 0 4px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #64748b;
 }
-.curriculum-preview-modal-content h2 {
+.curriculum-lesson-view-modal-content h2 {
     margin: 0 0 4px;
     padding-right: 2rem;
 }
-.curriculum-preview-note {
-    margin: 0 0 12px;
-    font-size: 13px;
-    color: #64748b;
+.curriculum-lesson-view-modal-content .curriculum-story-grid {
+    margin-top: 16px;
+}
+.curriculum-lesson-view-modal-content .curriculum-card {
+    margin-bottom: 0;
+}
+.curriculum-citation-list {
+    white-space: pre-line;
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    color: #334155;
+    min-height: 2em;
+}
+.curriculum-worksheet h4 {
+    margin: 0 0 8px;
 }
 .curriculum-status-pill {
     display: inline-block;
