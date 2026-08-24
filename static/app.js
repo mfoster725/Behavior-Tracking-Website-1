@@ -14190,7 +14190,7 @@ async function loadSchoolBilling() {
         if (data.needs_attention) {
             hint = '<div style="margin-top:6px;font-size:13px;color:#b45309;">Payment needs attention. Open Manage Plan to update it.</div>';
         } else if (!onPaid) {
-            hint = '<div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">To upgrade, open Manage Plan, select a paid plan, and pay.</div>';
+            hint = '<div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">Click on Manage Plan to upgrade your plan, update billing information, or cancel your plan.</div>';
         }
         box.innerHTML = `<div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;">
