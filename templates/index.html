@@ -1446,6 +1446,19 @@
         </div>
     </div>
 
+    <!-- Software billing details (opened from Manage billing) -->
+    <div id="billing-manage-modal" class="modal" onclick="if(event.target===this) closeSchoolBillingManageModal()">
+        <div class="modal-content" style="max-width: 480px;">
+            <span class="close" onclick="closeSchoolBillingManageModal()">&times;</span>
+            <h2>Manage billing</h2>
+            <div id="billing-manage-body" style="display: grid; gap: 16px; margin-top: 12px;"></div>
+            <div style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
+                <button type="button" id="billing-portal-open-btn" class="btn-primary" style="display: none;">Update card or cancel</button>
+                <button type="button" class="btn-secondary" onclick="closeSchoolBillingManageModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit User Modal -->
     <div id="edit-user-modal" class="modal">
         <div class="modal-content" style="max-width: 600px;">

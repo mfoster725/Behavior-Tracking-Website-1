@@ -2063,14 +2063,24 @@ def _format_price_label(price_obj, fallback_interval=None):
     return f"{money} one-time"
 
 
-def _retrieve_price_label(price_id, fallback_interval=None):
+def _retrieve_price_info(price_id, fallback_interval=None):
     if not price_id or stripe_sdk is None:
-        return None
+        return {'label': None, 'name': None}
     try:
-        return _format_price_label(stripe_sdk.Price.retrieve(price_id), fallback_interval)
+        price_obj = stripe_sdk.Price.retrieve(price_id, expand=['product'])
+        product = _stripe_get(price_obj, 'product')
+        name = None
+        if product is not None and not isinstance(product, str):
+            name = _stripe_get(product, 'name')
+        if not name:
+            name = _stripe_get(price_obj, 'nickname')
+        return {
+            'label': _format_price_label(price_obj, fallback_interval),
+            'name': name,
+        }
     except Exception:
         app.logger.exception('Could not load Stripe price %s', price_id)
-        return None
+        return {'label': None, 'name': None}
 
 
 def get_site_subscription():
@@ -2140,9 +2150,11 @@ def _billing_status_payload():
     build_required = _build_fee_configured()
     build_paid = bool(row.build_fee_paid) if build_required else True
     up_to_date = monthly_ok and build_paid
-    price_label = _retrieve_price_label(STRIPE_PRICE_ID, 'month') if _stripe_configured() else None
-    build_fee_label = (
-        _retrieve_price_label(STRIPE_BUILD_FEE_PRICE_ID) if build_required and _stripe_configured() else None
+    monthly_info = _retrieve_price_info(STRIPE_PRICE_ID, 'month') if _stripe_configured() else {'label': None, 'name': None}
+    build_info = (
+        _retrieve_price_info(STRIPE_BUILD_FEE_PRICE_ID)
+        if build_required and _stripe_configured()
+        else {'label': None, 'name': None}
     )
     period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
     build_paid_at = row.build_fee_paid_at.isoformat() + 'Z' if row.build_fee_paid_at else None
@@ -2158,8 +2170,10 @@ def _billing_status_payload():
         'cancel_at_period_end': bool(row.cancel_at_period_end),
         'current_period_end': period_end,
         'has_customer': bool(row.stripe_customer_id),
-        'price_label': price_label,
-        'build_fee_label': build_fee_label,
+        'price_label': monthly_info.get('label'),
+        'product_name': monthly_info.get('name'),
+        'build_fee_label': build_info.get('label'),
+        'build_fee_name': build_info.get('name'),
         'customer_email': row.customer_email,
         'can_subscribe': _stripe_configured() and not monthly_ok,
         'can_pay_build_fee': (
