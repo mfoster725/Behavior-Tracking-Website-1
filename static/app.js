@@ -13995,7 +13995,7 @@ function billingStatusLabel(status) {
         incomplete: 'Checkout incomplete',
         incomplete_expired: 'Checkout expired',
         trialing: 'Trial',
-        active: 'Active',
+        active: 'Active / paid',
         past_due: 'Past due',
         canceled: 'Canceled',
         unpaid: 'Unpaid',
@@ -14024,6 +14024,12 @@ function setBillingMessage(text, type) {
     msg.style.color = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#64748b');
 }
 
+function billingPill(ok, okText, badText) {
+    const bg = ok ? '#dcfce7' : '#ffedd5';
+    const color = ok ? '#166534' : '#9a3412';
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};color:${color};">${ok ? okText : badText}</span>`;
+}
+
 async function loadSchoolBilling() {
     const box = document.getElementById('billing-status-box');
     if (!box || !window.currentUser || window.currentUser.role !== 'admin') return;
@@ -14034,56 +14040,96 @@ async function loadSchoolBilling() {
             box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${data.error || 'Could not load billing status.'}</p>`;
             return;
         }
-        const active = data.status === 'active' || data.status === 'trialing';
         const banner = document.getElementById('billing-unpaid-banner');
-        if (banner) banner.style.display = (data.configured && !active) ? 'block' : 'none';
+        if (banner) {
+            banner.style.display = (data.configured && !data.up_to_date) ? 'block' : 'none';
+        }
         const period = formatBillingDate(data.current_period_end);
+        const buildPaidAt = formatBillingDate(data.build_fee_paid_at);
         const parts = [
-            `<div><strong>Status:</strong> ${billingStatusLabel(data.status)}</div>`
+            `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <strong>Overall:</strong>
+                ${billingPill(!!data.up_to_date, 'Up to date', 'Not up to date')}
+             </div>`,
+            `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <strong>Monthly:</strong>
+                ${billingPill(!!data.monthly_ok, billingStatusLabel(data.status), billingStatusLabel(data.status))}
+             </div>`
         ];
-        if (data.price_label) parts.push(`<div><strong>Plan:</strong> ${data.price_label}</div>`);
+        if (data.price_label) parts.push(`<div><strong>Monthly plan:</strong> ${data.price_label}</div>`);
         if (period) {
             parts.push(`<div><strong>${data.cancel_at_period_end ? 'Ends' : 'Renews'}:</strong> ${period}</div>`);
         }
+        if (data.build_fee_required) {
+            parts.push(
+                `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <strong>Build fee:</strong>
+                    ${billingPill(!!data.build_fee_paid, 'Paid', 'Not paid')}
+                 </div>`
+            );
+            if (data.build_fee_label) {
+                parts.push(`<div><strong>Build fee amount:</strong> ${data.build_fee_label}</div>`);
+            }
+            if (data.build_fee_paid && buildPaidAt) {
+                parts.push(`<div><strong>Build fee paid:</strong> ${buildPaidAt}</div>`);
+            }
+        }
         if (data.customer_email) parts.push(`<div><strong>Billing email:</strong> ${data.customer_email}</div>`);
         if (!data.configured) {
-            parts.push('<div style="margin-top:8px;color:#b45309;">Stripe is not configured yet. Add STRIPE_SECRET_KEY and STRIPE_PRICE_ID on the Render web service.</div>');
+            parts.push('<div style="margin-top:8px;color:#b45309;">Stripe is not configured yet. Add STRIPE_SECRET_KEY, STRIPE_PRICE_ID, and STRIPE_BUILD_FEE_PRICE_ID on the Render web service.</div>');
         }
-        box.innerHTML = `<div style="display:grid;gap:6px;font-size:14px;">${parts.join('')}</div>`;
+        box.innerHTML = `<div style="display:grid;gap:8px;font-size:14px;">${parts.join('')}</div>`;
         const emailInput = document.getElementById('billing-email');
         if (emailInput && data.customer_email && !emailInput.value) {
             emailInput.value = data.customer_email;
         }
         const subscribeBtn = document.getElementById('billing-subscribe-btn');
+        const buildFeeBtn = document.getElementById('billing-build-fee-btn');
         const portalBtn = document.getElementById('billing-portal-btn');
-        if (subscribeBtn) subscribeBtn.disabled = !data.configured || active;
+        if (subscribeBtn) {
+            subscribeBtn.disabled = !data.can_subscribe;
+            subscribeBtn.textContent = data.build_fee_required && data.can_subscribe && !data.build_fee_paid
+                ? 'Pay monthly + build fee'
+                : 'Subscribe monthly';
+            subscribeBtn.style.display = data.can_subscribe ? '' : 'none';
+        }
+        if (buildFeeBtn) {
+            const showBuildOnly = !!data.can_pay_build_fee && !!data.monthly_ok;
+            buildFeeBtn.style.display = showBuildOnly ? '' : 'none';
+            buildFeeBtn.disabled = !showBuildOnly;
+        }
         if (portalBtn) portalBtn.disabled = !data.configured || !data.has_customer;
     } catch (err) {
         box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Could not load billing status.</p>';
     }
 }
 
-async function startSchoolSubscription() {
+async function startSchoolSubscription(intent) {
     const subscribeBtn = document.getElementById('billing-subscribe-btn');
+    const buildFeeBtn = document.getElementById('billing-build-fee-btn');
     const emailInput = document.getElementById('billing-email');
     setBillingMessage('');
     if (subscribeBtn) subscribeBtn.disabled = true;
+    if (buildFeeBtn) buildFeeBtn.disabled = true;
     try {
         const response = await fetch('/api/billing/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: emailInput ? emailInput.value.trim() : '' })
+            body: JSON.stringify({
+                email: emailInput ? emailInput.value.trim() : '',
+                intent: intent || 'auto'
+            })
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.url) {
             setBillingMessage(data.error || 'Could not start checkout.', 'error');
-            if (subscribeBtn) subscribeBtn.disabled = false;
+            loadSchoolBilling();
             return;
         }
         window.location.href = data.url;
     } catch (err) {
         setBillingMessage('Could not start checkout.', 'error');
-        if (subscribeBtn) subscribeBtn.disabled = false;
+        loadSchoolBilling();
     }
 }
 
@@ -14162,7 +14208,9 @@ function copyToClipboard(text) {
 // Event listeners for schedule management
 document.addEventListener('DOMContentLoaded', () => {
     const subscribeBtn = document.getElementById('billing-subscribe-btn');
-    if (subscribeBtn) subscribeBtn.addEventListener('click', startSchoolSubscription);
+    if (subscribeBtn) subscribeBtn.addEventListener('click', () => startSchoolSubscription('auto'));
+    const buildFeeBtn = document.getElementById('billing-build-fee-btn');
+    if (buildFeeBtn) buildFeeBtn.addEventListener('click', () => startSchoolSubscription('build_fee'));
     const portalBtn = document.getElementById('billing-portal-btn');
     if (portalBtn) portalBtn.addEventListener('click', openSchoolBillingPortal);
     if (window.currentUser && window.currentUser.role === 'admin') {

@@ -234,6 +234,7 @@ limiter = Limiter(
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
 STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', '').strip()
+STRIPE_BUILD_FEE_PRICE_ID = os.environ.get('STRIPE_BUILD_FEE_PRICE_ID', '').strip()
 if stripe_sdk is not None and STRIPE_SECRET_KEY:
     stripe_sdk.api_key = STRIPE_SECRET_KEY
 
@@ -1439,7 +1440,70 @@ class SiteSubscription(db.Model):
     current_period_end = db.Column(db.DateTime, nullable=True)
     cancel_at_period_end = db.Column(db.Boolean, default=False, nullable=False)
     customer_email = db.Column(db.String(200), nullable=True)
+    build_fee_paid = db.Column(db.Boolean, default=False, nullable=False)
+    build_fee_paid_at = db.Column(db.DateTime, nullable=True)
+    build_fee_session_id = db.Column(db.String(100), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+def ensure_site_subscription_columns():
+    """Add build-fee columns on existing site_subscription tables."""
+    try:
+        with app.app_context():
+            inspector = None
+            try:
+                from sqlalchemy import inspect as sa_inspect
+                inspector = sa_inspect(db.engine)
+            except Exception:
+                return
+            if 'site_subscription' not in inspector.get_table_names():
+                return
+            columns = {col['name'] for col in inspector.get_columns('site_subscription')}
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            alters = []
+            if 'build_fee_paid' not in columns:
+                if is_postgres:
+                    alters.append(
+                        "ALTER TABLE site_subscription "
+                        "ADD COLUMN IF NOT EXISTS build_fee_paid BOOLEAN DEFAULT FALSE NOT NULL"
+                    )
+                else:
+                    alters.append(
+                        "ALTER TABLE site_subscription "
+                        "ADD COLUMN build_fee_paid BOOLEAN DEFAULT 0 NOT NULL"
+                    )
+            if 'build_fee_paid_at' not in columns:
+                if is_postgres:
+                    alters.append(
+                        "ALTER TABLE site_subscription "
+                        "ADD COLUMN IF NOT EXISTS build_fee_paid_at TIMESTAMP"
+                    )
+                else:
+                    alters.append(
+                        "ALTER TABLE site_subscription ADD COLUMN build_fee_paid_at DATETIME"
+                    )
+            if 'build_fee_session_id' not in columns:
+                if is_postgres:
+                    alters.append(
+                        "ALTER TABLE site_subscription "
+                        "ADD COLUMN IF NOT EXISTS build_fee_session_id VARCHAR(100)"
+                    )
+                else:
+                    alters.append(
+                        "ALTER TABLE site_subscription "
+                        "ADD COLUMN build_fee_session_id VARCHAR(100)"
+                    )
+            if not alters:
+                return
+            with db.engine.connect() as conn:
+                for sql in alters:
+                    conn.execute(text(sql))
+                conn.commit()
+    except Exception as e:
+        print(f"Note: site_subscription column ensure skipped: {e}", flush=True)
+
+
+ensure_site_subscription_columns()
 
 
 def ensure_curriculum_schema():
@@ -1955,6 +2019,10 @@ def _stripe_configured():
     return bool(stripe_sdk is not None and STRIPE_SECRET_KEY and STRIPE_PRICE_ID)
 
 
+def _build_fee_configured():
+    return bool(STRIPE_BUILD_FEE_PRICE_ID)
+
+
 def _public_base_url():
     env_url = (os.environ.get('RENDER_EXTERNAL_URL') or '').strip().rstrip('/')
     if env_url:
@@ -1978,12 +2046,58 @@ def _stripe_id(value):
     return _stripe_get(value, 'id')
 
 
+def _checkout_integration_id(kind):
+    return f"{kind}-{secrets.token_hex(4)}"
+
+
+def _format_price_label(price_obj, fallback_interval=None):
+    if price_obj is None:
+        return None
+    amount = (_stripe_get(price_obj, 'unit_amount') or 0) / 100.0
+    recurring = _stripe_get(price_obj, 'recurring')
+    interval = _stripe_get(recurring, 'interval') if recurring else fallback_interval
+    currency = (_stripe_get(price_obj, 'currency') or 'usd').upper()
+    money = f"${amount:.2f}" if currency == 'USD' else f"{amount:.2f} {currency}"
+    if interval:
+        return f"{money} / {interval}"
+    return f"{money} one-time"
+
+
+def _retrieve_price_label(price_id, fallback_interval=None):
+    if not price_id or stripe_sdk is None:
+        return None
+    try:
+        return _format_price_label(stripe_sdk.Price.retrieve(price_id), fallback_interval)
+    except Exception:
+        app.logger.exception('Could not load Stripe price %s', price_id)
+        return None
+
+
 def get_site_subscription():
     row = SiteSubscription.query.order_by(SiteSubscription.id.asc()).first()
     if row is None:
-        row = SiteSubscription(status='inactive')
+        row = SiteSubscription(status='inactive', build_fee_paid=False)
         db.session.add(row)
         db.session.commit()
+    return row
+
+
+def _subscription_is_current(status):
+    return (status or '') in ('active', 'trialing')
+
+
+def _mark_build_fee_paid(row, session_id=None):
+    if row.build_fee_paid:
+        if session_id and not row.build_fee_session_id:
+            row.build_fee_session_id = session_id
+            db.session.commit()
+        return row
+    row.build_fee_paid = True
+    row.build_fee_paid_at = datetime.utcnow()
+    if session_id:
+        row.build_fee_session_id = session_id
+    row.updated_at = datetime.utcnow()
+    db.session.commit()
     return row
 
 
@@ -2022,29 +2136,35 @@ def _apply_stripe_subscription(sub):
 
 def _billing_status_payload():
     row = get_site_subscription()
-    price_label = None
-    if _stripe_configured():
-        try:
-            price = stripe_sdk.Price.retrieve(STRIPE_PRICE_ID)
-            amount = (getattr(price, 'unit_amount', None) or 0) / 100.0
-            recurring = getattr(price, 'recurring', None)
-            interval = getattr(recurring, 'interval', None) if recurring else 'month'
-            currency = (getattr(price, 'currency', None) or 'usd').upper()
-            if currency == 'USD':
-                price_label = f"${amount:.2f} / {interval}"
-            else:
-                price_label = f"{amount:.2f} {currency} / {interval}"
-        except Exception:
-            app.logger.exception('Could not load Stripe price %s', STRIPE_PRICE_ID)
+    monthly_ok = _subscription_is_current(row.status)
+    build_required = _build_fee_configured()
+    build_paid = bool(row.build_fee_paid) if build_required else True
+    up_to_date = monthly_ok and build_paid
+    price_label = _retrieve_price_label(STRIPE_PRICE_ID, 'month') if _stripe_configured() else None
+    build_fee_label = (
+        _retrieve_price_label(STRIPE_BUILD_FEE_PRICE_ID) if build_required and _stripe_configured() else None
+    )
     period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
+    build_paid_at = row.build_fee_paid_at.isoformat() + 'Z' if row.build_fee_paid_at else None
     return {
         'configured': _stripe_configured(),
+        'build_fee_configured': build_required,
         'status': row.status or 'inactive',
+        'monthly_ok': monthly_ok,
+        'build_fee_paid': bool(row.build_fee_paid),
+        'build_fee_paid_at': build_paid_at,
+        'build_fee_required': build_required,
+        'up_to_date': up_to_date,
         'cancel_at_period_end': bool(row.cancel_at_period_end),
         'current_period_end': period_end,
         'has_customer': bool(row.stripe_customer_id),
         'price_label': price_label,
+        'build_fee_label': build_fee_label,
         'customer_email': row.customer_email,
+        'can_subscribe': _stripe_configured() and not monthly_ok,
+        'can_pay_build_fee': (
+            _stripe_configured() and build_required and not bool(row.build_fee_paid)
+        ),
     }
 
 
@@ -2065,19 +2185,71 @@ def billing_checkout():
             'error': 'Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID on the web service.'
         }), 400
     row = get_site_subscription()
-    if (row.status or '') in ('active', 'trialing'):
-        return jsonify({'error': 'A subscription is already active. Use Manage billing to change it.'}), 400
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or row.customer_email or '').strip()
+    intent = (data.get('intent') or 'auto').strip().lower()
     base = _public_base_url()
+    include_build = (
+        _build_fee_configured()
+        and not bool(row.build_fee_paid)
+        and intent in ('auto', 'subscribe', 'both')
+    )
+    monthly_ok = _subscription_is_current(row.status)
+
+    # Build-fee only (subscription already current).
+    if intent == 'build_fee' or (monthly_ok and include_build and intent == 'auto'):
+        if not _build_fee_configured():
+            return jsonify({'error': 'Build fee price is not configured (STRIPE_BUILD_FEE_PRICE_ID).'}), 400
+        if row.build_fee_paid:
+            return jsonify({'error': 'Build fee is already marked paid.'}), 400
+        kwargs = {
+            'mode': 'payment',
+            'line_items': [{'price': STRIPE_BUILD_FEE_PRICE_ID, 'quantity': 1}],
+            'success_url': base + '/?billing=success',
+            'cancel_url': base + '/?billing=canceled',
+            'client_reference_id': str(current_user.id),
+            'allow_promotion_codes': True,
+            'metadata': {
+                'site': 'behavior-tracking',
+                'admin_user_id': str(current_user.id),
+                'purpose': 'build_fee',
+            },
+            'integration_identifier': _checkout_integration_id('buildfee'),
+        }
+        if row.stripe_customer_id:
+            kwargs['customer'] = row.stripe_customer_id
+        elif email:
+            kwargs['customer_email'] = email
+        try:
+            session = stripe_sdk.checkout.Session.create(**kwargs)
+        except Exception as e:
+            app.logger.exception('Stripe build-fee checkout failed')
+            return jsonify({'error': 'Could not start build-fee checkout', 'detail': str(e)}), 400
+        return jsonify({'url': session.url})
+
+    if monthly_ok:
+        return jsonify({'error': 'Monthly subscription is already active. Use Manage billing to change it.'}), 400
+
+    line_items = [{'price': STRIPE_PRICE_ID, 'quantity': 1}]
+    metadata = {
+        'site': 'behavior-tracking',
+        'admin_user_id': str(current_user.id),
+        'purpose': 'subscription',
+    }
+    if include_build:
+        line_items.append({'price': STRIPE_BUILD_FEE_PRICE_ID, 'quantity': 1})
+        metadata['purpose'] = 'subscription_and_build_fee'
+        metadata['includes_build_fee'] = 'true'
+
     kwargs = {
         'mode': 'subscription',
-        'line_items': [{'price': STRIPE_PRICE_ID, 'quantity': 1}],
+        'line_items': line_items,
         'success_url': base + '/?billing=success',
         'cancel_url': base + '/?billing=canceled',
         'client_reference_id': str(current_user.id),
         'allow_promotion_codes': True,
-        'metadata': {'site': 'behavior-tracking', 'admin_user_id': str(current_user.id)},
+        'metadata': metadata,
+        'integration_identifier': _checkout_integration_id('subscribe'),
     }
     if row.stripe_customer_id:
         kwargs['customer'] = row.stripe_customer_id
@@ -2134,22 +2306,35 @@ def stripe_webhook():
     try:
         if event_type == 'checkout.session.completed':
             mode = _stripe_get(obj, 'mode')
+            session_id = _stripe_id(_stripe_get(obj, 'id'))
+            metadata = _stripe_get(obj, 'metadata') or {}
+            purpose = _stripe_get(metadata, 'purpose') if metadata is not None else None
+            includes_build = str(_stripe_get(metadata, 'includes_build_fee') or '').lower() in (
+                '1', 'true', 'yes'
+            )
+            row = get_site_subscription()
+            customer_id = _stripe_id(_stripe_get(obj, 'customer'))
+            email = _stripe_get(obj, 'customer_details')
+            email_value = _stripe_get(email, 'email') if email is not None else None
+            if not email_value:
+                email_value = _stripe_get(obj, 'customer_email')
+            if customer_id:
+                row.stripe_customer_id = customer_id
+            if email_value:
+                row.customer_email = email_value
+            db.session.commit()
+
             if mode == 'subscription':
-                row = get_site_subscription()
-                customer_id = _stripe_id(_stripe_get(obj, 'customer'))
                 sub_id = _stripe_id(_stripe_get(obj, 'subscription'))
-                email = _stripe_get(obj, 'customer_details')
-                email_value = _stripe_get(email, 'email') if email is not None else None
-                if not email_value:
-                    email_value = _stripe_get(obj, 'customer_email')
-                if customer_id:
-                    row.stripe_customer_id = customer_id
-                if email_value:
-                    row.customer_email = email_value
-                db.session.commit()
                 if sub_id:
                     sub = stripe_sdk.Subscription.retrieve(sub_id)
                     _apply_stripe_subscription(sub)
+                if includes_build or purpose in ('subscription_and_build_fee', 'build_fee'):
+                    _mark_build_fee_paid(get_site_subscription(), session_id=session_id)
+            elif mode == 'payment' and (
+                purpose == 'build_fee' or includes_build
+            ):
+                _mark_build_fee_paid(get_site_subscription(), session_id=session_id)
         elif event_type in (
             'customer.subscription.created',
             'customer.subscription.updated',
@@ -2161,6 +2346,15 @@ def stripe_webhook():
             if sub_id:
                 sub = stripe_sdk.Subscription.retrieve(sub_id)
                 _apply_stripe_subscription(sub)
+            if event_type == 'invoice.paid' and STRIPE_BUILD_FEE_PRICE_ID:
+                lines = _stripe_get(obj, 'lines') or {}
+                line_data = _stripe_get(lines, 'data') if not isinstance(lines, dict) else lines.get('data')
+                for line in (line_data or []):
+                    price = _stripe_get(line, 'price')
+                    price_id = _stripe_id(_stripe_get(price, 'id') if price is not None else None)
+                    if price_id == STRIPE_BUILD_FEE_PRICE_ID:
+                        _mark_build_fee_paid(get_site_subscription())
+                        break
     except Exception:
         app.logger.exception('Stripe webhook handler failed for %s', event_type)
         return jsonify({'error': 'Webhook handler failed'}), 500

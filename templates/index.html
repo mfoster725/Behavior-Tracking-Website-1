@@ -27,8 +27,8 @@
     <div class="container">
         <div id="billing-unpaid-banner" class="password-change-banner" style="display: none; background: #b45309;">
             <div>
-                <strong>Subscription:</strong> This site is not on an active paid plan.
-                Open <strong>Admin Panel</strong> to subscribe. Staff can keep using the app until you turn on a lockout.
+                <strong>Billing:</strong> This school is not fully paid / up to date.
+                Open <strong>Admin Panel</strong> to pay the monthly plan and/or build fee.
             </div>
         </div>
         {% if must_change_password %}
@@ -611,9 +611,9 @@
                 <div class="admin-sections" style="display: grid; gap: 20px; margin-top: 30px;">
                     <!-- Software subscription (Stripe) -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                        <h3>Software subscription</h3>
+                        <h3>Software billing</h3>
                         <p style="font-size: 13px; color: var(--text-secondary); margin: 8px 0 0;">
-                            The school pays for this website here. Card details are entered on Stripe, not stored in this app.
+                            Monthly subscription plus one-time build fee. Card details stay on Stripe; this panel shows whether the school is paid / up to date.
                         </p>
                         <div id="billing-status-box" style="margin-top: 16px;">
                             <p style="color: var(--text-secondary); font-size: 13px;">Loading billing status…</p>
@@ -621,7 +621,8 @@
                         <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center;">
                             <input type="email" id="billing-email" placeholder="Billing email" autocomplete="email"
                                    style="padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 220px;">
-                            <button type="button" id="billing-subscribe-btn" class="btn-primary">Subscribe</button>
+                            <button type="button" id="billing-subscribe-btn" class="btn-primary">Pay / Subscribe</button>
+                            <button type="button" id="billing-build-fee-btn" class="btn-secondary" style="display: none;">Pay build fee</button>
                             <button type="button" id="billing-portal-btn" class="btn-secondary">Manage billing</button>
                         </div>
                         <p id="billing-msg" style="display: none; margin-top: 10px; font-size: 13px;"></p>
@@ -2119,7 +2120,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=curricwip1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=billing2"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
