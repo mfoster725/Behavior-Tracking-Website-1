@@ -233,10 +233,15 @@ limiter = Limiter(
 
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
+STRIPE_PRICE_LOOKUP_KEY = os.environ.get('STRIPE_PRICE_LOOKUP_KEY', 'monthly').strip() or 'monthly'
+STRIPE_BUILD_FEE_LOOKUP_KEY = os.environ.get('STRIPE_BUILD_FEE_LOOKUP_KEY', 'build_fee').strip() or 'build_fee'
+# Optional fallbacks while migrating off hardcoded Price IDs.
 STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', '').strip()
 STRIPE_BUILD_FEE_PRICE_ID = os.environ.get('STRIPE_BUILD_FEE_PRICE_ID', '').strip()
 if stripe_sdk is not None and STRIPE_SECRET_KEY:
     stripe_sdk.api_key = STRIPE_SECRET_KEY
+_STRIPE_PRICE_CACHE = {}
+_STRIPE_PRICE_CACHE_TTL = 60
 
 # Render/production sits behind a reverse proxy; trust X-Forwarded-* for HTTPS and cookies.
 if use_postgres_db:
@@ -2015,12 +2020,89 @@ def index():
     )
 
 
+def _stripe_client():
+    if stripe_sdk is None or not STRIPE_SECRET_KEY:
+        return None
+    return stripe_sdk.StripeClient(STRIPE_SECRET_KEY)
+
+
+def _price_id_of(price_obj):
+    return _stripe_id(_stripe_get(price_obj, 'id'))
+
+
+def _lookup_stripe_price(lookup_key, fallback_price_id=None, fresh=False):
+    """Resolve the live Stripe Price for a stable lookup key (Dashboard-updated)."""
+    if stripe_sdk is None or not STRIPE_SECRET_KEY:
+        return None
+    cache_key = lookup_key or fallback_price_id or ''
+    now = time.time()
+    if not fresh and cache_key:
+        cached = _STRIPE_PRICE_CACHE.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+    price_obj = None
+    if lookup_key:
+        try:
+            client = _stripe_client()
+            params = {
+                'lookup_keys': [lookup_key],
+                'active': True,
+                'expand': ['data.product'],
+                'limit': 1,
+            }
+            result = None
+            if client is not None:
+                try:
+                    result = client.v1.prices.list(params)
+                except TypeError:
+                    result = None
+            if result is None:
+                result = stripe_sdk.Price.list(
+                    lookup_keys=[lookup_key],
+                    active=True,
+                    expand=['data.product'],
+                    limit=1,
+                )
+            data = _stripe_get(result, 'data') or []
+            if data:
+                price_obj = data[0]
+        except Exception:
+            app.logger.exception('Could not look up Stripe price %s', lookup_key)
+    if price_obj is None and fallback_price_id:
+        try:
+            price_obj = stripe_sdk.Price.retrieve(fallback_price_id, expand=['product'])
+        except Exception:
+            app.logger.exception('Could not load Stripe price %s', fallback_price_id)
+    if cache_key:
+        ttl = _STRIPE_PRICE_CACHE_TTL if price_obj is not None else 15
+        _STRIPE_PRICE_CACHE[cache_key] = (now + ttl, price_obj)
+    return price_obj
+
+
+def _monthly_price(fresh=False):
+    return _lookup_stripe_price(STRIPE_PRICE_LOOKUP_KEY, STRIPE_PRICE_ID, fresh=fresh)
+
+
+def _build_fee_price(fresh=False):
+    return _lookup_stripe_price(STRIPE_BUILD_FEE_LOOKUP_KEY, STRIPE_BUILD_FEE_PRICE_ID, fresh=fresh)
+
+
 def _stripe_configured():
-    return bool(stripe_sdk is not None and STRIPE_SECRET_KEY and STRIPE_PRICE_ID)
+    return bool(stripe_sdk is not None and STRIPE_SECRET_KEY and _price_id_of(_monthly_price()))
 
 
 def _build_fee_configured():
-    return bool(STRIPE_BUILD_FEE_PRICE_ID)
+    return bool(_price_id_of(_build_fee_price()))
+
+
+def _build_fee_price_ids():
+    ids = set()
+    pid = _price_id_of(_build_fee_price())
+    if pid:
+        ids.add(pid)
+    if STRIPE_BUILD_FEE_PRICE_ID:
+        ids.add(STRIPE_BUILD_FEE_PRICE_ID)
+    return ids
 
 
 def _public_base_url():
@@ -2063,24 +2145,19 @@ def _format_price_label(price_obj, fallback_interval=None):
     return f"{money} one-time"
 
 
-def _retrieve_price_info(price_id, fallback_interval=None):
-    if not price_id or stripe_sdk is None:
+def _price_info_from_obj(price_obj, fallback_interval=None):
+    if price_obj is None:
         return {'label': None, 'name': None}
-    try:
-        price_obj = stripe_sdk.Price.retrieve(price_id, expand=['product'])
-        product = _stripe_get(price_obj, 'product')
-        name = None
-        if product is not None and not isinstance(product, str):
-            name = _stripe_get(product, 'name')
-        if not name:
-            name = _stripe_get(price_obj, 'nickname')
-        return {
-            'label': _format_price_label(price_obj, fallback_interval),
-            'name': name,
-        }
-    except Exception:
-        app.logger.exception('Could not load Stripe price %s', price_id)
-        return {'label': None, 'name': None}
+    product = _stripe_get(price_obj, 'product')
+    name = None
+    if product is not None and not isinstance(product, str):
+        name = _stripe_get(product, 'name')
+    if not name:
+        name = _stripe_get(price_obj, 'nickname')
+    return {
+        'label': _format_price_label(price_obj, fallback_interval),
+        'name': name,
+    }
 
 
 def get_site_subscription():
@@ -2154,15 +2231,14 @@ def _billing_status_payload():
     row = get_site_subscription()
     monthly_ok = _subscription_is_current(row.status)
     on_paid_plan = _on_paid_plan(row.status)
-    build_required = _build_fee_configured()
+    monthly_obj = _monthly_price()
+    build_obj = _build_fee_price()
+    configured = bool(stripe_sdk is not None and STRIPE_SECRET_KEY and _price_id_of(monthly_obj))
+    build_required = bool(_price_id_of(build_obj))
     build_paid = bool(row.build_fee_paid) if build_required else True
     up_to_date = monthly_ok and build_paid
-    monthly_info = _retrieve_price_info(STRIPE_PRICE_ID, 'month') if _stripe_configured() else {'label': None, 'name': None}
-    build_info = (
-        _retrieve_price_info(STRIPE_BUILD_FEE_PRICE_ID)
-        if build_required and _stripe_configured()
-        else {'label': None, 'name': None}
-    )
+    monthly_info = _price_info_from_obj(monthly_obj, 'month') if configured else {'label': None, 'name': None}
+    build_info = _price_info_from_obj(build_obj) if build_required and configured else {'label': None, 'name': None}
     period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
     build_paid_at = row.build_fee_paid_at.isoformat() + 'Z' if row.build_fee_paid_at else None
     paid_name = monthly_info.get('name') or 'Paid plan'
@@ -2173,7 +2249,7 @@ def _billing_status_payload():
         'kind': 'free',
         'current': not on_paid_plan,
     }]
-    if _stripe_configured():
+    if configured:
         plans.append({
             'id': 'paid',
             'name': paid_name,
@@ -2183,7 +2259,7 @@ def _billing_status_payload():
             'build_fee_label': build_info.get('label') if build_required else None,
         })
     return {
-        'configured': _stripe_configured(),
+        'configured': configured,
         'build_fee_configured': build_required,
         'status': row.status or 'inactive',
         'monthly_ok': monthly_ok,
@@ -2203,9 +2279,9 @@ def _billing_status_payload():
         'build_fee_label': build_info.get('label'),
         'build_fee_name': build_info.get('name'),
         'customer_email': row.customer_email,
-        'can_subscribe': _stripe_configured() and not monthly_ok,
+        'can_subscribe': configured and not monthly_ok,
         'can_pay_build_fee': (
-            _stripe_configured() and build_required and not bool(row.build_fee_paid)
+            configured and build_required and not bool(row.build_fee_paid)
         ),
         'needs_attention': (row.status or '') in ('past_due', 'unpaid', 'incomplete'),
     }
@@ -2223,17 +2299,21 @@ def billing_status():
 @login_required
 @admin_required
 def billing_checkout():
-    if not _stripe_configured():
-        return jsonify({
-            'error': 'Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID on the web service.'
-        }), 400
     row = get_site_subscription()
+    monthly = _monthly_price(fresh=True)
+    monthly_id = _price_id_of(monthly)
+    if stripe_sdk is None or not STRIPE_SECRET_KEY or not monthly_id:
+        return jsonify({
+            'error': 'Stripe is not configured. Set a lookup key of "monthly" on the live monthly Price in Stripe (or STRIPE_PRICE_ID as a fallback).'
+        }), 400
+    build = _build_fee_price(fresh=True)
+    build_id = _price_id_of(build)
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or row.customer_email or '').strip()
     intent = (data.get('intent') or 'auto').strip().lower()
     base = _public_base_url()
     include_build = (
-        _build_fee_configured()
+        bool(build_id)
         and not bool(row.build_fee_paid)
         and intent in ('auto', 'subscribe', 'both')
     )
@@ -2241,13 +2321,13 @@ def billing_checkout():
 
     # Build-fee only (subscription already current).
     if intent == 'build_fee' or (monthly_ok and include_build and intent == 'auto'):
-        if not _build_fee_configured():
-            return jsonify({'error': 'Build fee price is not configured (STRIPE_BUILD_FEE_PRICE_ID).'}), 400
+        if not build_id:
+            return jsonify({'error': 'Build fee price is not configured. Set lookup key "build_fee" on that Price in Stripe.'}), 400
         if row.build_fee_paid:
             return jsonify({'error': 'Build fee is already marked paid.'}), 400
         kwargs = {
             'mode': 'payment',
-            'line_items': [{'price': STRIPE_BUILD_FEE_PRICE_ID, 'quantity': 1}],
+            'line_items': [{'price': build_id, 'quantity': 1}],
             'success_url': base + '/?billing=success',
             'cancel_url': base + '/?billing=canceled',
             'client_reference_id': str(current_user.id),
@@ -2271,16 +2351,16 @@ def billing_checkout():
         return jsonify({'url': session.url})
 
     if monthly_ok:
-        return jsonify({'error': 'Monthly subscription is already active. Use Manage billing to change it.'}), 400
+        return jsonify({'error': 'Monthly subscription is already active. Use Manage Plan to change it.'}), 400
 
-    line_items = [{'price': STRIPE_PRICE_ID, 'quantity': 1}]
+    line_items = [{'price': monthly_id, 'quantity': 1}]
     metadata = {
         'site': 'behavior-tracking',
         'admin_user_id': str(current_user.id),
         'purpose': 'subscription',
     }
     if include_build:
-        line_items.append({'price': STRIPE_BUILD_FEE_PRICE_ID, 'quantity': 1})
+        line_items.append({'price': build_id, 'quantity': 1})
         metadata['purpose'] = 'subscription_and_build_fee'
         metadata['includes_build_fee'] = 'true'
 
@@ -2389,13 +2469,15 @@ def stripe_webhook():
             if sub_id:
                 sub = stripe_sdk.Subscription.retrieve(sub_id)
                 _apply_stripe_subscription(sub)
-            if event_type == 'invoice.paid' and STRIPE_BUILD_FEE_PRICE_ID:
+            if event_type == 'invoice.paid':
+                fee_ids = _build_fee_price_ids()
                 lines = _stripe_get(obj, 'lines') or {}
                 line_data = _stripe_get(lines, 'data') if not isinstance(lines, dict) else lines.get('data')
                 for line in (line_data or []):
                     price = _stripe_get(line, 'price')
                     price_id = _stripe_id(_stripe_get(price, 'id') if price is not None else None)
-                    if price_id == STRIPE_BUILD_FEE_PRICE_ID:
+                    lookup_key = _stripe_get(price, 'lookup_key') if price is not None else None
+                    if price_id in fee_ids or lookup_key == STRIPE_BUILD_FEE_LOOKUP_KEY:
                         _mark_build_fee_paid(get_site_subscription())
                         break
     except Exception:
