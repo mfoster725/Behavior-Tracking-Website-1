@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=startips1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=curricwip1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -82,7 +82,9 @@
                 <button type="button" class="nav-btn" data-view="schedules">Schedules</button>
                 {% endif %}
                 <button type="button" class="nav-btn" data-view="bank-account">Bank Account</button>
+                {% if user.role == 'admin' %}
                 <button type="button" class="nav-btn" data-view="curriculum">Curriculum</button>
+                {% endif %}
                 <button type="button" class="nav-btn" data-view="marketplace">Marketplace</button>
                 {% if user.role == 'admin' %}
                 <button type="button" class="nav-btn" data-view="admin">Admin Panel</button>
@@ -960,9 +962,13 @@
             </div>
         </div>
 
-        <!-- Curriculum View -->
+        <!-- Curriculum View (admin only; still under construction) -->
+        {% if user.role == 'admin' %}
         <div id="curriculum-view" class="view">
             <div class="form-section accounts-ui curriculum-section">
+                <div class="curriculum-wip-banner" role="status">
+                    <strong>Under construction.</strong> This tab is not ready. Do not use it or judge it.
+                </div>
                 <h2 style="margin-bottom: 8px;">Curriculum</h2>
                 <p class="curriculum-lede">Lessons about the money from your actual week — paychecks, saving, and spending.</p>
 
@@ -1018,6 +1024,7 @@
                 <div id="curriculum-lesson-view-body" class="curriculum-card"></div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Marketplace View -->
         <div id="marketplace-view" class="view">
@@ -2112,8 +2119,10 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=csvimport4"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=curricwip1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
+    {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
+    {% endif %}
 </body>
 </html>

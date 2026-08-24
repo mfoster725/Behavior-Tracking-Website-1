@@ -1744,6 +1744,9 @@ async function switchView(viewName) {
     if (viewName === 'frenzy') {
         viewName = 'summary';
     }
+    if (viewName === 'curriculum' && !isAdmin()) {
+        return;
+    }
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -18528,7 +18531,7 @@ function loadNotifications() {
                 var id = parseInt(el.getAttribute('data-notification-id'), 10);
                 var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
                 fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
-                if (assignmentId) {
+                if (assignmentId && isAdmin()) {
                     window.curriculumFocusAssignmentId = assignmentId;
                     if (typeof switchView === 'function') switchView('curriculum');
                     var dropdownEl = document.getElementById('notifications-dropdown');
