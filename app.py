@@ -2096,6 +2096,12 @@ def _subscription_is_current(status):
     return (status or '') in ('active', 'trialing')
 
 
+def _on_paid_plan(status):
+    return (status or '') in (
+        'active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused'
+    )
+
+
 def _mark_build_fee_paid(row, session_id=None):
     if row.build_fee_paid:
         if session_id and not row.build_fee_session_id:
@@ -2147,6 +2153,7 @@ def _apply_stripe_subscription(sub):
 def _billing_status_payload():
     row = get_site_subscription()
     monthly_ok = _subscription_is_current(row.status)
+    on_paid_plan = _on_paid_plan(row.status)
     build_required = _build_fee_configured()
     build_paid = bool(row.build_fee_paid) if build_required else True
     up_to_date = monthly_ok and build_paid
@@ -2158,11 +2165,32 @@ def _billing_status_payload():
     )
     period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
     build_paid_at = row.build_fee_paid_at.isoformat() + 'Z' if row.build_fee_paid_at else None
+    paid_name = monthly_info.get('name') or 'Paid plan'
+    plans = [{
+        'id': 'free',
+        'name': 'Free',
+        'price_label': 'Included',
+        'kind': 'free',
+        'current': not on_paid_plan,
+    }]
+    if _stripe_configured():
+        plans.append({
+            'id': 'paid',
+            'name': paid_name,
+            'price_label': monthly_info.get('label'),
+            'kind': 'paid',
+            'current': on_paid_plan,
+            'build_fee_label': build_info.get('label') if build_required else None,
+        })
     return {
         'configured': _stripe_configured(),
         'build_fee_configured': build_required,
         'status': row.status or 'inactive',
         'monthly_ok': monthly_ok,
+        'on_paid_plan': on_paid_plan,
+        'current_plan': 'paid' if on_paid_plan else 'free',
+        'plan_name': paid_name if on_paid_plan else 'Free',
+        'plans': plans,
         'build_fee_paid': bool(row.build_fee_paid),
         'build_fee_paid_at': build_paid_at,
         'build_fee_required': build_required,
@@ -2179,6 +2207,7 @@ def _billing_status_payload():
         'can_pay_build_fee': (
             _stripe_configured() and build_required and not bool(row.build_fee_paid)
         ),
+        'needs_attention': (row.status or '') in ('past_due', 'unpaid', 'incomplete'),
     }
 
 

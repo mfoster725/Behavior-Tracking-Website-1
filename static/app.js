@@ -14012,16 +14012,19 @@ function formatBillingDate(iso) {
 }
 
 function setBillingMessage(text, type) {
-    const msg = document.getElementById('billing-msg');
-    if (!msg) return;
-    if (!text) {
-        msg.style.display = 'none';
-        msg.textContent = '';
-        return;
-    }
-    msg.style.display = 'block';
-    msg.textContent = text;
-    msg.style.color = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#64748b');
+    const ids = ['billing-msg', 'billing-manage-msg'];
+    ids.forEach((id) => {
+        const msg = document.getElementById(id);
+        if (!msg) return;
+        if (!text) {
+            msg.style.display = 'none';
+            msg.textContent = '';
+            return;
+        }
+        msg.style.display = 'block';
+        msg.textContent = text;
+        msg.style.color = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#64748b');
+    });
 }
 
 function billingPill(ok, okText, badText) {
@@ -14036,74 +14039,122 @@ function billingSubscribedCheck(ok) {
 }
 
 let _schoolBillingStatus = null;
+let _selectedBillingPlan = null;
 
-function billingManageCard(title, rows) {
-    return `<div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:14px;background:var(--bg-elevated);">
-        <div style="font-weight:700;margin-bottom:10px;">${title}</div>
-        <div style="display:grid;gap:8px;font-size:14px;">${rows.join('')}</div>
-    </div>`;
+function billingSelectedPlanId(data) {
+    if (_selectedBillingPlan) return _selectedBillingPlan;
+    if (data && data.configured && !data.on_paid_plan) return 'paid';
+    return (data && data.current_plan) || 'free';
 }
 
-function renderBillingManageModal(data) {
-    const body = document.getElementById('billing-manage-body');
+function billingPlanRow(plan, selectedId) {
+    const selected = plan.id === selectedId;
+    const current = plan.current ? '<span style="font-size:12px;color:var(--text-secondary);">Current</span>' : '';
+    const extra = [];
+    if (plan.price_label) extra.push(escapeHtml(plan.price_label));
+    if (plan.kind === 'paid' && plan.build_fee_label) {
+        extra.push(`Build fee ${escapeHtml(plan.build_fee_label)}`);
+    }
+    return `<label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid ${selected ? 'var(--accent, #1e3a5f)' : 'var(--border)'};border-radius:var(--radius-md);background:var(--bg-elevated);cursor:pointer;">
+        <input type="radio" name="billing-plan" value="${escapeHtml(plan.id)}" ${selected ? 'checked' : ''} style="margin-top:3px;">
+        <div style="flex:1;display:grid;gap:4px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <strong>${escapeHtml(plan.name)}</strong>
+                ${plan.current && plan.kind === 'paid' ? billingSubscribedCheck(true) : ''}
+                ${current}
+            </div>
+            ${extra.length ? `<div style="font-size:13px;color:var(--text-secondary);">${extra.join(' · ')}</div>` : ''}
+        </div>
+    </label>`;
+}
+
+function updateBillingManageActions(data) {
+    const selectedId = billingSelectedPlanId(data);
+    const payBtn = document.getElementById('billing-manage-pay-btn');
     const portalOpenBtn = document.getElementById('billing-portal-open-btn');
-    if (!body || !data) return;
-    const period = formatBillingDate(data.current_period_end);
-    const buildPaidAt = formatBillingDate(data.build_fee_paid_at);
-    const planName = data.product_name || 'Monthly subscription';
-    const monthlyRows = [
-        `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <strong>${escapeHtml(planName)}</strong>
-            ${billingSubscribedCheck(!!data.monthly_ok)}
-         </div>`
-    ];
-    if (data.price_label) {
-        monthlyRows.push(`<div>${escapeHtml(data.price_label)}</div>`);
-    }
-    monthlyRows.push(
-        `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <strong>Status:</strong>
-            ${billingPill(!!data.monthly_ok, billingStatusLabel(data.status), billingStatusLabel(data.status))}
-         </div>`
-    );
-    if (period) {
-        monthlyRows.push(`<div><strong>${data.cancel_at_period_end ? 'Ends' : 'Renews'}:</strong> ${escapeHtml(period)}</div>`);
-    }
-    const sections = [billingManageCard('Monthly plan', monthlyRows)];
-    if (data.build_fee_required) {
-        const buildName = data.build_fee_name || 'Build fee';
-        const buildRows = [
-            `<div><strong>${escapeHtml(buildName)}</strong></div>`
-        ];
-        if (data.build_fee_label) {
-            buildRows.push(`<div>${escapeHtml(data.build_fee_label)}</div>`);
+    const emailWrap = document.getElementById('billing-manage-email-wrap');
+    const emailInput = document.getElementById('billing-manage-email');
+    const canPayPaid = data.configured && selectedId === 'paid' && !data.monthly_ok;
+    const canPayBuild = data.configured && selectedId === 'paid' && !!data.monthly_ok && !!data.can_pay_build_fee;
+    if (payBtn) {
+        if (canPayPaid) {
+            payBtn.style.display = '';
+            payBtn.disabled = false;
+            payBtn.textContent = data.build_fee_required && !data.build_fee_paid
+                ? 'Pay monthly + build fee'
+                : 'Pay selected plan';
+        } else if (canPayBuild) {
+            payBtn.style.display = '';
+            payBtn.disabled = false;
+            payBtn.textContent = 'Pay build fee';
+        } else {
+            payBtn.style.display = 'none';
         }
-        buildRows.push(
-            `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <strong>Status:</strong>
-                ${billingPill(!!data.build_fee_paid, 'Paid', 'Not paid')}
-             </div>`
-        );
-        if (data.build_fee_paid && buildPaidAt) {
-            buildRows.push(`<div><strong>Paid:</strong> ${escapeHtml(buildPaidAt)}</div>`);
+    }
+    if (emailWrap) {
+        const showEmail = (canPayPaid || canPayBuild) && !data.has_customer;
+        emailWrap.style.display = showEmail ? '' : 'none';
+        if (emailInput && data.customer_email && !emailInput.value) {
+            emailInput.value = data.customer_email;
         }
-        sections.push(billingManageCard('Build fee', buildRows));
     }
-    if (data.customer_email) {
-        sections.push(`<div style="font-size:14px;"><strong>Billing email:</strong> ${escapeHtml(data.customer_email)}</div>`);
-    }
-    if (!data.configured) {
-        sections.push('<div style="color:#b45309;font-size:14px;">Stripe is not configured yet.</div>');
-    }
-    body.innerHTML = sections.join('');
     if (portalOpenBtn) {
         portalOpenBtn.style.display = data.configured && data.has_customer ? '' : 'none';
         portalOpenBtn.disabled = !data.configured || !data.has_customer;
     }
 }
 
+function renderBillingManageModal(data) {
+    const body = document.getElementById('billing-manage-body');
+    if (!body || !data) return;
+    const selectedId = billingSelectedPlanId(data);
+    const period = formatBillingDate(data.current_period_end);
+    const buildPaidAt = formatBillingDate(data.build_fee_paid_at);
+    const currentName = data.plan_name || (data.on_paid_plan ? (data.product_name || 'Paid plan') : 'Free');
+    const plans = Array.isArray(data.plans) && data.plans.length
+        ? data.plans
+        : [{ id: 'free', name: 'Free', price_label: 'Included', kind: 'free', current: !data.on_paid_plan }];
+    const sections = [
+        `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;">
+            <strong>Current plan:</strong>
+            <span>${escapeHtml(currentName)}</span>
+            ${billingSubscribedCheck(!!data.monthly_ok)}
+         </div>`,
+        `<div>
+            <div style="font-weight:700;margin-bottom:8px;">Select a plan</div>
+            <div style="display:grid;gap:8px;">${plans.map((plan) => billingPlanRow(plan, selectedId)).join('')}</div>
+         </div>`
+    ];
+    if (selectedId === 'free' && data.on_paid_plan) {
+        sections.push('<div style="font-size:13px;color:var(--text-secondary);">To switch to Free, use Update card or cancel and end the subscription at the period end.</div>');
+    }
+    if (data.build_fee_required && data.on_paid_plan) {
+        const buildBits = [
+            billingPill(!!data.build_fee_paid, 'Paid', 'Not paid')
+        ];
+        if (data.build_fee_label) buildBits.unshift(escapeHtml(data.build_fee_label));
+        if (data.build_fee_paid && buildPaidAt) {
+            sections.push(`<div style="font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')} · Paid ${escapeHtml(buildPaidAt)}</div>`);
+        } else {
+            sections.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')}</div>`);
+        }
+    }
+    if (period && data.on_paid_plan) {
+        sections.push(`<div style="font-size:14px;"><strong>${data.cancel_at_period_end ? 'Ends' : 'Renews'}:</strong> ${escapeHtml(period)}</div>`);
+    }
+    if (!data.configured) {
+        sections.push('<div style="color:#b45309;font-size:14px;">Paid plans are not available until Stripe is configured.</div>');
+    }
+    body.innerHTML = sections.join('');
+    updateBillingManageActions(data);
+}
+
 function openSchoolBillingManageModal() {
-    if (_schoolBillingStatus) renderBillingManageModal(_schoolBillingStatus);
+    _selectedBillingPlan = null;
+    if (_schoolBillingStatus) {
+        _selectedBillingPlan = billingSelectedPlanId(_schoolBillingStatus);
+        renderBillingManageModal(_schoolBillingStatus);
+    }
     const modal = document.getElementById('billing-manage-modal');
     if (modal) modal.style.display = 'block';
 }
@@ -14111,6 +14162,11 @@ function openSchoolBillingManageModal() {
 function closeSchoolBillingManageModal() {
     const modal = document.getElementById('billing-manage-modal');
     if (modal) modal.style.display = 'none';
+}
+
+function handleBillingPlanPick(planId) {
+    _selectedBillingPlan = planId;
+    if (_schoolBillingStatus) renderBillingManageModal(_schoolBillingStatus);
 }
 
 async function loadSchoolBilling() {
@@ -14126,45 +14182,24 @@ async function loadSchoolBilling() {
         _schoolBillingStatus = data;
         const banner = document.getElementById('billing-unpaid-banner');
         if (banner) {
-            banner.style.display = (data.configured && !data.up_to_date) ? 'block' : 'none';
+            banner.style.display = data.needs_attention ? 'block' : 'none';
         }
-        const parts = [];
-        if (data.price_label) {
-            parts.push(`<div><strong>Monthly plan:</strong> ${escapeHtml(data.price_label)}</div>`);
+        const onPaid = !!data.on_paid_plan;
+        const planName = data.plan_name || (onPaid ? (data.product_name || 'Paid plan') : 'Free');
+        let hint = '';
+        if (data.needs_attention) {
+            hint = '<div style="margin-top:6px;font-size:13px;color:#b45309;">Payment needs attention. Open Manage Plan to update it.</div>';
+        } else if (!onPaid) {
+            hint = '<div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">To upgrade, open Manage Plan, select a paid plan, and pay.</div>';
         }
-        const planName = data.product_name || (data.configured ? 'Monthly subscription' : '');
-        if (planName) {
-            parts.push(
-                `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span>${escapeHtml(planName)}</span>
-                    ${billingSubscribedCheck(!!data.monthly_ok)}
-                 </div>`
-            );
-        }
-        if (!data.configured) {
-            parts.push('<div style="margin-top:8px;color:#b45309;">Stripe is not configured yet. Add STRIPE_SECRET_KEY, STRIPE_PRICE_ID, and STRIPE_BUILD_FEE_PRICE_ID on the Render web service.</div>');
-        }
-        box.innerHTML = `<div style="display:grid;gap:8px;font-size:14px;">${parts.join('')}</div>`;
-        const emailInput = document.getElementById('billing-email');
-        if (emailInput && data.customer_email && !emailInput.value) {
-            emailInput.value = data.customer_email;
-        }
-        const subscribeBtn = document.getElementById('billing-subscribe-btn');
-        const buildFeeBtn = document.getElementById('billing-build-fee-btn');
-        const portalBtn = document.getElementById('billing-portal-btn');
-        if (subscribeBtn) {
-            subscribeBtn.disabled = !data.can_subscribe;
-            subscribeBtn.textContent = data.build_fee_required && data.can_subscribe && !data.build_fee_paid
-                ? 'Pay monthly + build fee'
-                : 'Subscribe monthly';
-            subscribeBtn.style.display = data.can_subscribe ? '' : 'none';
-        }
-        if (buildFeeBtn) {
-            const showBuildOnly = !!data.can_pay_build_fee && !!data.monthly_ok;
-            buildFeeBtn.style.display = showBuildOnly ? '' : 'none';
-            buildFeeBtn.disabled = !showBuildOnly;
-        }
-        if (portalBtn) portalBtn.disabled = false;
+        box.innerHTML = `<div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;">
+                <strong>Plan:</strong>
+                <span>${escapeHtml(planName)}</span>
+                ${billingSubscribedCheck(!!data.monthly_ok)}
+            </div>
+            ${hint}
+        </div>`;
         const manageModal = document.getElementById('billing-manage-modal');
         if (manageModal && manageModal.style.display === 'block') {
             renderBillingManageModal(data);
@@ -14175,12 +14210,10 @@ async function loadSchoolBilling() {
 }
 
 async function startSchoolSubscription(intent) {
-    const subscribeBtn = document.getElementById('billing-subscribe-btn');
-    const buildFeeBtn = document.getElementById('billing-build-fee-btn');
-    const emailInput = document.getElementById('billing-email');
+    const payBtn = document.getElementById('billing-manage-pay-btn');
+    const emailInput = document.getElementById('billing-manage-email');
     setBillingMessage('');
-    if (subscribeBtn) subscribeBtn.disabled = true;
-    if (buildFeeBtn) buildFeeBtn.disabled = true;
+    if (payBtn) payBtn.disabled = true;
     try {
         const response = await fetch('/api/billing/checkout', {
             method: 'POST',
@@ -14193,20 +14226,33 @@ async function startSchoolSubscription(intent) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.url) {
             setBillingMessage(data.error || 'Could not start checkout.', 'error');
+            if (payBtn) payBtn.disabled = false;
             loadSchoolBilling();
             return;
         }
         window.location.href = data.url;
     } catch (err) {
         setBillingMessage('Could not start checkout.', 'error');
+        if (payBtn) payBtn.disabled = false;
         loadSchoolBilling();
     }
 }
 
+function paySelectedBillingPlan() {
+    const data = _schoolBillingStatus || {};
+    const selectedId = billingSelectedPlanId(data);
+    if (selectedId !== 'paid') return;
+    if (data.monthly_ok && data.can_pay_build_fee) {
+        startSchoolSubscription('build_fee');
+        return;
+    }
+    startSchoolSubscription('auto');
+}
+
 async function openSchoolBillingPortal() {
-    const portalBtn = document.getElementById('billing-portal-btn');
+    const btn = document.getElementById('billing-portal-open-btn');
     setBillingMessage('');
-    if (portalBtn) portalBtn.disabled = true;
+    if (btn) btn.disabled = true;
     try {
         const response = await fetch('/api/billing/portal', {
             method: 'POST',
@@ -14215,13 +14261,13 @@ async function openSchoolBillingPortal() {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.url) {
             setBillingMessage(data.error || 'Could not open billing portal.', 'error');
-            if (portalBtn) portalBtn.disabled = false;
+            if (btn) btn.disabled = false;
             return;
         }
         window.location.href = data.url;
     } catch (err) {
         setBillingMessage('Could not open billing portal.', 'error');
-        if (portalBtn) portalBtn.disabled = false;
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -14277,14 +14323,20 @@ function copyToClipboard(text) {
 
 // Event listeners for schedule management
 document.addEventListener('DOMContentLoaded', () => {
-    const subscribeBtn = document.getElementById('billing-subscribe-btn');
-    if (subscribeBtn) subscribeBtn.addEventListener('click', () => startSchoolSubscription('auto'));
-    const buildFeeBtn = document.getElementById('billing-build-fee-btn');
-    if (buildFeeBtn) buildFeeBtn.addEventListener('click', () => startSchoolSubscription('build_fee'));
     const portalBtn = document.getElementById('billing-portal-btn');
     if (portalBtn) portalBtn.addEventListener('click', openSchoolBillingManageModal);
     const portalOpenBtn = document.getElementById('billing-portal-open-btn');
     if (portalOpenBtn) portalOpenBtn.addEventListener('click', openSchoolBillingPortal);
+    const payBtn = document.getElementById('billing-manage-pay-btn');
+    if (payBtn) payBtn.addEventListener('click', paySelectedBillingPlan);
+    const manageBody = document.getElementById('billing-manage-body');
+    if (manageBody) {
+        manageBody.addEventListener('change', (e) => {
+            if (e.target && e.target.name === 'billing-plan') {
+                handleBillingPlanPick(e.target.value);
+            }
+        });
+    }
     if (window.currentUser && window.currentUser.role === 'admin') {
         loadSchoolBilling();
         try {

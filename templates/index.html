@@ -27,8 +27,8 @@
     <div class="container">
         <div id="billing-unpaid-banner" class="password-change-banner" style="display: none; background: #b45309;">
             <div>
-                <strong>Billing:</strong> This school is not fully paid / up to date.
-                Open <strong>Admin Panel</strong> to pay the monthly plan and/or build fee.
+                <strong>Billing:</strong> Your paid plan needs attention.
+                Open <strong>Admin Panel → Manage Plan</strong> to update payment.
             </div>
         </div>
         {% if must_change_password %}
@@ -611,19 +611,12 @@
                 <div class="admin-sections" style="display: grid; gap: 20px; margin-top: 30px;">
                     <!-- Software subscription (Stripe) -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                        <h3>Software billing</h3>
-                        <p style="font-size: 13px; color: var(--text-secondary); margin: 8px 0 0;">
-                            Monthly subscription plus one-time build fee. Card details stay on Stripe; this panel shows whether the school is paid / up to date.
-                        </p>
-                        <div id="billing-status-box" style="margin-top: 16px;">
-                            <p style="color: var(--text-secondary); font-size: 13px;">Loading billing status…</p>
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                            <h3 style="margin: 0;">Software billing</h3>
+                            <button type="button" id="billing-portal-btn" class="btn-secondary">Manage Plan</button>
                         </div>
-                        <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center;">
-                            <input type="email" id="billing-email" placeholder="Billing email" autocomplete="email"
-                                   style="padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 220px;">
-                            <button type="button" id="billing-subscribe-btn" class="btn-primary">Pay / Subscribe</button>
-                            <button type="button" id="billing-build-fee-btn" class="btn-secondary" style="display: none;">Pay build fee</button>
-                            <button type="button" id="billing-portal-btn" class="btn-secondary">Manage billing</button>
+                        <div id="billing-status-box" style="margin-top: 12px;">
+                            <p style="color: var(--text-secondary); font-size: 13px;">Loading plan…</p>
                         </div>
                         <p id="billing-msg" style="display: none; margin-top: 10px; font-size: 13px;"></p>
                     </div>
@@ -1446,14 +1439,21 @@
         </div>
     </div>
 
-    <!-- Software billing details (opened from Manage billing) -->
+    <!-- Software billing details (opened from Manage Plan) -->
     <div id="billing-manage-modal" class="modal" onclick="if(event.target===this) closeSchoolBillingManageModal()">
         <div class="modal-content" style="max-width: 480px;">
             <span class="close" onclick="closeSchoolBillingManageModal()">&times;</span>
-            <h2>Manage billing</h2>
+            <h2>Manage Plan</h2>
             <div id="billing-manage-body" style="display: grid; gap: 16px; margin-top: 12px;"></div>
+            <div id="billing-manage-email-wrap" style="display: none; margin-top: 16px;">
+                <label for="billing-manage-email" style="display:block;font-size:13px;margin-bottom:6px;">Billing email</label>
+                <input type="email" id="billing-manage-email" placeholder="Billing email" autocomplete="email"
+                       style="padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); width: 100%; box-sizing: border-box;">
+            </div>
+            <p id="billing-manage-msg" style="display: none; margin-top: 10px; font-size: 13px;"></p>
             <div style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
-                <button type="button" id="billing-portal-open-btn" class="btn-primary" style="display: none;">Update card or cancel</button>
+                <button type="button" id="billing-manage-pay-btn" class="btn-primary" style="display: none;">Pay</button>
+                <button type="button" id="billing-portal-open-btn" class="btn-secondary" style="display: none;">Update card or cancel</button>
                 <button type="button" class="btn-secondary" onclick="closeSchoolBillingManageModal()">Close</button>
             </div>
         </div>
