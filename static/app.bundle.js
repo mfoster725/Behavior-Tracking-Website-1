@@ -18471,33 +18471,141 @@ function setupMarketplaceStudentSearch() {
     if (managedByMe) managedByMe.addEventListener('change', loadList);
 }
 
+var currentBankStudentId = null;
+
+function escapeBankHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function formatBankBalanceLabel(student) {
+    var name = (student && student.student_name) || '';
+    var bal = student && student.balance != null ? Number(student.balance) : 0;
+    return name + ' ($' + (isNaN(bal) ? 0 : bal).toFixed(2) + ')';
+}
+
+function setBankStaffDetailMode(isDetail) {
+    var display = isDetail ? 'block' : 'none';
+    var balanceSection = document.getElementById('bank-balance-section');
+    var paycheckSection = document.getElementById('bank-paycheck-section');
+    var transactionsSection = document.getElementById('bank-transactions-section');
+    var planDeliveries = document.getElementById('bank-plan-deliveries-section');
+    var preview = document.getElementById('bank-balances-preview');
+    var showAllBtn = document.getElementById('bank-show-all-btn');
+    var noMsg = document.getElementById('bank-no-student-msg');
+    if (balanceSection) balanceSection.style.display = display;
+    if (paycheckSection) paycheckSection.style.display = display;
+    if (transactionsSection) transactionsSection.style.display = display;
+    if (!isDetail && planDeliveries) planDeliveries.style.display = 'none';
+    if (preview) preview.style.display = isDetail ? 'none' : 'block';
+    if (showAllBtn) showAllBtn.style.display = isDetail ? 'inline-flex' : 'none';
+    if (noMsg) noMsg.style.display = 'none';
+}
+
+function fetchBankAccountSearch(includeQuery) {
+    var params = new URLSearchParams();
+    var managedByMe = document.getElementById('bank-managed-by-me-checkbox');
+    if (managedByMe && managedByMe.checked) params.set('managed_by_me', 'true');
+    if (includeQuery) {
+        var searchInput = document.getElementById('bank-student-search-input');
+        var q = ((searchInput && searchInput.value) || '').trim();
+        if (q) params.set('q', q);
+    }
+    return fetch('/api/bank-account/search?' + params.toString())
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (data) { return Array.isArray(data) ? data : []; });
+}
+
+function renderBankBalancesPreview(rows) {
+    var listEl = document.getElementById('bank-balances-preview-list');
+    var metaEl = document.getElementById('bank-balances-preview-meta');
+    if (!listEl) return;
+
+    var sorted = (rows || []).slice().sort(function (a, b) {
+        return String(a.student_name || '').localeCompare(String(b.student_name || ''), undefined, { sensitivity: 'base' });
+    });
+    var total = sorted.reduce(function (sum, row) {
+        var bal = row && row.balance != null ? Number(row.balance) : 0;
+        return sum + (isNaN(bal) ? 0 : bal);
+    }, 0);
+
+    if (metaEl) {
+        metaEl.textContent = sorted.length
+            ? (sorted.length + ' student' + (sorted.length === 1 ? '' : 's') + ' · $' + total.toFixed(2) + ' total')
+            : '';
+    }
+
+    if (!sorted.length) {
+        listEl.innerHTML = '<p class="bank-balances-preview-empty">No students to show.</p>';
+        return;
+    }
+
+    listEl.innerHTML = sorted.map(function (row) {
+        var bal = row && row.balance != null ? Number(row.balance) : 0;
+        return '<button type="button" class="bank-balances-preview-row" data-student-id="' + row.student_id + '">' +
+            '<span class="bank-balances-preview-name">' + escapeBankHtml(row.student_name) + '</span>' +
+            '<span class="bank-balances-preview-balance">$' + (isNaN(bal) ? 0 : bal).toFixed(2) + '</span>' +
+            '</button>';
+    }).join('');
+
+    listEl.querySelectorAll('.bank-balances-preview-row').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var id = Number(btn.getAttribute('data-student-id'));
+            var row = sorted.find(function (item) { return Number(item.student_id) === id; });
+            if (row) selectBankStudent(row);
+        });
+    });
+}
+
+function loadBankBalancesPreview() {
+    var listEl = document.getElementById('bank-balances-preview-list');
+    var metaEl = document.getElementById('bank-balances-preview-meta');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="bank-balances-preview-empty">Loading balances...</p>';
+    if (metaEl) metaEl.textContent = '';
+    fetchBankAccountSearch(true)
+        .then(renderBankBalancesPreview)
+        .catch(function () {
+            listEl.innerHTML = '<p class="bank-balances-preview-empty">Could not load balances. Please try again.</p>';
+        });
+}
+
+function selectBankStudent(student) {
+    if (!student) return;
+    currentBankStudentId = student.student_id;
+    var searchInput = document.getElementById('bank-student-search-input');
+    if (searchInput) searchInput.value = formatBankBalanceLabel(student);
+    var wrapper = searchInput && searchInput.closest('.bank-search-autocomplete-wrapper');
+    var dropdown = wrapper && wrapper.querySelector('.bank-search-autocomplete-dropdown');
+    if (dropdown) mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
+    setBankStaffDetailMode(true);
+    loadBankAccount(student.student_id);
+}
+
+function clearBankStudentSelection() {
+    currentBankStudentId = null;
+    var searchInput = document.getElementById('bank-student-search-input');
+    if (searchInput) searchInput.value = '';
+    setBankStaffDetailMode(false);
+    loadBankBalancesPreview();
+}
+
 // Bank Account student search (mirror marketplace behavior)
 function setupBankStudentSearch() {
     var searchInput = document.getElementById('bank-student-search-input');
     var wrapper = searchInput && searchInput.closest('.bank-search-autocomplete-wrapper');
     var dropdown = wrapper && wrapper.querySelector('.bank-search-autocomplete-dropdown');
     var managedByMe = document.getElementById('bank-managed-by-me-checkbox');
-    var noMsg = document.getElementById('bank-no-student-msg');
-    if (!searchInput || !dropdown || searchInput._bankSimpleAutocompleteBound) return;
+    var showAllBtn = document.getElementById('bank-show-all-btn');
+    if (!searchInput || !dropdown) return;
+
+    if (searchInput._bankSimpleAutocompleteBound) return;
     searchInput._bankSimpleAutocompleteBound = true;
 
     var list = [];
-
-    function setSectionsVisible(visible) {
-        var display = visible ? 'block' : 'none';
-        var balanceSection = document.getElementById('bank-balance-section');
-        var paycheckSection = document.getElementById('bank-paycheck-section');
-        var transactionsSection = document.getElementById('bank-transactions-section');
-        if (balanceSection) balanceSection.style.display = display;
-        if (paycheckSection) paycheckSection.style.display = display;
-        if (transactionsSection) transactionsSection.style.display = display;
-    }
-
-    // Initial state: hide bank sections and show placeholder message until a student is selected.
-    setSectionsVisible(false);
-    if (noMsg) {
-        noMsg.style.display = 'block';
-    }
 
     function showDropdown(items) {
         var frag = document.createDocumentFragment();
@@ -18505,44 +18613,36 @@ function setupBankStudentSearch() {
             var div = document.createElement('div');
             div.className = 'bank-search-autocomplete-item';
             div.style.cssText = 'padding:10px 12px; cursor:pointer; font-size:14px;';
-            var label = (s.student_name || '') + ' ($' + (s.balance != null ? Number(s.balance).toFixed(2) : '0.00') + ')';
-            div.textContent = label;
+            div.textContent = formatBankBalanceLabel(s);
             div.addEventListener('mousedown', function (e) {
                 e.preventDefault();
-                currentBankStudentId = s.student_id;
-                searchInput.value = label;
-                mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
-                if (noMsg) noMsg.style.display = 'none';
-                setSectionsVisible(true);
-                // When a bank-account student search is committed, clear "managed by me" so it does not persist across searches.
-                if (managedByMe && managedByMe.checked) {
-                    managedByMe.checked = false;
-                }
-                loadBankAccount(s.student_id);
+                selectBankStudent(s);
             });
             frag.appendChild(div);
         });
         mountAutocompleteDropdown(dropdown, frag, searchInput);
     }
 
-    function loadList() {
-        var params = new URLSearchParams();
-        if (managedByMe && managedByMe.checked) params.set('managed_by_me', 'true');
-        var q = (searchInput.value || '').trim();
-        if (q) params.set('q', q);
-        fetch('/api/bank-account/search?' + params.toString())
-            .then(function (r) { return r.ok ? r.json() : []; })
+    function loadList(options) {
+        options = options || {};
+        fetchBankAccountSearch(true)
             .then(function (data) {
-                list = Array.isArray(data) ? data : [];
-                showDropdown(list);
+                list = data;
+                if (options.showDropdown !== false) showDropdown(list);
+                if (!currentBankStudentId) renderBankBalancesPreview(list);
             })
             .catch(function () {
                 list = [];
                 mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
+                if (!currentBankStudentId) renderBankBalancesPreview([]);
             });
     }
 
-    searchInput.addEventListener('input', loadList);
+    searchInput.addEventListener('input', function () {
+        currentBankStudentId = null;
+        setBankStaffDetailMode(false);
+        loadList();
+    });
     searchInput.addEventListener('focus', function () {
         if (list.length) showDropdown(list);
         else loadList();
@@ -18552,7 +18652,21 @@ function setupBankStudentSearch() {
             mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
         }
     });
-    if (managedByMe) managedByMe.addEventListener('change', loadList);
+    if (managedByMe && !managedByMe._bankManagedBound) {
+        managedByMe._bankManagedBound = true;
+        managedByMe.addEventListener('change', function () {
+            currentBankStudentId = null;
+            if (searchInput) searchInput.value = '';
+            setBankStaffDetailMode(false);
+            loadList({ showDropdown: false });
+        });
+    }
+    if (showAllBtn && !showAllBtn._bankShowAllBound) {
+        showAllBtn._bankShowAllBound = true;
+        showAllBtn.addEventListener('click', function () {
+            clearBankStudentSelection();
+        });
+    }
 }
 
 function selectMarketplaceStudent(studentId) {
@@ -18974,6 +19088,8 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshBtn.addEventListener('click', () => {
             if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) {
                 loadBankAccount(currentBankStudentId);
+            } else if (window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+                loadBankBalancesPreview();
             }
         });
     }
@@ -19642,14 +19758,18 @@ function handleBankAccountView() {
     } else {
         // Staff/Admin view - simple selector; autocomplete handled by setupBankStudentSearch
         const wrap = document.getElementById('bank-student-select-wrap');
-        const noMsg = document.getElementById('bank-no-student-msg');
-        const adminPaycheckGen = document.getElementById('admin-paycheck-generation');
         if (wrap) wrap.style.display = 'block';
-        if (noMsg) noMsg.style.display = 'block';
-        if (adminPaycheckGen) adminPaycheckGen.style.display = 'block';
 
         setupBankStudentSearch();
         initStarbucksManagement();
+
+        if (currentBankStudentId) {
+            setBankStaffDetailMode(true);
+            loadBankAccount(currentBankStudentId);
+        } else {
+            setBankStaffDetailMode(false);
+            loadBankBalancesPreview();
+        }
     }
     
     // Setup event listeners
@@ -19706,62 +19826,6 @@ function handleBankAccountView() {
     if (createItemBtn) {
         createItemBtn.addEventListener('click', openCreateItemModal);
     }
-    
-    // Admin paycheck generation
-    const generatePaychecksBtn = document.getElementById('generate-paychecks-btn');
-    if (generatePaychecksBtn) {
-        generatePaychecksBtn.addEventListener('click', generatePaychecksForAll);
-    }
-}
-
-// Generate paychecks for all students (Admin only)
-async function generatePaychecksForAll() {
-    if (window.currentUser.role !== 'admin') {
-        showMessage('Only admins can generate paychecks', 'error');
-        return;
-    }
-    
-    const btn = document.getElementById('generate-paychecks-btn');
-    const resultDiv = document.getElementById('paycheck-generation-result');
-    
-    if (btn) btn.disabled = true;
-    if (resultDiv) {
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<p>Generating paychecks...</p>';
-    }
-    
-    try {
-        const response = await fetch('/api/paycheck/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            if (resultDiv) {
-                resultDiv.innerHTML = `<p style="color: #10b981;">${data.message}</p>`;
-            }
-            showMessage(data.message, 'success');
-            // Refresh paycheck list for currently selected student so updated paychecks are visible
-            if (currentStudentId) {
-                await loadPaychecks(currentStudentId);
-            }
-        } else {
-            if (resultDiv) {
-                resultDiv.innerHTML = `<p style="color: #dc2626;">${data.error || 'Error generating paychecks'}</p>`;
-            }
-            showMessage(data.error || 'Error generating paychecks', 'error');
-        }
-    } catch (error) {
-        console.error('Error generating paychecks:', error);
-        if (resultDiv) {
-            resultDiv.innerHTML = '<p style="color: #dc2626;">Error generating paychecks</p>';
-        }
-        showMessage('Error generating paychecks', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
-    }
 }
 
 // Make functions globally accessible
@@ -19776,7 +19840,6 @@ window.updatePurchaseOrderStatus = updatePurchaseOrderStatus;
 window.openCreateItemModal = openCreateItemModal;
 window.closeCreateItemModal = closeCreateItemModal;
 window.saveMarketplaceItem = saveMarketplaceItem;
-window.generatePaychecksForAll = generatePaychecksForAll;
 
 // ==================== Parent Portal Functions ====================
 

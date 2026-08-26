@@ -14401,6 +14401,18 @@ def search_bank_accounts():
         all_student_ids.update(student_ids_from_staff)
         
         students = Student.query.filter(Student.id.in_(list(all_student_ids))).all() if all_student_ids else []
+        if managed_by_me:
+            user_name = (current_user.name or current_user.username) or ''
+            user_username = (current_user.username or '').strip()
+            if not user_name and not user_username:
+                students = []
+            else:
+                team_members = TeamMember.query.filter(
+                    (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
+                    (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+                ).all()
+                managed_ids = {tm.student_id for tm in team_members if tm.student_id}
+                students = [s for s in students if s.id in managed_ids]
     else:
         # No query: return all students staff can access (same logic as /api/students but without
         # restricting to "student user accounts only"). Staff need to look up any student's bank

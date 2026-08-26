@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=banklayout2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bankpreview1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -803,21 +803,19 @@
                         <input type="checkbox" id="bank-managed-by-me-checkbox" style="cursor: pointer;">
                         <span>Show students managed by me</span>
                     </label>
+                    <button type="button" id="bank-show-all-btn" class="btn-secondary" style="display: none; margin-top: 10px;">Show all students</button>
                     <p id="bank-no-student-msg" style="display: none; margin-top: 8px; color: #64748b;">Select a student to view their account and transactions.</p>
                 </div>
-                
-                <!-- Admin Paycheck Generation -->
-                {% if user.role == 'admin' %}
-                <div
-                    id="admin-paycheck-generation"
-                    style="background: #fff3cd; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ffc107;"
-                >
-                    <h4 style="margin-top: 0;">Paycheck Generation</h4>
-                    <p style="margin-bottom: 15px;">Generate paychecks for all students for the previous week (Monday-Friday).</p>
-                    <button id="generate-paychecks-btn" class="btn-primary">Generate Paychecks</button>
-                    <div id="paycheck-generation-result" style="margin-top: 10px; display: none;"></div>
+
+                <div id="bank-balances-preview" style="display: none; margin-bottom: 28px;">
+                    <div class="bank-balances-preview-head">
+                        <h3>Account balances</h3>
+                        <p id="bank-balances-preview-meta"></p>
+                    </div>
+                    <div id="bank-balances-preview-list" class="bank-balances-preview-list">
+                        <p class="bank-balances-preview-empty">Loading balances...</p>
+                    </div>
                 </div>
-                {% endif %}
                 {% endif %}
 
                 <!-- Balance Display -->
@@ -2138,7 +2136,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=summer-quarter"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=bankpreview1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
