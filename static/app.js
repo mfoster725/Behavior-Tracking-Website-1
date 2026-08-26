@@ -746,8 +746,8 @@ function getCurrentSchoolYear() {
     }
 }
 
-// Load school year dates - automatically calculated (August to August)
-function loadSchoolYearDates() {
+// Return admin-configured school year dates, or null if none have been saved.
+function getConfiguredSchoolYearDates() {
     try {
         const stored = localStorage.getItem('schoolYearDates');
         if (stored) {
@@ -758,6 +758,15 @@ function loadSchoolYearDates() {
         }
     } catch (e) {
         console.error('Error loading school year dates from localStorage:', e);
+    }
+    return null;
+}
+
+// Load school year dates - automatically calculated (August to August)
+function loadSchoolYearDates() {
+    const configured = getConfiguredSchoolYearDates();
+    if (configured) {
+        return configured;
     }
 
     const currentSchoolYear = getCurrentSchoolYear();
@@ -847,32 +856,70 @@ function saveQuarterDates(quarterDates) {
     }
 }
 
-function getCurrentQuarter(date) {
-    const quarterDates = loadQuarterDates();
-    const dateObj = new Date(date);
-    const month = dateObj.getMonth() + 1; // 1-12
-    const day = dateObj.getDate();
-    const dateStr = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    
-    for (const [quarter, dates] of Object.entries(quarterDates)) {
-        // Extract MM-DD from MM/DD/YYYY format if needed
-        let start = extractMMDD(dates.start);
-        let end = extractMMDD(dates.end);
-        
-        // Handle quarters that span across years (e.g., Q2: Nov-Jan)
-        if (start <= end) {
-            // Normal quarter within same year
-            if (dateStr >= start && dateStr <= end) {
-                return dates.label;
-            }
-        } else {
-            // Quarter spans across years
-            if (dateStr >= start || dateStr <= end) {
-                return dates.label;
-            }
+function parseLocalDate(date) {
+    if (date instanceof Date) {
+        return date;
+    }
+    if (typeof date === 'string') {
+        const iso = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) {
+            return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+        }
+        const mdy = date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (mdy) {
+            return new Date(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2]));
         }
     }
-    
+    return new Date(date);
+}
+
+function toMmDd(date) {
+    const dateObj = parseLocalDate(date);
+    if (isNaN(dateObj.getTime())) {
+        return '';
+    }
+    const month = dateObj.getMonth() + 1;
+    const day = dateObj.getDate();
+    return `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function isMmDdInInclusiveRange(dateStr, start, end) {
+    if (!dateStr || !start || !end) {
+        return false;
+    }
+    // Handle ranges that span across years (e.g. Nov-Jan or Aug-Jun)
+    if (start <= end) {
+        return dateStr >= start && dateStr <= end;
+    }
+    return dateStr >= start || dateStr <= end;
+}
+
+function getCurrentQuarter(date) {
+    const schoolYearDates = getConfiguredSchoolYearDates();
+    if (!schoolYearDates) {
+        return 'School year not set';
+    }
+
+    const dateStr = toMmDd(date);
+    if (!dateStr) {
+        return 'Unknown Quarter';
+    }
+
+    const schoolYearStart = extractMMDD(schoolYearDates.start);
+    const schoolYearEnd = extractMMDD(schoolYearDates.end);
+    if (!isMmDdInInclusiveRange(dateStr, schoolYearStart, schoolYearEnd)) {
+        return 'Summer';
+    }
+
+    const quarterDates = loadQuarterDates();
+    for (const [, dates] of Object.entries(quarterDates)) {
+        const start = extractMMDD(dates.start);
+        const end = extractMMDD(dates.end);
+        if (isMmDdInInclusiveRange(dateStr, start, end)) {
+            return dates.label;
+        }
+    }
+
     return 'Unknown Quarter';
 }
 
