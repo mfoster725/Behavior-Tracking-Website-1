@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=autosubmit1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=banklayout2">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -723,11 +723,12 @@
         <!-- Bank Account View (restyled to match Accounts UI) -->
         <div id="bank-account-view" class="view">
             <div class="form-section accounts-ui">
+                <div id="bank-account-layout">
                 {% if user.role in ['staff', 'admin'] %}
                 <!-- Starbucks Management (staff/admin only) -->
-                <div id="starbucks-section" style="margin-top: 0; margin-bottom: 24px;">
+                <div id="starbucks-section">
                     <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Starbucks</h3>
-                    <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">
+                    <p class="starbucks-lede">
                         Track the number of Starbucks each student has earned. Use the search options below to find students, then edit counts directly in the table.
                     </p>
 
@@ -776,6 +777,7 @@
                 </div>
                 {% endif %}
 
+                <div id="bank-accounts-section">
                 <h2 style="margin-bottom: 24px;">Student Bank Accounts</h2>
 
                 <!-- Staff/Admin Student Select (searchable dropdown + managed by me) -->
@@ -953,6 +955,8 @@
                     >
                         <p style="margin: 0; color: #94a3b8;">No plan rewards delivered yet.</p>
                     </div>
+                </div>
+                </div>
                 </div>
             </div>
         </div>

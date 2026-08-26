@@ -10648,6 +10648,73 @@ tr[data-aggregate-day-label] {
     text-align: right;
 }
 
+/* Bank Account tab: accounts left, Starbucks right on computer screens */
+#bank-account-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+#starbucks-section {
+    margin: 0 0 24px 0;
+}
+
+#starbucks-section .starbucks-lede {
+    margin: 0 0 16px 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
+@media (min-width: 901px) {
+    #bank-account-layout:has(#starbucks-section) {
+        flex-direction: row;
+        align-items: stretch;
+        gap: 0;
+    }
+
+    #bank-accounts-section {
+        flex: 1 1 0;
+        min-width: 0;
+        order: 1;
+        padding-right: 28px;
+    }
+
+    /* Shrink-wrap to the table/data; padding is extra side spacing */
+    #starbucks-section {
+        flex: 0 0 auto;
+        order: 2;
+        width: min-content;
+        max-width: 42%;
+        margin: 0;
+        padding: 0 24px 0 28px;
+        border-left: 1px solid var(--border);
+        box-sizing: content-box;
+    }
+
+    #starbucks-section .starbucks-lede,
+    #starbucks-section .dashboard-controls,
+    #starbucks-section #starbucks-save-status {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    #starbucks-section .dashboard-search-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #starbucks-section .dashboard-search-wrap {
+        flex: none;
+        min-width: 0;
+        max-width: none;
+        width: 100%;
+    }
+
+    #starbucks-section .dashboard-managed-check {
+        white-space: nowrap;
+    }
+}
+
 /* Starbucks table: columns only as wide as data; card fits table */
 #starbucks-table-container {
     display: inline-block;
@@ -10686,6 +10753,10 @@ tr[data-aggregate-day-label] {
 #starbucks-table td:nth-child(2) {
     /* Let this column auto-size just enough for its text on one line */
     white-space: nowrap;
+}
+
+#starbucks-table td[colspan] {
+    white-space: normal;
 }
 
 /* Badges for infractions/reminders */
