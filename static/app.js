@@ -391,6 +391,7 @@ let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
 let dailyAutosaveTimer = null; // Debounce timer for daily-entry autosave
+let periodAutosaveTimer = null; // Debounce timer for period-entry autosave
 let dailyWriteChain = Promise.resolve(); // Serialize daily saves/clears so a clear cannot be overwritten
 let dailyWriteGeneration = 0; // Bumped on Clear All so in-flight saves are ignored
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
@@ -492,6 +493,128 @@ function saveSubmittedStudents(submittedStudents) {
 }
 
 let submittedStudents = loadSubmittedStudents(); // Track submitted students by date: submittedStudents[date] = Set of student IDs
+let pointCardNightlySubmitTimer = null;
+let pointCardNightlySubmitInterval = null;
+let pointCardAutoSubmitInFlight = false;
+let pointCardNightlySubmitSchedulerStarted = false;
+
+function isPastPointCardSubmitTime(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') {
+        return false;
+    }
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) {
+        return false;
+    }
+    const submitAt = new Date(parts[0], parts[1] - 1, parts[2], 22, 0, 0, 0);
+    return Date.now() >= submitAt.getTime();
+}
+
+function markStudentSubmitted(dateStr, studentId) {
+    if (!dateStr || !studentId) {
+        return;
+    }
+    const id = parseInt(studentId, 10);
+    if (!Number.isFinite(id)) {
+        return;
+    }
+    if (!submittedStudents[dateStr]) {
+        submittedStudents[dateStr] = new Set();
+    }
+    submittedStudents[dateStr].add(id);
+    saveSubmittedStudents(submittedStudents);
+}
+
+function isStudentSubmittedForDate(dateStr, studentId) {
+    const id = parseInt(studentId, 10);
+    return !!(dateStr && submittedStudents[dateStr] && submittedStudents[dateStr].has(id));
+}
+
+function studentDailyDataHasInput(studentId) {
+    const studentData = dailyData[studentId];
+    if (!studentData) {
+        return false;
+    }
+    return Object.keys(studentData).some(periodTime => {
+        const data = studentData[periodTime];
+        return data && (data.s !== null || data.t !== null || data.a !== null || data.r !== null);
+    });
+}
+
+function studentPeriodDataHasInput(studentId) {
+    const data = periodData[studentId];
+    if (!data) {
+        return false;
+    }
+    return (data.safety_points !== null && data.safety_points !== undefined) ||
+        (data.teamwork_points !== null && data.teamwork_points !== undefined) ||
+        (data.accountability_points !== null && data.accountability_points !== undefined) ||
+        (data.relationships_points !== null && data.relationships_points !== undefined);
+}
+
+function periodRecordHasInput(period) {
+    if (!period) {
+        return false;
+    }
+    return (period.safety_points !== null && period.safety_points !== undefined) ||
+        (period.teamwork_points !== null && period.teamwork_points !== undefined) ||
+        (period.accountability_points !== null && period.accountability_points !== undefined) ||
+        (period.relationships_points !== null && period.relationships_points !== undefined);
+}
+
+function getStudentNameById(studentId) {
+    const id = parseInt(studentId, 10);
+    const fromAll = allStudents.find(s => s.id === id);
+    if (fromAll && fromAll.name) {
+        return fromAll.name;
+    }
+    const fromPeriod = filteredStudentsForPeriod.find(s => s.id === id);
+    return (fromPeriod && fromPeriod.name) ? fromPeriod.name : 'student';
+}
+
+function msUntilNextPointCardSubmit() {
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 5, 0, 0);
+    if (now.getTime() >= target.getTime()) {
+        target.setDate(target.getDate() + 1);
+    }
+    return Math.max(1000, target.getTime() - now.getTime());
+}
+
+function startPointCardNightlySubmitScheduler() {
+    if (pointCardNightlySubmitSchedulerStarted || !canEdit()) {
+        return;
+    }
+    pointCardNightlySubmitSchedulerStarted = true;
+
+    const scheduleNext = () => {
+        if (pointCardNightlySubmitTimer) {
+            clearTimeout(pointCardNightlySubmitTimer);
+        }
+        pointCardNightlySubmitTimer = setTimeout(async () => {
+            await autoSubmitPointCardsIfDue();
+            scheduleNext();
+        }, msUntilNextPointCardSubmit());
+    };
+    scheduleNext();
+
+    if (!pointCardNightlySubmitInterval) {
+        pointCardNightlySubmitInterval = setInterval(() => {
+            autoSubmitPointCardsIfDue();
+        }, 30000);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            autoSubmitPointCardsIfDue();
+        }
+    });
+    window.addEventListener('focus', () => {
+        autoSubmitPointCardsIfDue();
+    });
+
+    autoSubmitPointCardsIfDue();
+}
 
 function scheduleDailyDataLoad(delayMs) {
     if (dailyLoadDebounceTimer) {
@@ -997,8 +1120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadSchedules('teacher');
         }
         
-        
-        // If user is a parent, ensure parent portal view is active and load children
+        startPointCardNightlySubmitScheduler();
         
         console.log('Initialization complete');
     } catch (error) {
@@ -1159,7 +1281,6 @@ function setupEventListeners() {
             savePeriodBtn.addEventListener('click', savePeriodData);
         }
 
-
         // Daily overview entry
         const dailyDateInput = document.getElementById('daily-date-input');
         if (dailyDateInput) {
@@ -1235,6 +1356,10 @@ function setupEventListeners() {
 
         ensureDailyGridDelegatedListeners();
         
+        const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
+        if (clearDailyAllBtn) {
+            clearDailyAllBtn.addEventListener('click', clearDailyAllData);
+        }
 
         // Info modal actions: bind explicit handlers so save/cancel works even when inline handlers are unavailable.
         const infoModal = document.getElementById('info-modal');
@@ -2368,8 +2493,17 @@ async function loadPeriodData() {
         if (response.ok) {
             const data = await response.json();
             periodData = {};
+            const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
             data.forEach(item => {
-                periodData[item.student_id] = item;
+                const studentId = item.student_id;
+                const hasInput = periodRecordHasInput(item);
+                if (item.submitted || (hasInput && pastSubmitTime)) {
+                    markStudentSubmitted(currentDate, studentId);
+                }
+                if (isStudentSubmittedForDate(currentDate, studentId)) {
+                    return;
+                }
+                periodData[studentId] = item;
             });
         }
     } catch (error) {
@@ -2607,6 +2741,8 @@ function renderStudentsGrid() {
                 
                 // Update "I" box highlight based on STAR values
                 updateInfoButtonHighlight(student.id, currentPeriod);
+
+                schedulePeriodAutosave();
                 
                 // Auto-advance, unless backspace clear. R uses special nav flow.
                 if (!e.isBackspaceClear) {
@@ -2766,26 +2902,43 @@ function renderStudentsGrid() {
     }
 }
 
-async function savePeriodData() {
+function schedulePeriodAutosave() {
     if (!currentDate || !currentPeriod) {
-        alert('Please select a date and period');
         return;
+    }
+    if (periodAutosaveTimer) {
+        clearTimeout(periodAutosaveTimer);
+    }
+    periodAutosaveTimer = setTimeout(async () => {
+        periodAutosaveTimer = null;
+        try {
+            await savePeriodData({ silent: true, skipReload: true });
+        } catch (error) {
+            console.error('Auto-save error for period data:', error);
+        }
+    }, 1500);
+}
+
+async function savePeriodData(options = {}) {
+    const { silent = false, skipReload = false } = options;
+    if (!currentDate || !currentPeriod) {
+        if (!silent) {
+            alert('Please select a date and period');
+        }
+        return false;
     }
 
     const locationInput = document.getElementById('location-input');
     const location = locationInput ? locationInput.value || currentPeriod : currentPeriod;
 
-    // For period entry view, only save data for filtered students
     const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
         ? filteredStudentsForPeriod 
         : allStudents;
     const allowedStudentIds = new Set(studentsToSave.map(s => s.id));
 
-    // Prepare data for students (filtered if in period entry view)
     const studentsData = [];
     Object.keys(periodData).forEach(studentId => {
         const studentIdInt = parseInt(studentId);
-        // Only include students who are in the allowed list
         if (!allowedStudentIds.has(studentIdInt)) {
             return;
         }
@@ -2797,19 +2950,26 @@ async function savePeriodData() {
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
-                safety_points: data.safety_points || 0,
-                teamwork_points: data.teamwork_points || 0,
-                accountability_points: data.accountability_points || 0,
-                relationships_points: data.relationships_points || 0,
+                safety_points: data.safety_points ?? null,
+                teamwork_points: data.teamwork_points ?? null,
+                accountability_points: data.accountability_points ?? null,
+                relationships_points: data.relationships_points ?? null,
                 info: data.info || ''
             });
         }
     });
 
     if (studentsData.length === 0) {
-        alert('No data to save');
-        return;
+        if (!silent) {
+            alert('No data to save');
+        }
+        return false;
     }
+
+    const studentsMap = {};
+    studentsData.forEach(student => {
+        studentsMap[student.student_id] = student;
+    });
 
     try {
         const response = await fetch('/api/period-data', {
@@ -2819,28 +2979,33 @@ async function savePeriodData() {
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
-                students: studentsData
+                students: studentsMap
             })
         });
 
         if (response.ok) {
-            showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
-            // Reload to get updated data
-            loadPeriodData();
-            // Refresh summary if it's currently displayed
+            if (!silent) {
+                showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
+            }
+            if (!skipReload) {
+                loadPeriodData();
+            }
             refreshSummaryIfActive();
             if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
                 window.StudentPlans.refreshActiveMets(studentsData.map(s => s.student_id), currentDate);
             }
+            return true;
         } else {
             throw new Error('Failed to save');
         }
     } catch (error) {
         console.error('Error saving period data:', error);
-        showMessage('Error saving data. Please try again.', 'error');
+        if (!silent) {
+            showMessage('Error saving data. Please try again.', 'error');
+        }
+        throw error;
     }
 }
-
 
 // Daily Overview Functions
 async function filterDailyStudents() {
@@ -3029,6 +3194,7 @@ async function loadDailyData() {
 
         const nextDailyData = {};
         const attendanceUpdates = {};
+        const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
 
         // Map records by student, but only for visible, non-submitted students
         allRecords.forEach(record => {
@@ -3038,8 +3204,12 @@ async function loadDailyData() {
             if (!visibleStudentIds.has(studentId)) {
                 return;
             }
-            // Skip students that have already been submitted for this date
-            if (submittedStudents[currentDate].has(studentId)) {
+
+            const hasInput = Array.isArray(record.periods) && record.periods.some(periodRecordHasInput);
+            if (record.submitted || (hasInput && pastSubmitTime)) {
+                markStudentSubmitted(currentDate, studentId);
+            }
+            if (isStudentSubmittedForDate(currentDate, studentId)) {
                 return;
             }
 
@@ -3553,58 +3723,6 @@ function renderDailyGrid() {
             body.appendChild(spacerCell);
         }
     });
-    
-    // Add submit button row for each student (staff only)
-    if (canEdit()) {
-        // Empty cell for period column
-        const submitPeriodCell = document.createElement('div');
-        submitPeriodCell.className = 'daily-period-cell';
-        submitPeriodCell.style.borderTop = '2px solid #e0e0e0';
-        body.appendChild(submitPeriodCell);
-        
-        // Add spacer after period column (gutter, but visually transparent)
-        const submitSpacer = document.createElement('div');
-        submitSpacer.style.background = 'transparent';
-        submitSpacer.style.borderTop = '2px solid #e0e0e0';
-        body.appendChild(submitSpacer);
-        
-        // For each student, add submit button spanning STAR columns (S, T, A, R, I => 5 columns)
-        studentsToDisplay.forEach((student, studentIndex) => {
-            const submitCell = document.createElement('div');
-            submitCell.className = 'daily-data-cell daily-submit-cell';
-            submitCell.style.gridColumn = 'span 5'; // Span S, T, A, R, I columns
-            submitCell.style.padding = '4px 6px';
-            submitCell.style.display = 'flex';
-            submitCell.style.justifyContent = 'center';
-            submitCell.style.alignItems = 'center';
-            submitCell.style.borderTop = '2px solid #e0e0e0';
-            
-            // Apply card color background
-            const bgColor = getCardColor(student.card_color);
-            if (bgColor) {
-                submitCell.style.backgroundColor = bgColor;
-            }
-            
-            const submitButton = document.createElement('button');
-            submitButton.className = 'student-submit-btn';
-            submitButton.textContent = `Submit ${student.name}`;
-            submitButton.dataset.studentId = student.id;
-            submitButton.dataset.studentName = student.name;
-            submitButton.addEventListener('click', submitStudentData);
-            
-            submitCell.appendChild(submitButton);
-            body.appendChild(submitCell);
-            
-            // Add spacer cell after each student (except the last)
-            if (studentIndex < studentsToDisplay.length - 1) {
-                const spacerCell = document.createElement('div');
-                // Gutters between submit-button columns
-                spacerCell.style.background = 'transparent';
-                spacerCell.style.borderTop = '2px solid #e0e0e0';
-                body.appendChild(spacerCell);
-            }
-        });
-    }
     
     // Update "I" box highlights for all students and periods on initial load
     studentsToDisplay.forEach(student => {
@@ -4486,10 +4604,10 @@ async function saveDailyAllData(options = {}) {
                 periods.push({
                     time_range: periodTime,
                     location: periodInfo ? periodInfo.location : periodTime,
-                    safety_points: data.s !== null ? data.s : 0,
-                    teamwork_points: data.t !== null ? data.t : 0,
-                    accountability_points: data.a !== null ? data.a : 0,
-                    relationships_points: data.r !== null ? data.r : 0,
+                    safety_points: data.s,
+                    teamwork_points: data.t,
+                    accountability_points: data.a,
+                    relationships_points: data.r,
                     points_possible: 4,
                     reset: false,
                     frenzy: false,
@@ -4555,38 +4673,38 @@ async function saveDailyAllData(options = {}) {
     }
 }
 
-async function submitStudentData(e) {
-    const button = e.target;
-    const studentId = parseInt(button.dataset.studentId);
-    const studentName = button.dataset.studentName;
-    
+async function submitStudentPointCard(studentId, studentName, options = {}) {
+    const { silent = false } = options;
+    studentId = parseInt(studentId, 10);
+    studentName = studentName || getStudentNameById(studentId);
+
     if (!currentDate) {
-        alert('Please select a date');
-        return;
+        if (!silent) {
+            alert('Please select a date');
+        }
+        return false;
     }
 
-    // Check if there's data for this student
-    if (!dailyData[studentId] || Object.keys(dailyData[studentId]).length === 0) {
-        alert(`No data to submit for ${studentName}`);
-        return;
+    if (!studentDailyDataHasInput(studentId)) {
+        if (!silent) {
+            alert(`No data to submit for ${studentName}`);
+        }
+        return false;
     }
 
-    // Prepare periods data for this student
     const periods = [];
-    
     Object.keys(dailyData[studentId]).forEach(periodTime => {
         const data = dailyData[studentId][periodTime];
         const periodInfo = STANDARD_PERIODS.find(p => p.time === periodTime);
-        
-        // Only save if at least one value is not null
+
         if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
             periods.push({
                 time_range: periodTime,
                 location: periodInfo ? periodInfo.location : periodTime,
-                safety_points: data.s !== null ? data.s : 0,
-                teamwork_points: data.t !== null ? data.t : 0,
-                accountability_points: data.a !== null ? data.a : 0,
-                relationships_points: data.r !== null ? data.r : 0,
+                safety_points: data.s,
+                teamwork_points: data.t,
+                accountability_points: data.a,
+                relationships_points: data.r,
                 points_possible: 4,
                 reset: false,
                 frenzy: false,
@@ -4599,21 +4717,17 @@ async function submitStudentData(e) {
     });
 
     if (periods.length === 0) {
-        alert(`No data to submit for ${studentName}`);
-        return;
+        if (!silent) {
+            alert(`No data to submit for ${studentName}`);
+        }
+        return false;
     }
 
-    // Disable button during submission
-    button.disabled = true;
-    button.textContent = `Submitting...`;
-
-    // Get attendance status
     const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-
     const abortController = new AbortController();
     const timeoutId = setTimeout(function () {
         abortController.abort();
-    }, 45000); // 45 second timeout
+    }, 45000);
 
     try {
         const response = await fetch('/api/daily-records', {
@@ -4632,43 +4746,114 @@ async function submitStudentData(e) {
         clearTimeout(timeoutId);
 
         if (response.ok) {
-            // Mark this student as submitted for the current date
-            if (!submittedStudents[currentDate]) {
-                submittedStudents[currentDate] = new Set();
-            }
-            submittedStudents[currentDate].add(studentId);
-            
-            // Save to localStorage for persistence
-            saveSubmittedStudents(submittedStudents);
-            
-            // Clear this student's data from dailyData
+            markStudentSubmitted(currentDate, studentId);
             delete dailyData[studentId];
-            
-            // Show success message
-            showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            if (periodData[studentId]) {
+                delete periodData[studentId];
+            }
+            if (!silent) {
+                showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            }
             invalidateDailyLoadCache(currentDate);
-            
-            // Reload the grid to show cleared data
-            renderDailyGrid();
-        } else {
-            var err = new Error('Failed to submit data');
-            err.status = response.status;
-            throw err;
+            return true;
         }
+
+        const err = new Error('Failed to submit data');
+        err.status = response.status;
+        throw err;
     } catch (error) {
         clearTimeout(timeoutId);
         console.error('Error submitting student data:', error);
-        var isTimeout = error.name === 'AbortError';
-        var isServerBusy = error.status >= 502 && error.status <= 504;
-        if (isTimeout || isServerBusy) {
-            showMessage('Submission didn\'t go through (server may be busy). Please try again in a minute or two.', 'error');
-        } else {
-            showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+        if (!silent) {
+            const isTimeout = error.name === 'AbortError';
+            const isServerBusy = error.status >= 502 && error.status <= 504;
+            if (isTimeout || isServerBusy) {
+                showMessage('Submission didn\'t go through (server may be busy). Please try again in a minute or two.', 'error');
+            } else {
+                showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+            }
         }
-        
-        // Re-enable button
-        button.disabled = false;
-        button.textContent = `Submit ${studentName}`;
+        return false;
+    }
+}
+
+async function autoSubmitPointCardsIfDue() {
+    if (!canEdit() || !currentDate || pointCardAutoSubmitInFlight) {
+        return;
+    }
+    if (!isPastPointCardSubmitTime(currentDate)) {
+        return;
+    }
+
+    const dailyIds = Object.keys(dailyData)
+        .map(id => parseInt(id, 10))
+        .filter(id => studentDailyDataHasInput(id) && !isStudentSubmittedForDate(currentDate, id));
+    const periodIds = Object.keys(periodData)
+        .map(id => parseInt(id, 10))
+        .filter(id => studentPeriodDataHasInput(id) && !isStudentSubmittedForDate(currentDate, id));
+
+    if (dailyIds.length === 0 && periodIds.length === 0) {
+        return;
+    }
+
+    pointCardAutoSubmitInFlight = true;
+    let submittedCount = 0;
+    try {
+        if (dailyAutosaveTimer) {
+            clearTimeout(dailyAutosaveTimer);
+            dailyAutosaveTimer = null;
+        }
+        if (periodAutosaveTimer) {
+            clearTimeout(periodAutosaveTimer);
+            periodAutosaveTimer = null;
+        }
+        if (dailyIds.length > 0 || Object.keys(dailyData).length > 0) {
+            await enqueueDailyWrite(function () {
+                return saveDailyAllData({ silent: true, fromAutosave: true });
+            });
+        }
+
+        if (periodIds.length > 0) {
+            try {
+                await savePeriodData({ silent: true, skipReload: true });
+            } catch (error) {
+                console.error('Error saving period data before nightly submit:', error);
+            }
+        }
+
+        for (const studentId of dailyIds) {
+            const ok = await submitStudentPointCard(studentId, getStudentNameById(studentId), { silent: true });
+            if (ok) {
+                submittedCount += 1;
+            }
+        }
+
+        for (const studentId of periodIds) {
+            if (isStudentSubmittedForDate(currentDate, studentId)) {
+                continue;
+            }
+            markStudentSubmitted(currentDate, studentId);
+            delete periodData[studentId];
+            submittedCount += 1;
+        }
+
+        if (submittedCount > 0) {
+            invalidateDailyLoadCache(currentDate);
+            const dailyViewActive = document.getElementById('entry-view')?.classList.contains('active');
+            const periodViewActive = document.getElementById('period-entry-view')?.classList.contains('active');
+            if (dailyViewActive) {
+                renderDailyGrid();
+            }
+            if (periodViewActive) {
+                renderStudentsGrid();
+            }
+            showMessage(`Auto-submitted ${submittedCount} point card${submittedCount === 1 ? '' : 's'} for the day.`, 'success');
+            refreshSummaryIfActive();
+        }
+    } catch (error) {
+        console.error('Error auto-submitting point cards:', error);
+    } finally {
+        pointCardAutoSubmitInFlight = false;
     }
 }
 
@@ -10031,6 +10216,11 @@ function saveInfoModal() {
     clearInfoModalStarHighlights();
     if (modalEl) modalEl.style.display = 'none';
     showMessage('Information saved!', 'success');
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        schedulePeriodAutosave();
+    } else {
+        scheduleDailyAutosave();
+    }
     onInfoModalClosedForNav();
 }
 
@@ -18585,7 +18775,7 @@ function loadNotifications() {
         listEl.innerHTML = list.slice(0, 30).map(function (n) {
             return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
                 '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
-                '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+                '<div style="color:#64748b; white-space:pre-wrap;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
                 '</div>';
         }).join('');
         listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {

@@ -31,6 +31,7 @@ from decimal import Decimal
 import re
 import math
 import secrets
+import threading
 import csv
 import json
 import time
@@ -812,6 +813,393 @@ def ensure_daily_query_indexes():
         app.logger.warning(f"Failed to ensure daily query indexes: {e}")
 
 
+def ensure_point_card_submit_schema():
+    """Add daily_records.submitted_at if the column is missing."""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        if 'daily_records' not in inspector.get_table_names():
+            return
+        columns = [col['name'] for col in inspector.get_columns('daily_records')]
+        if 'submitted_at' in columns:
+            return
+        with db.engine.connect() as conn:
+            conn.execute(text('ALTER TABLE daily_records ADD COLUMN submitted_at TIMESTAMP'))
+            conn.commit()
+        print('Migration complete: submitted_at column added to daily_records', flush=True)
+    except Exception as e:
+        print(f'Point card submit schema check: {e}', flush=True)
+
+
+def _school_tz():
+    name = (os.environ.get('SCHOOL_TIMEZONE') or 'America/Chicago').strip() or 'America/Chicago'
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        return timezone(timedelta(hours=-5))
+
+
+# Nightly submit window: after 10:00pm school time, before 11:59pm.
+POINT_CARD_SUBMIT_HOUR = 22
+POINT_CARD_SUBMIT_MINUTE = 0
+
+
+def school_now():
+    return datetime.now(_school_tz())
+
+
+def is_past_point_card_submit_time(record_date):
+    if not record_date:
+        return False
+    now = school_now()
+    submit_at = datetime(
+        record_date.year, record_date.month, record_date.day,
+        POINT_CARD_SUBMIT_HOUR, POINT_CARD_SUBMIT_MINUTE, 0,
+        tzinfo=now.tzinfo,
+    )
+    return now >= submit_at
+
+
+def _dates_due_for_point_card_submit():
+    now = school_now()
+    today = now.date()
+    dates = []
+    if is_past_point_card_submit_time(today):
+        dates.append(today)
+    for days_ago in range(1, 8):
+        dates.append(today - timedelta(days=days_ago))
+    return dates
+
+
+POINT_CARD_TIME_RANGES = (
+    'AM Bus',
+    '7:45-8:30',
+    '8:30-9:00',
+    '9:00-9:30',
+    '9:30-10:00',
+    '10:00-10:30',
+    '10:30-11:00',
+    '11:00-11:30',
+    '11:30-12:00',
+    '12:00-12:30',
+    '12:30-1:00',
+    '1:00-1:30',
+    '1:30-2:00',
+    '2:00-2:30',
+    '2:30-2:45',
+    'PM Bus',
+)
+
+STAR_POINT_FIELDS = (
+    ('safety_points', 'Safety'),
+    ('teamwork_points', 'Teamwork'),
+    ('accountability_points', 'Accountability'),
+    ('relationships_points', 'Relationships'),
+)
+
+ABSENT_ATTENDANCE_STATUSES = frozenset({'excused', 'unexcused'})
+
+
+def _nullable_star_points(value):
+    if value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_school_date(record_date):
+    return record_date.strftime('%B ') + str(record_date.day) + record_date.strftime(', %Y')
+
+
+def _collect_point_card_gaps(period_records_by_time):
+    gaps = []
+    all_labels = [label for _, label in STAR_POINT_FIELDS]
+    for time_range in POINT_CARD_TIME_RANGES:
+        period = period_records_by_time.get(time_range)
+        if period is None:
+            gaps.append({'time_range': time_range, 'categories': list(all_labels)})
+            continue
+        missing = [
+            label for field, label in STAR_POINT_FIELDS
+            if getattr(period, field, None) is None
+        ]
+        if missing:
+            gaps.append({'time_range': time_range, 'categories': missing})
+    return gaps
+
+
+def _format_missing_gap_line(gap):
+    labels = gap.get('categories') or []
+    if len(labels) >= len(STAR_POINT_FIELDS):
+        detail = 'no points added'
+    else:
+        detail = ', '.join(labels)
+    return f"• {gap['time_range']} — {detail}"
+
+
+def _missing_points_body(student_name, record_date, gaps, for_scheduled_staff=False):
+    date_label = _format_school_date(record_date)
+    if for_scheduled_staff:
+        header = (
+            f"{student_name} did not have points added during your scheduled time "
+            f"on {date_label}:"
+        )
+    else:
+        header = f"{student_name} did not have points added on {date_label}:"
+    return header + '\n' + '\n'.join(_format_missing_gap_line(gap) for gap in gaps)
+
+
+def _staff_users_by_schedule_name():
+    lookup = {}
+    users = User.query.filter(User.role.in_(['staff', 'admin'])).all()
+    for user in users:
+        if user.name and user.name.strip():
+            lookup[user.name.strip().lower()] = user
+        if user.username and user.username.strip():
+            lookup.setdefault(user.username.strip().lower(), user)
+    return lookup
+
+
+def _dates_for_missing_point_notifications(dates):
+    if not dates:
+        return []
+    today = school_now().date()
+    earliest = today - timedelta(days=1)
+    result = []
+    for record_date in dates:
+        if record_date < earliest or record_date > today:
+            continue
+        if record_date.weekday() >= 5:
+            continue
+        if not is_past_point_card_submit_time(record_date):
+            continue
+        now = school_now()
+        notify_at = datetime(
+            record_date.year, record_date.month, record_date.day,
+            POINT_CARD_SUBMIT_HOUR, POINT_CARD_SUBMIT_MINUTE, 0,
+            tzinfo=now.tzinfo,
+        ) + timedelta(minutes=5)
+        if now < notify_at:
+            continue
+        result.append(record_date)
+    return result
+
+
+def notify_missing_point_card_entries(dates):
+    """Notify case managers and scheduled staff about empty STAR boxes after nightly submit."""
+    dates = _dates_for_missing_point_notifications(dates)
+    if not dates:
+        return 0
+
+    student_users = User.query.filter_by(role='student').all()
+    active_student_ids = [u.student_id for u in student_users if u.student_id]
+    if not active_student_ids:
+        return 0
+
+    students = Student.query.filter(Student.id.in_(active_student_ids)).all()
+    students_by_id = {s.id: s for s in students}
+    staff_lookup = _staff_users_by_schedule_name()
+
+    schedules = Schedule.query.filter(
+        Schedule.schedule_type == 'student',
+        Schedule.student_id.in_(active_student_ids),
+    ).all()
+    staff_name_by_student_period = {}
+    for row in schedules:
+        if not row.student_id or not row.time_period:
+            continue
+        staff_name_by_student_period.setdefault(row.student_id, {})[row.time_period] = row.staff_name
+
+    notified_students = 0
+    for record_date in dates:
+        existing_notices = {
+            n.student_id
+            for n in MissingPointCardNotice.query.filter_by(record_date=record_date).all()
+        }
+        records = DailyRecord.query.filter(
+            DailyRecord.date == record_date,
+            DailyRecord.student_id.in_(active_student_ids),
+        ).options(selectinload(DailyRecord.periods)).all()
+        records_by_student = {r.student_id: r for r in records}
+
+        for student_id in active_student_ids:
+            if student_id in existing_notices:
+                continue
+            student = students_by_id.get(student_id)
+            if not student:
+                continue
+
+            record = records_by_student.get(student_id)
+            status = (record.attendance_status or 'present') if record else 'present'
+            if status in ABSENT_ATTENDANCE_STATUSES:
+                db.session.add(MissingPointCardNotice(
+                    student_id=student_id, record_date=record_date
+                ))
+                continue
+
+            period_by_time = {}
+            if record:
+                for period in record.periods:
+                    if period.time_range:
+                        period_by_time[period.time_range] = period
+            gaps = _collect_point_card_gaps(period_by_time)
+            if not gaps:
+                db.session.add(MissingPointCardNotice(
+                    student_id=student_id, record_date=record_date
+                ))
+                continue
+
+            case_manager = get_student_case_manager(student_id)
+            skip_staff_ids = set()
+            if case_manager:
+                db.session.add(Notification(
+                    user_id=case_manager.id,
+                    type='missing_point_card',
+                    title=f'Missing points: {student.name}',
+                    body=_missing_points_body(student.name, record_date, gaps, False),
+                ))
+                skip_staff_ids.add(case_manager.id)
+
+            gaps_by_staff = {}
+            period_staff = staff_name_by_student_period.get(student_id, {})
+            for gap in gaps:
+                staff_name = (period_staff.get(gap['time_range']) or '').strip()
+                if not staff_name:
+                    continue
+                staff_user = staff_lookup.get(staff_name.lower())
+                if not staff_user or staff_user.id in skip_staff_ids:
+                    continue
+                gaps_by_staff.setdefault(staff_user.id, []).append(gap)
+
+            for staff_user_id, staff_gaps in gaps_by_staff.items():
+                db.session.add(Notification(
+                    user_id=staff_user_id,
+                    type='missing_point_card',
+                    title=f'Missing points: {student.name}',
+                    body=_missing_points_body(student.name, record_date, staff_gaps, True),
+                ))
+
+            db.session.add(MissingPointCardNotice(
+                student_id=student_id, record_date=record_date
+            ))
+            notified_students += 1
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    if notified_students:
+        app.logger.info(
+            'Sent missing-point notifications for %s student(s) on %s',
+            notified_students,
+            ', '.join(d.isoformat() for d in dates),
+        )
+    return notified_students
+
+
+def run_point_card_auto_submit(target_date=None):
+    """Mark point cards with entered data as submitted after 10:00pm school time. No browser required."""
+    if target_date is not None:
+        if isinstance(target_date, str):
+            target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+        dates = [target_date]
+    else:
+        dates = _dates_due_for_point_card_submit()
+
+    if not dates:
+        return 0
+
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    count = 0
+    records = DailyRecord.query.filter(
+        DailyRecord.date.in_(dates),
+        DailyRecord.submitted_at.is_(None),
+    ).options(selectinload(DailyRecord.periods)).all()
+    for record in records:
+        if not record.periods:
+            continue
+        if not is_past_point_card_submit_time(record.date):
+            continue
+        record.submitted_at = now_naive
+        count += 1
+    if count:
+        db.session.commit()
+        app.logger.info(
+            'Auto-submitted %s point card(s) for %s',
+            count,
+            ', '.join(d.isoformat() for d in dates),
+        )
+    try:
+        notify_missing_point_card_entries(dates)
+    except Exception:
+        app.logger.exception('missing point card notifications failed')
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    return count
+
+
+def maybe_auto_submit_point_cards_for_date(record_date):
+    if not is_past_point_card_submit_time(record_date):
+        return 0
+    return run_point_card_auto_submit(record_date)
+
+
+def mark_daily_record_submitted_if_due(daily_record):
+    if not daily_record or daily_record.submitted_at or not daily_record.periods:
+        return
+    if is_past_point_card_submit_time(daily_record.date):
+        daily_record.submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+_point_card_submit_thread_started = False
+_point_card_submit_thread_lock = threading.Lock()
+
+
+def _seconds_until_next_point_card_submit():
+    now = school_now()
+    target = now.replace(hour=POINT_CARD_SUBMIT_HOUR, minute=5, second=0, microsecond=0)
+    if now >= target:
+        target = target + timedelta(days=1)
+    return max(1.0, (target - now).total_seconds())
+
+
+def _point_card_submit_loop():
+    try:
+        with app.app_context():
+            run_point_card_auto_submit()
+    except Exception:
+        app.logger.exception('point card auto-submit catch-up failed')
+    while True:
+        try:
+            time.sleep(_seconds_until_next_point_card_submit())
+            with app.app_context():
+                run_point_card_auto_submit()
+        except Exception:
+            app.logger.exception('point card nightly auto-submit failed')
+            time.sleep(60)
+
+
+def start_point_card_nightly_submit_thread():
+    global _point_card_submit_thread_started
+    with _point_card_submit_thread_lock:
+        if _point_card_submit_thread_started:
+            return
+        _point_card_submit_thread_started = True
+    thread = threading.Thread(
+        target=_point_card_submit_loop,
+        name='point-card-nightly-submit',
+        daemon=True,
+    )
+    thread.start()
+    print('Point card nightly auto-submit thread started (10:05pm school time)', flush=True)
+
+
 class Student(db.Model):
     __tablename__ = 'students'
     id = db.Column(db.Integer, primary_key=True)
@@ -862,6 +1250,8 @@ class DailyRecord(db.Model):
     attendance_status = db.Column(db.String(20), default='present')
     # Keep present field for backward compatibility during migration
     present = db.Column(db.Boolean, default=True)
+    # Set after 10:00pm (school timezone) when the point card had data, even if no browser is open
+    submitted_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
     periods = db.relationship('PeriodRecord', backref='daily_record', lazy=True, cascade='all, delete-orphan')
@@ -1417,6 +1807,22 @@ class Notification(db.Model):
     purchase_order = db.relationship('PurchaseOrder', backref='notification_records')
     curriculum_assignment = db.relationship('CurriculumAssignment', backref='notification_records')
 
+
+class MissingPointCardNotice(db.Model):
+    """One row per student/date after the nightly missing-points scan, so we do not re-notify."""
+    __tablename__ = 'missing_point_card_notices'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship('Student', backref='missing_point_card_notices')
+
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'record_date', name='unique_missing_point_card_notice'),
+    )
+
+
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
@@ -1572,6 +1978,8 @@ def init_db():
             # Create all tables
             db.create_all()
             ensure_daily_query_indexes()
+            ensure_point_card_submit_schema()
+            start_point_card_nightly_submit_thread()
             try:
                 seed_plan_if_library()
             except Exception as seed_err:
@@ -3764,10 +4172,10 @@ def period_data():
             if period_record:
                 # Update existing
                 period_record.location = location
-                period_record.safety_points = student_data.get('safety_points', 0)
-                period_record.teamwork_points = student_data.get('teamwork_points', 0)
-                period_record.accountability_points = student_data.get('accountability_points', 0)
-                period_record.relationships_points = student_data.get('relationships_points', 0)
+                period_record.safety_points = _nullable_star_points(student_data.get('safety_points'))
+                period_record.teamwork_points = _nullable_star_points(student_data.get('teamwork_points'))
+                period_record.accountability_points = _nullable_star_points(student_data.get('accountability_points'))
+                period_record.relationships_points = _nullable_star_points(student_data.get('relationships_points'))
                 period_record.points_possible = 4
                 period_record.info = student_data.get('info')
             else:
@@ -3776,10 +4184,10 @@ def period_data():
                     daily_record_id=daily_record.id,
                     time_range=period,
                     location=location,
-                    safety_points=student_data.get('safety_points', 0),
-                    teamwork_points=student_data.get('teamwork_points', 0),
-                    accountability_points=student_data.get('accountability_points', 0),
-                    relationships_points=student_data.get('relationships_points', 0),
+                    safety_points=_nullable_star_points(student_data.get('safety_points')),
+                    teamwork_points=_nullable_star_points(student_data.get('teamwork_points')),
+                    accountability_points=_nullable_star_points(student_data.get('accountability_points')),
+                    relationships_points=_nullable_star_points(student_data.get('relationships_points')),
                     points_possible=4,
                     info=student_data.get('info')
                 )
@@ -3788,6 +4196,7 @@ def period_data():
             saved_count += 1
         
         db.session.commit()
+        maybe_auto_submit_point_cards_for_date(record_date)
         
         # Audit: Log period data creation/update
         log_phi_access(
@@ -3806,6 +4215,7 @@ def period_data():
         # GET request - retrieve period data
         record_date = datetime.strptime(request.args.get('date'), '%Y-%m-%d').date()
         period = request.args.get('period')
+        maybe_auto_submit_point_cards_for_date(record_date)
         
         # Audit: Log period data access
         log_phi_access(
@@ -3846,7 +4256,8 @@ def period_data():
                     'teamwork_points': period_record.teamwork_points,
                     'accountability_points': period_record.accountability_points,
                     'relationships_points': period_record.relationships_points,
-                    'info': period_record.info or ''
+                    'info': period_record.info or '',
+                    'submitted': bool(daily_record.submitted_at),
                 })
         
         return jsonify(result)
@@ -3916,10 +4327,10 @@ def daily_records():
                 daily_record_id=daily_record.id,
                 time_range=period_data.get('time_range'),
                 location=period_data.get('location'),
-                safety_points=period_data.get('safety_points', 0),
-                teamwork_points=period_data.get('teamwork_points', 0),
-                accountability_points=period_data.get('accountability_points', 0),
-                relationships_points=period_data.get('relationships_points', 0),
+                safety_points=_nullable_star_points(period_data.get('safety_points')),
+                teamwork_points=_nullable_star_points(period_data.get('teamwork_points')),
+                accountability_points=_nullable_star_points(period_data.get('accountability_points')),
+                relationships_points=_nullable_star_points(period_data.get('relationships_points')),
                 points_possible=period_data.get('points_possible', 4),
                 reset=period_data.get('reset', False),
                 frenzy=period_data.get('frenzy', False),
@@ -3965,6 +4376,7 @@ def daily_records():
             )
             db.session.add(frenzy)
         
+        mark_daily_record_submitted_if_due(daily_record)
         db.session.commit()
         
         # Audit: Log daily record creation/update
@@ -4012,6 +4424,8 @@ def daily_records():
         )
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
+        if start_date and end_date and start_date == end_date:
+            maybe_auto_submit_point_cards_for_date(datetime.strptime(start_date, '%Y-%m-%d').date())
         staff_id = request.args.get('staff_id', type=int)
         managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
         
@@ -4138,6 +4552,8 @@ def daily_records():
                 'day_of_week': record.day_of_week,
                 'present': record.present,  # Keep for backward compatibility
                 'attendance_status': attendance_status,
+                'submitted': bool(record.submitted_at),
+                'submitted_at': record.submitted_at.isoformat() if record.submitted_at else None,
                 'periods': periods,
                 'frenzies': frenzies
             })
@@ -12010,6 +12426,36 @@ def generate_paychecks_cron():
         })
     except Exception as e:
         app.logger.exception('paycheck cron error')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/point-cards/auto-submit-cron', methods=['GET', 'POST'])
+def auto_submit_point_cards_cron():
+    """
+    Nightly point-card submit for cards that have data (after 10pm school time).
+    Secured by CRON_SECRET. Optional ?date=YYYY-MM-DD.
+    """
+    secret = os.environ.get('CRON_SECRET')
+    if not secret:
+        return jsonify({'error': 'CRON_SECRET not configured'}), 503
+    provided = request.headers.get('X-Cron-Secret') or (
+        request.headers.get('Authorization') or ''
+    ).replace('Bearer ', '').strip()
+    if not provided or not secrets.compare_digest(secret, provided):
+        return jsonify({'error': 'Unauthorized'}), 401
+    target_date = None
+    if request.method == 'POST' and request.is_json:
+        target_date = (request.json or {}).get('date')
+    elif request.method == 'GET':
+        target_date = request.args.get('date')
+    try:
+        count = run_point_card_auto_submit(target_date)
+        return jsonify({
+            'message': f'Auto-submitted {count} point card(s)',
+            'count': count,
+        })
+    except Exception as e:
+        app.logger.exception('point card auto-submit cron error')
         return jsonify({'error': str(e)}), 500
 
 

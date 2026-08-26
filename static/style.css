@@ -2874,6 +2874,14 @@ table tbody tr:hover {
     justify-content: center;
 }
 
+.daily-percent-cell[data-category="s"] {
+    border-bottom-left-radius: var(--radius-md);
+}
+
+.daily-percent-cell[data-category="overall"] {
+    border-bottom-right-radius: var(--radius-md);
+}
+
 /* ============================================================
    POINT CARD DATA
    ============================================================ */

@@ -1,0 +1,17 @@
+# Render Cron Job: nightly point-card auto-submit.
+# Runs daily at 04:15 UTC = 11:15pm CDT / 10:15pm CST (after 10pm, before 11:59pm Chicago).
+# Apply once: Render Dashboard → New → Blueprint → this repo.
+# Or create the cron job manually (same schedule and start command).
+services:
+  - type: cron
+    name: point-card-nightly-submit
+    runtime: python
+    plan: starter
+    schedule: "15 4 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_point_card_submit_cron.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SCHOOL_TIMEZONE
+        value: America/Chicago

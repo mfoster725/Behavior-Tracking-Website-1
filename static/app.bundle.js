@@ -1,4 +1,4 @@
-/* static/app.bundle.js � synced mirror of static/app.js (same content below this line). */
+/* static/app.bundle.js — synced mirror of static/app.js (same content below this line). */
 // Standard time periods
 const STANDARD_PERIODS = [
     { time: 'AM Bus', location: 'Bus' },
@@ -387,14 +387,67 @@ let allStudents = [];
 let editParentLinkedStudentIds = [];
 let filteredStudentsForPeriod = []; // Students filtered by staff member and period for period entry view
 let allStaffMembers = []; // Store staff users for team member dropdowns
+let allStudentUsers = []; // Student users from User Management (includes team_members)
 let periodData = {}; // Store data by student_id for current period
 let dailyData = {}; // Store data for daily overview: dailyData[studentId][period] = {s, t, a, r}
 let attendanceData = {}; // Store attendance by date and studentId: attendanceData[date][studentId] = 'present'|'excused'|'unexcused'
 let dailyAutosaveTimer = null; // Debounce timer for daily-entry autosave
+let periodAutosaveTimer = null; // Debounce timer for period-entry autosave
+let dailyWriteChain = Promise.resolve(); // Serialize daily saves/clears so a clear cannot be overwritten
+let dailyWriteGeneration = 0; // Bumped on Clear All so in-flight saves are ignored
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
 let dailyEntryStaffFilterName = null; // When set, results are for this staff's students (full-name match only)
+const STAR_ENTRY_MODE_KEY = 'starEntryMode'; // localStorage: 'student' | 'period'
+const STAR_COLUMN_CRITERIA = {
+    s: {
+        letter: 'S',
+        title: 'Safety',
+        color: '#B91C1C',
+        items: [
+            'Keep hands, feet, and objects to self',
+            'Use self control and a calm body',
+            'Stay in assigned area',
+            'Ask for a cooldown',
+            'Be awake and alert'
+        ]
+    },
+    t: {
+        letter: 'T',
+        title: 'Teamwork',
+        color: '#1E40AF',
+        items: [
+            'Follow directions',
+            'Participate'
+        ]
+    },
+    a: {
+        letter: 'A',
+        title: 'Accountability',
+        color: '#047857',
+        items: [
+            'Take ownership of choices and accept feedback',
+            'Stay on task',
+            'Use indoor voice',
+            'Have supplies ready',
+            'Complete assignments'
+        ]
+    },
+    r: {
+        letter: 'R',
+        title: 'Relationships',
+        color: '#B45309',
+        items: [
+            'Use appropriate language',
+            'Respect others',
+            'Be supportive and encouraging'
+        ]
+    }
+};
+let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
+let starNavKeydownBound = false;
+let starZeroWarningKeydownBound = false;
 // Starbucks management state (Bank Account tab)
 let starbucksRows = []; // [{ student_id, student_name, starbucks_count }]
 let starbucksAutosaveTimer = null; // Debounce timer for Starbucks table autosave
@@ -441,6 +494,128 @@ function saveSubmittedStudents(submittedStudents) {
 }
 
 let submittedStudents = loadSubmittedStudents(); // Track submitted students by date: submittedStudents[date] = Set of student IDs
+let pointCardNightlySubmitTimer = null;
+let pointCardNightlySubmitInterval = null;
+let pointCardAutoSubmitInFlight = false;
+let pointCardNightlySubmitSchedulerStarted = false;
+
+function isPastPointCardSubmitTime(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') {
+        return false;
+    }
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) {
+        return false;
+    }
+    const submitAt = new Date(parts[0], parts[1] - 1, parts[2], 22, 0, 0, 0);
+    return Date.now() >= submitAt.getTime();
+}
+
+function markStudentSubmitted(dateStr, studentId) {
+    if (!dateStr || !studentId) {
+        return;
+    }
+    const id = parseInt(studentId, 10);
+    if (!Number.isFinite(id)) {
+        return;
+    }
+    if (!submittedStudents[dateStr]) {
+        submittedStudents[dateStr] = new Set();
+    }
+    submittedStudents[dateStr].add(id);
+    saveSubmittedStudents(submittedStudents);
+}
+
+function isStudentSubmittedForDate(dateStr, studentId) {
+    const id = parseInt(studentId, 10);
+    return !!(dateStr && submittedStudents[dateStr] && submittedStudents[dateStr].has(id));
+}
+
+function studentDailyDataHasInput(studentId) {
+    const studentData = dailyData[studentId];
+    if (!studentData) {
+        return false;
+    }
+    return Object.keys(studentData).some(periodTime => {
+        const data = studentData[periodTime];
+        return data && (data.s !== null || data.t !== null || data.a !== null || data.r !== null);
+    });
+}
+
+function studentPeriodDataHasInput(studentId) {
+    const data = periodData[studentId];
+    if (!data) {
+        return false;
+    }
+    return (data.safety_points !== null && data.safety_points !== undefined) ||
+        (data.teamwork_points !== null && data.teamwork_points !== undefined) ||
+        (data.accountability_points !== null && data.accountability_points !== undefined) ||
+        (data.relationships_points !== null && data.relationships_points !== undefined);
+}
+
+function periodRecordHasInput(period) {
+    if (!period) {
+        return false;
+    }
+    return (period.safety_points !== null && period.safety_points !== undefined) ||
+        (period.teamwork_points !== null && period.teamwork_points !== undefined) ||
+        (period.accountability_points !== null && period.accountability_points !== undefined) ||
+        (period.relationships_points !== null && period.relationships_points !== undefined);
+}
+
+function getStudentNameById(studentId) {
+    const id = parseInt(studentId, 10);
+    const fromAll = allStudents.find(s => s.id === id);
+    if (fromAll && fromAll.name) {
+        return fromAll.name;
+    }
+    const fromPeriod = filteredStudentsForPeriod.find(s => s.id === id);
+    return (fromPeriod && fromPeriod.name) ? fromPeriod.name : 'student';
+}
+
+function msUntilNextPointCardSubmit() {
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 5, 0, 0);
+    if (now.getTime() >= target.getTime()) {
+        target.setDate(target.getDate() + 1);
+    }
+    return Math.max(1000, target.getTime() - now.getTime());
+}
+
+function startPointCardNightlySubmitScheduler() {
+    if (pointCardNightlySubmitSchedulerStarted || !canEdit()) {
+        return;
+    }
+    pointCardNightlySubmitSchedulerStarted = true;
+
+    const scheduleNext = () => {
+        if (pointCardNightlySubmitTimer) {
+            clearTimeout(pointCardNightlySubmitTimer);
+        }
+        pointCardNightlySubmitTimer = setTimeout(async () => {
+            await autoSubmitPointCardsIfDue();
+            scheduleNext();
+        }, msUntilNextPointCardSubmit());
+    };
+    scheduleNext();
+
+    if (!pointCardNightlySubmitInterval) {
+        pointCardNightlySubmitInterval = setInterval(() => {
+            autoSubmitPointCardsIfDue();
+        }, 30000);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            autoSubmitPointCardsIfDue();
+        }
+    });
+    window.addEventListener('focus', () => {
+        autoSubmitPointCardsIfDue();
+    });
+
+    autoSubmitPointCardsIfDue();
+}
 
 function scheduleDailyDataLoad(delayMs) {
     if (dailyLoadDebounceTimer) {
@@ -730,6 +905,27 @@ function isAdmin() {
     return window.currentUser && window.currentUser.role === 'admin';
 }
 
+function isCaseManagerUser() {
+    return !!(
+        window.currentUser &&
+        ['staff', 'admin'].includes(window.currentUser.role) &&
+        window.currentUser.designation === 'Case Manager'
+    );
+}
+
+/** Admins and Case Managers can promote eligible students. */
+function canManageLevelUps() {
+    return isAdmin() || isCaseManagerUser();
+}
+
+function levelUpButtonColorClass(nextColor) {
+    const color = String(nextColor || '').trim().toLowerCase();
+    if (color === 'yellow' || color === 'green' || color === 'blue') {
+        return `level-up-btn--${color}`;
+    }
+    return '';
+}
+
 function canEdit() {
     return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
 }
@@ -789,7 +985,7 @@ function attachNavAndHamburger() {
             e.preventDefault();
             e.stopPropagation();
             toggleNavMenu();
-        }, true);
+        });
     }
 
     document.addEventListener('click', function navAndHamburgerClick(e) {
@@ -801,12 +997,10 @@ function attachNavAndHamburger() {
                 document.body.classList.remove('nav-menu-open');
                 return;
             }
-            var hamburger = e.target && e.target.closest && e.target.closest('#nav-hamburger');
-            if (hamburger) {
-                toggleNavMenu();
+            if (e.target.closest('#nav-hamburger')) {
                 return;
             }
-            if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav') && !e.target.closest('#nav-hamburger')) {
+            if (document.body.classList.contains('nav-menu-open') && !e.target.closest('#main-nav')) {
                 document.body.classList.remove('nav-menu-open');
             }
         });
@@ -927,8 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadSchedules('teacher');
         }
         
-        
-        // If user is a parent, ensure parent portal view is active and load children
+        startPointCardNightlySubmitScheduler();
         
         console.log('Initialization complete');
     } catch (error) {
@@ -1089,7 +1282,6 @@ function setupEventListeners() {
             savePeriodBtn.addEventListener('click', savePeriodData);
         }
 
-
         // Daily overview entry
         const dailyDateInput = document.getElementById('daily-date-input');
         if (dailyDateInput) {
@@ -1159,8 +1351,16 @@ function setupEventListeners() {
             });
         }
 
+        initStarEntryModeToggle();
+        initUiHoverTips();
+        initStarNavModals();
+
         ensureDailyGridDelegatedListeners();
         
+        const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
+        if (clearDailyAllBtn) {
+            clearDailyAllBtn.addEventListener('click', clearDailyAllData);
+        }
 
         // Info modal actions: bind explicit handlers so save/cancel works even when inline handlers are unavailable.
         const infoModal = document.getElementById('info-modal');
@@ -1662,6 +1862,9 @@ async function switchView(viewName) {
     if (viewName === 'frenzy') {
         viewName = 'summary';
     }
+    if (viewName === 'curriculum' && !isAdmin()) {
+        return;
+    }
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1757,6 +1960,7 @@ async function switchView(viewName) {
         loadUsers();
         loadQuarterConfig();
         loadSchoolYearConfig();
+        loadSchoolBilling();
     }
     
     // If switching to schedules view, initialize schedules
@@ -1826,6 +2030,18 @@ async function switchView(viewName) {
         }
 
         handleBankAccountView();
+    }
+    if (viewName === 'curriculum') {
+        const currManaged = document.getElementById('curriculum-managed-by-me-checkbox');
+        if (currManaged && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            if (!currManaged.checked) {
+                currManaged.checked = true;
+                currManaged.dispatchEvent(new Event('change'));
+            }
+        }
+        if (typeof window.loadCurriculumView === 'function') {
+            window.loadCurriculumView();
+        }
     }
     if (viewName === 'marketplace') {
         // Sync "Show students managed by me" to role (staff = checked, admin = unchecked)
@@ -2278,8 +2494,17 @@ async function loadPeriodData() {
         if (response.ok) {
             const data = await response.json();
             periodData = {};
+            const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
             data.forEach(item => {
-                periodData[item.student_id] = item;
+                const studentId = item.student_id;
+                const hasInput = periodRecordHasInput(item);
+                if (item.submitted || (hasInput && pastSubmitTime)) {
+                    markStudentSubmitted(currentDate, studentId);
+                }
+                if (isStudentSubmittedForDate(currentDate, studentId)) {
+                    return;
+                }
+                periodData[studentId] = item;
             });
         }
     } catch (error) {
@@ -2396,14 +2621,22 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.textContent = student.name;
         studentHeader.style.gridColumn = 'span 5';
+        studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
         const bgColor = getCardColor(student.card_color);
         if (bgColor) {
             studentHeader.style.backgroundColor = bgColor;
         }
+
+        if (window.StudentPlans && typeof window.StudentPlans.buildStudentHeaderPlanControls === 'function') {
+            studentHeader.appendChild(window.StudentPlans.buildStudentHeaderPlanControls(student));
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = student.name;
+        nameSpan.style.fontWeight = '600';
+        studentHeader.appendChild(nameSpan);
         
         header.appendChild(studentHeader);
         
@@ -2478,7 +2711,9 @@ function renderStudentsGrid() {
             const select = document.createElement('select');
             select.className = 'daily-input';
             select.dataset.studentId = student.id;
+            select.dataset.period = currentPeriod || '';
             select.dataset.category = cat.short;
+            select.dataset.studentName = student.name || '';
             
             if (isStudent()) select.disabled = true;
             
@@ -2507,10 +2742,16 @@ function renderStudentsGrid() {
                 
                 // Update "I" box highlight based on STAR values
                 updateInfoButtonHighlight(student.id, currentPeriod);
+
+                schedulePeriodAutosave();
                 
-                // Auto-advance to next input (skipping Info column), unless this was triggered by backspace
+                // Auto-advance, unless backspace clear. R uses special nav flow.
                 if (!e.isBackspaceClear) {
-                    moveToNextInput(select);
+                    if (cat.short === 'r' && val !== null) {
+                        afterStarREntry(select);
+                    } else {
+                        moveToNextInput(select);
+                    }
                 }
             });
             
@@ -2656,28 +2897,49 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach(student => {
         updateInfoButtonHighlight(student.id, currentPeriod);
     });
+
+    if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+        window.StudentPlans.refreshActiveMets(studentsToDisplay.map(s => s.id), currentDate);
+    }
 }
 
-async function savePeriodData() {
+function schedulePeriodAutosave() {
     if (!currentDate || !currentPeriod) {
-        alert('Please select a date and period');
         return;
+    }
+    if (periodAutosaveTimer) {
+        clearTimeout(periodAutosaveTimer);
+    }
+    periodAutosaveTimer = setTimeout(async () => {
+        periodAutosaveTimer = null;
+        try {
+            await savePeriodData({ silent: true, skipReload: true });
+        } catch (error) {
+            console.error('Auto-save error for period data:', error);
+        }
+    }, 1500);
+}
+
+async function savePeriodData(options = {}) {
+    const { silent = false, skipReload = false } = options;
+    if (!currentDate || !currentPeriod) {
+        if (!silent) {
+            alert('Please select a date and period');
+        }
+        return false;
     }
 
     const locationInput = document.getElementById('location-input');
     const location = locationInput ? locationInput.value || currentPeriod : currentPeriod;
 
-    // For period entry view, only save data for filtered students
     const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
         ? filteredStudentsForPeriod 
         : allStudents;
     const allowedStudentIds = new Set(studentsToSave.map(s => s.id));
 
-    // Prepare data for students (filtered if in period entry view)
     const studentsData = [];
     Object.keys(periodData).forEach(studentId => {
         const studentIdInt = parseInt(studentId);
-        // Only include students who are in the allowed list
         if (!allowedStudentIds.has(studentIdInt)) {
             return;
         }
@@ -2689,19 +2951,26 @@ async function savePeriodData() {
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
-                safety_points: data.safety_points || 0,
-                teamwork_points: data.teamwork_points || 0,
-                accountability_points: data.accountability_points || 0,
-                relationships_points: data.relationships_points || 0,
+                safety_points: data.safety_points ?? null,
+                teamwork_points: data.teamwork_points ?? null,
+                accountability_points: data.accountability_points ?? null,
+                relationships_points: data.relationships_points ?? null,
                 info: data.info || ''
             });
         }
     });
 
     if (studentsData.length === 0) {
-        alert('No data to save');
-        return;
+        if (!silent) {
+            alert('No data to save');
+        }
+        return false;
     }
+
+    const studentsMap = {};
+    studentsData.forEach(student => {
+        studentsMap[student.student_id] = student;
+    });
 
     try {
         const response = await fetch('/api/period-data', {
@@ -2711,25 +2980,33 @@ async function savePeriodData() {
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
-                students: studentsData
+                students: studentsMap
             })
         });
 
         if (response.ok) {
-            showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
-            // Reload to get updated data
-            loadPeriodData();
-            // Refresh summary if it's currently displayed
+            if (!silent) {
+                showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
+            }
+            if (!skipReload) {
+                loadPeriodData();
+            }
             refreshSummaryIfActive();
+            if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+                window.StudentPlans.refreshActiveMets(studentsData.map(s => s.student_id), currentDate);
+            }
+            return true;
         } else {
             throw new Error('Failed to save');
         }
     } catch (error) {
         console.error('Error saving period data:', error);
-        showMessage('Error saving data. Please try again.', 'error');
+        if (!silent) {
+            showMessage('Error saving data. Please try again.', 'error');
+        }
+        throw error;
     }
 }
-
 
 // Daily Overview Functions
 async function filterDailyStudents() {
@@ -2880,7 +3157,9 @@ async function loadDailyData() {
 
         // If all visible students have already been submitted, we don't need to load anything
         if (nonSubmittedVisibleIds.size === 0) {
-            renderDailyGrid();
+            if (requestToken === dailyLoadRequestToken) {
+                renderDailyGrid();
+            }
             return;
         }
 
@@ -2913,11 +3192,10 @@ async function loadDailyData() {
         if (requestToken !== dailyLoadRequestToken) {
             return;
         }
-        
-        // Initialize attendance data for current date if not exists
-        if (!attendanceData[currentDate]) {
-            attendanceData[currentDate] = {};
-        }
+
+        const nextDailyData = {};
+        const attendanceUpdates = {};
+        const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
 
         // Map records by student, but only for visible, non-submitted students
         allRecords.forEach(record => {
@@ -2927,28 +3205,27 @@ async function loadDailyData() {
             if (!visibleStudentIds.has(studentId)) {
                 return;
             }
-            // Skip students that have already been submitted for this date
-            if (submittedStudents[currentDate].has(studentId)) {
+
+            const hasInput = Array.isArray(record.periods) && record.periods.some(periodRecordHasInput);
+            if (record.submitted || (hasInput && pastSubmitTime)) {
+                markStudentSubmitted(currentDate, studentId);
+            }
+            if (isStudentSubmittedForDate(currentDate, studentId)) {
                 return;
             }
 
-            dailyData[studentId] = {};
+            nextDailyData[studentId] = {};
 
             // Load attendance status - prefer attendance_status, fallback to present boolean for backward compatibility
             if (record.attendance_status) {
-                attendanceData[currentDate][studentId] = record.attendance_status;
+                attendanceUpdates[studentId] = record.attendance_status;
             } else if (record.present !== undefined) {
                 // Migration: convert old present boolean to new attendance_status
-                attendanceData[currentDate][studentId] = record.present ? 'present' : 'unexcused';
-            } else {
-                // Default to present if not set
-                if (!attendanceData[currentDate][studentId]) {
-                    attendanceData[currentDate][studentId] = 'present';
-                }
+                attendanceUpdates[studentId] = record.present ? 'present' : 'unexcused';
             }
 
             record.periods.forEach(period => {
-                dailyData[studentId][period.time_range] = {
+                nextDailyData[studentId][period.time_range] = {
                     s: period.safety_points,
                     t: period.teamwork_points,
                     a: period.accountability_points,
@@ -2956,6 +3233,18 @@ async function loadDailyData() {
                     info: period.info || ''
                 };
             });
+        });
+
+        if (requestToken !== dailyLoadRequestToken) {
+            return;
+        }
+
+        dailyData = nextDailyData;
+        if (!attendanceData[currentDate]) {
+            attendanceData[currentDate] = {};
+        }
+        Object.keys(attendanceUpdates).forEach(studentId => {
+            attendanceData[currentDate][studentId] = attendanceUpdates[studentId];
         });
     } catch (error) {
         if (error && error.name === 'AbortError') {
@@ -3035,6 +3324,21 @@ function calculateStudentPercentages(studentId) {
     return percentages;
 }
 
+function isDailyStudentFilterActive() {
+    return !!(dailyEntrySearchQuery && dailyEntrySearchQuery.trim()) || !!dailyEntryManagedByMe;
+}
+
+function getVisibleDailyStudents() {
+    // When a search / managed-by-me filter is active, never fall back to the full roster.
+    if (isDailyStudentFilterActive()) {
+        return Array.isArray(filteredDailyStudents) ? filteredDailyStudents : [];
+    }
+    if (Array.isArray(filteredDailyStudents) && filteredDailyStudents.length > 0) {
+        return filteredDailyStudents;
+    }
+    return Array.isArray(allStudents) ? allStudents : [];
+}
+
 function renderDailyGrid() {
     const header = document.getElementById('daily-header');
     const body = document.getElementById('daily-body');
@@ -3049,7 +3353,7 @@ function renderDailyGrid() {
     body.innerHTML = '';
 
     // Use filtered students for display
-    const studentsToDisplay = filteredDailyStudents && filteredDailyStudents.length > 0 ? filteredDailyStudents : allStudents;
+    const studentsToDisplay = getVisibleDailyStudents();
     
     if (!studentsToDisplay || studentsToDisplay.length === 0) {
         return;
@@ -3101,12 +3405,17 @@ function renderDailyGrid() {
         studentHeader.style.display = 'flex';
         studentHeader.style.flexDirection = 'column';
         studentHeader.style.gap = '4px';
-        studentHeader.style.padding = '6px 8px';
+        studentHeader.style.padding = '6px 22px 6px 8px';
+        studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
         const bgColor = getCardColor(student.card_color);
         if (bgColor) {
             studentHeader.style.backgroundColor = bgColor;
+        }
+
+        if (window.StudentPlans && typeof window.StudentPlans.buildStudentHeaderPlanControls === 'function') {
+            studentHeader.appendChild(window.StudentPlans.buildStudentHeaderPlanControls(student));
         }
         
         // Student name
@@ -3254,6 +3563,7 @@ function renderDailyGrid() {
                 select.dataset.studentId = student.id;
                 select.dataset.period = period.time;
                 select.dataset.category = category;
+                select.dataset.studentName = student.name || '';
                 
                 // Disable for students
                 if (isStudent()) {
@@ -3415,64 +3725,16 @@ function renderDailyGrid() {
         }
     });
     
-    // Add submit button row for each student (staff only)
-    if (canEdit()) {
-        // Empty cell for period column
-        const submitPeriodCell = document.createElement('div');
-        submitPeriodCell.className = 'daily-period-cell';
-        submitPeriodCell.style.borderTop = '2px solid #e0e0e0';
-        body.appendChild(submitPeriodCell);
-        
-        // Add spacer after period column (gutter, but visually transparent)
-        const submitSpacer = document.createElement('div');
-        submitSpacer.style.background = 'transparent';
-        submitSpacer.style.borderTop = '2px solid #e0e0e0';
-        body.appendChild(submitSpacer);
-        
-        // For each student, add submit button spanning STAR columns (S, T, A, R, I => 5 columns)
-        studentsToDisplay.forEach((student, studentIndex) => {
-            const submitCell = document.createElement('div');
-            submitCell.className = 'daily-data-cell daily-submit-cell';
-            submitCell.style.gridColumn = 'span 5'; // Span S, T, A, R, I columns
-            submitCell.style.padding = '4px 6px';
-            submitCell.style.display = 'flex';
-            submitCell.style.justifyContent = 'center';
-            submitCell.style.alignItems = 'center';
-            submitCell.style.borderTop = '2px solid #e0e0e0';
-            
-            // Apply card color background
-            const bgColor = getCardColor(student.card_color);
-            if (bgColor) {
-                submitCell.style.backgroundColor = bgColor;
-            }
-            
-            const submitButton = document.createElement('button');
-            submitButton.className = 'student-submit-btn';
-            submitButton.textContent = `Submit ${student.name}`;
-            submitButton.dataset.studentId = student.id;
-            submitButton.dataset.studentName = student.name;
-            submitButton.addEventListener('click', submitStudentData);
-            
-            submitCell.appendChild(submitButton);
-            body.appendChild(submitCell);
-            
-            // Add spacer cell after each student (except the last)
-            if (studentIndex < studentsToDisplay.length - 1) {
-                const spacerCell = document.createElement('div');
-                // Gutters between submit-button columns
-                spacerCell.style.background = 'transparent';
-                spacerCell.style.borderTop = '2px solid #e0e0e0';
-                body.appendChild(spacerCell);
-            }
-        });
-    }
-    
     // Update "I" box highlights for all students and periods on initial load
     studentsToDisplay.forEach(student => {
         STANDARD_PERIODS.forEach(period => {
             updateInfoButtonHighlight(student.id, period.time);
         });
     });
+
+    if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
+        window.StudentPlans.refreshActiveMets(studentsToDisplay.map(s => s.id), currentDate);
+    }
 }
 
 function updateDailyPercentageRow() {
@@ -3571,9 +3833,13 @@ function handleDailyInputChange(e) {
     // Schedule an autosave of the current daily grid state
     scheduleDailyAutosave();
     
-    // Auto-advance to next input, unless this was triggered by backspace
+    // Auto-advance, unless backspace clear. R uses special nav flow.
     if (!e.isBackspaceClear) {
-        moveToNextInput(select);
+        if (category === 'r' && value !== null) {
+            afterStarREntry(select);
+        } else {
+            moveToNextInput(select);
+        }
     }
 }
 
@@ -3603,12 +3869,14 @@ function handleDailyInputKeydown(e) {
         e.preventDefault();
         select.value = e.key;
         
-        // Trigger change event
+        // Trigger change event (R advance handled in change handler)
         const event = new Event('change', { bubbles: true });
         select.dispatchEvent(event);
-        
-        // Move to next input after setting value (works even if clicked first)
-        moveToNextInput(select);
+
+        // S/T/A still advance here; R is handled by afterStarREntry in change
+        if (select.dataset.category !== 'r') {
+            moveToNextInput(select);
+        }
     }
     // Handle arrow keys for navigation
     else if (e.key === 'ArrowRight' || e.key === 'Tab') {
@@ -3643,11 +3911,634 @@ function moveToPreviousInput(currentInput) {
     }
 }
 
+function isDailyEntryViewActive() {
+    return !!document.getElementById('entry-view')?.classList.contains('active');
+}
+
+function isPeriodEntryViewActive() {
+    return !!document.getElementById('period-entry-view')?.classList.contains('active');
+}
+
+function getStarEntryMode() {
+    try {
+        const mode = localStorage.getItem(STAR_ENTRY_MODE_KEY);
+        return mode === 'student' || mode === 'period' ? mode : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setStarEntryMode(mode, { syncToggle = true } = {}) {
+    try {
+        if (mode === 'student' || mode === 'period') {
+            localStorage.setItem(STAR_ENTRY_MODE_KEY, mode);
+        } else {
+            localStorage.removeItem(STAR_ENTRY_MODE_KEY);
+        }
+    } catch (e) {
+        // ignore storage failures
+    }
+    if (syncToggle) {
+        syncStarEntryModeToggle();
+    }
+}
+
+function syncStarEntryModeToggle() {
+    const mode = getStarEntryMode();
+    const studentBtn = document.getElementById('star-entry-mode-student');
+    const periodBtn = document.getElementById('star-entry-mode-period');
+    if (studentBtn) studentBtn.classList.toggle('active', mode === 'student');
+    if (periodBtn) periodBtn.classList.toggle('active', mode === 'period');
+}
+
+function initStarEntryModeToggle() {
+    const toggle = document.getElementById('star-entry-mode-toggle');
+    if (!toggle || toggle.dataset.bound === 'true') {
+        syncStarEntryModeToggle();
+        return;
+    }
+    toggle.dataset.bound = 'true';
+    toggle.querySelectorAll('.star-entry-mode-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            setStarEntryMode(btn.dataset.mode);
+        });
+    });
+    syncStarEntryModeToggle();
+}
+
+function getUiHoverTipEl() {
+    let el = document.getElementById('ui-hover-tip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'ui-hover-tip';
+        el.className = 'ui-hover-tip';
+        el.setAttribute('role', 'tooltip');
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function hideUiHoverTip() {
+    const tip = document.getElementById('ui-hover-tip');
+    if (!tip) return;
+    tip.style.display = 'none';
+    tip.innerHTML = '';
+    tip.setAttribute('aria-hidden', 'true');
+    delete tip.dataset.tipKey;
+}
+
+function positionUiHoverTip(tip, anchor) {
+    if (!tip || !anchor) return;
+    tip.style.display = 'block';
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    const margin = 8;
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + (rect.width / 2) - (tipRect.width / 2);
+    let top = rect.bottom + margin;
+    if (top + tipRect.height > window.innerHeight - 8) {
+        top = rect.top - tipRect.height - margin;
+    }
+    left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - tipRect.height - 8));
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+}
+
+function starColumnCriteriaHtml(category) {
+    const meta = STAR_COLUMN_CRITERIA[category];
+    if (!meta) return '';
+    const items = meta.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+    return `<div class="ui-hover-tip-title" style="color:${meta.color}">${escapeHtml(meta.letter)} — ${escapeHtml(meta.title)}</div><ul>${items}</ul>`;
+}
+
+function resolveUiHoverTipSource(node) {
+    const el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el || typeof el.closest !== 'function') return null;
+
+    const modeBtn = el.closest('.star-entry-mode-btn[data-tooltip]');
+    if (modeBtn) {
+        const text = (modeBtn.getAttribute('data-tooltip') || '').trim();
+        if (!text) return null;
+        return { el: modeBtn, key: `mode:${modeBtn.id || text}`, html: escapeHtml(text) };
+    }
+
+    const inEntryGrid = el.closest('#daily-grid, #students-grid, #period-entry-view, #entry-view');
+    if (!inEntryGrid) return null;
+
+    const header = el.closest('.star-category-header');
+    if (header && STAR_COLUMN_CRITERIA[header.dataset.category]) {
+        const category = header.dataset.category;
+        return { el: header, key: `star:${category}`, html: starColumnCriteriaHtml(category) };
+    }
+
+    return null;
+}
+
+function showUiHoverTip(source) {
+    if (!source || !source.el || !source.html) {
+        hideUiHoverTip();
+        return;
+    }
+    const tip = getUiHoverTipEl();
+    if (tip.dataset.tipKey !== source.key) {
+        tip.innerHTML = source.html;
+        tip.dataset.tipKey = source.key;
+    }
+    tip.setAttribute('aria-hidden', 'false');
+    positionUiHoverTip(tip, source.el);
+}
+
+function initUiHoverTips() {
+    if (window.__uiHoverTipsBound) return;
+    window.__uiHoverTipsBound = true;
+
+    let currentSourceEl = null;
+
+    document.addEventListener('mouseover', (e) => {
+        const source = resolveUiHoverTipSource(e.target);
+        if (!source) return;
+        if (source.el === currentSourceEl) return;
+        currentSourceEl = source.el;
+        showUiHoverTip(source);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+        if (!currentSourceEl) return;
+        const next = resolveUiHoverTipSource(e.relatedTarget);
+        if (next && next.el === currentSourceEl) return;
+        currentSourceEl = next ? next.el : null;
+        if (next) {
+            showUiHoverTip(next);
+        } else {
+            hideUiHoverTip();
+        }
+    });
+
+    document.addEventListener('scroll', () => {
+        currentSourceEl = null;
+        hideUiHoverTip();
+    }, true);
+
+    window.addEventListener('blur', () => {
+        currentSourceEl = null;
+        hideUiHoverTip();
+    });
+}
+
+function initStarNavModals() {
+    const navModal = document.getElementById('star-nav-modal');
+    if (navModal && navModal.dataset.bound !== 'true') {
+        navModal.dataset.bound = 'true';
+        document.getElementById('star-nav-modal-close')?.addEventListener('click', () => {
+            closeStarNavPopup({ restoreFocus: true });
+        });
+        document.getElementById('star-nav-next-student')?.addEventListener('click', () => {
+            handleStarNavChoice('next-student');
+        });
+        document.getElementById('star-nav-additional-info')?.addEventListener('click', () => {
+            handleStarNavChoice('additional-info');
+        });
+        document.getElementById('star-nav-next-period')?.addEventListener('click', () => {
+            handleStarNavChoice('next-period');
+        });
+    }
+
+    const zeroModal = document.getElementById('star-zero-warning-modal');
+    if (zeroModal && zeroModal.dataset.bound !== 'true') {
+        zeroModal.dataset.bound = 'true';
+        document.getElementById('star-zero-warning-close-x')?.addEventListener('click', () => {
+            closeStarZeroWarningPopup({ continueNav: true });
+        });
+        document.getElementById('star-zero-warning-close')?.addEventListener('click', () => {
+            closeStarZeroWarningPopup({ continueNav: true });
+        });
+        document.getElementById('star-zero-warning-add-info')?.addEventListener('click', () => {
+            openAdditionalInfoFromStarNav();
+        });
+    }
+}
+
+function getStudentsForStarNav() {
+    if (isDailyEntryViewActive()) {
+        return Array.isArray(filteredDailyStudents) && filteredDailyStudents.length
+            ? filteredDailyStudents
+            : allStudents;
+    }
+    if (isPeriodEntryViewActive()) {
+        return Array.isArray(filteredStudentsForPeriod) && filteredStudentsForPeriod.length
+            ? filteredStudentsForPeriod
+            : allStudents;
+    }
+    return allStudents;
+}
+
+function getPeriodForStarInput(select) {
+    return select?.dataset?.period || currentPeriod || '';
+}
+
+function getStudentNameForStarInput(select, studentId) {
+    if (select?.dataset?.studentName) return select.dataset.studentName;
+    const students = getStudentsForStarNav();
+    const match = students.find((s) => String(s.id) === String(studentId));
+    if (match?.name) return match.name;
+    const infoBtn = document.querySelector(`.info-btn[data-student-id="${studentId}"]`);
+    return infoBtn?.dataset?.studentName || 'Student';
+}
+
+function buildStarNavContext(select, extras = {}) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    return {
+        select,
+        studentId,
+        period,
+        studentName: getStudentNameForStarInput(select, studentId),
+        hideAdditionalInfo: false,
+        skipZeroWarning: false,
+        ...extras
+    };
+}
+
+function getPeriodStarValues(studentId, period) {
+    if (isDailyEntryViewActive()) {
+        const row = dailyData[studentId]?.[period];
+        if (!row) return [];
+        return [row.s, row.t, row.a, row.r];
+    }
+    if (isPeriodEntryViewActive()) {
+        const data = periodData[studentId];
+        if (!data) return [];
+        return [
+            data.safety_points,
+            data.teamwork_points,
+            data.accountability_points,
+            data.relationships_points
+        ];
+    }
+    // Fallback: inspect DOM selects for this student/period
+    const inputs = document.querySelectorAll(
+        `.daily-input[data-student-id="${studentId}"][data-period="${period}"]`
+    );
+    return Array.from(inputs).map((el) => (el.value === '' ? null : parseInt(el.value, 10)));
+}
+
+function rowHasStarZero(studentId, period) {
+    return getPeriodStarValues(studentId, period).some((v) => v === 0);
+}
+
+function rowHasStarOne(studentId, period) {
+    return getPeriodStarValues(studentId, period).some((v) => v === 1);
+}
+
+function clearInfoModalStarHighlights() {
+    document.querySelectorAll('#info-modal .info-field-highlight').forEach((el) => {
+        el.classList.remove('info-field-highlight');
+    });
+}
+
+function applyInfoModalStarHighlights(studentId, period) {
+    clearInfoModalStarHighlights();
+    const studentIdNum = parseInt(studentId, 10);
+    const hasZero = rowHasStarZero(studentIdNum, period);
+    const hasOne = rowHasStarOne(studentIdNum, period);
+    if (!hasZero && !hasOne) return;
+
+    const reminderRow = document.getElementById('info-reminder-1')?.closest('.inline-checkbox-row');
+    const resetRow = document.getElementById('info-reset')?.closest('.inline-checkbox-row');
+    const frenzyRow = document.getElementById('info-frenzy')?.closest('.inline-checkbox-row');
+
+    // 0 → highlight reminders, reset, and frenzy; 1 → highlight reminders only
+    if (hasZero) {
+        reminderRow?.classList.add('info-field-highlight');
+        resetRow?.classList.add('info-field-highlight');
+        frenzyRow?.classList.add('info-field-highlight');
+    } else if (hasOne) {
+        reminderRow?.classList.add('info-field-highlight');
+    }
+}
+
+function isStarRowComplete(studentId, period) {
+    if (isPeriodEntryViewActive()) {
+        const data = periodData[studentId];
+        if (!data) return false;
+        return data.safety_points !== null && data.safety_points !== undefined &&
+            data.teamwork_points !== null && data.teamwork_points !== undefined &&
+            data.accountability_points !== null && data.accountability_points !== undefined &&
+            data.relationships_points !== null && data.relationships_points !== undefined;
+    }
+    const row = dailyData[studentId]?.[period];
+    if (!row) return false;
+    return row.s !== null && row.s !== undefined &&
+        row.t !== null && row.t !== undefined &&
+        row.a !== null && row.a !== undefined &&
+        row.r !== null && row.r !== undefined;
+}
+
+function isLastPeriodRow(period) {
+    if (isPeriodEntryViewActive()) return true;
+    if (!period || !STANDARD_PERIODS.length) return true;
+    return STANDARD_PERIODS[STANDARD_PERIODS.length - 1].time === period;
+}
+
+function focusStarInput(studentId, period, category = 's') {
+    const periodAttr = period || currentPeriod || '';
+    let selector = `.daily-input[data-student-id="${studentId}"][data-category="${category}"]`;
+    if (periodAttr) {
+        selector = `.daily-input[data-student-id="${studentId}"][data-period="${periodAttr}"][data-category="${category}"]`;
+    }
+    const input = document.querySelector(selector);
+    if (input && !input.disabled) {
+        input.focus();
+        return true;
+    }
+    return false;
+}
+
+function findFirstIncompleteStarInput(studentId) {
+    if (isPeriodEntryViewActive()) {
+        if (!isStarRowComplete(studentId, currentPeriod)) {
+            return focusStarInput(studentId, currentPeriod, 's');
+        }
+        return false;
+    }
+    for (const period of STANDARD_PERIODS) {
+        if (!isStarRowComplete(studentId, period.time)) {
+            return focusStarInput(studentId, period.time, 's');
+        }
+    }
+    return false;
+}
+
+function navigateNextPeriod(select) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    if (isPeriodEntryViewActive() || isLastPeriodRow(period)) {
+        return false;
+    }
+    const idx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+    if (idx < 0 || idx >= STANDARD_PERIODS.length - 1) return false;
+    return focusStarInput(studentId, STANDARD_PERIODS[idx + 1].time, 's');
+}
+
+function navigateNextStudent(select) {
+    const studentId = parseInt(select.dataset.studentId, 10);
+    const period = getPeriodForStarInput(select);
+    const students = getStudentsForStarNav();
+    const currentIndex = students.findIndex((s) => String(s.id) === String(studentId));
+    if (currentIndex < 0) return false;
+
+    const onLastRow = isLastPeriodRow(period);
+
+    for (let i = currentIndex + 1; i < students.length; i++) {
+        const nextStudent = students[i];
+        if (onLastRow) {
+            if (findFirstIncompleteStarInput(nextStudent.id)) {
+                return true;
+            }
+            continue;
+        }
+        if (focusStarInput(nextStudent.id, period, 's')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function afterStarREntry(select) {
+    const context = buildStarNavContext(select);
+    if (!context.skipZeroWarning && rowHasStarZero(context.studentId, context.period)) {
+        showStarZeroWarningPopup(context);
+        return;
+    }
+    continueAfterStarREntry(context);
+}
+
+function continueAfterStarREntry(context) {
+    if (!context?.select) return;
+    pendingStarNavContext = context;
+    const mode = getStarEntryMode();
+    if (mode === 'period') {
+        pendingStarNavContext = null;
+        navigateNextStudent(context.select);
+        return;
+    }
+    if (mode === 'student') {
+        pendingStarNavContext = null;
+        // On last row / period entry, Next Period is unavailable — fall back to next student
+        if (!navigateNextPeriod(context.select)) {
+            navigateNextStudent(context.select);
+        }
+        return;
+    }
+    showStarNavPopup(context);
+}
+
+function showStarZeroWarningPopup(context) {
+    pendingStarNavContext = { ...context, skipZeroWarning: true };
+    const modal = document.getElementById('star-zero-warning-modal');
+    const messageEl = document.getElementById('star-zero-warning-message');
+    if (!modal || !messageEl) {
+        continueAfterStarREntry(pendingStarNavContext);
+        return;
+    }
+    messageEl.textContent =
+        `${context.studentName} has a 0 during this period. Please add additional information.`;
+    modal.style.display = 'block';
+    const addBtn = document.getElementById('star-zero-warning-add-info');
+    // Autofocus Add Information so Enter activates it; Close is reached via Tab
+    setTimeout(() => addBtn?.focus(), 0);
+
+    if (!starZeroWarningKeydownBound) {
+        starZeroWarningKeydownBound = true;
+        document.addEventListener('keydown', handleStarZeroWarningKeydown, true);
+    }
+}
+
+function closeStarZeroWarningPopup({ continueNav = false } = {}) {
+    const modal = document.getElementById('star-zero-warning-modal');
+    if (modal) modal.style.display = 'none';
+    if (starZeroWarningKeydownBound) {
+        document.removeEventListener('keydown', handleStarZeroWarningKeydown, true);
+        starZeroWarningKeydownBound = false;
+    }
+    if (continueNav && pendingStarNavContext) {
+        const ctx = { ...pendingStarNavContext, skipZeroWarning: true };
+        pendingStarNavContext = null;
+        continueAfterStarREntry(ctx);
+    }
+}
+
+function handleStarZeroWarningKeydown(e) {
+    const modal = document.getElementById('star-zero-warning-modal');
+    if (!modal || modal.style.display !== 'block') return;
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        closeStarZeroWarningPopup({ continueNav: true });
+    }
+}
+
+function showStarNavPopup(context) {
+    pendingStarNavContext = context;
+    const modal = document.getElementById('star-nav-modal');
+    if (!modal) {
+        navigateNextStudent(context.select);
+        return;
+    }
+
+    const nextPeriodBtn = document.getElementById('star-nav-next-period');
+    const infoBtn = document.getElementById('star-nav-additional-info');
+    const hideNextPeriod = isLastPeriodRow(context.period) || isPeriodEntryViewActive();
+    if (nextPeriodBtn) {
+        nextPeriodBtn.style.display = hideNextPeriod ? 'none' : '';
+    }
+    if (infoBtn) {
+        const hideInfo = !!context.hideAdditionalInfo;
+        infoBtn.style.display = hideInfo ? 'none' : '';
+        const highlight = !hideInfo && rowHasStarZero(context.studentId, context.period);
+        infoBtn.classList.toggle('star-nav-highlight', highlight);
+    }
+
+    modal.style.display = 'block';
+    const defaultBtn = document.getElementById('star-nav-next-student');
+    setTimeout(() => defaultBtn?.focus(), 0);
+
+    if (!starNavKeydownBound) {
+        starNavKeydownBound = true;
+        document.addEventListener('keydown', handleStarNavPopupKeydown, true);
+    }
+}
+
+function closeStarNavPopup({ restoreFocus = false } = {}) {
+    const modal = document.getElementById('star-nav-modal');
+    if (modal) modal.style.display = 'none';
+    if (starNavKeydownBound) {
+        document.removeEventListener('keydown', handleStarNavPopupKeydown, true);
+        starNavKeydownBound = false;
+    }
+    if (restoreFocus && pendingStarNavContext?.select) {
+        pendingStarNavContext.select.focus();
+    }
+}
+
+function handleStarNavPopupKeydown(e) {
+    const modal = document.getElementById('star-nav-modal');
+    if (!modal || modal.style.display !== 'block') return;
+
+    const key = e.key;
+    if (key === 'Tab') {
+        e.preventDefault();
+        handleStarNavChoice('next-student');
+        return;
+    }
+    if (key === 'Enter') {
+        const nextPeriodBtn = document.getElementById('star-nav-next-period');
+        if (nextPeriodBtn && nextPeriodBtn.style.display !== 'none') {
+            e.preventDefault();
+            handleStarNavChoice('next-period');
+        }
+        return;
+    }
+    if (key === 'i' || key === 'I') {
+        const infoBtn = document.getElementById('star-nav-additional-info');
+        if (infoBtn && infoBtn.style.display !== 'none') {
+            e.preventDefault();
+            handleStarNavChoice('additional-info');
+        }
+        return;
+    }
+    if (key === 'Escape') {
+        e.preventDefault();
+        closeStarNavPopup({ restoreFocus: true });
+    }
+}
+
+function handleStarNavChoice(action) {
+    const context = pendingStarNavContext;
+    if (!context?.select) {
+        closeStarNavPopup();
+        return;
+    }
+
+    if (action === 'next-student') {
+        setStarEntryMode('period');
+        closeStarNavPopup();
+        pendingStarNavContext = null;
+        navigateNextStudent(context.select);
+        return;
+    }
+    if (action === 'next-period') {
+        setStarEntryMode('student');
+        closeStarNavPopup();
+        pendingStarNavContext = null;
+        if (!navigateNextPeriod(context.select)) {
+            navigateNextStudent(context.select);
+        }
+        return;
+    }
+    if (action === 'additional-info') {
+        closeStarNavPopup();
+        openAdditionalInfoFromStarNav();
+    }
+}
+
+function openAdditionalInfoFromStarNav() {
+    const context = pendingStarNavContext;
+    if (!context) return;
+
+    // Close zero warning without continuing nav; keep pending context for I handoff
+    const zeroModal = document.getElementById('star-zero-warning-modal');
+    if (zeroModal && zeroModal.style.display === 'block') {
+        zeroModal.style.display = 'none';
+        if (starZeroWarningKeydownBound) {
+            document.removeEventListener('keydown', handleStarZeroWarningKeydown, true);
+            starZeroWarningKeydownBound = false;
+        }
+    }
+
+    pendingStarNavContext = {
+        ...context,
+        skipZeroWarning: true,
+        hideAdditionalInfo: true,
+        awaitingInfoModalClose: true
+    };
+
+    const infoBtn = document.querySelector(
+        `.info-btn[data-student-id="${context.studentId}"][data-period="${context.period || currentPeriod}"]`
+    );
+    if (infoBtn) {
+        showInfoModal({ target: infoBtn });
+    } else {
+        onInfoModalClosedForNav();
+    }
+}
+
+function onInfoModalClosedForNav() {
+    const context = pendingStarNavContext;
+    if (!context?.awaitingInfoModalClose) return;
+    const nextContext = {
+        ...context,
+        awaitingInfoModalClose: false,
+        skipZeroWarning: true,
+        hideAdditionalInfo: true
+    };
+    pendingStarNavContext = null;
+    continueAfterStarREntry(nextContext);
+}
+
 function updateDailyAutosaveStatus(text) {
     const statusEl = document.getElementById('save-daily-status');
     if (statusEl) {
         statusEl.textContent = text || '';
     }
+}
+
+function enqueueDailyWrite(task) {
+    const run = dailyWriteChain.then(task, task);
+    dailyWriteChain = run.catch(function () { /* keep the write queue alive after errors */ });
+    return run;
 }
 
 function scheduleDailyAutosave() {
@@ -3664,18 +4555,26 @@ function scheduleDailyAutosave() {
 
     dailyAutosaveTimer = setTimeout(async () => {
         dailyAutosaveTimer = null;
+        const generation = dailyWriteGeneration;
         try {
-            await saveDailyAllData({ silent: true, fromAutosave: true });
-            updateDailyAutosaveStatus('All changes saved');
+            await enqueueDailyWrite(function () {
+                return saveDailyAllData({ silent: true, fromAutosave: true });
+            });
+            if (generation === dailyWriteGeneration) {
+                updateDailyAutosaveStatus('All changes saved');
+            }
         } catch (error) {
             console.error('Auto-save error for daily data:', error);
-            updateDailyAutosaveStatus('Auto-save failed');
+            if (generation === dailyWriteGeneration) {
+                updateDailyAutosaveStatus('Auto-save failed');
+            }
         }
     }, 1500);
 }
 
 async function saveDailyAllData(options = {}) {
     const { silent = false, fromAutosave = false } = options;
+    const generation = dailyWriteGeneration;
 
     if (!currentDate) {
         if (!silent) {
@@ -3706,10 +4605,10 @@ async function saveDailyAllData(options = {}) {
                 periods.push({
                     time_range: periodTime,
                     location: periodInfo ? periodInfo.location : periodTime,
-                    safety_points: data.s !== null ? data.s : 0,
-                    teamwork_points: data.t !== null ? data.t : 0,
-                    accountability_points: data.a !== null ? data.a : 0,
-                    relationships_points: data.r !== null ? data.r : 0,
+                    safety_points: data.s,
+                    teamwork_points: data.t,
+                    accountability_points: data.a,
+                    relationships_points: data.r,
                     points_possible: 4,
                     reset: false,
                     frenzy: false,
@@ -3740,6 +4639,10 @@ async function saveDailyAllData(options = {}) {
         }
     });
 
+    if (generation !== dailyWriteGeneration) {
+        return;
+    }
+
     if (savePromises.length === 0) {
         if (!silent) {
             showMessage('No data to save', 'info');
@@ -3749,6 +4652,9 @@ async function saveDailyAllData(options = {}) {
 
     try {
         await Promise.all(savePromises);
+        if (generation !== dailyWriteGeneration) {
+            return;
+        }
         if (!silent) {
             showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
         }
@@ -3768,38 +4674,38 @@ async function saveDailyAllData(options = {}) {
     }
 }
 
-async function submitStudentData(e) {
-    const button = e.target;
-    const studentId = parseInt(button.dataset.studentId);
-    const studentName = button.dataset.studentName;
-    
+async function submitStudentPointCard(studentId, studentName, options = {}) {
+    const { silent = false } = options;
+    studentId = parseInt(studentId, 10);
+    studentName = studentName || getStudentNameById(studentId);
+
     if (!currentDate) {
-        alert('Please select a date');
-        return;
+        if (!silent) {
+            alert('Please select a date');
+        }
+        return false;
     }
 
-    // Check if there's data for this student
-    if (!dailyData[studentId] || Object.keys(dailyData[studentId]).length === 0) {
-        alert(`No data to submit for ${studentName}`);
-        return;
+    if (!studentDailyDataHasInput(studentId)) {
+        if (!silent) {
+            alert(`No data to submit for ${studentName}`);
+        }
+        return false;
     }
 
-    // Prepare periods data for this student
     const periods = [];
-    
     Object.keys(dailyData[studentId]).forEach(periodTime => {
         const data = dailyData[studentId][periodTime];
         const periodInfo = STANDARD_PERIODS.find(p => p.time === periodTime);
-        
-        // Only save if at least one value is not null
+
         if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
             periods.push({
                 time_range: periodTime,
                 location: periodInfo ? periodInfo.location : periodTime,
-                safety_points: data.s !== null ? data.s : 0,
-                teamwork_points: data.t !== null ? data.t : 0,
-                accountability_points: data.a !== null ? data.a : 0,
-                relationships_points: data.r !== null ? data.r : 0,
+                safety_points: data.s,
+                teamwork_points: data.t,
+                accountability_points: data.a,
+                relationships_points: data.r,
                 points_possible: 4,
                 reset: false,
                 frenzy: false,
@@ -3812,21 +4718,17 @@ async function submitStudentData(e) {
     });
 
     if (periods.length === 0) {
-        alert(`No data to submit for ${studentName}`);
-        return;
+        if (!silent) {
+            alert(`No data to submit for ${studentName}`);
+        }
+        return false;
     }
 
-    // Disable button during submission
-    button.disabled = true;
-    button.textContent = `Submitting...`;
-
-    // Get attendance status
     const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-
     const abortController = new AbortController();
     const timeoutId = setTimeout(function () {
         abortController.abort();
-    }, 45000); // 45 second timeout
+    }, 45000);
 
     try {
         const response = await fetch('/api/daily-records', {
@@ -3845,46 +4747,116 @@ async function submitStudentData(e) {
         clearTimeout(timeoutId);
 
         if (response.ok) {
-            // Mark this student as submitted for the current date
-            if (!submittedStudents[currentDate]) {
-                submittedStudents[currentDate] = new Set();
-            }
-            submittedStudents[currentDate].add(studentId);
-            
-            // Save to localStorage for persistence
-            saveSubmittedStudents(submittedStudents);
-            
-            // Clear this student's data from dailyData
+            markStudentSubmitted(currentDate, studentId);
             delete dailyData[studentId];
-            
-            // Show success message
-            showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            if (periodData[studentId]) {
+                delete periodData[studentId];
+            }
+            if (!silent) {
+                showMessage(`Successfully submitted data for ${studentName}!`, 'success');
+            }
             invalidateDailyLoadCache(currentDate);
-            
-            // Reload the grid to show cleared data
-            renderDailyGrid();
-        } else {
-            var err = new Error('Failed to submit data');
-            err.status = response.status;
-            throw err;
+            return true;
         }
+
+        const err = new Error('Failed to submit data');
+        err.status = response.status;
+        throw err;
     } catch (error) {
         clearTimeout(timeoutId);
         console.error('Error submitting student data:', error);
-        var isTimeout = error.name === 'AbortError';
-        var isServerBusy = error.status >= 502 && error.status <= 504;
-        if (isTimeout || isServerBusy) {
-            showMessage('Submission didn\'t go through (server may be busy). Please try again in a minute or two.', 'error');
-        } else {
-            showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+        if (!silent) {
+            const isTimeout = error.name === 'AbortError';
+            const isServerBusy = error.status >= 502 && error.status <= 504;
+            if (isTimeout || isServerBusy) {
+                showMessage('Submission didn\'t go through (server may be busy). Please try again in a minute or two.', 'error');
+            } else {
+                showMessage(`Error submitting data for ${studentName}. Please try again.`, 'error');
+            }
         }
-        
-        // Re-enable button
-        button.disabled = false;
-        button.textContent = `Submit ${studentName}`;
+        return false;
     }
 }
 
+async function autoSubmitPointCardsIfDue() {
+    if (!canEdit() || !currentDate || pointCardAutoSubmitInFlight) {
+        return;
+    }
+    if (!isPastPointCardSubmitTime(currentDate)) {
+        return;
+    }
+
+    const dailyIds = Object.keys(dailyData)
+        .map(id => parseInt(id, 10))
+        .filter(id => studentDailyDataHasInput(id) && !isStudentSubmittedForDate(currentDate, id));
+    const periodIds = Object.keys(periodData)
+        .map(id => parseInt(id, 10))
+        .filter(id => studentPeriodDataHasInput(id) && !isStudentSubmittedForDate(currentDate, id));
+
+    if (dailyIds.length === 0 && periodIds.length === 0) {
+        return;
+    }
+
+    pointCardAutoSubmitInFlight = true;
+    let submittedCount = 0;
+    try {
+        if (dailyAutosaveTimer) {
+            clearTimeout(dailyAutosaveTimer);
+            dailyAutosaveTimer = null;
+        }
+        if (periodAutosaveTimer) {
+            clearTimeout(periodAutosaveTimer);
+            periodAutosaveTimer = null;
+        }
+        if (dailyIds.length > 0 || Object.keys(dailyData).length > 0) {
+            await enqueueDailyWrite(function () {
+                return saveDailyAllData({ silent: true, fromAutosave: true });
+            });
+        }
+
+        if (periodIds.length > 0) {
+            try {
+                await savePeriodData({ silent: true, skipReload: true });
+            } catch (error) {
+                console.error('Error saving period data before nightly submit:', error);
+            }
+        }
+
+        for (const studentId of dailyIds) {
+            const ok = await submitStudentPointCard(studentId, getStudentNameById(studentId), { silent: true });
+            if (ok) {
+                submittedCount += 1;
+            }
+        }
+
+        for (const studentId of periodIds) {
+            if (isStudentSubmittedForDate(currentDate, studentId)) {
+                continue;
+            }
+            markStudentSubmitted(currentDate, studentId);
+            delete periodData[studentId];
+            submittedCount += 1;
+        }
+
+        if (submittedCount > 0) {
+            invalidateDailyLoadCache(currentDate);
+            const dailyViewActive = document.getElementById('entry-view')?.classList.contains('active');
+            const periodViewActive = document.getElementById('period-entry-view')?.classList.contains('active');
+            if (dailyViewActive) {
+                renderDailyGrid();
+            }
+            if (periodViewActive) {
+                renderStudentsGrid();
+            }
+            showMessage(`Auto-submitted ${submittedCount} point card${submittedCount === 1 ? '' : 's'} for the day.`, 'success');
+            refreshSummaryIfActive();
+        }
+    } catch (error) {
+        console.error('Error auto-submitting point cards:', error);
+    } finally {
+        pointCardAutoSubmitInFlight = false;
+    }
+}
 
 async function loadExistingRecord() {
     if (!currentStudentId || !currentDate) return;
@@ -8093,6 +9065,10 @@ function renderImportResults(data, type) {
     const success = data.success || [];
     const errors = data.errors || [];
     const warnings = data.warnings || [];
+    const updatedCount = data.updated_count || 0;
+    const duplicateCount = data.duplicate_count || 0;
+    const updatedNames = data.updated_names || [];
+    const personLabel = type === 'student' ? 'student' : 'user';
 
     if (success.length > 0) {
         const heading =
@@ -8123,6 +9099,21 @@ function renderImportResults(data, type) {
         html += '</tbody></table></div>';
     }
 
+    if (updatedCount > 0) {
+        html += `<div class="import-results-info"><strong>${updatedCount} ${personLabel}${updatedCount === 1 ? ' was' : 's were'} updated</strong> with information from this file.`;
+        if (updatedNames.length > 0) {
+            html += `<br>${updatedNames.join(', ')}`;
+        }
+        html += '</div>';
+    }
+
+    if (duplicateCount > 0) {
+        const noun = duplicateCount === 1 ? 'duplicate' : 'duplicates';
+        const skippedVerb = duplicateCount === 1 ? 'was' : 'were';
+        const already = duplicateCount === 1 ? `that ${personLabel} is` : `those ${personLabel}s are`;
+        html += `<div class="import-results-info"><strong>${duplicateCount} ${noun}</strong> in this batch ${skippedVerb} skipped because ${already} already in the system with the same information.</div>`;
+    }
+
     if (warnings.length > 0) {
         html += '<div class="import-results-warning">';
         warnings.forEach(msg => {
@@ -8145,6 +9136,19 @@ function renderImportResults(data, type) {
 
     container.innerHTML = html;
     container.style.display = 'block';
+}
+
+function importFailureMessage(data, response, rawText) {
+    if (response && (response.status === 502 || response.status === 504)) {
+        return 'The import timed out. Please wait a few seconds and try again.';
+    }
+    if (data && (data.error || data.message)) {
+        return data.error || data.message;
+    }
+    if (rawText && rawText.charAt(0) !== '<' && rawText.length < 500) {
+        return rawText;
+    }
+    return `Import failed (HTTP ${response.status})`;
 }
 
 async function importStaffCSV() {
@@ -8171,7 +9175,7 @@ async function importStaffCSV() {
         });
         const data = await response.json();
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response)}</div>`;
             return;
         }
         renderImportResults(data, 'staff');
@@ -8205,7 +9209,7 @@ async function importOutsideStaffCSV() {
         });
         const data = await response.json();
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response)}</div>`;
             return;
         }
         renderImportResults(data, 'outside_staff');
@@ -8220,7 +9224,7 @@ async function importStudentCSV() {
     const container = document.getElementById('import-results');
     if (!input || !container) return;
 
-    if (!input.files || input.files.length === 0) {
+    if (!input.files || !input.files.length) {
         showMessage('Please select a student CSV file to import.', 'error');
         return;
     }
@@ -8237,9 +9241,16 @@ async function importStudentCSV() {
             method: 'POST',
             body: formData
         });
-        const data = await response.json();
+        const text = await response.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (parseErr) {
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage({}, response, text)}</div>`;
+            return;
+        }
         if (!response.ok) {
-            container.innerHTML = `<div class="import-results-error">Error: ${data.error || 'Import failed.'}</div>`;
+            container.innerHTML = `<div class="import-results-error">Error: ${importFailureMessage(data, response, text)}</div>`;
             return;
         }
         renderImportResults(data, 'student');
@@ -8763,6 +9774,7 @@ async function showInfoModal(event) {
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
     bindInfoModalAutoPreview();
     refreshInfoModalAutoPreview();
+    applyInfoModalStarHighlights(studentId, period);
     
     modal.style.display = 'block';
 }
@@ -9074,7 +10086,9 @@ function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
 
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
+    clearInfoModalStarHighlights();
     modal.style.display = 'none';
+    onInfoModalClosedForNav();
 }
 
 function saveInfoModal() {
@@ -9198,8 +10212,17 @@ function saveInfoModal() {
         }
     }
     
-    closeInfoModal();
+    // Close without double-firing nav handoff; run handoff after save completes
+    const modalEl = document.getElementById('info-modal');
+    clearInfoModalStarHighlights();
+    if (modalEl) modalEl.style.display = 'none';
     showMessage('Information saved!', 'success');
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        schedulePeriodAutosave();
+    } else {
+        scheduleDailyAutosave();
+    }
+    onInfoModalClosedForNav();
 }
 
 // Helper function to check if info data has any content
@@ -9974,7 +10997,62 @@ function renderTeacherSchedule() {
             addScheduleRow('teacher', time, null);
         }
     });
+
+    requestAnimationFrame(() => syncScheduleRowHeights());
 }
+
+/**
+ * Keep teacher and student schedule rows lined up period-for-period.
+ * Resets heights first, then matches each pair (and the header) to the taller side.
+ */
+function syncScheduleRowHeights() {
+    const teacherTable = document.querySelector('.teacher-schedule-table');
+    const studentTable = document.querySelector('.student-schedule-table');
+    if (!teacherTable || !studentTable) return;
+
+    const teacherHeader = teacherTable.querySelector('thead tr');
+    const studentHeader = studentTable.querySelector('thead tr');
+    const teacherRows = teacherTable.querySelectorAll('tbody tr');
+    const studentRows = studentTable.querySelectorAll('tbody tr');
+
+    const clearHeight = (el) => {
+        if (el) el.style.height = '';
+    };
+
+    clearHeight(teacherHeader);
+    clearHeight(studentHeader);
+    teacherRows.forEach(clearHeight);
+    studentRows.forEach(clearHeight);
+
+    // Force layout so offsetHeight reflects natural sizes after reset
+    void teacherTable.offsetHeight;
+
+    const matchPair = (a, b) => {
+        if (!a || !b) return;
+        const h = Math.max(a.offsetHeight, b.offsetHeight);
+        a.style.height = `${h}px`;
+        b.style.height = `${h}px`;
+    };
+
+    matchPair(teacherHeader, studentHeader);
+    const count = Math.max(teacherRows.length, studentRows.length);
+    for (let i = 0; i < count; i++) {
+        matchPair(teacherRows[i], studentRows[i]);
+    }
+}
+
+// Keep rows aligned when the viewport changes
+let syncScheduleRowHeightsRaf = null;
+window.addEventListener('resize', () => {
+    if (syncScheduleRowHeightsRaf) cancelAnimationFrame(syncScheduleRowHeightsRaf);
+    syncScheduleRowHeightsRaf = requestAnimationFrame(() => {
+        syncScheduleRowHeightsRaf = null;
+        const schedulesView = document.getElementById('schedules-view');
+        if (schedulesView && schedulesView.classList.contains('active')) {
+            syncScheduleRowHeights();
+        }
+    });
+});
 
 /**
  * Mount autocomplete options from a DocumentFragment.
@@ -10694,6 +11772,8 @@ function renderStudentSchedule() {
         const savedSchedule = studentScheduleData.find(s => s && s.time_period === time);
         addScheduleRow('student', time, savedSchedule || null);
     });
+
+    requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
 // Helper function to add a class input group to the classes container
@@ -10715,6 +11795,7 @@ function addClassInputGroup(container, value = '') {
             if (container && container.querySelectorAll('.class-input-group').length === 0) {
                 addClassInputGroup(container);
             }
+            syncScheduleRowHeights();
         });
     }
     
@@ -10735,6 +11816,7 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
             const classesContainer = row.querySelector('.classes-container');
             if (classesContainer) {
                 addClassInputGroup(classesContainer);
+                syncScheduleRowHeights();
             }
         });
     }
@@ -10750,6 +11832,8 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
                 // If this was the last class input, ensure at least one remains
                 if (container.querySelectorAll('.class-input-group').length === 0) {
                     addClassInputGroup(container);
+                } else {
+                    syncScheduleRowHeights();
                 }
             }
         });
@@ -10923,8 +12007,29 @@ async function loadUserPreferences() {
         const data = await response.json();
         userPreferences = data || {};
         applyUserManagementSectionVisibility();
+        syncClientTimezonePreference();
     } catch (error) {
         console.error('Error loading user preferences:', error);
+    }
+}
+
+/** Remember the browser's local timezone (matches the user's location/clock, not server UTC). */
+async function syncClientTimezonePreference() {
+    const tz = getClientTimezone();
+    if (!tz) return;
+    window.clientTimezone = tz;
+    const existing = userPreferences || {};
+    if (existing.clientTimezone === tz) return;
+    const newPrefs = { ...existing, clientTimezone: tz };
+    userPreferences = newPrefs;
+    try {
+        await fetch('/api/user/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newPrefs)
+        });
+    } catch (error) {
+        console.warn('Failed to save client timezone preference:', error);
     }
 }
 
@@ -11137,7 +12242,7 @@ async function loadUsers() {
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
                 archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
@@ -11150,6 +12255,7 @@ async function loadUsers() {
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
         const studentUsers = users.filter(u => u.role === 'student');
+        allStudentUsers = studentUsers;
         
         // Helper: safe string for sorting (treat null/undefined as empty, case-insensitive)
         const sortKey = (value) => (value || '').toString().toLowerCase();
@@ -11240,18 +12346,18 @@ async function loadUsers() {
         } else {
             const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
-                adminFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
+                adminFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user), false));
             });
             adminTbody.appendChild(adminFrag);
         }
         
         // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
-            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
             const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
-                staffFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user)));
+                staffFrag.appendChild(createAdminStaffRow(user, getDisplayRole(user), true));
             });
             staffTbody.appendChild(staffFrag);
         }
@@ -11271,7 +12377,7 @@ async function loadUsers() {
         
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="10" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -11303,7 +12409,7 @@ async function loadUsers() {
                     });
                     
                     if (archivedStudents.length === 0) {
-                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="9" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
                         const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
@@ -11317,6 +12423,7 @@ async function loadUsers() {
                             const professional = fmt(tm.professional);
                             const groupLeader = fmt(tm.group_leader);
                             const safeName = (student.name || 'Student').replace(/'/g, "\\'");
+                            const nameForJs = JSON.stringify(student.name || 'Student');
                             row.innerHTML = `
                                 <td><strong>${student.name || 'Unnamed Student'}</strong></td>
                                 <td>${student.grade || '-'}</td>
@@ -11325,6 +12432,12 @@ async function loadUsers() {
                                 <td style="font-size: 13px;">${practitioner}</td>
                                 <td style="font-size: 13px;">${professional}</td>
                                 <td style="font-size: 13px;">${groupLeader}</td>
+                                <td class="plan-cell">
+                                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
+                                        onclick='openStudentPlanModal(${student.id}, ${nameForJs}, false)'>
+                                        Plan
+                                    </button>
+                                </td>
                                 <td class="actions-cell">
                                     <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
                                         onclick="restoreArchivedStudent(${student.id}, '${safeName}')">
@@ -11337,11 +12450,11 @@ async function loadUsers() {
                         archivedStudentsTbody.appendChild(archivedFrag);
                     }
                 } else {
-                    archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                    archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
                 }
             } catch (e) {
                 console.error('Error loading archived students:', e);
-                archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
             }
         }
 
@@ -11352,7 +12465,7 @@ async function loadUsers() {
     }
 }
 
-function createAdminStaffRow(user, displayRole) {
+function createAdminStaffRow(user, displayRole, isStaffTable) {
     const row = document.createElement('tr');
     row.dataset.userId = user.id;
     
@@ -11386,6 +12499,13 @@ function createAdminStaffRow(user, displayRole) {
         <td><strong>${name}</strong></td>
         <td style="font-weight: 500; color: ${user.role === 'admin' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
         <td>${user.username}</td>
+        ${isStaffTable ? `
+        <td>
+            <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;"
+                onclick="showCaseloadForUser(${user.id}, '${user.username.replace(/'/g, "\\'")}', ${userName})">
+                Show Caseload
+            </button>
+        </td>` : ''}
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
                 <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
@@ -11398,6 +12518,105 @@ function createAdminStaffRow(user, displayRole) {
     `;
     
     return row;
+}
+
+function studentUserHasStaffMember(studentUser, staffIdentifiers) {
+    if (!studentUser || !studentUser.team_members || !staffIdentifiers.length) return false;
+    const tm = studentUser.team_members;
+    const roleFields = ['case_manager', 'practitioner', 'professional', 'group_leader', 'paraprofessional'];
+    const normalize = (value) => (value == null ? '' : String(value)).trim().toLowerCase();
+    const matchesValue = (value) => {
+        const key = normalize(value);
+        return key && staffIdentifiers.includes(key);
+    };
+    return roleFields.some((field) => {
+        const entry = tm[field];
+        if (!entry) return false;
+        const values = Array.isArray(entry) ? entry : [entry];
+        return values.some(matchesValue);
+    });
+}
+
+function showCaseloadForUser(userId, username, displayName) {
+    try {
+        const staffUser = (allStaffMembers || []).find((u) => u.id === userId);
+        const staffIdentifiers = [];
+        for (const val of [staffUser?.name, staffUser?.username, displayName, username]) {
+            const key = (val == null ? '' : String(val)).trim().toLowerCase();
+            if (key && !staffIdentifiers.includes(key)) staffIdentifiers.push(key);
+        }
+        if (staffIdentifiers.length === 0) {
+            showMessage('Could not resolve staff member for caseload lookup.', 'error');
+            return;
+        }
+
+        const studentSource = Array.isArray(allStudentUsers) && allStudentUsers.length > 0
+            ? allStudentUsers
+            : [];
+        if (studentSource.length === 0) {
+            showMessage('No current students loaded. Open User Management or refresh users first.', 'info');
+            return;
+        }
+
+        const caseload = studentSource.filter((s) => studentUserHasStaffMember(s, staffIdentifiers));
+
+        const modal = document.getElementById('caseload-modal');
+        const titleEl = document.getElementById('caseload-modal-title');
+        const bodyEl = document.getElementById('caseload-modal-body');
+
+        if (!modal || !titleEl || !bodyEl) {
+            console.warn('Caseload modal elements not found in DOM.');
+            const count = caseload.length;
+            if (count === 0) {
+                showMessage(`No students currently assigned to ${displayName || username || 'this staff member'}.`, 'info');
+            } else {
+                const names = caseload.map(s => s.name || s.student_name || `Student #${s.id}`).join(', ');
+                showMessage(`Students for ${displayName || username}: ${names}`, 'info');
+            }
+            return;
+        }
+
+        const safeDisplayName = (displayName || staffUser?.name || staffUser?.username || username || '').toString();
+        titleEl.textContent = `Caseload for ${safeDisplayName}`;
+
+        if (caseload.length === 0) {
+            bodyEl.innerHTML = `<p style="margin: 0;">No students currently have this staff member assigned in the current students table.</p>`;
+        } else {
+            const rowsHtml = caseload.map(student => {
+                const studentName = escapeHtml(student.name || student.student_name || student.username || `Student #${student.id}`);
+                const grade = escapeHtml(student.grade || '-');
+                const cardColor = student.card_color || '-';
+                const cardColorDisplay = cardColor === '-' ? '-' : (cardColor.charAt(0).toUpperCase() + cardColor.slice(1));
+                return `
+                    <tr>
+                        <td><strong>${studentName}</strong></td>
+                        <td>${grade}</td>
+                        <td>${cardColorDisplay}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            bodyEl.innerHTML = `
+                <table class="users-table" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Student</th>
+                            <th style="text-align: left;">Grade</th>
+                            <th style="text-align: left;">Card</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        modal.style.display = 'block';
+    } catch (e) {
+        console.error('Error showing caseload:', e);
+        showMessage('Error loading caseload. Please try again.', 'error');
+    }
 }
 
 function createStudentRow(user) {
@@ -11462,10 +12681,13 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
         <td>${user.username}</td>
-        <td id="password-cell-${user.id}">
+        <td id="password-cell-${user.id}" class="users-table-password-col">
             ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+                <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View</button>
             ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="plan-cell">
+            ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
@@ -12848,6 +14070,288 @@ function editOutsideStaffUser(userId, name, username, district) {
     }
 }
 
+function billingStatusLabel(status) {
+    const labels = {
+        inactive: 'Not subscribed',
+        incomplete: 'Checkout incomplete',
+        incomplete_expired: 'Checkout expired',
+        trialing: 'Trial',
+        active: 'Active / paid',
+        past_due: 'Past due',
+        canceled: 'Canceled',
+        unpaid: 'Unpaid',
+        paused: 'Paused'
+    };
+    return labels[status] || (status || 'Unknown');
+}
+
+function formatBillingDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function setBillingMessage(text, type) {
+    const ids = ['billing-msg', 'billing-manage-msg'];
+    ids.forEach((id) => {
+        const msg = document.getElementById(id);
+        if (!msg) return;
+        if (!text) {
+            msg.style.display = 'none';
+            msg.textContent = '';
+            return;
+        }
+        msg.style.display = 'block';
+        msg.textContent = text;
+        msg.style.color = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#64748b');
+    });
+}
+
+function billingPill(ok, okText, badText) {
+    const bg = ok ? '#dcfce7' : '#ffedd5';
+    const color = ok ? '#166534' : '#9a3412';
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};color:${color};">${ok ? okText : badText}</span>`;
+}
+
+function billingSubscribedCheck(ok) {
+    if (!ok) return '';
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#dcfce7;color:#16a34a;font-weight:700;font-size:13px;" title="Subscribed" aria-label="Subscribed">✓</span>';
+}
+
+let _schoolBillingStatus = null;
+let _selectedBillingPlan = null;
+
+function billingSelectedPlanId(data) {
+    if (_selectedBillingPlan) return _selectedBillingPlan;
+    if (data && data.configured && !data.on_paid_plan) return 'paid';
+    return (data && data.current_plan) || 'free';
+}
+
+function billingPlanRow(plan, selectedId) {
+    const selected = plan.id === selectedId;
+    const current = plan.current ? '<span style="font-size:12px;color:var(--text-secondary);">Current</span>' : '';
+    const extra = [];
+    if (plan.price_label) extra.push(escapeHtml(plan.price_label));
+    if (plan.kind === 'paid' && plan.build_fee_label) {
+        extra.push(`Build fee ${escapeHtml(plan.build_fee_label)}`);
+    }
+    return `<label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid ${selected ? 'var(--accent, #1e3a5f)' : 'var(--border)'};border-radius:var(--radius-md);background:var(--bg-elevated);cursor:pointer;">
+        <input type="radio" name="billing-plan" value="${escapeHtml(plan.id)}" ${selected ? 'checked' : ''} style="margin-top:3px;">
+        <div style="flex:1;display:grid;gap:4px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <strong>${escapeHtml(plan.name)}</strong>
+                ${plan.current && plan.kind === 'paid' ? billingSubscribedCheck(true) : ''}
+                ${current}
+            </div>
+            ${extra.length ? `<div style="font-size:13px;color:var(--text-secondary);">${extra.join(' · ')}</div>` : ''}
+        </div>
+    </label>`;
+}
+
+function updateBillingManageActions(data) {
+    const selectedId = billingSelectedPlanId(data);
+    const payBtn = document.getElementById('billing-manage-pay-btn');
+    const portalOpenBtn = document.getElementById('billing-portal-open-btn');
+    const emailWrap = document.getElementById('billing-manage-email-wrap');
+    const emailInput = document.getElementById('billing-manage-email');
+    const canPayPaid = data.configured && selectedId === 'paid' && !data.monthly_ok;
+    const canPayBuild = data.configured && selectedId === 'paid' && !!data.monthly_ok && !!data.can_pay_build_fee;
+    if (payBtn) {
+        if (canPayPaid) {
+            payBtn.style.display = '';
+            payBtn.disabled = false;
+            payBtn.textContent = data.build_fee_required && !data.build_fee_paid
+                ? 'Pay monthly + build fee'
+                : 'Pay selected plan';
+        } else if (canPayBuild) {
+            payBtn.style.display = '';
+            payBtn.disabled = false;
+            payBtn.textContent = 'Pay build fee';
+        } else {
+            payBtn.style.display = 'none';
+        }
+    }
+    if (emailWrap) {
+        const showEmail = (canPayPaid || canPayBuild) && !data.has_customer;
+        emailWrap.style.display = showEmail ? '' : 'none';
+        if (emailInput && data.customer_email && !emailInput.value) {
+            emailInput.value = data.customer_email;
+        }
+    }
+    if (portalOpenBtn) {
+        portalOpenBtn.style.display = data.configured && data.has_customer ? '' : 'none';
+        portalOpenBtn.disabled = !data.configured || !data.has_customer;
+    }
+}
+
+function renderBillingManageModal(data) {
+    const body = document.getElementById('billing-manage-body');
+    if (!body || !data) return;
+    const selectedId = billingSelectedPlanId(data);
+    const period = formatBillingDate(data.current_period_end);
+    const buildPaidAt = formatBillingDate(data.build_fee_paid_at);
+    const currentName = data.plan_name || (data.on_paid_plan ? (data.product_name || 'Paid plan') : 'Free');
+    const plans = Array.isArray(data.plans) && data.plans.length
+        ? data.plans
+        : [{ id: 'free', name: 'Free', price_label: 'Included', kind: 'free', current: !data.on_paid_plan }];
+    const sections = [
+        `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;">
+            <strong>Current plan:</strong>
+            <span>${escapeHtml(currentName)}</span>
+            ${billingSubscribedCheck(!!data.monthly_ok)}
+         </div>`,
+        `<div>
+            <div style="font-weight:700;margin-bottom:8px;">Select a plan</div>
+            <div style="display:grid;gap:8px;">${plans.map((plan) => billingPlanRow(plan, selectedId)).join('')}</div>
+         </div>`
+    ];
+    if (selectedId === 'free' && data.on_paid_plan) {
+        sections.push('<div style="font-size:13px;color:var(--text-secondary);">To switch to Free, use Update card or cancel and end the subscription at the period end.</div>');
+    }
+    if (data.build_fee_required && data.on_paid_plan) {
+        const buildBits = [
+            billingPill(!!data.build_fee_paid, 'Paid', 'Not paid')
+        ];
+        if (data.build_fee_label) buildBits.unshift(escapeHtml(data.build_fee_label));
+        if (data.build_fee_paid && buildPaidAt) {
+            sections.push(`<div style="font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')} · Paid ${escapeHtml(buildPaidAt)}</div>`);
+        } else {
+            sections.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')}</div>`);
+        }
+    }
+    if (period && data.on_paid_plan) {
+        sections.push(`<div style="font-size:14px;"><strong>${data.cancel_at_period_end ? 'Ends' : 'Renews'}:</strong> ${escapeHtml(period)}</div>`);
+    }
+    if (!data.configured) {
+        sections.push('<div style="color:#b45309;font-size:14px;">Paid plans are not available until Stripe is configured.</div>');
+    }
+    body.innerHTML = sections.join('');
+    updateBillingManageActions(data);
+}
+
+function openSchoolBillingManageModal() {
+    _selectedBillingPlan = null;
+    if (_schoolBillingStatus) {
+        _selectedBillingPlan = billingSelectedPlanId(_schoolBillingStatus);
+        renderBillingManageModal(_schoolBillingStatus);
+    }
+    const modal = document.getElementById('billing-manage-modal');
+    if (modal) modal.style.display = 'block';
+}
+
+function closeSchoolBillingManageModal() {
+    const modal = document.getElementById('billing-manage-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function handleBillingPlanPick(planId) {
+    _selectedBillingPlan = planId;
+    if (_schoolBillingStatus) renderBillingManageModal(_schoolBillingStatus);
+}
+
+async function loadSchoolBilling() {
+    const box = document.getElementById('billing-status-box');
+    if (!box || !window.currentUser || window.currentUser.role !== 'admin') return;
+    try {
+        const response = await fetch('/api/billing/status');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${data.error || 'Could not load billing status.'}</p>`;
+            return;
+        }
+        _schoolBillingStatus = data;
+        const banner = document.getElementById('billing-unpaid-banner');
+        if (banner) {
+            banner.style.display = data.needs_attention ? 'block' : 'none';
+        }
+        const onPaid = !!data.on_paid_plan;
+        const planName = data.plan_name || (onPaid ? (data.product_name || 'Paid plan') : 'Free');
+        let hint = '';
+        if (data.needs_attention) {
+            hint = '<div style="margin-top:6px;font-size:13px;color:#b45309;">Payment needs attention. Open Manage Plan to update it.</div>';
+        } else if (!onPaid) {
+            hint = '<div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">Click on Manage Plan to upgrade your plan, update billing information, or cancel your plan.</div>';
+        }
+        box.innerHTML = `<div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;">
+                <strong>Plan:</strong>
+                <span>${escapeHtml(planName)}</span>
+                ${billingSubscribedCheck(!!data.monthly_ok)}
+            </div>
+            ${hint}
+        </div>`;
+        const manageModal = document.getElementById('billing-manage-modal');
+        if (manageModal && manageModal.style.display === 'block') {
+            renderBillingManageModal(data);
+        }
+    } catch (err) {
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Could not load billing status.</p>';
+    }
+}
+
+async function startSchoolSubscription(intent) {
+    const payBtn = document.getElementById('billing-manage-pay-btn');
+    const emailInput = document.getElementById('billing-manage-email');
+    setBillingMessage('');
+    if (payBtn) payBtn.disabled = true;
+    try {
+        const response = await fetch('/api/billing/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: emailInput ? emailInput.value.trim() : '',
+                intent: intent || 'auto'
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.url) {
+            setBillingMessage(data.error || 'Could not start checkout.', 'error');
+            if (payBtn) payBtn.disabled = false;
+            loadSchoolBilling();
+            return;
+        }
+        window.location.href = data.url;
+    } catch (err) {
+        setBillingMessage('Could not start checkout.', 'error');
+        if (payBtn) payBtn.disabled = false;
+        loadSchoolBilling();
+    }
+}
+
+function paySelectedBillingPlan() {
+    const data = _schoolBillingStatus || {};
+    const selectedId = billingSelectedPlanId(data);
+    if (selectedId !== 'paid') return;
+    if (data.monthly_ok && data.can_pay_build_fee) {
+        startSchoolSubscription('build_fee');
+        return;
+    }
+    startSchoolSubscription('auto');
+}
+
+async function openSchoolBillingPortal() {
+    const btn = document.getElementById('billing-portal-open-btn');
+    setBillingMessage('');
+    if (btn) btn.disabled = true;
+    try {
+        const response = await fetch('/api/billing/portal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.url) {
+            setBillingMessage(data.error || 'Could not open billing portal.', 'error');
+            if (btn) btn.disabled = false;
+            return;
+        }
+        window.location.href = data.url;
+    } catch (err) {
+        setBillingMessage('Could not open billing portal.', 'error');
+        if (btn) btn.disabled = false;
+    }
+}
+
 function loadAdminStats(users) {
     const statsContainer = document.getElementById('admin-stats');
     if (!statsContainer) return;
@@ -12900,6 +14404,37 @@ function copyToClipboard(text) {
 
 // Event listeners for schedule management
 document.addEventListener('DOMContentLoaded', () => {
+    const portalBtn = document.getElementById('billing-portal-btn');
+    if (portalBtn) portalBtn.addEventListener('click', openSchoolBillingManageModal);
+    const portalOpenBtn = document.getElementById('billing-portal-open-btn');
+    if (portalOpenBtn) portalOpenBtn.addEventListener('click', openSchoolBillingPortal);
+    const payBtn = document.getElementById('billing-manage-pay-btn');
+    if (payBtn) payBtn.addEventListener('click', paySelectedBillingPlan);
+    const manageBody = document.getElementById('billing-manage-body');
+    if (manageBody) {
+        manageBody.addEventListener('change', (e) => {
+            if (e.target && e.target.name === 'billing-plan') {
+                handleBillingPlanPick(e.target.value);
+            }
+        });
+    }
+    if (window.currentUser && window.currentUser.role === 'admin') {
+        loadSchoolBilling();
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const billing = params.get('billing');
+            if (billing === 'success') {
+                setBillingMessage('Payment received. Status updates after Stripe confirms the subscription.', 'success');
+                switchView('admin');
+            } else if (billing === 'canceled') {
+                setBillingMessage('Checkout canceled. No charge was made.', 'error');
+                switchView('admin');
+            } else if (billing === 'portal') {
+                switchView('admin');
+            }
+        } catch (e) {}
+    }
+
     // Initialize teacher schedule on page load (for staff/admin)
     // Note: Schedules will be rendered when schedules view is shown
     // We don't load here to avoid unnecessary API calls if user never visits schedules tab
@@ -12954,12 +14489,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add period buttons
     const addTeacherPeriodBtn = document.getElementById('add-teacher-period-btn');
     if (addTeacherPeriodBtn) {
-        addTeacherPeriodBtn.addEventListener('click', () => addScheduleRow('teacher'));
+        addTeacherPeriodBtn.addEventListener('click', () => {
+            addScheduleRow('teacher');
+            syncScheduleRowHeights();
+        });
     }
     
     const addStudentPeriodBtn = document.getElementById('add-student-period-btn');
     if (addStudentPeriodBtn) {
-        addStudentPeriodBtn.addEventListener('click', () => addScheduleRow('student'));
+        addStudentPeriodBtn.addEventListener('click', () => {
+            addScheduleRow('student');
+            syncScheduleRowHeights();
+        });
     }
     
     // Save schedule buttons
@@ -15711,10 +17252,61 @@ function buildMarketplaceHiddenInfoHtml(rules) {
     var items = rules.map(function (r) {
         return '<li>' + String(formatMarketplaceHiddenRuleLabel(r)).replace(/</g, '&lt;') + '</li>';
     }).join('');
-    return '<div class="marketplace-hidden-info">' +
-        '<div class="marketplace-hidden-info-title">Hidden from</div>' +
-        '<ul class="marketplace-hidden-info-list">' + items + '</ul>' +
-        '</div>';
+    return '<div class="marketplace-hidden-info-title">Hidden from</div>' +
+        '<ul class="marketplace-hidden-info-list">' + items + '</ul>';
+}
+
+function renderMarketplaceHiddenRulesBox(containerEl, rules, options) {
+    if (!containerEl) return;
+    options = options || {};
+    if (!rules || !rules.length) {
+        containerEl.style.display = 'none';
+        containerEl.innerHTML = '';
+        return;
+    }
+    var itemsHtml = rules.map(function (r) {
+        var label = formatMarketplaceHiddenRuleLabel(r);
+        var removeBtn = options.removable
+            ? '<button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:2px 8px; font-size:11px; flex-shrink:0;" data-rule-id="' + r.id + '">Remove</button>'
+            : '';
+        return '<li style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
+            '<span>' + String(label).replace(/</g, '&lt;') + '</span>' + removeBtn + '</li>';
+    }).join('');
+    containerEl.innerHTML = '<div class="marketplace-hidden-info-title">Hidden from</div><ul class="marketplace-hidden-info-list">' + itemsHtml + '</ul>';
+    containerEl.style.display = 'block';
+    if (options.removable && options.onRemove) {
+        containerEl.querySelectorAll('.marketplace-unhide-remove-rule').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                options.onRemove(parseInt(btn.getAttribute('data-rule-id'), 10));
+            });
+        });
+    }
+}
+
+function resetMarketplaceHideFormFields(keepType) {
+    document.getElementById('marketplace-hide-student-id').value = '';
+    document.getElementById('marketplace-hide-student-search').value = '';
+    document.getElementById('marketplace-hide-card-color').value = '';
+    document.getElementById('marketplace-hide-grade').value = '';
+    if (keepType !== 'student') {
+        document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
+        document.getElementById('marketplace-hide-value-student').style.display = 'none';
+        document.getElementById('marketplace-hide-value-color').style.display = 'none';
+        document.getElementById('marketplace-hide-value-grade').style.display = 'none';
+    }
+}
+
+function refreshMarketplaceHideModalRules(itemId) {
+    var rulesEl = document.getElementById('marketplace-hide-current-rules');
+    if (!rulesEl || !itemId) return;
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (rules) {
+            var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+            if (item) item.hidden_rules = rules;
+            renderMarketplaceHiddenRulesBox(rulesEl, rules);
+        });
 }
 
 function renderMarketplaceCatalog(items) {
@@ -15752,14 +17344,13 @@ function renderMarketplaceCatalog(items) {
                 '<button type="button" class="marketplace-btn-delete btn-secondary" style="padding:4px 10px; font-size:12px; color:#dc2626;" data-item-id="' + item.id + '">Delete</button>' +
                 '</div>';
         }
-        var hiddenInfoHtml = (isStaffOrAdmin && hasHidden) ? buildMarketplaceHiddenInfoHtml(item.hidden_rules) : '';
         return '<div class="marketplace-item-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
             imgHtml +
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
             '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
             '<div style="display:flex; justify-content:space-between; align-items:center;">' +
             '<span style="font-weight:700; color:var(--accent);">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
-            '</div>' + hiddenInfoHtml + staffBtns + adminBtns + '</div>';
+            '</div>' + staffBtns + adminBtns + '</div>';
     }).join('');
     grid.querySelectorAll('.marketplace-item-card').forEach(function (card) {
         card.addEventListener('click', function (e) {
@@ -15898,7 +17489,7 @@ function loadMarketplacePOApprovals() {
                 return '<div style="border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; margin-bottom:10px; background:var(--bg-surface);">' +
                     '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' — $' + Number(o.item_price).toFixed(2) + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">Student: ' + (o.student_name || '').replace(/</g, '&lt;') + '</div>' +
-                    '<div style="font-size:13px; color:#64748b;">' + (o.created_at ? new Date(o.created_at).toLocaleString() : '') + '</div>' +
+                    '<div style="font-size:13px; color:#64748b;">' + formatApiDateTime(o.created_at) + '</div>' +
                     '<div style="margin-top:10px; display:flex; gap:8px; align-items:center;">' +
                     '<button type="button" class="btn-primary" style="padding:6px 12px;" data-po-approve="' + o.id + '">Fulfill</button>' +
                     '<button type="button" class="btn-secondary" style="padding:6px 12px;" data-po-deny="' + o.id + '">Deny</button>' +
@@ -16548,6 +18139,7 @@ function openMarketplaceHideModal(itemId) {
     document.getElementById('marketplace-hide-grade').value = '';
     var errEl = document.getElementById('marketplace-hide-error');
     if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    refreshMarketplaceHideModalRules(itemId);
     if (modal) modal.style.display = 'block';
 }
 function closeMarketplaceHideModal() {
@@ -16557,7 +18149,11 @@ function closeMarketplaceHideModal() {
 }
 function submitMarketplaceHide() {
     var itemId = marketplaceHideModalItemId;
-    if (!itemId) return;
+    var errEl = document.getElementById('marketplace-hide-error');
+    if (!itemId) {
+        if (errEl) { errEl.textContent = 'No item selected. Close and try again.'; errEl.style.display = 'block'; }
+        return;
+    }
     var typeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
     var type = null;
     typeRadios.forEach(function (r) { if (r.checked) type = r.value; });
@@ -16574,7 +18170,6 @@ function submitMarketplaceHide() {
     } else {
         document.getElementById('marketplace-hide-error').textContent = 'Choose one: specific student, card color, or grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return;
     }
-    var errEl = document.getElementById('marketplace-hide-error');
     errEl.style.display = 'none';
     fetch('/api/marketplace-items/' + itemId + '/hidden-rules', {
         method: 'POST',
@@ -16584,13 +18179,50 @@ function submitMarketplaceHide() {
         .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
         .then(function (res) {
             if (res.ok || (res.data && res.data.id)) {
-                closeMarketplaceHideModal();
                 loadMarketplaceCatalog();
+                fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
+                    .then(function (r) { return r.ok ? r.json() : []; })
+                    .then(function (rules) {
+                        var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
+                        if (item) item.hidden_rules = rules;
+                        refreshMarketplaceHideModalRules(itemId);
+                        resetMarketplaceHideFormFields(type);
+                        if (type === 'student') {
+                            var studentRadio = document.querySelector('input[name="marketplace-hide-type"][value="student"]');
+                            if (studentRadio) {
+                                studentRadio.checked = true;
+                                document.getElementById('marketplace-hide-value-student').style.display = 'block';
+                            }
+                        }
+                        if (errEl) {
+                            errEl.style.display = 'block';
+                            errEl.style.background = '#F0FDF4';
+                            errEl.style.border = '1px solid #BBF7D0';
+                            errEl.style.color = '#166534';
+                            errEl.textContent = 'Rule added. Select another student or close when done.';
+                            setTimeout(function () {
+                                if (errEl.textContent === 'Rule added. Select another student or close when done.') {
+                                    errEl.style.display = 'none';
+                                    errEl.style.background = '#fef2f2';
+                                    errEl.style.border = '1px solid #fecaca';
+                                    errEl.style.color = '#dc2626';
+                                }
+                            }, 3000);
+                        }
+                    });
             } else {
+                errEl.style.background = '#fef2f2';
+                errEl.style.border = '1px solid #fecaca';
+                errEl.style.color = '#dc2626';
                 errEl.textContent = (res.data && res.data.error) || 'Failed to add rule.'; errEl.style.display = 'block';
             }
         })
-        .catch(function () { errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block'; });
+        .catch(function () {
+            errEl.style.background = '#fef2f2';
+            errEl.style.border = '1px solid #fecaca';
+            errEl.style.color = '#dc2626';
+            errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block';
+        });
 }
 
 var marketplaceUnhideModalItemId = null;
@@ -16600,22 +18232,12 @@ function openMarketplaceUnhideModal(itemId) {
     var modal = document.getElementById('marketplace-unhide-modal');
     var nameEl = document.getElementById('marketplace-unhide-item-name');
     if (nameEl) nameEl.textContent = item ? item.name : '';
-    var listEl = document.getElementById('marketplace-unhide-rules-list');
-    if (!listEl) { if (modal) modal.style.display = 'block'; return; }
-    listEl.innerHTML = '';
+    var rulesEl = document.getElementById('marketplace-unhide-current-rules');
     var rules = (item && item.hidden_rules) ? item.hidden_rules : [];
-    if (!rules.length) {
-        listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
-    } else {
-        rules.forEach(function (r) {
-            var label = formatMarketplaceHiddenRuleLabel(r);
-            var li = document.createElement('li');
-            li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-            li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-            listEl.appendChild(li);
-            li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
-        });
-    }
+    renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+        removable: true,
+        onRemove: function (ruleId) { removeMarketplaceHiddenRule(itemId, ruleId); }
+    });
     if (modal) modal.style.display = 'block';
 }
 function closeMarketplaceUnhideModal() {
@@ -16633,49 +18255,36 @@ function removeMarketplaceHiddenRule(itemId, ruleId) {
                     .then(function (rules) {
                         var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
                         if (item) item.hidden_rules = rules;
-                        var listEl = document.getElementById('marketplace-unhide-rules-list');
-                        if (!listEl) return;
-                        listEl.innerHTML = '';
                         if (!rules.length) {
-                            listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
                             closeMarketplaceUnhideModal();
-                        } else {
-                            rules.forEach(function (r) {
-                                var label = formatMarketplaceHiddenRuleLabel(r);
-                                var li = document.createElement('li');
-                                li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-                                li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-                                listEl.appendChild(li);
-                                li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(itemId, r.id); });
-                            });
+                            return;
                         }
+                        var rulesEl = document.getElementById('marketplace-unhide-current-rules');
+                        renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+                            removable: true,
+                            onRemove: function (rid) { removeMarketplaceHiddenRule(itemId, rid); }
+                        });
                     });
             }
         });
 }
 function refreshMarketplaceUnhideModalList() {
     if (marketplaceUnhideModalItemId == null) return;
-    fetch('/api/marketplace-items/' + marketplaceUnhideModalItemId + '/hidden-rules')
+    var itemId = marketplaceUnhideModalItemId;
+    fetch('/api/marketplace-items/' + itemId + '/hidden-rules')
         .then(function (r) { return r.ok ? r.json() : []; })
         .then(function (rules) {
-            var item = marketplaceCatalog.find(function (x) { return x.id === marketplaceUnhideModalItemId; });
+            var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
             if (item) item.hidden_rules = rules;
-            var listEl = document.getElementById('marketplace-unhide-rules-list');
-            if (!listEl) return;
-            listEl.innerHTML = '';
             if (!rules.length) {
-                listEl.innerHTML = '<li style="color:#94a3b8;">No visibility rules.</li>';
                 closeMarketplaceUnhideModal();
-            } else {
-                rules.forEach(function (r) {
-                    var label = formatMarketplaceHiddenRuleLabel(r);
-                    var li = document.createElement('li');
-                    li.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9;';
-                    li.innerHTML = '<span>' + String(label).replace(/</g, '&lt;') + '</span><button type="button" class="marketplace-unhide-remove-rule btn-secondary" style="padding:4px 10px; font-size:12px;" data-rule-id="' + r.id + '">Remove</button>';
-                    listEl.appendChild(li);
-                    li.querySelector('.marketplace-unhide-remove-rule').addEventListener('click', function () { removeMarketplaceHiddenRule(marketplaceUnhideModalItemId, r.id); });
-                });
+                return;
             }
+            var rulesEl = document.getElementById('marketplace-unhide-current-rules');
+            renderMarketplaceHiddenRulesBox(rulesEl, rules, {
+                removable: true,
+                onRemove: function (ruleId) { removeMarketplaceHiddenRule(itemId, ruleId); }
+            });
         });
 }
 
@@ -17038,7 +18647,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
                     frag.appendChild(div);
                 });
-                mountAutocompleteDropdown(hideStudentDropdown, frag, hideStudentSearch);
+                mountAutocompleteDropdown(hideStudentDropdown, frag, true);
             }
             hideStudentSearch.addEventListener('input', function () {
                 var q = hideStudentSearch.value.trim();
@@ -17067,8 +18676,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (unhideModal) unhideModal.addEventListener('click', function (e) { if (e.target === unhideModal) closeMarketplaceUnhideModal(); });
         if (unhideAddMore) unhideAddMore.addEventListener('click', function () {
             if (marketplaceUnhideModalItemId != null) {
+                var itemId = marketplaceUnhideModalItemId;
                 closeMarketplaceUnhideModal();
-                openMarketplaceHideModal(marketplaceUnhideModalItemId);
+                openMarketplaceHideModal(itemId);
             }
         });
         var editClose = document.getElementById('marketplace-edit-item-modal-close');
@@ -17164,15 +18774,22 @@ function loadNotifications() {
         var listEl = document.getElementById('notifications-list');
         if (!listEl) return;
         listEl.innerHTML = list.slice(0, 30).map(function (n) {
-            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
+            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
                 '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
-                '<div style="color:#64748b;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+                '<div style="color:#64748b; white-space:pre-wrap;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
                 '</div>';
         }).join('');
         listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
             el.addEventListener('click', function () {
                 var id = parseInt(el.getAttribute('data-notification-id'), 10);
+                var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
                 fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
+                if (assignmentId && isAdmin()) {
+                    window.curriculumFocusAssignmentId = assignmentId;
+                    if (typeof switchView === 'function') switchView('curriculum');
+                    var dropdownEl = document.getElementById('notifications-dropdown');
+                    if (dropdownEl) dropdownEl.style.display = 'none';
+                }
             });
         });
     });
@@ -17283,6 +18900,10 @@ async function loadBankAccount(studentId) {
         
         // Load paychecks
         await loadPaychecks(studentId);
+
+        if (window.StudentPlans && typeof window.StudentPlans.loadBankPlanDeliveries === 'function') {
+            window.StudentPlans.loadBankPlanDeliveries(studentId);
+        }
         
         currentBankStudentId = studentId;
     } catch (error) {
@@ -17786,7 +19407,7 @@ function renderTransactions(transactions) {
     // Render in a compact, table-like list similar to Accounts UI
     const rows = transactions
         .slice()
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .sort((a, b) => (parseApiUtcDateTime(b.created_at) || 0) - (parseApiUtcDateTime(a.created_at) || 0))
         .map(t => {
             const isDeposit = t.type === 'deposit';
             const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
@@ -17795,7 +19416,7 @@ function renderTransactions(transactions) {
             return `
                 <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
                     <div style="flex:1; min-width:0;">
-                        <div style="font-size:13px; color:#0f172a;">${new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        <div style="font-size:13px; color:#0f172a;">${formatApiDateTime(t.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                         <div style="font-size:13px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t.description || ''}</div>
                     </div>
                     <div style="width:110px; text-align:right; font-size:13px; color:#64748b;">
@@ -18402,6 +20023,9 @@ const DASHBOARD_COLORS = {
     relationships: '#ffcc00',
     palette: ['#ff3b30', '#007aff', '#34c759', '#ffcc00', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
+
+/** Frenzy severity 1–5 colors (matches trigger-time / heatmap severity scale). */
+const FRENZY_SEVERITY_COLORS = ['#369E2C', '#7EB851', '#BCB432', '#E3AA30', '#BB2317'];
 
 // Use the exact same STAR colors as the Overview STAR Percent gauge
 const STAR_CHART_BAR_COLORS = [
@@ -19175,6 +20799,70 @@ function setupCompareToggle(pageKey) {
     }
 }
 
+// ---- Level Up's (Summary Overview) ----
+function buildSummaryLevelUpsQueryParams() {
+    const st = (typeof dashboardState !== 'undefined' && dashboardState.summary) ? dashboardState.summary : {};
+    const params = [];
+    if (st.studentId) params.push(`student_id=${st.studentId}`);
+    if (st.staffId) params.push(`staff_id=${st.staffId}`);
+    const managedCheckbox = document.getElementById('summary-managed-by-me-checkbox');
+    if (managedCheckbox && managedCheckbox.checked) params.push('managed_by_me=true');
+    return params;
+}
+
+function formatCardColorLabel(color) {
+    const c = String(color || 'yellow').toLowerCase();
+    if (c === 'green') return 'Green Card';
+    if (c === 'blue') return 'Blue Card';
+    return 'Yellow Card';
+}
+
+async function fetchLevelUpsData() {
+    const params = buildSummaryLevelUpsQueryParams();
+    const url = '/api/level-ups' + (params.length ? `?${params.join('&')}` : '');
+    const response = await fetch(url, { credentials: 'same-origin' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const msg = data && data.error ? data.error : 'Failed to load Level Up’s data.';
+        throw new Error(msg);
+    }
+    return data;
+}
+
+function updateLevelUpsOverviewTeaser(overviewCard, data) {
+    if (!overviewCard || !data) return;
+    const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
+    const subEl = overviewCard.querySelector('[data-level-ups-sub]');
+    const eligible = Number(data.eligible_count || 0);
+    if (countEl) countEl.textContent = String(eligible);
+    if (subEl) {
+        subEl.textContent = eligible === 1 ? 'ready to level up' : 'ready to level up';
+    }
+}
+
+async function refreshLevelUpsOverviewTeaser(overviewCard) {
+    if (!overviewCard) return;
+    // Share one in-flight request so opening the card can reuse teaser data
+    // instead of waiting on a second full /api/level-ups round-trip.
+    const loadPromise = fetchLevelUpsData().then((data) => {
+        overviewCard._levelUpsData = data;
+        updateLevelUpsOverviewTeaser(overviewCard, data);
+        return data;
+    });
+    overviewCard._levelUpsPromise = loadPromise;
+    try {
+        await loadPromise;
+    } catch (err) {
+        console.warn('Unable to load Level Up’s teaser:', err);
+        const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
+        if (countEl) countEl.textContent = '—';
+    } finally {
+        if (overviewCard._levelUpsPromise === loadPromise) {
+            overviewCard._levelUpsPromise = null;
+        }
+    }
+}
+
 // ---- Incentive Tracking Toggle (Summary / Point Card) ----
 function setupIncentiveToggle() {
     const toggle = document.getElementById('summary-incentive-toggle');
@@ -19641,7 +21329,7 @@ function buildSegmentedDonutSvg(segments, options = {}) {
         });
 
     // Add a small bleed margin so stroke/separators never clip at outer edges.
-    return `<svg class="overview-donut-svg" viewBox="-1.5 -1.5 103 103" aria-hidden="true">${paths.join('')}${separatorRects.join('')}</svg>`;
+    return `<svg class="overview-donut-svg" width="${sizePx}" height="${sizePx}" viewBox="-1.5 -1.5 103 103" aria-hidden="true">${paths.join('')}${separatorRects.join('')}</svg>`;
 }
 
 function overviewTrendDeltaClass(metric, delta) {
@@ -20329,6 +22017,31 @@ function parseIsoDateLocal(isoDate) {
     const [year, month, day] = normalized.split('-').map(Number);
     if (!year || !month || !day) return null;
     return new Date(year, month - 1, day);
+}
+
+/** Parse API datetimes stored as UTC (naive ISO or with Z) into a Date for local display. */
+function parseApiUtcDateTime(iso) {
+    if (iso == null || iso === '') return null;
+    const s = String(iso).trim();
+    if (!s) return null;
+    if (/[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+    if (s.indexOf('T') !== -1) return new Date(s + 'Z');
+    return new Date(s + 'T00:00:00Z');
+}
+
+/** Format API UTC timestamps in the user's local timezone (browser locale). */
+function formatApiDateTime(iso, options) {
+    const d = parseApiUtcDateTime(iso);
+    if (!d || Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, options || { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function getClientTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (e) {
+        return '';
+    }
 }
 
 function normalizeDateKey(value) {
@@ -21696,6 +23409,7 @@ function buildOverviewDashboardCardHtml(data) {
     const totalDays = data.total_days || 0;
     const infractions = data.infractions || data.additional_info?.infractions || {};
     const totalInfractions = Object.values(infractions).reduce((s, c) => s + Number(c) || 0, 0);
+    const totalFenzies = Number(data.total_frenzies) || 0;
     const reminders = data.additional_info?.total_reminders || 0;
     const resets = data.additional_info?.total_resets || 0;
     const attendance = data.attendance_summary || {};
@@ -21973,6 +23687,9 @@ function buildOverviewDashboardCardHtml(data) {
                     </div>
                 </div>
             </div>
+            ${window.StudentPlans && typeof window.StudentPlans.buildPlanThresholdsOverviewHtml === 'function'
+                ? window.StudentPlans.buildPlanThresholdsOverviewHtml(data.plan_threshold_stats)
+                : ''}
         </div>
 
         <div class="overview-beige-panel overview-stat overview-trigger-panel" data-overview-key="trigger_times">
@@ -22031,6 +23748,22 @@ function buildOverviewDashboardCardHtml(data) {
                 </div>
             </div>
         </div>
+        <div class="overview-rich-row overview-rich-secondary">
+            <div class="overview-beige-panel overview-stat overview-level-ups-panel" data-overview-key="level_ups" title="Level Up’s">
+                <div class="overview-panel-kicker">Level Up’s</div>
+                <div class="overview-level-ups-body">
+                    <div class="overview-level-ups-count" data-level-ups-eligible-count>—</div>
+                    <div class="overview-level-ups-sub" data-level-ups-sub>ready to level up</div>
+                </div>
+            </div>
+            <div class="overview-beige-panel overview-stat overview-fenzies-panel" data-overview-key="frenzies" title="Fenzies">
+                <div class="overview-panel-kicker">Fenzies</div>
+                <div class="overview-fenzies-body">
+                    <div class="overview-fenzies-count">${totalFenzies}</div>
+                    <div class="overview-fenzies-sub">recorded</div>
+                </div>
+            </div>
+        </div>
     </div>`;
 }
 
@@ -22043,6 +23776,13 @@ function renderSummarySingle(container, data) {
     container.innerHTML = html;
     window.currentSummaryTrendRecords = [];
     wireSummaryBehaviorTrendCard();
+
+    const overviewCardEl = container.querySelector('.overview-card');
+    // Kick off Level Up’s fetch before restoring overview cards so a persisted
+    // Level Up’s panel can reuse the same in-flight request instead of doubling it.
+    if (overviewCardEl) {
+        refreshLevelUpsOverviewTeaser(overviewCardEl);
+    }
 
     try {
         attachOverviewCardInteractions(container, data);
@@ -22235,26 +23975,36 @@ function applySummaryMasonryLayout(grid) {
         overviewCard.style.width = rightWidth + 'px';
 
         let rightTop = overviewTopOffset + overviewCard.offsetHeight + gap;
-        let leftTop = trendBottom;
+        // Track both columns under the 2-wide Trends card so the middle
+        // column gets cards instead of staying empty.
+        const leftColTops = [trendBottom, trendBottom];
+        const leftColLefts = [0, perColWidth + gap];
         const handled = new Set([trendCard, overviewCard]);
         const extraCards = cards.filter(card => !handled.has(card));
+
+        const shortestLeftColIndex = () =>
+            leftColTops[0] <= leftColTops[1] ? 0 : 1;
+        const minLeftTop = () => Math.min(leftColTops[0], leftColTops[1]);
+        const placeInLeftColumns = (card) => {
+            const colIndex = shortestLeftColIndex();
+            card.style.position = 'absolute';
+            card.style.width = rightWidth + 'px';
+            card.style.left = leftColLefts[colIndex] + 'px';
+            card.style.top = leftColTops[colIndex] + 'px';
+            leftColTops[colIndex] += card.offsetHeight + gap;
+        };
+
         const triggerTimesExtraCard = extraCards.find(card => card.dataset.overviewCard === 'trigger_times');
         if (triggerTimesExtraCard) {
-            triggerTimesExtraCard.style.position = 'absolute';
-            triggerTimesExtraCard.style.width = rightWidth + 'px';
-            triggerTimesExtraCard.style.left = '0px';
-            triggerTimesExtraCard.style.top = leftTop + 'px';
-            leftTop += triggerTimesExtraCard.offsetHeight + gap;
+            placeInLeftColumns(triggerTimesExtraCard);
             handled.add(triggerTimesExtraCard);
         }
         extraCards.forEach(card => {
             if (handled.has(card)) return;
             card.style.position = 'absolute';
             card.style.width = rightWidth + 'px';
-            if (leftTop <= rightTop) {
-                card.style.left = '0px';
-                card.style.top = leftTop + 'px';
-                leftTop += card.offsetHeight + gap;
+            if (minLeftTop() <= rightTop) {
+                placeInLeftColumns(card);
             } else {
                 card.style.left = rightLeft + 'px';
                 card.style.top = rightTop + 'px';
@@ -22262,7 +24012,12 @@ function applySummaryMasonryLayout(grid) {
             }
         });
 
-        const maxHeight = Math.max(leftTop, rightTop, overviewCard.offsetHeight + Math.max(0, overviewTopOffset));
+        const maxHeight = Math.max(
+            leftColTops[0],
+            leftColTops[1],
+            rightTop,
+            overviewCard.offsetHeight + Math.max(0, overviewTopOffset)
+        );
         grid.style.height = maxHeight + 'px';
         if (summaryContainer && summaryContainer.id === 'summary-results') {
             summaryContainer.style.minHeight = maxHeight + 'px';
@@ -22388,6 +24143,702 @@ function scheduleMasonryLayoutAfterResize(grid) {
     });
 }
 
+/** Label used server-side for blank frenzy time / location / purpose (`FRENZY_MISSING_LABEL`). */
+const FRENZY_NOT_RECORDED_LABEL = 'Not recorded';
+
+function isFrenzyNotRecordedLabel(label) {
+    return String(label || '').trim().toLowerCase() === FRENZY_NOT_RECORDED_LABEL.toLowerCase();
+}
+
+/**
+ * Horizontal stacked severity bars + matching table for Frenzies Time / Location / Purpose.
+ * @param {Array<{label: string, entry: object}>} slots
+ * @param {{ severityKeys: string[], getSeverityColor: Function, severityLabels: object, emptyMsg: string, tableHeader: string, drillAttr: string, chartClass?: string }} opts
+ */
+function buildFrenziesHstarBreakdown(slots, opts) {
+    const {
+        severityKeys,
+        getSeverityColor,
+        severityLabels,
+        emptyMsg,
+        tableHeader,
+        drillAttr,
+        chartClass = '',
+    } = opts;
+    if (!slots || !slots.length) {
+        return { graphHtml: emptyMsg, tableHtml: emptyMsg };
+    }
+    const maxTotal = Math.max(...slots.map((s) => Number(s.entry.count) || 0), 1);
+    const axisMax = niceCeilingAxisMax(maxTotal);
+    const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+        ${severityKeys.map((sev) => `<span class="infractions-bar-legend-item">
+            <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
+            ${escapeHtml(severityLabels[sev] || sev)}
+        </span>`).join('')}
+    </div>`;
+    const rowsHtml = slots.map((slot) => {
+        const slotTotal = Number(slot.entry.count) || 0;
+        const barPct = axisMax > 0 ? Math.min(100, (slotTotal / axisMax) * 100) : 0;
+        const sevBreakdown = slot.entry.severity_breakdown || {};
+        const segmentsHtml = severityKeys.map((sev) => {
+            const count = sevBreakdown[sev] || 0;
+            if (!count) return '';
+            const segPct = slotTotal > 0 ? (count / slotTotal) * 100 : 0;
+            return `<div class="infractions-hstar-segment" style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
+        }).join('');
+        return `<div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
+            <div class="infractions-hstar-slot">
+                <div class="infractions-hstar-bar-row">
+                    <div class="infractions-hstar-bar" style="width:${barPct}%">
+                        <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
+                    </div>
+                    <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${slotTotal}</span></span>
+                </div>
+            </div>`;
+    }).join('');
+    const tickDivisions = 5;
+    const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
+    const xTicksHtml = tickLabels.map((n) => `<span>${n}</span>`).join('');
+    const chartClassAttr = chartClass ? ` ${chartClass}` : '';
+    const graphHtml = `<div class="infractions-hstar-chart${chartClassAttr}">${barLegendHtml}<div class="infractions-hstar-body">${rowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
+
+    let tableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+        <thead><tr>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">${escapeHtml(tableHeader)}</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
+        </tr></thead>
+        <tbody>`;
+    slots.forEach((slot) => {
+        const slotTotal = Number(slot.entry.count) || 0;
+        const avgMin = Number(slot.entry.avg_duration) || 0;
+        tableHtml += `<tr class="dashboard-breakdown-item" ${drillAttr}="${escapeHtml(slot.label)}" style="cursor:pointer;">
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slotTotal}</span></td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
+        </tr>`;
+    });
+    tableHtml += `</tbody></table>`;
+    return { graphHtml, tableHtml };
+}
+
+function buildFrenziesCard(data, masonryGrid = null) {
+    const card = document.createElement('div');
+    card.className = 'dashboard-card infractions-card frenzies-card overview-extra-card';
+    card.dataset.overviewCard = 'frenzies_card';
+
+    const totalFrenzies = Number(data.total_frenzies) || 0;
+    const frenziesBySeverity = data.frenzies_by_severity || {};
+    const frenziesByTime = data.frenzies_by_time || {};
+    const frenziesByDay = data.frenzies_by_day || {};
+    const frenziesByLocation = data.frenzies_by_location || {};
+    const frenziesByPurpose = data.frenzies_by_purpose || {};
+    const frenziesByDurationBucket = data.frenzies_by_duration_bucket || {};
+    const frenziesDurationSummary = data.frenzies_duration_summary || {};
+    const frenziesSeverityTotals = data.frenzies_severity_totals || {};
+    const infractionsForFrenzies = data.infractions_for_frenzies || {};
+
+    const getMasonryGrid = () => masonryGrid || card.closest('.dashboard-card-grid');
+
+    const severityLabels = {
+        1: 'Para',
+        2: 'Response Team',
+        3: 'Professional',
+        4: 'Administration',
+        5: 'SRO'
+    };
+    const severityColors = FRENZY_SEVERITY_COLORS;
+
+    const OVERVIEW_HINT_KEY = 'frenzies_overview_click_hint_seen';
+    const overviewHintSeen = localStorage.getItem(OVERVIEW_HINT_KEY);
+    const overviewHintMsg = 'Click a row to see breakdowns by time of day, day of week, and related details.';
+    const overviewHintMsgAttr = overviewHintMsg.replace(/"/g, '&quot;');
+    const overviewTitleHintBlock = `
+        <div class="infractions-click-hint infractions-title-hint" data-hint-key="${OVERVIEW_HINT_KEY}" data-hint-message="${overviewHintMsgAttr}">
+            <span class="infractions-hint-icon" role="button" tabindex="0" aria-label="Show hint">i</span>
+            <div class="infractions-hint-popover" role="tooltip" aria-hidden="true" style="display:none;"></div>
+        </div>`;
+    const overviewFirstTimeText = overviewHintSeen ? '' : `<p class="infractions-click-hint-text" data-hint-key="${OVERVIEW_HINT_KEY}" style="font-size:0.8rem;color:var(--text-secondary);margin:4px 0 10px 0;">${escapeHtml(overviewHintMsg)}</p>`;
+
+    const getSeverityColor = (sev) => severityColors[Number(sev) - 1] || severityColors[0];
+    const emptyMsg = `<p style="color:var(--text-secondary);font-size:0.875rem;">No frenzies for this period.</p>`;
+
+    // Build severity breakdown (graph + table) using frenziesSeverityTotals
+    let severityGraphHtml = emptyMsg;
+    let severityTableHtml = emptyMsg;
+    const severityKeys = Object.keys(frenziesSeverityTotals || {}).filter(k => Number(frenziesSeverityTotals[k]) > 0).sort((a, b) => Number(a) - Number(b));
+    if (severityKeys.length > 0) {
+        const severitySegments = severityKeys.map(sev => ({
+            value: frenziesSeverityTotals[sev],
+            color: getSeverityColor(sev),
+            title: `${sev} - ${severityLabels[sev] || sev}: ${frenziesSeverityTotals[sev]} (${Math.round((frenziesSeverityTotals[sev] / Math.max(totalFrenzies, 1)) * 100)}%)`
+        }));
+        const frenzySeverityDonutPx = 175;
+        const frenzySeverityRingPx = 30;
+        const donutSvg = buildSegmentedDonutSvg(severitySegments, { sizePx: frenzySeverityDonutPx, ringPx: frenzySeverityRingPx });
+        const legendItems = severityKeys.map(sev => {
+            const count = frenziesSeverityTotals[sev];
+            const pct = Math.round((count / Math.max(totalFrenzies, 1)) * 100);
+            return `<div class="infractions-severity-legend-item frenzies-severity-legend-item" data-frenzy-drill-severity="${escapeHtml(sev)}" style="cursor:pointer;">
+                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
+                <span class="infractions-severity-legend-label">${escapeHtml(`${sev} - ${severityLabels[sev] || sev}`)}</span>
+                <span class="infractions-severity-legend-count">${count} (${pct}%)</span>
+            </div>`;
+        }).join('');
+        severityGraphHtml = `<div class="infractions-severity-graph frenzies-severity-graph" style="display:flex;align-items:center;gap:24px;">
+            <div class="frenzies-severity-donut-wrap" style="--frenzy-severity-donut-px:${frenzySeverityDonutPx}px;position:relative;width:${frenzySeverityDonutPx}px;height:${frenzySeverityDonutPx}px;min-width:${frenzySeverityDonutPx}px;min-height:${frenzySeverityDonutPx}px;flex-shrink:0;">
+                ${donutSvg}
+                <div class="overview-donut-center">
+                    <div class="overview-donut-total">${totalFrenzies}</div>
+                    <div class="frenzies-severity-donut-sub">frenzies</div>
+                </div>
+            </div>
+            <div class="infractions-severity-legend frenzies-severity-legend">${legendItems}</div>
+        </div>`;
+
+        severityTableHtml = `<table class="dashboard-breakdown-list infractions-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+            <thead><tr>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Severity</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
+            </tr></thead>
+            <tbody>`;
+        severityKeys.forEach(sev => {
+            const sevEntry = frenziesBySeverity[sev] || {};
+            const avgMin = Number(sevEntry.avg_duration) || 0;
+            severityTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-severity="${escapeHtml(sev)}" style="cursor:pointer;">
+                <td class="dashboard-breakdown-name" style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(`${sev} - ${severityLabels[sev] || sev}`)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${frenziesSeverityTotals[sev]}</span></td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
+            </tr>`;
+        });
+        severityTableHtml += `</tbody></table>`;
+    }
+
+    // Build Time / Location / Purpose (horizontal stacked bars) — can hide "Not recorded"
+    const allTimeKeys = new Set([...SCHEDULE_PERIODS, ...Object.keys(frenziesByTime)]);
+    const allTimeSlots = Array.from(allTimeKeys).map(p => ({
+        label: p,
+        entry: frenziesByTime[p] || {}
+    })).filter(s => (Number(s.entry.count) || 0) > 0);
+    const allLocationSlots = Object.entries(frenziesByLocation)
+        .map(([k, v]) => ({ label: k, entry: v }))
+        .filter(e => (Number(e.entry.count) || 0) > 0)
+        .sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
+    const allPurposeSlots = Object.entries(frenziesByPurpose)
+        .map(([k, v]) => ({ label: k, entry: v }))
+        .filter(e => (Number(e.entry.count) || 0) > 0)
+        .sort((a, b) => (Number(b.entry.count) || 0) - (Number(a.entry.count) || 0));
+    const hasNotRecordedData = [...allTimeSlots, ...allLocationSlots, ...allPurposeSlots]
+        .some(s => isFrenzyNotRecordedLabel(s.label));
+
+    const hstarOptsBase = { severityKeys, getSeverityColor, severityLabels, emptyMsg };
+    const buildNrSensitivePanels = (ignoreNotRecorded) => {
+        const keep = (slots) => ignoreNotRecorded
+            ? slots.filter(s => !isFrenzyNotRecordedLabel(s.label))
+            : slots;
+        const timeBuilt = buildFrenziesHstarBreakdown(keep(allTimeSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Time',
+            drillAttr: 'data-frenzy-drill-time',
+        });
+        const locationBuilt = buildFrenziesHstarBreakdown(keep(allLocationSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Location',
+            drillAttr: 'data-frenzy-drill-location',
+        });
+        const purposeBuilt = buildFrenziesHstarBreakdown(keep(allPurposeSlots), {
+            ...hstarOptsBase,
+            tableHeader: 'Purpose',
+            drillAttr: 'data-frenzy-drill-purpose',
+        });
+        return {
+            timeGraphHtml: timeBuilt.graphHtml,
+            timeTableHtml: timeBuilt.tableHtml,
+            locationGraphHtml: locationBuilt.graphHtml,
+            locationTableHtml: locationBuilt.tableHtml,
+            purposeGraphHtml: purposeBuilt.graphHtml,
+            purposeTableHtml: purposeBuilt.tableHtml,
+        };
+    };
+    const {
+        timeGraphHtml,
+        timeTableHtml,
+        locationGraphHtml,
+        locationTableHtml,
+        purposeGraphHtml,
+        purposeTableHtml,
+    } = buildNrSensitivePanels(false);
+
+    // Build Day breakdown (horizontal stacked bars — same as Time / Location)
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const daySlots = dayOrder.map(d => ({ label: d, entry: frenziesByDay[d] || {} })).filter(s => (Number(s.entry.count) || 0) > 0);
+    let dayGraphHtml = emptyMsg;
+    let dayTableHtml = emptyMsg;
+    if (daySlots.length > 0) {
+        const maxDayTotal = Math.max(...daySlots.map(s => Number(s.entry.count) || 0), 1);
+        const axisMax = niceCeilingAxisMax(maxDayTotal);
+        const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+            ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
+                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
+                ${escapeHtml(severityLabels[sev] || sev)}
+            </span>`).join('')}
+        </div>`;
+        const dayRowsHtml = daySlots.map(slot => {
+            const slotTotal = Number(slot.entry.count) || 0;
+            const barPct = axisMax > 0 ? Math.min(100, (slotTotal / axisMax) * 100) : 0;
+            const sevBreakdown = slot.entry.severity_breakdown || {};
+            const segmentsHtml = severityKeys.map(sev => {
+                const count = sevBreakdown[sev] || 0;
+                if (!count) return '';
+                const segPct = slotTotal > 0 ? (count / slotTotal) * 100 : 0;
+                return `<div class="infractions-hstar-segment" style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
+            }).join('');
+            return `<div class="infractions-hstar-label">${escapeHtml(slot.label)}</div>
+                <div class="infractions-hstar-slot">
+                    <div class="infractions-hstar-bar-row">
+                        <div class="infractions-hstar-bar" style="width:${barPct}%">
+                            <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
+                        </div>
+                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${slotTotal}</span></span>
+                    </div>
+                </div>`;
+        }).join('');
+        const tickDivisions = 5;
+        const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
+        const xTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
+        dayGraphHtml = `<div class="infractions-hstar-chart frenzies-day-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${dayRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
+
+        dayTableHtml = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+            <thead><tr>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Day</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
+            </tr></thead>
+            <tbody>`;
+        daySlots.forEach(slot => {
+            const slotTotal = Number(slot.entry.count) || 0;
+            const avgMin = Number(slot.entry.avg_duration) || 0;
+            dayTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-day="${escapeHtml(slot.label)}" style="cursor:pointer;">
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(slot.label)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${slotTotal}</span></td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
+            </tr>`;
+        });
+        dayTableHtml += `</tbody></table>`;
+    } else {
+        dayGraphHtml = dayTableHtml = emptyMsg;
+    }
+
+    // Build Duration breakdown with summary strip
+    const durationBuckets = ['0-5', '6-10', '11-20', '21+'];
+    const durationEntries = durationBuckets.map(b => ({ key: b, entry: frenziesByDurationBucket[b] || {} })).filter(e => (Number(e.entry.count) || 0) > 0);
+    const totalDurationMinutes = Number(frenziesDurationSummary.total_duration) || 0;
+    const avgDurationMinutes = Number(frenziesDurationSummary.avg_duration) || 0;
+    const durationSummaryHtml = totalFrenzies > 0 ? `<div class="frenzies-duration-summary" style="display:flex;gap:24px;margin-bottom:16px;">
+        <div style="flex:1;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Total Duration</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);">${totalDurationMinutes} min</div>
+        </div>
+        <div style="flex:1;">
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">Average Duration</div>
+            <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);">${avgDurationMinutes.toFixed(1)} min</div>
+        </div>
+    </div>` : '';
+
+    let durationGraphHtml = emptyMsg;
+    let durationTableHtml = emptyMsg;
+    if (durationEntries.length > 0) {
+        const maxDurTotal = Math.max(...durationEntries.map(e => Number(e.entry.count) || 0), 1);
+        const axisMax = niceCeilingAxisMax(maxDurTotal);
+        const barLegendHtml = `<div class="infractions-bar-legend" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+            ${severityKeys.map(sev => `<span class="infractions-bar-legend-item">
+                <span class="infractions-bar-legend-swatch" style="background:${getSeverityColor(sev)}"></span>
+                ${escapeHtml(severityLabels[sev] || sev)}
+            </span>`).join('')}
+        </div>`;
+        const durationRowsHtml = durationEntries.map(bucket => {
+            const bucketTotal = Number(bucket.entry.count) || 0;
+            const barPct = axisMax > 0 ? Math.min(100, (bucketTotal / axisMax) * 100) : 0;
+            const sevBreakdown = bucket.entry.severity_breakdown || {};
+            const segmentsHtml = severityKeys.map(sev => {
+                const count = sevBreakdown[sev] || 0;
+                if (!count) return '';
+                const segPct = bucketTotal > 0 ? (count / bucketTotal) * 100 : 0;
+                return `<div style="width:${segPct}%;background:${getSeverityColor(sev)}" title="${severityLabels[sev]}: ${count}"></div>`;
+            }).join('');
+            return `<div class="infractions-hstar-label">${escapeHtml(bucket.key)} min</div>
+                <div class="infractions-hstar-slot">
+                    <div class="infractions-hstar-bar-row">
+                        <div class="infractions-hstar-bar" style="width:${barPct}%">
+                            <div class="infractions-hstar-segments" style="display:flex;height:100%;">${segmentsHtml}</div>
+                        </div>
+                        <span class="infractions-hstar-count"><span class="infractions-hstar-count-num">${bucketTotal}</span></span>
+                    </div>
+                </div>`;
+        }).join('');
+        const tickDivisions = 5;
+        const tickLabels = Array.from({ length: tickDivisions + 1 }, (_, i) => Math.round((axisMax * i) / tickDivisions));
+        const xTicksHtml = tickLabels.map(n => `<span>${n}</span>`).join('');
+        durationGraphHtml = durationSummaryHtml + `<div class="infractions-hstar-chart">${barLegendHtml}<div class="infractions-hstar-body">${durationRowsHtml}<div class="infractions-hstar-x-spacer" aria-hidden="true"></div><div class="infractions-hstar-x-axis">${xTicksHtml}</div></div></div>`;
+
+        durationTableHtml = durationSummaryHtml + `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;">
+            <thead><tr>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Duration (min)</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
+                <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th>
+            </tr></thead>
+            <tbody>`;
+        durationEntries.forEach(bucket => {
+            const bucketTotal = Number(bucket.entry.count) || 0;
+            const avgMin = Number(bucket.entry.avg_duration) || 0;
+            durationTableHtml += `<tr class="dashboard-breakdown-item" data-frenzy-drill-duration="${escapeHtml(bucket.key)}" style="cursor:pointer;">
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(bucket.key)}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;"><span class="dashboard-breakdown-value">${bucketTotal}</span></td>
+                <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td>
+            </tr>`;
+        });
+        durationTableHtml += `</tbody></table>`;
+    } else {
+        durationGraphHtml = durationSummaryHtml + emptyMsg;
+        durationTableHtml = durationGraphHtml;
+    }
+
+    // Infractions-matching shell: always show Graph/Table + Severity|Time|Day|Location|Purpose|Duration
+    const overviewBreakdownTabsHtml = `
+        <div class="infractions-overview-breakdown-tabs frenzies-overview-breakdown-tabs" role="tablist" aria-label="Group frenzies">
+            <button type="button" class="infractions-overview-breakdown-tab active" data-frenzies-overview-breakdown="severity" role="tab" aria-selected="true">Severity</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="time" role="tab" aria-selected="false">Time</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="day" role="tab" aria-selected="false">Day</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="location" role="tab" aria-selected="false">Location</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="purpose" role="tab" aria-selected="false">Purpose</button>
+            <button type="button" class="infractions-overview-breakdown-tab" data-frenzies-overview-breakdown="duration" role="tab" aria-selected="false">Duration</button>
+        </div>`;
+    const overviewTabBody = `${overviewFirstTimeText}${overviewBreakdownTabsHtml}
+        <div data-frenzies-panel="graph">
+            <div data-frenzies-breakdown-panel="severity">${severityGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="time" hidden>${timeGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="day" hidden>${dayGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="location" hidden>${locationGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="purpose" hidden>${purposeGraphHtml}</div>
+            <div data-frenzies-breakdown-panel="duration" hidden>${durationGraphHtml}</div>
+        </div>
+        <div data-frenzies-panel="table" hidden>
+            <div data-frenzies-breakdown-panel="severity">${severityTableHtml}</div>
+            <div data-frenzies-breakdown-panel="time" hidden>${timeTableHtml}</div>
+            <div data-frenzies-breakdown-panel="day" hidden>${dayTableHtml}</div>
+            <div data-frenzies-breakdown-panel="location" hidden>${locationTableHtml}</div>
+            <div data-frenzies-breakdown-panel="purpose" hidden>${purposeTableHtml}</div>
+            <div data-frenzies-breakdown-panel="duration" hidden>${durationTableHtml}</div>
+        </div>`;
+
+    card.innerHTML = `
+        <div class="dashboard-breakdown-card-inner">
+            <div class="dashboard-card-header infractions-card-header">
+                <div class="infractions-card-header-left">
+                    <h3 class="dashboard-card-title">Frenzies</h3>
+                    ${overviewTitleHintBlock}
+                </div>
+                <div class="infractions-overview-header-view-toggle frenzies-overview-header-view-toggle">
+                    ${hasNotRecordedData ? `<button type="button" class="frenzies-ignore-nr-btn" data-frenzies-ignore-nr aria-pressed="false" title="Hide Not recorded rows in Time, Location, and Purpose">Ignore Not recorded</button>` : ''}
+                    <div class="view-mode-toggle" role="tablist" aria-label="Frenzies overview view mode">
+                        <button type="button" class="view-mode-toggle-btn active" data-frenzies-view="graph" role="tab" aria-selected="true">Graph</button>
+                        <button type="button" class="view-mode-toggle-btn" data-frenzies-view="table" role="tab" aria-selected="false">Table</button>
+                    </div>
+                </div>
+            </div>
+            <div class="infractions-tabs infractions-tabs--detail-only frenzies-tabs" role="tablist" hidden></div>
+            <div class="infractions-tab-panels frenzies-tab-panels">
+                <div class="infractions-tab-panel infractions-tab-overview frenzies-tab-panel is-active" data-tab-panel="overview">
+                    ${overviewTabBody}
+                </div>
+            </div>
+        </div>`;
+
+    // Wire interactions (always — chrome is always present)
+    const tabsContainer = card.querySelector('.frenzies-tabs');
+    const tabPanelsContainer = card.querySelector('.frenzies-tab-panels');
+    const overviewHeaderToggle = card.querySelector('.frenzies-overview-header-view-toggle');
+
+    const relayoutMasonry = () => {
+        const gridEl = getMasonryGrid();
+        if (typeof scheduleMasonryLayoutAfterResize === 'function' && gridEl) {
+            scheduleMasonryLayoutAfterResize(gridEl);
+        }
+    };
+
+    const syncFrenziesTabsRow = () => {
+        if (!tabsContainer) return;
+        tabsContainer.hidden = tabsContainer.querySelectorAll('.infractions-tab, .frenzies-tab').length === 0;
+    };
+    const syncViewToggleVisibility = () => {
+        const onOverview = !!card.querySelector('.infractions-tab-panel.infractions-tab-overview.is-active, .frenzies-tab-panel.is-active[data-tab-panel="overview"]');
+        if (overviewHeaderToggle) overviewHeaderToggle.hidden = !onOverview;
+    };
+
+    const setActiveTab = (tabName) => {
+        card.querySelectorAll('.infractions-tab, .frenzies-tab').forEach(t => {
+            const active = t.dataset.tab === tabName;
+            t.classList.toggle('active', active);
+            t.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        card.querySelectorAll('.infractions-tab-panel, .frenzies-tab-panel').forEach(p => {
+            const active = p.dataset.tabPanel === tabName;
+            p.classList.toggle('is-active', active);
+            p.classList.toggle('active', active);
+        });
+        syncViewToggleVisibility();
+        syncFrenziesTabsRow();
+        relayoutMasonry();
+    };
+
+    const wireTabClicks = () => {
+        card.querySelectorAll('.infractions-tab, .frenzies-tab').forEach(tab => {
+            if (tab._frenziesWired) return;
+            tab._frenziesWired = true;
+            tab.addEventListener('click', (e) => {
+                const closeBtn = e.target.closest('.infractions-tab-close, .frenzies-tab-close');
+                if (closeBtn) {
+                    e.stopPropagation();
+                    const tabName = tab.dataset.tab;
+                    if (tabName === 'overview') return;
+                    const panel = card.querySelector(`.infractions-tab-panel[data-tab-panel="${tabName}"], .frenzies-tab-panel[data-tab-panel="${tabName}"]`);
+                    if (panel) panel.remove();
+                    tab.remove();
+                    if (!card.querySelector('.infractions-tab.active, .frenzies-tab.active')) {
+                        setActiveTab('overview');
+                    }
+                    syncFrenziesTabsRow();
+                    return;
+                }
+                setActiveTab(tab.dataset.tab);
+            });
+        });
+    };
+
+    wireTabClicks();
+    syncViewToggleVisibility();
+    syncFrenziesTabsRow();
+
+    // Graph/Table view toggle
+    const viewButtons = card.querySelectorAll('[data-frenzies-view]');
+    viewButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const view = btn.dataset.frenziesView;
+            card.querySelectorAll('[data-frenzies-panel]').forEach(host => {
+                host.hidden = host.getAttribute('data-frenzies-panel') !== view;
+            });
+            viewButtons.forEach(b => {
+                const active = b.dataset.frenziesView === view;
+                b.classList.toggle('active', active);
+                b.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            if (typeof scheduleInfractionBarPixelLayout === 'function') {
+                scheduleInfractionBarPixelLayout(card);
+            }
+            relayoutMasonry();
+        });
+    });
+
+    // Breakdown tab switching
+    const syncBreakdownPanels = (mode) => {
+        card.querySelectorAll('[data-frenzies-panel]').forEach(host => {
+            host.querySelectorAll('[data-frenzies-breakdown-panel]').forEach(panel => {
+                panel.hidden = panel.dataset.frenziesBreakdownPanel !== mode;
+            });
+        });
+        card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
+            const active = btn.dataset.frenziesOverviewBreakdown === mode;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        if (typeof scheduleInfractionBarPixelLayout === 'function') {
+            scheduleInfractionBarPixelLayout(card);
+        }
+        relayoutMasonry();
+    };
+    const wireBreakdownTabs = () => {
+        card.querySelectorAll('[data-frenzies-overview-breakdown]').forEach(btn => {
+            if (btn._frenziesBreakdownWired) return;
+            btn._frenziesBreakdownWired = true;
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.frenziesOverviewBreakdown;
+                if (!mode) return;
+                syncBreakdownPanels(mode);
+            });
+        });
+    };
+    wireBreakdownTabs();
+    syncBreakdownPanels('severity');
+
+    // Ignore "Not recorded" (Time / Location / Purpose)
+    const ignoreNrBtn = card.querySelector('[data-frenzies-ignore-nr]');
+    if (ignoreNrBtn) {
+        ignoreNrBtn.addEventListener('click', () => {
+            const next = ignoreNrBtn.getAttribute('aria-pressed') !== 'true';
+            ignoreNrBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+            ignoreNrBtn.classList.toggle('active', next);
+            const activeBreakdown = card.querySelector('[data-frenzies-overview-breakdown].active')?.dataset?.frenziesOverviewBreakdown || 'severity';
+            const panels = buildNrSensitivePanels(next);
+            const setPanel = (mode, view, html) => {
+                const el = card.querySelector(`[data-frenzies-panel="${view}"] [data-frenzies-breakdown-panel="${mode}"]`);
+                if (el) el.innerHTML = html;
+            };
+            setPanel('time', 'graph', panels.timeGraphHtml);
+            setPanel('time', 'table', panels.timeTableHtml);
+            setPanel('location', 'graph', panels.locationGraphHtml);
+            setPanel('location', 'table', panels.locationTableHtml);
+            setPanel('purpose', 'graph', panels.purposeGraphHtml);
+            setPanel('purpose', 'table', panels.purposeTableHtml);
+            syncBreakdownPanels(activeBreakdown);
+        });
+    }
+    // Hint popover
+    card.addEventListener('click', e => {
+        const icon = e.target.closest('.infractions-hint-icon');
+        if (icon) {
+            e.preventDefault();
+            const hintDiv = icon.closest('.infractions-click-hint');
+            if (!hintDiv) return;
+            const popover = hintDiv.querySelector('.infractions-hint-popover');
+            if (!popover) return;
+            const msg = hintDiv.getAttribute('data-hint-message');
+            if (msg != null) popover.textContent = msg;
+            const isOpen = popover.getAttribute('aria-hidden') === 'false';
+            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                p.style.display = 'none';
+                p.setAttribute('aria-hidden', 'true');
+            });
+            if (!isOpen) {
+                popover.style.display = 'block';
+                popover.setAttribute('aria-hidden', 'false');
+            }
+            return;
+        }
+        if (!e.target.closest('.infractions-hint-popover')) {
+            card.querySelectorAll('.infractions-hint-popover').forEach(p => {
+                p.style.display = 'none';
+                p.setAttribute('aria-hidden', 'true');
+            });
+        }
+    });
+
+    // Drill row clicks - Level 1 tabs
+    const buildInfractionsTableHtml = (infractions) => {
+        const entries = Object.entries(infractions).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        if (!entries.length) return '<p style="color:var(--text-secondary);font-size:0.875rem;">No connected infractions.</p>';
+        let html = '<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;"><thead><tr><th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Infraction</th><th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th></tr></thead><tbody>';
+        entries.forEach(([type, count]) => {
+            html += `<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(type)}</td><td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${count}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        return html;
+    };
+
+    const buildDimensionTableHtml = (entries, label) => {
+        if (!entries.length) return '<p style="color:var(--text-secondary);font-size:0.875rem;">No data.</p>';
+        let html = `<table class="dashboard-breakdown-list" style="border-collapse:collapse;font-size:0.85rem;margin-top:4px;"><thead><tr><th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">${escapeHtml(label)}</th><th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th><th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Avg min</th></tr></thead><tbody>`;
+        entries.forEach(([key, obj]) => {
+            const count = Number(obj.count) || Number(obj) || 0;
+            const avgMin = Number(obj.avg_duration) || 0;
+            html += `<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);">${escapeHtml(String(key))}</td><td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${count}</td><td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${avgMin.toFixed(1)}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        return html;
+    };
+
+    card.addEventListener('click', e => {
+        const row = e.target.closest('[data-frenzy-drill-severity], [data-frenzy-drill-time], [data-frenzy-drill-day], [data-frenzy-drill-location], [data-frenzy-drill-purpose], [data-frenzy-drill-duration]');
+        if (!row) return;
+
+        localStorage.setItem(OVERVIEW_HINT_KEY, '1');
+        const overviewTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + OVERVIEW_HINT_KEY + '"]');
+        if (overviewTextEl) overviewTextEl.remove();
+
+        const sev = row.dataset.frenzyDrillSeverity;
+        const time = row.dataset.frenzyDrillTime;
+        const day = row.dataset.frenzyDrillDay;
+        const location = row.dataset.frenzyDrillLocation;
+        const purpose = row.dataset.frenzyDrillPurpose;
+        const duration = row.dataset.frenzyDrillDuration;
+
+        let tabName, label, drillHtml;
+
+        if (sev) {
+            tabName = `frenzy-sev-${sev}`;
+            label = severityLabels[sev] || sev;
+            const sevEntry = frenziesBySeverity[sev] || {};
+            const byTime = Object.entries(sevEntry.by_time || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+            const byDay = Object.entries(sevEntry.by_day_of_week || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+            const byLoc = Object.entries(sevEntry.by_location || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+            const byPurpose = Object.entries(sevEntry.purpose_breakdown || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+            const infractions = sevEntry.infractions_breakdown || {};
+            drillHtml = `
+                <h4 style="margin:0 0 12px 0;font-size:0.9rem;">Severity ${label}: Complementary Dimensions</h4>
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">By Time</h5>
+                ${buildDimensionTableHtml(byTime, 'Time')}
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">By Day</h5>
+                ${buildDimensionTableHtml(byDay, 'Day')}
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">By Location</h5>
+                ${buildDimensionTableHtml(byLoc, 'Location')}
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">By Purpose</h5>
+                ${buildDimensionTableHtml(byPurpose, 'Purpose')}
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">Connected Infractions</h5>
+                ${buildInfractionsTableHtml(infractions)}
+            `;
+        } else {
+            let key, dimLabel, entry, allSeverities;
+            if (time) { key = time; dimLabel = 'Time'; entry = frenziesByTime[time] || {}; }
+            else if (day) { key = day; dimLabel = 'Day'; entry = frenziesByDay[day] || {}; }
+            else if (location) { key = location; dimLabel = 'Location'; entry = frenziesByLocation[location] || {}; }
+            else if (purpose) { key = purpose; dimLabel = 'Purpose'; entry = frenziesByPurpose[purpose] || {}; }
+            else if (duration) { key = duration; dimLabel = 'Duration'; entry = frenziesByDurationBucket[duration] || {}; }
+
+            tabName = `frenzy-${dimLabel.toLowerCase()}-${key}`;
+            label = `${key}`;
+            const sevBreakdown = entry.severity_breakdown || {};
+            allSeverities = Object.entries(sevBreakdown).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+            drillHtml = `
+                <h4 style="margin:0 0 12px 0;font-size:0.9rem;">${dimLabel}: ${escapeHtml(key)}</h4>
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">By Severity</h5>
+                ${buildDimensionTableHtml(allSeverities.map(([s, c]) => [severityLabels[s] || s, c]), 'Severity')}
+                <h5 style="margin:12px 0 6px 0;font-size:0.85rem;color:var(--text-secondary);">Connected Infractions</h5>
+                ${buildInfractionsTableHtml(infractionsForFrenzies)}
+            `;
+        }
+
+        let existingTab = Array.from(card.querySelectorAll('.frenzies-tab')).find(t => t.dataset.tab === tabName);
+        if (existingTab) {
+            setActiveTab(tabName);
+            return;
+        }
+
+        const shortLabel = label.length > 28 ? `${label.slice(0, 25)}…` : label;
+        const tab = document.createElement('button');
+        tab.className = 'infractions-tab frenzies-tab';
+        tab.dataset.tab = tabName;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', 'false');
+        tab.innerHTML = `
+            <span class="infractions-tab-label">${escapeHtml(shortLabel)}</span>
+            <span class="infractions-tab-close frenzies-tab-close" aria-label="Close" role="button">&times;</span>
+        `;
+        tabsContainer.appendChild(tab);
+        tabsContainer.hidden = false;
+
+        const panel = document.createElement('div');
+        panel.className = 'infractions-tab-panel frenzies-tab-panel';
+        panel.dataset.tabPanel = tabName;
+        panel.innerHTML = drillHtml;
+        tabPanelsContainer.appendChild(panel);
+
+        wireTabClicks();
+        setActiveTab(tabName);
+    });
+
+    return card;
+}
+
 function attachOverviewCardInteractions(container, data) {
     const overviewCard = container.querySelector('.overview-card');
     if (!overviewCard) return;
@@ -22406,7 +24857,10 @@ function attachOverviewCardInteractions(container, data) {
         infractions: 'infractions_card',
         reminders: 'reminders',
         resets: 'resets',
-        trigger_times: 'trigger_times'
+        trigger_times: 'trigger_times',
+        level_ups: 'level_ups',
+        plan_thresholds: 'plan_thresholds',
+        frenzies: 'frenzies_card'
     };
 
     const STORAGE_KEY = 'summary_overview_selected_stats_v1';
@@ -24568,6 +27022,182 @@ function attachOverviewCardInteractions(container, data) {
         setTriggerTimesView('graph');
     };
 
+    const buildLevelUpsCard = () => {
+        const card = document.createElement('div');
+        card.className = 'dashboard-card level-ups-card overview-extra-card';
+        card.dataset.overviewCard = 'level_ups';
+        card.innerHTML = `
+            <div class="dashboard-card-header level-ups-card-header">
+                <h3 class="dashboard-card-title">Level Up’s</h3>
+            </div>
+            <div class="dashboard-card-body level-ups-card-body">
+                <div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading Level Up’s...</p></div>
+            </div>
+        `;
+        grid.appendChild(card);
+
+        const body = card.querySelector('.level-ups-card-body');
+        const canPromote = canManageLevelUps();
+
+        const renderTables = (payload) => {
+            const yellowRows = payload.yellow_to_green || [];
+            const greenRows = payload.green_to_blue || [];
+            const showPromote = !!(payload.can_level_up && canPromote);
+
+            const buildSection = (title, rows, emptyText, tone) => {
+                const sectionClass = `level-ups-section level-ups-section--${tone}`;
+                if (!rows.length) {
+                    return `
+                        <div class="${sectionClass}">
+                            <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
+                            <p class="level-ups-empty">${escapeHtml(emptyText)}</p>
+                        </div>
+                    `;
+                }
+                const gapTh = '<th class="level-ups-col-gap" aria-hidden="true"></th>';
+                const gapTd = '<td class="level-ups-col-gap" aria-hidden="true"></td>';
+                const gapAfterAvgTh = '<th class="level-ups-col-gap-after-avg" aria-hidden="true"></th>';
+                const gapAfterAvgTd = '<td class="level-ups-col-gap-after-avg" aria-hidden="true"></td>';
+                const bodyRows = rows.map((row) => {
+                    const daysLogged = Number(row.days_logged || 0);
+                    const daysRequired = Number(row.days_required || 30);
+                    const avg = row.average_percent;
+                    const avgText = (avg == null || Number.isNaN(Number(avg))) ? '—' : `${Number(avg).toFixed(1)}%`;
+                    const needed = Number(row.days_at_90_needed || 0);
+                    const minDayPct = row.min_day_percent;
+                    const minDayPctText = (minDayPct == null || Number.isNaN(Number(minDayPct)))
+                        ? '90'
+                        : (Number(minDayPct) % 1 === 0 ? String(Number(minDayPct)) : Number(minDayPct).toFixed(1));
+                    const quickest = Number(row.days_at_100_needed || needed);
+                    let neededHtml;
+                    if (row.eligible) {
+                        const eligibleLabel = escapeHtml('Eligible now!');
+                        if (showPromote) {
+                            const targetColor = row.next_card_color || (tone === 'yellow' ? 'green' : 'blue');
+                            const colorClass = levelUpButtonColorClass(targetColor);
+                            neededHtml = `<span class="level-ups-needed-eligible"><span class="level-ups-needed-eligible-text">${eligibleLabel}</span><button type="button" class="level-up-btn ${colorClass}" data-level-up-student-id="${row.id}" data-level-up-target-color="${escapeHtml(targetColor)}">Level Up</button></span>`;
+                        } else {
+                            neededHtml = `<span class="level-ups-needed-eligible-text">${eligibleLabel}</span>`;
+                        }
+                    } else {
+                        neededHtml = `<span class="level-ups-needed-line">${escapeHtml(`${needed} more day${needed === 1 ? '' : 's'} with at least ${minDayPctText}% to level up`)}</span><span class="level-ups-needed-line">${escapeHtml(`${quickest} day${quickest === 1 ? '' : 's'} with 100%`)}</span>`;
+                    }
+                    return `<tr data-student-id="${row.id}">
+                        <td class="level-ups-col-name">${escapeHtml(row.name || '')}</td>
+                        ${gapTd}
+                        <td class="level-ups-col-days">${daysLogged}/${daysRequired}</td>
+                        ${gapTd}
+                        <td class="level-ups-col-avg">${escapeHtml(avgText)}</td>
+                        ${gapAfterAvgTd}
+                        <td class="level-ups-col-needed"><span class="level-ups-needed-text">${neededHtml}</span></td>
+                    </tr>`;
+                }).join('');
+                return `
+                    <div class="${sectionClass}">
+                        <h4 class="level-ups-section-title">${escapeHtml(title)}</h4>
+                        <div class="level-ups-table-wrap">
+                            <table class="level-ups-table">
+                                <colgroup>
+                                    <col class="level-ups-col-name">
+                                    <col class="level-ups-col-gap">
+                                    <col class="level-ups-col-days">
+                                    <col class="level-ups-col-gap">
+                                    <col class="level-ups-col-avg">
+                                    <col class="level-ups-col-gap-after-avg">
+                                    <col class="level-ups-col-needed">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th class="level-ups-col-name" title="Student name">Student</th>
+                                        ${gapTh}
+                                        <th class="level-ups-col-days" title="Longest stretch of consecutive school days with data whose average STAR % is 90% or higher, out of the 30 needed to level up. Excused days are excluded; unexcused days count as 0%.">Qualifying<br>Days</th>
+                                        ${gapTh}
+                                        <th class="level-ups-col-avg" title="Average STAR % of the current qualifying stretch. If there are no qualifying days yet, this is the student's average over their most recent school days with data (up to 30).">Avg</th>
+                                        ${gapAfterAvgTh}
+                                        <th class="level-ups-col-needed" title="How many more days are needed to reach 30 qualifying days, and the lowest equal daily % that keeps the full 30-day average at 90% or higher. Quickest is how soon they can finish if every upcoming day is 100%.">Days<br>Needed</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${bodyRows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            };
+
+            body.innerHTML = `
+                <p class="level-ups-intro">
+                    Qualifying days are the longest stretch of consecutive school days with data whose average STAR % is 90% or higher.
+                    Students level up at 30 qualifying days. Excused days are excluded; unexcused days count as 0%.
+                </p>
+                ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.', 'yellow')}
+                ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.', 'green')}
+            `;
+
+            if (showPromote) {
+                body.querySelectorAll('.level-up-btn').forEach((btn) => {
+                    btn.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const sid = Number(btn.getAttribute('data-level-up-student-id'));
+                        if (!sid) return;
+                        const studentName = btn.closest('tr')?.querySelector('td')?.textContent || 'this student';
+                        if (!window.confirm(`Level up ${studentName}? This moves them to the next card color and restarts their 30-day window.`)) {
+                            return;
+                        }
+                        btn.disabled = true;
+                        btn.textContent = 'Working…';
+                        try {
+                            const resp = await fetch(`/api/students/${sid}/level-up`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json' },
+                            });
+                            const result = await resp.json().catch(() => ({}));
+                            if (!resp.ok) {
+                                throw new Error(result.error || 'Level up failed');
+                            }
+                            const refreshed = await fetchLevelUpsData();
+                            overviewCard._levelUpsData = refreshed;
+                            updateLevelUpsOverviewTeaser(overviewCard, refreshed);
+                            renderTables(refreshed);
+                            if (typeof applySummaryMasonryLayout === 'function') {
+                                applySummaryMasonryLayout(grid);
+                            }
+                        } catch (err) {
+                            console.error(err);
+                            window.alert(err.message || 'Level up failed');
+                            btn.disabled = false;
+                            btn.textContent = 'Level Up';
+                        }
+                    });
+                });
+            }
+        };
+
+        const loadAndRender = async () => {
+            try {
+                let payload = overviewCard._levelUpsData;
+                if (!payload && overviewCard._levelUpsPromise) {
+                    payload = await overviewCard._levelUpsPromise;
+                }
+                if (!payload) {
+                    payload = await fetchLevelUpsData();
+                    overviewCard._levelUpsData = payload;
+                    updateLevelUpsOverviewTeaser(overviewCard, payload);
+                }
+                renderTables(payload);
+            } catch (err) {
+                console.error(err);
+                body.innerHTML = `<div class="dashboard-empty"><p>${escapeHtml(err.message || 'Error loading Level Up’s')}</p></div>`;
+            }
+            if (typeof applySummaryMasonryLayout === 'function') {
+                applySummaryMasonryLayout(grid);
+            }
+        };
+
+        loadAndRender();
+    };
+
     const applySelectionChange = (box, key, { restore = false } = {}) => {
         if (!key) return;
 
@@ -24597,12 +27227,69 @@ function attachOverviewCardInteractions(container, data) {
             } else {
                 selectionOrder = selectionOrder.filter(k => k !== 'star_percent');
             }
+        } else if (key === 'level_ups') {
+            const opened = toggleExtraCard('level_ups', buildLevelUpsCard);
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'level_ups');
+                selectionOrder.push('level_ups');
+                if (!restore) {
+                    const levelCard = container.querySelector('.level-ups-card');
+                    if (levelCard && typeof levelCard.scrollIntoView === 'function') {
+                        levelCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'level_ups');
+            }
+        } else if (key === 'plan_thresholds') {
+            const opened = toggleExtraCard('plan_thresholds', () => {
+                if (window.StudentPlans && typeof window.StudentPlans.buildPlanThresholdsCard === 'function') {
+                    return window.StudentPlans.buildPlanThresholdsCard(data);
+                }
+                const card = document.createElement('div');
+                card.className = 'dashboard-card overview-extra-card';
+                card.dataset.overviewCard = 'plan_thresholds';
+                card.innerHTML = '<h3 class="dashboard-card-title">Plan thresholds</h3><p>No data.</p>';
+                return card;
+            });
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'plan_thresholds');
+                selectionOrder.push('plan_thresholds');
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'plan_thresholds');
+            }
         } else if (key === 'starbucks') {
             // Starbucks: only visual selection, no extra card
             box.classList.toggle('overview-stat-selected');
         } else if (key === 'frenzies') {
-            // Frenzy reports view has been removed.
-            return;
+            const opened = toggleExtraCard('frenzies_card', () => {
+                const card = buildFrenziesCard(data, grid);
+                grid.appendChild(card);
+                if (typeof scheduleInfractionBarPixelLayout === 'function') {
+                    scheduleInfractionBarPixelLayout(card);
+                }
+                if (typeof wireInfractionsChartHoverTips === 'function') {
+                    wireInfractionsChartHoverTips(card);
+                }
+                if (typeof scheduleMasonryLayoutAfterResize === 'function') {
+                    scheduleMasonryLayoutAfterResize(grid);
+                }
+            });
+            box.classList.toggle('overview-stat-selected', opened);
+            if (opened) {
+                selectionOrder = selectionOrder.filter(k => k !== 'frenzies');
+                selectionOrder.push('frenzies');
+                if (!restore) {
+                    const frenziesCard = container.querySelector('.frenzies-card');
+                    if (frenziesCard && typeof frenziesCard.scrollIntoView === 'function') {
+                        frenziesCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } else {
+                selectionOrder = selectionOrder.filter(k => k !== 'frenzies');
+            }
         } else if (key === 'infractions') {
             // Toggle Infractions card; details are shown when a row is selected
             const opened = toggleExtraCard('infractions_card', () => {
