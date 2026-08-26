@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cron script: auto-submit point cards that have data after 10:00pm school time.
+Cron script: auto-submit point cards that have data after 11:15pm school time.
 
 Usage:
     python run_point_card_submit_cron.py [YYYY-MM-DD]

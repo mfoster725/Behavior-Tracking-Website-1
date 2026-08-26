@@ -679,6 +679,8 @@ class User(UserMixin, db.Model):
     user_number = db.Column(db.String(50), nullable=True)
     # Imported staff must change their generated password after first login
     must_change_password = db.Column(db.Boolean, default=False, nullable=False)
+    # Hidden from User Management tables; still a real DB user and can log in
+    hidden_from_management = db.Column(db.Boolean, default=False, nullable=False)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -742,6 +744,9 @@ def ensure_ui_preferences_column():
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE"
                 ))
                 conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hidden_from_management BOOLEAN DEFAULT FALSE"
+                ))
+                conn.execute(text(
                     "ALTER TABLE students ADD COLUMN IF NOT EXISTS lunch_number VARCHAR(50)"
                 ))
                 conn.commit()
@@ -752,6 +757,38 @@ def ensure_ui_preferences_column():
 
 # Run the migration once when the app starts up in a Postgres environment
 ensure_ui_preferences_column()
+
+
+def ensure_hidden_from_management_column():
+    """Add users.hidden_from_management on SQLite and Postgres if it is missing."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'users' not in inspector.get_table_names():
+                return
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'hidden_from_management' in columns:
+                return
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            with db.engine.connect() as conn:
+                if is_postgres:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS hidden_from_management BOOLEAN DEFAULT FALSE NOT NULL"
+                    ))
+                else:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN hidden_from_management BOOLEAN DEFAULT 0 NOT NULL"
+                    ))
+                conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure hidden_from_management column exists: {e}")
+        except Exception:
+            print(f"Failed to ensure hidden_from_management column exists: {e}")
+
+
+ensure_hidden_from_management_column()
 
 
 def ensure_frenzy_severity_column():
@@ -840,9 +877,9 @@ def _school_tz():
         return timezone(timedelta(hours=-5))
 
 
-# Nightly submit window: after 10:00pm school time, before 11:59pm.
-POINT_CARD_SUBMIT_HOUR = 22
-POINT_CARD_SUBMIT_MINUTE = 0
+# Nightly submit: 11:15pm school time (matches the external cron job).
+POINT_CARD_SUBMIT_HOUR = 23
+POINT_CARD_SUBMIT_MINUTE = 15
 
 
 def school_now():
@@ -976,14 +1013,6 @@ def _dates_for_missing_point_notifications(dates):
             continue
         if not is_past_point_card_submit_time(record_date):
             continue
-        now = school_now()
-        notify_at = datetime(
-            record_date.year, record_date.month, record_date.day,
-            POINT_CARD_SUBMIT_HOUR, POINT_CARD_SUBMIT_MINUTE, 0,
-            tzinfo=now.tzinfo,
-        ) + timedelta(minutes=5)
-        if now < notify_at:
-            continue
         result.append(record_date)
     return result
 
@@ -1102,7 +1131,7 @@ def notify_missing_point_card_entries(dates):
 
 
 def run_point_card_auto_submit(target_date=None):
-    """Mark point cards with entered data as submitted after 10:00pm school time. No browser required."""
+    """Mark point cards with entered data as submitted after 11:15pm school time. No browser required."""
     if target_date is not None:
         if isinstance(target_date, str):
             target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
@@ -1163,7 +1192,9 @@ _point_card_submit_thread_lock = threading.Lock()
 
 def _seconds_until_next_point_card_submit():
     now = school_now()
-    target = now.replace(hour=POINT_CARD_SUBMIT_HOUR, minute=5, second=0, microsecond=0)
+    target = now.replace(
+        hour=POINT_CARD_SUBMIT_HOUR, minute=POINT_CARD_SUBMIT_MINUTE, second=0, microsecond=0
+    )
     if now >= target:
         target = target + timedelta(days=1)
     return max(1.0, (target - now).total_seconds())
@@ -1197,7 +1228,7 @@ def start_point_card_nightly_submit_thread():
         daemon=True,
     )
     thread.start()
-    print('Point card nightly auto-submit thread started (10:05pm school time)', flush=True)
+    print('Point card nightly auto-submit thread started (11:15pm school time)', flush=True)
 
 
 class Student(db.Model):
@@ -1250,7 +1281,7 @@ class DailyRecord(db.Model):
     attendance_status = db.Column(db.String(20), default='present')
     # Keep present field for backward compatibility during migration
     present = db.Column(db.Boolean, default=True)
-    # Set after 10:00pm (school timezone) when the point card had data, even if no browser is open
+    # Set after 11:15pm (school timezone) when the point card had data, even if no browser is open
     submitted_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
@@ -2077,6 +2108,18 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add grades_taught column (may already exist): {e}")
+
+                    if 'hidden_from_management' not in columns:
+                        print("Adding hidden_from_management column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN hidden_from_management BOOLEAN DEFAULT FALSE NOT NULL"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN hidden_from_management BOOLEAN DEFAULT 0 NOT NULL"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add hidden_from_management column (may already exist): {e}")
 
                 # Ensure checkpoints.description exists for checkpoint notes.
                 if 'checkpoints' in table_names:
@@ -11042,6 +11085,7 @@ def manage_users():
         else:
             # Students can only see themselves
             users = [current_user]
+        users = [u for u in users if not getattr(u, 'hidden_from_management', False)]
         
         # Batch load related data to avoid N+1 queries
         student_ids = list({u.student_id for u in users if u.student_id})
@@ -11313,6 +11357,8 @@ def manage_users():
         # Admin can delete anyone except themselves
         if user_id == current_user.id:
             return jsonify({'error': 'Cannot delete your own account'}), 400
+        if getattr(user, 'hidden_from_management', False):
+            return jsonify({'error': 'This account cannot be deleted from User Management.'}), 403
         
         db.session.delete(user)
         db.session.commit()
@@ -12432,7 +12478,7 @@ def generate_paychecks_cron():
 @app.route('/api/point-cards/auto-submit-cron', methods=['GET', 'POST'])
 def auto_submit_point_cards_cron():
     """
-    Nightly point-card submit for cards that have data (after 10pm school time).
+    Nightly point-card submit for cards that have data (after 11:15pm school time).
     Secured by CRON_SECRET. Optional ?date=YYYY-MM-DD.
     """
     secret = os.environ.get('CRON_SECRET')
