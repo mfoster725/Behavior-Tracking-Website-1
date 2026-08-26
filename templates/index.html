@@ -662,6 +662,7 @@
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional.
                                 Grades Taught is used for Case Managers (e.g. <strong>7</strong> for 7th only, <strong>6-9</strong> for 6th through 9th). Case Manager column is used for Paraprofessionals.
+                                Names can be a first name or a partial match of at least 4 letters (e.g. <strong>Britt</strong> matches <strong>Brittany Roers</strong>), matched within the same role.
                             </p>
                             <input type="file" id="import-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
                         </div>
@@ -680,6 +681,8 @@
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Card Color: yellow, green, or blue. Team member columns are optional.
+                                Team names can be a first name or a partial match of at least 4 letters, matched to staff in that role
+                                (e.g. Professional <strong>Britt</strong> assigns the student to <strong>Brittany Roers</strong> if she is the unique Professional match).
                             </p>
                             <input type="file" id="import-student-file" accept=".csv" style="margin-bottom: 10px; display: block;">
                         </div>
@@ -2133,7 +2136,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=billing2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=starhover1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

@@ -3929,22 +3929,6 @@ function resolveUiHoverTipSource(node) {
         return { el: header, key: `star:${category}`, html: starColumnCriteriaHtml(category) };
     }
 
-    const input = el.closest('.daily-input');
-    if (input && STAR_COLUMN_CRITERIA[input.dataset.category]) {
-        const category = input.dataset.category;
-        return {
-            el: input.closest('.daily-data-cell') || input,
-            key: `star:${category}`,
-            html: starColumnCriteriaHtml(category)
-        };
-    }
-
-    const percent = el.closest('.daily-percent-cell, .period-percent-cell');
-    if (percent && STAR_COLUMN_CRITERIA[percent.dataset.category]) {
-        const category = percent.dataset.category;
-        return { el: percent, key: `star:${category}`, html: starColumnCriteriaHtml(category) };
-    }
-
     return null;
 }
 

@@ -3720,6 +3720,12 @@ def period_data():
         period = data.get('period')
         location = data.get('location', '')
         students_data = data.get('students', {})
+        if isinstance(students_data, list):
+            students_data = {
+                str(item.get('student_id')): item
+                for item in students_data
+                if isinstance(item, dict) and item.get('student_id') is not None
+            }
         
         saved_count = 0
         
@@ -8925,6 +8931,165 @@ def _import_str_eq(left, right):
     return (left or '').strip() == (right or '').strip()
 
 
+IMPORT_NAME_MIN_PARTIAL = 4
+
+# Team-member CSV roles mapped from staff designation (same pairing as User.get_designations_list).
+STAFF_DESIGNATION_ALIASES = {
+    'Case Manager': ('Case Manager', 'Teacher'),
+    'Practitioner': ('Practitioner', 'Group Leader'),
+    'Paraprofessional': ('Paraprofessional',),
+    'Professional': ('Professional',),
+    'Admin': ('Admin',),
+}
+
+
+def _import_name_tokens(name):
+    if not name:
+        return []
+    return [part for part in re.split(r'[\s,]+', str(name).strip().lower()) if part]
+
+
+def _import_letters_only(value):
+    return re.sub(r'[^a-z]', '', (value or '').lower())
+
+
+def _import_name_match_rank(query, candidate_name):
+    """Score how well a CSV name matches a stored staff name. Higher is better; 0 is no match.
+
+    Accepts an exact full name, an exact first name of any length, or a partial first-name
+    match of at least IMPORT_NAME_MIN_PARTIAL consecutive letters (e.g. Britt -> Brittany).
+    Extra tokens in the query (last name) must also match the candidate last name.
+    """
+    query = (query or '').strip()
+    candidate_name = (candidate_name or '').strip()
+    if not query or not candidate_name:
+        return 0
+    if query.lower() == candidate_name.lower():
+        return 4
+
+    q_tokens = _import_name_tokens(query)
+    c_tokens = _import_name_tokens(candidate_name)
+    if not q_tokens or not c_tokens:
+        return 0
+
+    q_first = _import_letters_only(q_tokens[0])
+    c_first = _import_letters_only(c_tokens[0])
+    if not q_first or not c_first:
+        return 0
+
+    first_exact = q_first == c_first
+    shorter, longer = (q_first, c_first) if len(q_first) <= len(c_first) else (c_first, q_first)
+    first_partial = (
+        not first_exact
+        and len(shorter) >= IMPORT_NAME_MIN_PARTIAL
+        and longer.startswith(shorter)
+    )
+    if not first_exact and not first_partial:
+        return 0
+
+    if len(q_tokens) > 1:
+        q_last = _import_letters_only(q_tokens[-1])
+        c_last = _import_letters_only(c_tokens[-1]) if len(c_tokens) > 1 else ''
+        if not q_last or not c_last:
+            return 0
+        last_exact = q_last == c_last
+        last_shorter, last_longer = (q_last, c_last) if len(q_last) <= len(c_last) else (c_last, q_last)
+        last_partial = (
+            not last_exact
+            and len(last_shorter) >= IMPORT_NAME_MIN_PARTIAL
+            and last_longer.startswith(last_shorter)
+        )
+        if not last_exact and not last_partial:
+            return 0
+        if first_exact and last_exact:
+            return 3
+        return 2 if first_exact else 1
+
+    return 2 if first_exact else 1
+
+
+def _best_import_name_matches(query, candidates, name_attr='name'):
+    """Return candidates tied at the best match rank. Empty if none match."""
+    ranked = []
+    for candidate in candidates:
+        name = candidate if isinstance(candidate, str) else getattr(candidate, name_attr, None)
+        rank = _import_name_match_rank(query, name)
+        if rank:
+            ranked.append((rank, candidate))
+    if not ranked:
+        return []
+    best = max(rank for rank, _ in ranked)
+    return [candidate for rank, candidate in ranked if rank == best]
+
+
+def _prefer_complete_import_name(existing_name, incoming_name):
+    """When a CSV nickname matches a stored full name, keep the more complete one."""
+    existing_name = (existing_name or '').strip()
+    incoming_name = (incoming_name or '').strip()
+    if not existing_name:
+        return incoming_name
+    if not incoming_name:
+        return existing_name
+    if _import_str_eq(existing_name, incoming_name):
+        return existing_name
+    if not _import_name_match_rank(incoming_name, existing_name):
+        return incoming_name
+    existing_tokens = _import_name_tokens(existing_name)
+    incoming_tokens = _import_name_tokens(incoming_name)
+    if len(existing_tokens) != len(incoming_tokens):
+        return existing_name if len(existing_tokens) > len(incoming_tokens) else incoming_name
+    existing_letters = _import_letters_only(existing_name)
+    incoming_letters = _import_letters_only(incoming_name)
+    return existing_name if len(existing_letters) >= len(incoming_letters) else incoming_name
+
+
+def _staff_user_matches_team_role(user, team_role):
+    if not user or getattr(user, 'role', None) != 'staff' or getattr(user, 'is_outside_staff', False):
+        return False
+    designation = getattr(user, 'designation', None) or ''
+    aliases = STAFF_DESIGNATION_ALIASES.get(designation, (designation,) if designation else ())
+    return team_role in aliases or designation == team_role
+
+
+def _staff_pool_for_team_role(staff_users, team_role):
+    return [user for user in staff_users if _staff_user_matches_team_role(user, team_role)]
+
+
+def _unresolved_staff_name_message(query, matches, role_label):
+    if len(matches) > 1:
+        names = ', '.join((m.name or '').strip() or '(unnamed)' for m in matches)
+        return (
+            f"{role_label} '{query}' matched multiple {role_label} staff ({names}). "
+            "Assign this person manually in User Management."
+        )
+    return (
+        f"{role_label} '{query}' was not found among {role_label} staff. "
+        "You can assign this person manually in User Management."
+    )
+
+
+def _resolve_staff_user_by_name(name, *, designation=None, staff_users=None):
+    """Match a CSV name to a unique staff user, optionally limited by designation/role aliases."""
+    name = (name or '').strip()
+    if not name:
+        return None, []
+    if staff_users is None:
+        query = User.query.filter(User.role == 'staff', User.is_outside_staff == False)
+        if designation:
+            aliases = [
+                primary for primary, names in STAFF_DESIGNATION_ALIASES.items()
+                if designation in names or primary == designation
+            ]
+            query = query.filter(User.designation.in_(aliases or [designation]))
+        staff_users = query.all()
+    elif designation:
+        staff_users = _staff_pool_for_team_role(staff_users, designation)
+    matches = _best_import_name_matches(name, staff_users)
+    if len(matches) == 1:
+        return matches[0], matches
+    return None, matches
+
+
 def _user_number_match_filter(user_number):
     """Match a stored user_number, including Excel-style '12345.0' and extra whitespace."""
     variants = [user_number]
@@ -8933,8 +9098,8 @@ def _user_number_match_filter(user_number):
     return or_(User.user_number.in_(variants), func.trim(User.user_number) == user_number)
 
 
-def _find_staff_for_import(user_number, name, *, outside_staff=False):
-    """Match staff by user number; if none, unique same-name staff with no user number."""
+def _find_staff_for_import(user_number, name, *, outside_staff=False, designation=None):
+    """Match staff by user number; if none, unique first-name/partial name staff with no user number."""
     if user_number:
         by_number = User.query.filter(
             User.role == 'staff',
@@ -8954,10 +9119,13 @@ def _find_staff_for_import(user_number, name, *, outside_staff=False):
     unnamed = User.query.filter(
         User.role == 'staff',
         User.is_outside_staff == outside_staff,
-        func.lower(User.name) == name.strip().lower(),
         or_(User.user_number.is_(None), User.user_number == ''),
     ).all()
-    return unnamed[0] if len(unnamed) == 1 else None
+    pool = unnamed
+    if designation:
+        pool = [user for user in unnamed if (user.designation or '') == designation]
+    matches = _best_import_name_matches(name, pool)
+    return matches[0] if len(matches) == 1 else None
 
 
 def _staff_import_conflict(existing, *, outside_staff=False):
@@ -8987,6 +9155,22 @@ def _parse_student_team_members(row):
             if val:
                 members.append((role_name, val))
     return members
+
+
+def _resolve_student_team_members(members, staff_users, warnings, student_label):
+    """Replace CSV team names with the matched staff user's full name when unique."""
+    resolved = []
+    for role_name, member_name in members:
+        pool = _staff_pool_for_team_role(staff_users, role_name)
+        matches = _best_import_name_matches(member_name, pool)
+        if len(matches) == 1:
+            resolved.append((role_name, matches[0].name))
+        else:
+            warnings.append(
+                f"{student_label}: {_unresolved_staff_name_message(member_name, matches, role_name)}"
+            )
+            resolved.append((role_name, member_name))
+    return resolved
 
 
 def _sync_student_team_members(student_id, members, existing=None):
@@ -9021,16 +9205,13 @@ def _sync_student_team_members(student_id, members, existing=None):
     return True
 
 
-def _resolve_case_manager_id(case_manager_name):
-    if not case_manager_name:
-        return None
-    return (
-        User.query.filter(
-            User.designation == 'Case Manager',
-            func.lower(User.name) == case_manager_name.strip().lower(),
-        )
-        .first()
+def _resolve_case_manager_id(case_manager_name, staff_users=None):
+    user, _matches = _resolve_staff_user_by_name(
+        case_manager_name,
+        designation='Case Manager',
+        staff_users=staff_users,
     )
+    return user
 
 
 def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, warnings):
@@ -9039,8 +9220,9 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     if not _import_str_eq(user.user_number, user_number):
         user.user_number = user_number
         changed = True
-    if not _import_str_eq(user.name, name):
-        user.name = name
+    preferred_name = _prefer_complete_import_name(user.name, name)
+    if not _import_str_eq(user.name, preferred_name):
+        user.name = preferred_name
         changed = True
     if not _import_str_eq(user.designation, role):
         user.designation = role
@@ -9056,14 +9238,15 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     desired_cm_id = None
     if role == 'Paraprofessional':
         if case_manager_name:
-            cm = _resolve_case_manager_id(case_manager_name)
+            cm, cm_matches = _resolve_staff_user_by_name(
+                case_manager_name, designation='Case Manager'
+            )
             if cm:
                 desired_cm_id = cm.id
             else:
                 desired_cm_id = user.linked_case_manager_id
                 warnings.append(
-                    f"{name}: Case Manager '{case_manager_name}' was not found. "
-                    "You can assign a Case Manager manually in User Management."
+                    f"{name}: {_unresolved_staff_name_message(case_manager_name, cm_matches, 'Case Manager')}"
                 )
         else:
             desired_cm_id = user.linked_case_manager_id
@@ -9078,8 +9261,9 @@ def _apply_outside_staff_import_updates(user, *, user_number, name, district):
     if not _import_str_eq(user.user_number, user_number):
         user.user_number = user_number
         changed = True
-    if not _import_str_eq(user.name, name):
-        user.name = name
+    preferred_name = _prefer_complete_import_name(user.name, name)
+    if not _import_str_eq(user.name, preferred_name):
+        user.name = preferred_name
         changed = True
     if not _import_str_eq(user.district, district):
         user.district = district or None
@@ -9223,7 +9407,9 @@ def import_users():
                 return
             seen_numbers.add(user_number)
 
-            existing = _find_staff_for_import(user_number, name, outside_staff=False)
+            existing = _find_staff_for_import(
+                user_number, name, outside_staff=False, designation=role or None
+            )
             conflict = _staff_import_conflict(existing, outside_staff=False)
             if conflict:
                 errors.append(
@@ -9262,13 +9448,15 @@ def import_users():
             )
 
             if role == 'Paraprofessional' and case_manager_name:
-                cm = _resolve_case_manager_id(case_manager_name)
+                cm, cm_matches = _resolve_staff_user_by_name(
+                    case_manager_name, designation='Case Manager'
+                )
                 if cm:
                     user.linked_case_manager_id = cm.id
                 else:
                     warnings.append(
-                        f"{name} was created but their Case Manager '{case_manager_name}' "
-                        "was not found in the system. You can assign a Case Manager manually in User Management."
+                        f"{name} was created but their "
+                        f"{_unresolved_staff_name_message(case_manager_name, cm_matches, 'Case Manager')}"
                     )
 
             _set_imported_password(user, password)
@@ -9410,6 +9598,7 @@ def import_users():
                 for (username,) in db.session.query(User.username).all()
                 if username
             }
+            staff_users = User.query.filter_by(role='staff', is_outside_staff=False).all()
 
             new_student_items = []
             student_rows = rows[header_offset:]
@@ -9439,7 +9628,12 @@ def import_users():
                     if len(name_matches) == 1:
                         existing_student = name_matches[0]
 
-                team_members = _parse_student_team_members(row)
+                team_members = _resolve_student_team_members(
+                    _parse_student_team_members(row),
+                    staff_users,
+                    warnings,
+                    initials or lunch_number,
+                )
 
                 if existing_student:
                     try:
