@@ -1159,10 +1159,6 @@ function setupEventListeners() {
             savePeriodBtn.addEventListener('click', savePeriodData);
         }
 
-        const clearPeriodBtn = document.getElementById('clear-period-btn');
-        if (clearPeriodBtn) {
-            clearPeriodBtn.addEventListener('click', clearPeriodData);
-        }
 
         // Daily overview entry
         const dailyDateInput = document.getElementById('daily-date-input');
@@ -1239,10 +1235,6 @@ function setupEventListeners() {
 
         ensureDailyGridDelegatedListeners();
         
-        const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
-        if (clearDailyAllBtn) {
-            clearDailyAllBtn.addEventListener('click', clearDailyAllData);
-        }
 
         // Info modal actions: bind explicit handlers so save/cancel works even when inline handlers are unavailable.
         const infoModal = document.getElementById('info-modal');
@@ -2849,12 +2841,6 @@ async function savePeriodData() {
     }
 }
 
-function clearPeriodData() {
-    if (confirm('Clear all data for this period?')) {
-        periodData = {};
-        renderStudentsGrid();
-    }
-}
 
 // Daily Overview Functions
 async function filterDailyStudents() {
@@ -4683,86 +4669,6 @@ async function submitStudentData(e) {
         // Re-enable button
         button.disabled = false;
         button.textContent = `Submit ${studentName}`;
-    }
-}
-
-async function persistClearedDailyRecords(studentIds, dateToClear) {
-    const savePromises = studentIds.map(function (studentId) {
-        const attendance = attendanceData[dateToClear]?.[studentId] || 'present';
-        return fetch('/api/daily-records', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                student_id: parseInt(studentId, 10),
-                date: dateToClear,
-                attendance_status: attendance,
-                periods: [],
-                frenzies: []
-            })
-        }).then(function (response) {
-            if (!response.ok) {
-                throw new Error('Failed to clear daily record (' + response.status + ')');
-            }
-            return response;
-        });
-    });
-    await Promise.all(savePromises);
-    invalidateDailyLoadCache(dateToClear);
-}
-
-async function clearDailyAllData() {
-    const visibleStudents = getVisibleDailyStudents();
-    const studentIdsToClear = visibleStudents
-        .map(function (student) { return student && student.id; })
-        .filter(function (id) { return id !== undefined && id !== null && id !== ''; })
-        .map(function (id) { return String(id); })
-        .filter(function (id) { return dailyData[id] !== undefined; });
-
-    if (studentIdsToClear.length === 0) {
-        alert('No visible students to clear');
-        return;
-    }
-
-    const confirmLabel = studentIdsToClear.length === 1
-        ? 'Clear all data for this visible student?'
-        : `Clear all data for the ${studentIdsToClear.length} visible students? Other students will not be changed.`;
-    if (!confirm(confirmLabel)) {
-        return;
-    }
-
-    if (dailyAutosaveTimer) {
-        clearTimeout(dailyAutosaveTimer);
-        dailyAutosaveTimer = null;
-    }
-
-    const dateToClear = currentDate;
-    const idsToClear = new Set(studentIdsToClear);
-
-    // Only remove the students currently on screen; keep everyone else's in-memory data.
-    Object.keys(dailyData).forEach(function (studentId) {
-        if (idsToClear.has(String(studentId))) {
-            delete dailyData[studentId];
-        }
-    });
-
-    renderDailyGrid();
-    invalidateDailyLoadCache(dateToClear);
-
-    if (!dateToClear) {
-        updateDailyAutosaveStatus('All changes saved');
-        return;
-    }
-
-    updateDailyAutosaveStatus('Saving...');
-    try {
-        await enqueueDailyWrite(function () {
-            return persistClearedDailyRecords(studentIdsToClear, dateToClear);
-        });
-        updateDailyAutosaveStatus('All changes saved');
-    } catch (error) {
-        console.error('Error clearing daily data:', error);
-        updateDailyAutosaveStatus('Auto-save failed');
-        showMessage('Error clearing data. Please try again.', 'error');
     }
 }
 

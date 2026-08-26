@@ -1089,10 +1089,6 @@ function setupEventListeners() {
             savePeriodBtn.addEventListener('click', savePeriodData);
         }
 
-        const clearPeriodBtn = document.getElementById('clear-period-btn');
-        if (clearPeriodBtn) {
-            clearPeriodBtn.addEventListener('click', clearPeriodData);
-        }
 
         // Daily overview entry
         const dailyDateInput = document.getElementById('daily-date-input');
@@ -1165,10 +1161,6 @@ function setupEventListeners() {
 
         ensureDailyGridDelegatedListeners();
         
-        const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
-        if (clearDailyAllBtn) {
-            clearDailyAllBtn.addEventListener('click', clearDailyAllData);
-        }
 
         // Info modal actions: bind explicit handlers so save/cancel works even when inline handlers are unavailable.
         const infoModal = document.getElementById('info-modal');
@@ -2738,12 +2730,6 @@ async function savePeriodData() {
     }
 }
 
-function clearPeriodData() {
-    if (confirm('Clear all data for this period?')) {
-        periodData = {};
-        renderStudentsGrid();
-    }
-}
 
 // Daily Overview Functions
 async function filterDailyStudents() {
@@ -3899,12 +3885,6 @@ async function submitStudentData(e) {
     }
 }
 
-function clearDailyAllData() {
-    if (confirm('Clear all data for this day?')) {
-        dailyData = {};
-        renderDailyGrid();
-    }
-}
 
 async function loadExistingRecord() {
     if (!currentStudentId || !currentDate) return;
