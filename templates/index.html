@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bankpreview1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=pastcards1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -272,14 +272,6 @@
                             <button type="button" class="dashboard-compare-toggle" id="summary-incentive-toggle">Incentive Tracking</button>
                             <a href="{{ url_for('insights_dashboard') }}" class="dashboard-compare-toggle" id="summary-insights-btn">Insights View</a>
                             <button type="button" id="print-summary-btn" disabled title="Print">Print</button>
-                            <button
-                                type="button"
-                                id="show-point-card-btn"
-                                class="is-inactive"
-                                data-tooltip="Select a student to view past point cards"
-                            >
-                                View Past Point Cards
-                            </button>
                         </div>
                     </div>
 
@@ -324,7 +316,6 @@
                         <p>Select a timeframe to view summary data</p>
                     </div>
                 </div>
-                <div id="point-card-data-container" style="display: none; margin-top: 20px;"></div>
             </div>
         </div>
 
@@ -2038,6 +2029,51 @@
         </div>
     </div>
 
+    <!-- Past Point Cards Modal -->
+    <div id="past-point-cards-modal" class="modal">
+        <div class="modal-content past-point-cards-modal-content">
+            <span class="close" onclick="closePastPointCardsModal()">&times;</span>
+            <h2 id="past-point-cards-modal-title">Past Point Cards</h2>
+            <div class="point-card-filters" id="point-card-filters">
+                <label class="point-card-filter-field">
+                    <span>Date</span>
+                    <input type="date" id="point-card-filter-date">
+                </label>
+                <label class="point-card-filter-field">
+                    <span>Month</span>
+                    <select id="point-card-filter-month">
+                        <option value="">All months</option>
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </label>
+                <label class="point-card-filter-field">
+                    <span>Year</span>
+                    <select id="point-card-filter-year">
+                        <option value="">All years</option>
+                    </select>
+                </label>
+                <label class="point-card-filter-field point-card-filter-search">
+                    <span>Search</span>
+                    <input type="search" id="point-card-search-input" placeholder="Times, locations, STAR values, or info…">
+                </label>
+                <button type="button" class="btn-secondary" id="point-card-filter-clear">Clear</button>
+            </div>
+            <p id="point-card-filter-status" class="point-card-filter-status"></p>
+            <div id="point-card-data-container"></div>
+        </div>
+    </div>
+
     <!-- Student If/Then Plan Modal -->
     <div id="student-plan-modal" class="modal">
         <div class="modal-content" style="max-width: 920px;">
@@ -2136,8 +2172,8 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=bankpreview1"></script>
-    <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan3"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=pastcards1"></script>
+    <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan4"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
     {% endif %}

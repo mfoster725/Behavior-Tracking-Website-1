@@ -1584,36 +1584,8 @@ function setupEventListeners() {
             console.warn('print-summary-btn not found');
         }
 
-        const showPointCardBtn = document.getElementById('show-point-card-btn');
-        if (showPointCardBtn) {
-            showPointCardBtn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (showPointCardBtn.dataset.loading === 'true') {
-                    return;
-                }
-                if (showPointCardBtn.classList.contains('is-inactive')) {
-                    showMessage('Please select a student first', 'error');
-                    return;
-                }
-                const container = document.getElementById('point-card-data-container');
-                const isOpen = !!(container && container.style.display !== 'none' && container.innerHTML.trim());
-                if (isOpen) {
-                    container.style.display = 'none';
-                    showPointCardBtn.textContent = 'View Past Point Cards';
-                    return;
-                }
-                showPointCardBtn.dataset.loading = 'true';
-                try {
-                    await loadPointCardData();
-                } finally {
-                    delete showPointCardBtn.dataset.loading;
-                }
-            });
-        } else {
-            console.warn('show-point-card-btn not found');
-        }
-        
+        bindPastPointCardsModalChrome();
+
         // Make period and timeframe dropdowns mutually exclusive for summary
         const summaryPeriodSelect = document.getElementById('summary-period-select');
         const summaryTimeframeSelect = document.getElementById('quarter-select');
@@ -6171,18 +6143,6 @@ async function loadSummary() {
             `;
         }
         
-        // Show "Show Point Card Data" button if a specific student is selected
-        const showPointCardBtn = document.getElementById('show-point-card-btn');
-        if (studentId) {
-            showPointCardBtn.style.display = 'inline-block';
-            showPointCardBtn.dataset.studentId = studentId;
-            showPointCardBtn.dataset.timeframe = timeframe;
-        } else {
-            showPointCardBtn.style.display = 'none';
-        }
-        
-        // Hide point card data container
-        document.getElementById('point-card-data-container').style.display = 'none';
     } catch (error) {
         console.error('Error loading summary:', error);
         showMessage('Error loading summary. Please try again.', 'error');
@@ -6854,163 +6814,166 @@ function renderCaseManagerComparison(data, timeframeLabel) {
             </div>
         </div>
     `;
-    
-    // Hide point card data container
-    document.getElementById('point-card-data-container').style.display = 'none';
 }
 
-async function loadPointCardData() {
-    const showPointCardBtn = document.getElementById('show-point-card-btn');
+let pastPointCardsLoadToken = 0;
 
-    // Prefer the dashboard state (new summary UI) for student/timeframe,
-    // and fall back to the button's data attributes for backwards compatibility.
-    let studentId = null;
-    let timeframe = 'alltime';
+function getPastPointCardsModal() {
+    return document.getElementById('past-point-cards-modal');
+}
 
-    if (typeof dashboardState !== 'undefined' && dashboardState.summary) {
-        const st = dashboardState.summary;
-        if (st.studentId) {
-            studentId = st.studentId;
-        }
+function getPointCardDataContainer() {
+    return document.getElementById('point-card-data-container');
+}
 
-        if (st.compareMode) {
-            const quarterSelect = document.getElementById('quarter-select');
-            if (quarterSelect && quarterSelect.value) {
-                timeframe = quarterSelect.value;
-            }
-        } else if (st.period) {
-            timeframe = st.period === 'all_time' ? 'alltime' : st.period;
-        }
+function resetPointCardFilters({ preserveValues = false } = {}) {
+    if (preserveValues) return;
+    const dateInput = document.getElementById('point-card-filter-date');
+    const monthSelect = document.getElementById('point-card-filter-month');
+    const yearSelect = document.getElementById('point-card-filter-year');
+    const searchInput = document.getElementById('point-card-search-input');
+    if (dateInput) dateInput.value = '';
+    if (monthSelect) monthSelect.value = '';
+    if (yearSelect) yearSelect.value = '';
+    if (searchInput) searchInput.value = '';
+}
+
+function populatePointCardYearFilter(records) {
+    const yearSelect = document.getElementById('point-card-filter-year');
+    if (!yearSelect) return;
+    const previous = yearSelect.value;
+    const years = [...new Set((records || []).map((r) => {
+        const y = String(r.date || '').split('-')[0];
+        return y && /^\d{4}$/.test(y) ? y : null;
+    }).filter(Boolean))].sort((a, b) => Number(b) - Number(a));
+    yearSelect.innerHTML = '<option value="">All years</option>' +
+        years.map((y) => `<option value="${y}">${y}</option>`).join('');
+    if (previous && years.includes(previous)) {
+        yearSelect.value = previous;
     }
+}
 
-    // If state didn't give us a student, fall back to any data attributes on the button
-    if (!studentId && showPointCardBtn && showPointCardBtn.dataset.studentId) {
-        studentId = showPointCardBtn.dataset.studentId;
-        if (showPointCardBtn.dataset.timeframe) {
-            timeframe = showPointCardBtn.dataset.timeframe;
-        }
+function updatePointCardFilterStatus(visibleCount, totalCount) {
+    const status = document.getElementById('point-card-filter-status');
+    if (!status) return;
+    if (!totalCount) {
+        status.textContent = '';
+        return;
     }
-    
+    status.textContent = visibleCount === totalCount
+        ? `${totalCount} day${totalCount === 1 ? '' : 's'}`
+        : `Showing ${visibleCount} of ${totalCount} days`;
+}
+
+function bindPastPointCardsModalChrome() {
+    const modal = getPastPointCardsModal();
+    if (!modal || modal.dataset.bound === 'true') return;
+    modal.dataset.bound = 'true';
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closePastPointCardsModal();
+    });
+    const dateInput = document.getElementById('point-card-filter-date');
+    const monthSelect = document.getElementById('point-card-filter-month');
+    const yearSelect = document.getElementById('point-card-filter-year');
+    const searchInput = document.getElementById('point-card-search-input');
+    const clearBtn = document.getElementById('point-card-filter-clear');
+    const apply = () => applyPointCardFilters();
+    if (dateInput) dateInput.addEventListener('change', apply);
+    if (monthSelect) {
+        monthSelect.addEventListener('change', () => {
+            if (dateInput) dateInput.value = '';
+            apply();
+        });
+    }
+    if (yearSelect) {
+        yearSelect.addEventListener('change', () => {
+            if (dateInput) dateInput.value = '';
+            apply();
+        });
+    }
+    if (searchInput) searchInput.addEventListener('input', apply);
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            resetPointCardFilters();
+            applyPointCardFilters();
+        });
+    }
+}
+
+function openPastPointCardsModal(studentId, studentName) {
+    const modal = getPastPointCardsModal();
+    if (!modal) {
+        showMessage('Unable to open past point cards', 'error');
+        return;
+    }
+    const parsedId = parseInt(studentId, 10);
+    if (!Number.isFinite(parsedId)) {
+        showMessage('Unable to identify that student', 'error');
+        return;
+    }
+    window.currentPointCardStudentId = parsedId;
+    const resolvedName = studentName
+        || (Array.isArray(allStudents) ? (allStudents.find((s) => s.id === parsedId) || {}).name : '')
+        || 'Student';
+    window.currentPointCardStudentName = resolvedName;
+    const title = document.getElementById('past-point-cards-modal-title');
+    if (title) title.textContent = `Past Point Cards — ${resolvedName}`;
+    resetPointCardFilters();
+    bindPastPointCardsModalChrome();
+    modal.style.display = 'block';
+    return loadPointCardData(parsedId);
+}
+
+function closePastPointCardsModal() {
+    const modal = getPastPointCardsModal();
+    if (modal) modal.style.display = 'none';
+}
+
+async function loadPointCardData(studentIdOverride) {
+    const studentId = studentIdOverride || window.currentPointCardStudentId;
+    const container = getPointCardDataContainer();
+    if (!container) return;
+
     if (!studentId) {
         showMessage('Please select a student first', 'error');
         return;
     }
-    
-    const container = document.getElementById('point-card-data-container');
+
+    const loadToken = ++pastPointCardsLoadToken;
     container.innerHTML = '<div class="loading">Loading point card data...</div>';
-    container.style.display = 'block';
-    
+    updatePointCardFilterStatus(0, 0);
+
     try {
-        // Get date range based on timeframe
-        let startDate, endDate;
-        const currentYear = new Date().getFullYear();
-        const quarterDates = loadQuarterDates();
-        const schoolYearDates = loadSchoolYearDates();
-        
-        if (timeframe === 'alltime') {
-            // For all time, get all records (no date filter)
-            startDate = null;
-            endDate = null;
-        } else if (timeframe === '30day') {
-            // For 30 day, we'll fetch all and filter on frontend or use a wide range
-            // Since we need the most recent 30 days with data, we'll fetch a wide range
-            const today = new Date();
-            const pastDate = new Date(today);
-            pastDate.setDate(pastDate.getDate() - 90); // Get last 90 days to ensure we have 30 days with data
-            startDate = pastDate.toISOString().split('T')[0];
-            endDate = today.toISOString().split('T')[0];
-        } else if (timeframe === 'month') {
-            // For month to month, get all records (no date filter, will be grouped by month)
-            startDate = null;
-            endDate = null;
-        } else if (timeframe === 'quarter') {
-            // For quarter to quarter, get all records within any quarter period
-            // We'll need to fetch a wide range that covers all quarters
-            startDate = `${currentYear - 1}-01-01`;
-            endDate = `${currentYear + 1}-12-31`;
-        } else if (timeframe === 'year') {
-            // For year to year, get all records within school year periods
-            // Calculate based on school year dates (MM/DD/YYYY format)
-            if (schoolYearDates.start && schoolYearDates.end) {
-                // Parse MM/DD/YYYY format
-                const startParts = schoolYearDates.start.split('/');
-                const endParts = schoolYearDates.end.split('/');
-                if (startParts.length === 3 && endParts.length === 3) {
-                    // Convert to YYYY-MM-DD format for API
-                    startDate = `${startParts[2]}-${startParts[0]}-${startParts[1]}`;
-                    endDate = `${endParts[2]}-${endParts[0]}-${endParts[1]}`;
-                } else {
-                    // Fallback: try to parse as MM-DD format (old format)
-                    const syStart = schoolYearDates.start.split('-');
-                    const syEnd = schoolYearDates.end.split('-');
-                    if (syStart.length >= 2 && syEnd.length >= 2) {
-                        if (parseInt(syStart[0]) <= parseInt(syEnd[0])) {
-                            startDate = `${currentYear}-${syStart[0]}-${syStart[1]}`;
-                            endDate = `${currentYear}-${syEnd[0]}-${syEnd[1]}`;
-                        } else {
-                            startDate = `${currentYear}-${syStart[0]}-${syStart[1]}`;
-                            endDate = `${currentYear + 1}-${syEnd[0]}-${syEnd[1]}`;
-                        }
-                    }
-                }
-            }
-        } else {
-            // Default to all time
-            startDate = null;
-            endDate = null;
-        }
-        
-        // Fetch records
-        let fetchUrl = `/api/daily-records?student_id=${studentId}`;
-        if (startDate) {
-            fetchUrl += `&start_date=${startDate}`;
-        }
-        if (endDate) {
-            fetchUrl += `&end_date=${endDate}`;
-        }
-        const response = await fetch(fetchUrl);
+        const response = await fetch(`/api/daily-records?student_id=${studentId}`);
         const records = await response.json();
-        
+        if (loadToken !== pastPointCardsLoadToken) return;
+
         if (!records || records.length === 0) {
-            container.innerHTML = '<div class="info-message">No point card data found for this period.</div>';
-            const btn = document.getElementById('show-point-card-btn');
-            if (btn) btn.textContent = 'Hide Point Cards';
+            window.currentPointCardRecords = [];
+            populatePointCardYearFilter([]);
+            container.innerHTML = '<div class="info-message">No past point cards found for this student.</div>';
+            updatePointCardFilterStatus(0, 0);
             return;
         }
-        
-        // Sort records by date (newest first)
+
         records.sort((a, b) => new Date(b.date) - new Date(a.date));
-        
-        // Get student name
-        const student = allStudents.find(s => s.id === parseInt(studentId));
-        const studentName = student ? student.name : 'Student';
-        
-        // Build HTML
-        let html = `
-            <div class="point-card-header">
-                <h3>Point Card Data - ${studentName}</h3>
-                <p>${timeframe === 'alltime' ? 'All Time' : timeframe === '30day' ? '30 Day' : timeframe === 'month' ? 'Month to Month' : timeframe === 'quarter' ? 'Quarter to Quarter' : timeframe === 'year' ? 'Year to Year' : 'All Time'}</p>
-                <div class="point-card-search" style="margin-top: 15px;">
-                    <input type="text" id="point-card-search-input" placeholder="🔍 Search dates, times, locations, STAR values, or info..." style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;">
-                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">Search by date, time period, location, STAR values (0-2), or info data</p>
-                </div>
-            </div>
-        `;
-        
-        html += '<div class="point-card-days-grid">';
+
+        const student = Array.isArray(allStudents) ? allStudents.find((s) => s.id === parseInt(studentId, 10)) : null;
+        const studentName = window.currentPointCardStudentName || (student ? student.name : 'Student');
+        const safeStudentName = typeof escapeHtml === 'function' ? escapeHtml(studentName) : studentName;
+
+        let html = '<div class="point-card-days-grid">';
         records.forEach((record, recordIndex) => {
-            // Parse date without timezone issues (YYYY-MM-DD format)
             const [year, month, day] = record.date.split('-').map(Number);
-            const date = new Date(year, month - 1, day); // month is 0-indexed
-            // Format as "Day of Week, Month Day, Year" (e.g., "Monday, January 8, 2026")
+            const date = new Date(year, month - 1, day);
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             const formattedDate = date.toLocaleDateString('en-US', options);
-            
+
             html += `
                 <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}">
                     <div class="point-card-day-header">
                         <h4>${formattedDate}</h4>
-                        <button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${studentName}">Edit</button>
+                        <button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>
                     </div>
                     <div class="point-card-day-content">
                         <div class="point-card-grid" id="point-card-grid-${record.id}">
@@ -7024,42 +6987,30 @@ async function loadPointCardData() {
             `;
         });
         html += '</div>';
-        
+
         container.innerHTML = html;
-        const btn = document.getElementById('show-point-card-btn');
-        if (btn) btn.textContent = 'Hide Point Cards';
-        
-        // Add event listeners to edit buttons
-        container.querySelectorAll('.edit-day-btn').forEach(btn => {
+
+        container.querySelectorAll('.edit-day-btn').forEach((btn) => {
             btn.addEventListener('click', editPointCardDay);
         });
-        
-        // Add event listeners to info view buttons
-        container.querySelectorAll('.info-view-btn').forEach(btn => {
+
+        container.querySelectorAll('.info-view-btn').forEach((btn) => {
             btn.addEventListener('click', (e) => {
                 const recordId = e.target.dataset.recordId;
-                const periodIndex = parseInt(e.target.dataset.periodIndex);
-                // Find the record and period data
-                const record = records.find(r => r.id === parseInt(recordId));
+                const periodIndex = parseInt(e.target.dataset.periodIndex, 10);
+                const record = records.find((r) => r.id === parseInt(recordId, 10));
                 if (record && record.periods && record.periods[periodIndex]) {
                     const period = record.periods[periodIndex];
                     showInfoViewPopup(period.info, period.time_range, period.location);
                 }
             });
         });
-        
-        // Add search functionality
-        const searchInput = document.getElementById('point-card-search-input');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                filterPointCardData(e.target.value, records);
-            });
-        }
-        
-        // Store records for filtering
+
         window.currentPointCardRecords = records;
-        
+        populatePointCardYearFilter(records);
+        applyPointCardFilters();
     } catch (error) {
+        if (loadToken !== pastPointCardsLoadToken) return;
         console.error('Error loading point card data:', error);
         container.innerHTML = '<div class="error">Error loading point card data. Please try again.</div>';
     }
@@ -7206,83 +7157,110 @@ function openPointCardPrintWindow() {
     }, 250);
 }
 
-function filterPointCardData(searchQuery, records) {
-    const query = searchQuery.toLowerCase().trim();
-    
-    // If search is empty, show all days
-    if (!query) {
-        document.querySelectorAll('.point-card-day').forEach(day => {
-            day.style.display = 'block';
-        });
-        return;
-    }
-    
-    // Filter each day
-    records.forEach(record => {
-        const dayElement = document.querySelector(`.point-card-day[data-date="${record.date}"]`);
+function applyPointCardFilters() {
+    const records = window.currentPointCardRecords || [];
+    const container = getPointCardDataContainer();
+    if (!container) return;
+
+    const dateVal = (document.getElementById('point-card-filter-date') || {}).value || '';
+    const monthVal = (document.getElementById('point-card-filter-month') || {}).value || '';
+    const yearVal = (document.getElementById('point-card-filter-year') || {}).value || '';
+    const query = ((document.getElementById('point-card-search-input') || {}).value || '').toLowerCase().trim();
+
+    let visibleCount = 0;
+
+    records.forEach((record) => {
+        const dayElement = container.querySelector(`.point-card-day[data-date="${record.date}"]`);
         if (!dayElement) return;
-        
-        // Parse date without timezone issues
-        const [year, month, day] = record.date.split('-').map(Number);
-        const date = new Date(year, month - 1, day); // month is 0-indexed
-        // Format as "Day of Week, Month Day, Year" for searching
+
+        const [year, month, day] = String(record.date || '').split('-').map(Number);
+        const date = new Date(year, month - 1, day);
         const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
         const formattedDate = date.toLocaleDateString('en-US', options).toLowerCase();
-        const shortDate = record.date.toLowerCase(); // YYYY-MM-DD format
-        // Also support MM/DD/YYYY format
+        const shortDate = String(record.date || '').toLowerCase();
         const mmddyyyy = `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`;
-        
-        // Check if date matches
-        let dateMatches = formattedDate.includes(query) || shortDate.includes(query) || mmddyyyy.includes(query);
-        
-        // Check if any period matches
+
+        let matchesDateFilters = true;
+        if (dateVal) {
+            matchesDateFilters = record.date === dateVal;
+        } else {
+            if (monthVal && Number(month) !== Number(monthVal)) matchesDateFilters = false;
+            if (yearVal && String(year) !== String(yearVal)) matchesDateFilters = false;
+        }
+
+        let dateMatches = !query
+            || formattedDate.includes(query)
+            || shortDate.includes(query)
+            || mmddyyyy.includes(query)
+            || String(month).includes(query)
+            || date.toLocaleDateString('en-US', { month: 'long' }).toLowerCase().includes(query)
+            || date.toLocaleDateString('en-US', { month: 'short' }).toLowerCase().includes(query);
+
         let periodMatches = false;
-        if (record.periods && record.periods.length > 0) {
-            periodMatches = record.periods.some(period => {
-                // Check time
+        if (query && record.periods && record.periods.length > 0) {
+            periodMatches = record.periods.some((period) => {
                 const timeMatches = period.time_range && period.time_range.toLowerCase().includes(query);
-                
-                // Check location
                 const locationMatches = period.location && period.location.toLowerCase().includes(query);
-                
-                // Check STAR values
                 const safetyMatches = period.safety_points !== null && period.safety_points !== undefined && period.safety_points.toString().includes(query);
                 const teamworkMatches = period.teamwork_points !== null && period.teamwork_points !== undefined && period.teamwork_points.toString().includes(query);
                 const accountabilityMatches = period.accountability_points !== null && period.accountability_points !== undefined && period.accountability_points.toString().includes(query);
                 const relationshipsMatches = period.relationships_points !== null && period.relationships_points !== undefined && period.relationships_points.toString().includes(query);
-                
-                // Check info data
+
                 let infoMatches = false;
                 if (period.info && period.info.trim() !== '') {
                     try {
                         const infoData = JSON.parse(period.info);
-                        const infoString = JSON.stringify(infoData).toLowerCase();
-                        infoMatches = infoString.includes(query);
+                        infoMatches = JSON.stringify(infoData).toLowerCase().includes(query);
                     } catch (e) {
-                        // If not JSON, treat as plain text
                         infoMatches = period.info.toLowerCase().includes(query);
                     }
                 }
-                
-                return timeMatches || locationMatches || safetyMatches || teamworkMatches || 
-                       accountabilityMatches || relationshipsMatches || infoMatches;
+
+                return timeMatches || locationMatches || safetyMatches || teamworkMatches ||
+                    accountabilityMatches || relationshipsMatches || infoMatches;
             });
         }
-        
-        // Show/hide day based on matches
-        if (dateMatches || periodMatches) {
+
+        const matchesSearch = !query || dateMatches || periodMatches;
+        const visible = matchesDateFilters && matchesSearch;
+
+        if (visible) {
             dayElement.style.display = 'block';
-            
-            // If periods match, highlight matching rows
-            if (periodMatches && !dateMatches) {
+            visibleCount += 1;
+            if (query && periodMatches && !dateMatches) {
                 highlightMatchingRows(dayElement, query, record);
             } else {
                 clearHighlights(dayElement);
             }
         } else {
             dayElement.style.display = 'none';
+            clearHighlights(dayElement);
         }
     });
+
+    updatePointCardFilterStatus(visibleCount, records.length);
+
+    let emptyEl = container.querySelector('.point-card-filter-empty');
+    if (records.length && visibleCount === 0) {
+        if (!emptyEl) {
+            emptyEl = document.createElement('div');
+            emptyEl.className = 'info-message point-card-filter-empty';
+            emptyEl.textContent = 'No point cards match these filters.';
+            container.appendChild(emptyEl);
+        }
+        emptyEl.style.display = 'block';
+    } else if (emptyEl) {
+        emptyEl.style.display = 'none';
+    }
+}
+
+function filterPointCardData(searchQuery, records) {
+    if (records) window.currentPointCardRecords = records;
+    const searchInput = document.getElementById('point-card-search-input');
+    if (searchInput && typeof searchQuery === 'string' && searchInput.value !== searchQuery) {
+        searchInput.value = searchQuery;
+    }
+    applyPointCardFilters();
 }
 
 function highlightMatchingRows(dayElement, query, record) {
@@ -10814,6 +10792,8 @@ window.closeInfoModal = closeInfoModal;
 window.saveInfoModal = saveInfoModal;
 window.saveEditedPointCard = saveEditedPointCard;
 window.showInfoViewPopup = showInfoViewPopup;
+window.openPastPointCardsModal = openPastPointCardsModal;
+window.closePastPointCardsModal = closePastPointCardsModal;
 
 // Schedule Management Functions
 let teacherScheduleData = [];
@@ -21132,10 +21112,6 @@ async function loadIncentiveTracking(startDate, endDate) {
         );
 
         container.innerHTML = headerCard + yellowCardBlock + greenCardBlock + blueCardBlock;
-
-        // Hide raw point card data cards if visible
-        const pcContainer = document.getElementById('point-card-data-container');
-        if (pcContainer) pcContainer.style.display = 'none';
     } catch (err) {
         console.error('Error loading incentive tracking:', err);
         const container = document.getElementById('summary-results');
@@ -21165,27 +21141,6 @@ function setupContextClear(pageKey) {
 }
 
 // ---- Load Trigger ----
-function syncSummaryPointCardButton() {
-    const btn = document.getElementById('show-point-card-btn');
-    if (!btn || typeof dashboardState === 'undefined' || !dashboardState.summary) return;
-    const st = dashboardState.summary;
-    const pc = document.getElementById('point-card-data-container');
-    if (st.studentId) {
-        btn.classList.remove('is-inactive');
-        btn.dataset.studentId = String(st.studentId);
-        const tf = st.compareMode
-            ? ((document.getElementById('quarter-select') || {}).value || 'alltime')
-            : (st.period === 'all_time' ? 'alltime' : (st.period || '30day'));
-        btn.dataset.timeframe = tf;
-    } else {
-        btn.classList.add('is-inactive');
-        delete btn.dataset.studentId;
-        delete btn.dataset.timeframe;
-        btn.textContent = 'View Past Point Cards';
-        if (pc) pc.style.display = 'none';
-    }
-}
-
 function triggerDashboardLoad(pageKey) {
     // Frenzy has been merged into Summary reports; keep dashboard loads on Summary only.
     if (pageKey !== 'summary') return;
@@ -21206,7 +21161,6 @@ async function loadSummaryDashboard() {
     if (!container) return;
 
     container.innerHTML = '<div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading summary...</p></div>';
-    syncSummaryPointCardButton();
 
     const quarterDates = typeof loadQuarterDates === 'function' ? loadQuarterDates() : {};
     const schoolYearDates = typeof loadSchoolYearDates === 'function' ? loadSchoolYearDates() : {};
@@ -21299,14 +21253,12 @@ async function loadSummaryDashboard() {
         const renderMs = performance.now() - renderStart;
         const totalMs = performance.now() - summaryLoadStart;
         console.info(`Summary load timings: fetch=${fetchMs.toFixed(1)}ms render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`);
-        syncSummaryPointCardButton();
     } catch (err) {
         if (err && err.name === 'AbortError') {
             return;
         }
         if (requestToken !== summaryLoadRequestToken) return;
         container.innerHTML = `<div class="dashboard-empty"><p>Error loading summary: ${err.message}</p></div>`;
-        syncSummaryPointCardButton();
     } finally {
         if (summaryLoadAbortController === activeAbortController) {
             summaryLoadAbortController = null;
@@ -28898,8 +28850,6 @@ function initDashboard() {
             switchView(targetView);
         });
     });
-
-    syncSummaryPointCardButton();
 }
 
 // Summary loads are handled centrally by switchView().

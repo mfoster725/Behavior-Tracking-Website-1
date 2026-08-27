@@ -193,43 +193,51 @@
         renderMetIconsInto(icons, student.id);
         wrap.appendChild(icons);
 
-        if (canEditPlans()) {
-            const kebabWrap = document.createElement('div');
-            kebabWrap.className = 'plan-kebab-wrap';
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'plan-kebab-btn';
-            btn.setAttribute('aria-label', 'Student plan menu');
-            btn.textContent = '⋮';
-            const menu = document.createElement('div');
-            menu.className = 'plan-kebab-menu';
-            menu.innerHTML = `
+        const kebabWrap = document.createElement('div');
+        kebabWrap.className = 'plan-kebab-wrap';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'plan-kebab-btn';
+        btn.setAttribute('aria-label', 'Student card menu');
+        btn.textContent = '⋮';
+        const menu = document.createElement('div');
+        menu.className = 'plan-kebab-menu';
+        const planItems = canEditPlans()
+            ? `
                 <button type="button" data-action="edit">Attach / Edit plan</button>
                 <button type="button" data-action="show">Show plan</button>
                 <button type="button" data-action="history">Delivery history</button>
-            `;
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const wasOpen = menu.classList.contains('open');
-                closeKebabMenus();
-                if (!wasOpen) {
-                    menu.classList.add('open');
-                    openKebabMenu = menu;
+            `
+            : '';
+        menu.innerHTML = `
+            <button type="button" data-action="past-cards">View past point cards</button>
+            ${planItems}
+        `;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wasOpen = menu.classList.contains('open');
+            closeKebabMenus();
+            if (!wasOpen) {
+                menu.classList.add('open');
+                openKebabMenu = menu;
+            }
+        });
+        menu.addEventListener('click', (e) => {
+            const action = e.target && e.target.dataset && e.target.dataset.action;
+            if (!action) return;
+            e.stopPropagation();
+            closeKebabMenus();
+            if (action === 'past-cards') {
+                if (typeof global.openPastPointCardsModal === 'function') {
+                    global.openPastPointCardsModal(student.id, student.name);
                 }
-            });
-            menu.addEventListener('click', (e) => {
-                const action = e.target && e.target.dataset && e.target.dataset.action;
-                if (!action) return;
-                e.stopPropagation();
-                closeKebabMenus();
-                if (action === 'edit') openPlanModal(student.id, student.name, false);
-                else if (action === 'show') openPlanModal(student.id, student.name, true);
-                else if (action === 'history') openDeliveryHistoryModal(student.id, student.name);
-            });
-            kebabWrap.appendChild(btn);
-            kebabWrap.appendChild(menu);
-            wrap.appendChild(kebabWrap);
-        }
+            } else if (action === 'edit') openPlanModal(student.id, student.name, false);
+            else if (action === 'show') openPlanModal(student.id, student.name, true);
+            else if (action === 'history') openDeliveryHistoryModal(student.id, student.name);
+        });
+        kebabWrap.appendChild(btn);
+        kebabWrap.appendChild(menu);
+        wrap.appendChild(kebabWrap);
         return wrap;
     }
 

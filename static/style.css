@@ -2456,7 +2456,7 @@ table tbody tr:hover {
     right: 0;
     top: 100%;
     z-index: 40;
-    min-width: 170px;
+    min-width: 190px;
     background: #fff;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
@@ -2900,7 +2900,78 @@ table tbody tr:hover {
 }
 
 #point-card-data-container {
-    margin-top: 1.25rem;
+    margin-top: 0;
+}
+
+.past-point-cards-modal-content {
+    max-width: 1100px;
+    width: min(1100px, 94vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.past-point-cards-modal-content h2 {
+    margin-right: 2rem;
+}
+
+.point-card-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-end;
+    margin: 0 0 8px;
+    flex-shrink: 0;
+}
+
+.point-card-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.point-card-filter-field input,
+.point-card-filter-field select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    min-width: 140px;
+}
+
+.point-card-filter-search {
+    flex: 1 1 220px;
+    min-width: 180px;
+}
+
+.point-card-filter-search input {
+    width: 100%;
+}
+
+#point-card-filter-clear {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.point-card-filter-status {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+#past-point-cards-modal #point-card-data-container {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding-right: 4px;
 }
 
 .point-card-days-grid {
@@ -4473,69 +4544,6 @@ table tbody tr:hover {
 #print-frenzy-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-}
-
-/* Historical point card button – match print button size & style */
-#show-point-card-btn {
-    padding: 7px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-family: var(--font-body);
-    cursor: pointer;
-    transition: all 0.15s;
-    margin-left: 0.35rem;
-    position: relative;
-}
-
-#show-point-card-btn:hover {
-    border-color: var(--border-strong);
-    color: var(--text-primary);
-}
-
-/* Dimmed / inactive state when no student is selected */
-#show-point-card-btn.is-inactive {
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-
-#show-point-card-btn.is-inactive:hover {
-    border-color: var(--border);
-    color: var(--text-secondary);
-}
-
-/* Custom tooltip for "View Past Point Cards" button */
-#show-point-card-btn[data-tooltip]::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 6px);
-    transform: translateX(-50%);
-    background: var(--bg-surface);
-    /* Match base Print button border + text */
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 6px 10px;
-    font-size: 0.75rem;
-    font-family: var(--font-body);
-    white-space: nowrap;
-    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.15);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.08s ease-out, transform 0.08s ease-out;
-    z-index: 20;
-}
-
-#show-point-card-btn[data-tooltip]:hover::after {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-    /* Match Print button hover state */
-    border-color: var(--border-strong);
-    color: var(--text-primary);
 }
 
 /* Chart tooltips (Reports tab, Insights Dashboard): ensure stacking and light theme.
