@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=pastcards2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=schedprint2">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -328,9 +328,40 @@
                     <!-- Titles (grid row 1 — aligned across columns) -->
                     <div class="schedule-section-header schedule-area-title-teacher">
                         <h3>Teacher's Schedule</h3>
+                        <button type="button" id="print-staff-schedule-btn" class="btn-secondary">Print</button>
                     </div>
                     <div class="schedule-section-header schedule-area-title-student">
                         <h3>Student's Schedule</h3>
+                        <div class="schedule-print-menu">
+                            <button type="button" id="print-student-schedule-menu-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="print-student-schedule-menu">Print</button>
+                            <div id="print-student-schedule-menu" class="schedule-print-menu-dropdown" role="menu" hidden>
+                                <button type="button" role="menuitem" data-print-scope="selected">This student</button>
+                                <button type="button" role="menuitem" data-print-scope="managed">Students managed by me</button>
+                                <button type="button" role="menuitem" data-print-scope="all">All students</button>
+                                <div class="schedule-print-menu-divider"></div>
+                                <div class="schedule-print-menu-row">
+                                    <label for="print-student-schedules-staff">By staff</label>
+                                    <select id="print-student-schedules-staff">
+                                        <option value="">Select staff…</option>
+                                    </select>
+                                </div>
+                                <div class="schedule-print-menu-row">
+                                    <label for="print-student-schedules-grade">By grade</label>
+                                    <select id="print-student-schedules-grade">
+                                        <option value="">Select grade…</option>
+                                    </select>
+                                </div>
+                                <div class="schedule-print-menu-row">
+                                    <label for="print-student-schedules-color">By card color</label>
+                                    <select id="print-student-schedules-color">
+                                        <option value="">Select color…</option>
+                                        <option value="yellow">Yellow</option>
+                                        <option value="green">Green</option>
+                                        <option value="blue">Blue</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Controls (grid row 2 — shared height so tables start together) -->
@@ -2172,7 +2203,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=pcview1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=schedprint2"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan4"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

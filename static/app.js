@@ -12243,6 +12243,351 @@ async function saveSchedule(type) {
     }
 }
 
+function closeStudentSchedulePrintMenu() {
+    const menu = document.getElementById('print-student-schedule-menu');
+    const toggle = document.getElementById('print-student-schedule-menu-btn');
+    if (menu) menu.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+function toggleStudentSchedulePrintMenu() {
+    const menu = document.getElementById('print-student-schedule-menu');
+    const toggle = document.getElementById('print-student-schedule-menu-btn');
+    if (!menu || !toggle) return;
+    const willOpen = menu.hidden;
+    if (willOpen) {
+        populateStudentSchedulePrintFilters();
+    }
+    menu.hidden = !willOpen;
+    toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
+function populateStudentSchedulePrintFilters() {
+    const staffSelect = document.getElementById('print-student-schedules-staff');
+    if (staffSelect) {
+        const currentVal = staffSelect.value;
+        let list = (allStaffMembers || []).filter((u) => u.role === 'staff');
+        list.sort((a, b) => (a.name || a.username || '').localeCompare(b.name || b.username || ''));
+        staffSelect.innerHTML = '<option value="">Select staff…</option>';
+        list.forEach((u) => {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = u.name || u.username || `User ${u.id}`;
+            staffSelect.appendChild(opt);
+        });
+        if (currentVal && Array.from(staffSelect.options).some((o) => o.value === currentVal)) {
+            staffSelect.value = currentVal;
+        }
+    }
+
+    const gradeSelect = document.getElementById('print-student-schedules-grade');
+    if (gradeSelect) {
+        const currentVal = gradeSelect.value;
+        const grades = new Set();
+        (allStudentUsers || []).forEach((u) => {
+            const grade = (u.grade || '').toString().trim();
+            if (grade) grades.add(grade);
+        });
+        (allStudents || []).forEach((s) => {
+            const grade = (s.grade || '').toString().trim();
+            if (grade) grades.add(grade);
+        });
+        const sorted = [...grades].sort((a, b) => {
+            const na = parseInt(a, 10);
+            const nb = parseInt(b, 10);
+            if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
+            return a.localeCompare(b, undefined, { numeric: true });
+        });
+        gradeSelect.innerHTML = '<option value="">Select grade…</option>';
+        sorted.forEach((grade) => {
+            const opt = document.createElement('option');
+            opt.value = grade;
+            opt.textContent = `Grade ${grade}`;
+            gradeSelect.appendChild(opt);
+        });
+        if (currentVal && Array.from(gradeSelect.options).some((o) => o.value === currentVal)) {
+            gradeSelect.value = currentVal;
+        }
+    }
+
+    const colorSelect = document.getElementById('print-student-schedules-color');
+    if (colorSelect) colorSelect.value = '';
+}
+
+function getSelectedStaffScheduleName() {
+    const select = document.getElementById('teacher-schedule-staff-search');
+    if (select && select.value && select.selectedOptions[0]) {
+        return select.selectedOptions[0].textContent.trim();
+    }
+    if (window.currentUser) {
+        return window.currentUser.name || window.currentUser.username || 'Staff';
+    }
+    return 'Staff';
+}
+
+function getSelectedStudentScheduleName() {
+    const select = document.getElementById('schedule-student-select');
+    if (select && select.value && select.selectedOptions[0]) {
+        return select.selectedOptions[0].textContent.trim();
+    }
+    return '';
+}
+
+function collectSchedulePeriodsFromTable(type) {
+    const tbody = document.getElementById(`${type}-schedule-body`);
+    if (!tbody) return [];
+    const periods = [];
+    tbody.querySelectorAll('tr').forEach((row) => {
+        const timeInput = row.querySelector('.time-input');
+        const timePeriod = (timeInput ? timeInput.value : row.dataset.timePeriod || '').trim();
+        if (!timePeriod) return;
+        if (type === 'teacher') {
+            const classValues = Array.from(row.querySelectorAll('.class-input'))
+                .map((input) => input.value.trim())
+                .filter(Boolean);
+            if (classValues.length) {
+                classValues.forEach((className) => {
+                    periods.push({ time_period: timePeriod, class_name: className, staff_name: '' });
+                });
+            } else {
+                periods.push({ time_period: timePeriod, class_name: '', staff_name: '' });
+            }
+        } else {
+            const classInput = row.querySelector('.class-input');
+            const staffInput = row.querySelector('.staff-input');
+            periods.push({
+                time_period: timePeriod,
+                class_name: classInput ? classInput.value.trim() : '',
+                staff_name: staffInput ? staffInput.value.trim() : ''
+            });
+        }
+    });
+    return periods;
+}
+
+function groupSchedulePeriodsForPrint(periods, includeStaff) {
+    const byTime = {};
+    (periods || []).forEach((period) => {
+        const time = (period && period.time_period) ? String(period.time_period).trim() : '';
+        if (!time) return;
+        if (!byTime[time]) byTime[time] = [];
+        byTime[time].push(period);
+    });
+    const times = SCHEDULE_PERIODS.slice();
+    Object.keys(byTime).forEach((time) => {
+        if (!times.includes(time)) times.push(time);
+    });
+    return times.map((time) => {
+        const items = byTime[time] || [];
+        const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
+        const staffNames = includeStaff
+            ? [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))]
+            : [];
+        return {
+            time,
+            className: classNames.join(', '),
+            staffName: staffNames.join(', ')
+        };
+    });
+}
+
+function formatSchedulePrintDate() {
+    return new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+}
+
+function buildSchedulePrintHtml(blocks) {
+    const printedOn = formatSchedulePrintDate();
+    return blocks.map((block, index) => {
+        const includeStaff = block.kind === 'student';
+        const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
+        const rowHtml = rows.map((row) => `
+            <tr>
+                <td>${escapeHtml(row.time)}</td>
+                <td>${escapeHtml(row.className)}</td>
+                ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
+            </tr>
+        `).join('');
+        const pageBreakClass = index < blocks.length - 1 ? ' schedule-print-page-break' : '';
+        const subtitle = block.subtitle || (includeStaff ? 'Student schedule' : 'Staff schedule');
+        return `
+            <section class="schedule-print-page${pageBreakClass}">
+                <header class="schedule-print-header">
+                    <h1>${escapeHtml(block.title)}</h1>
+                    <p>${escapeHtml(subtitle)} · Printed ${escapeHtml(printedOn)}</p>
+                </header>
+                <table class="schedule-print-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Class</th>
+                            ${includeStaff ? '<th>Staff</th>' : ''}
+                        </tr>
+                    </thead>
+                    <tbody>${rowHtml}</tbody>
+                </table>
+            </section>
+        `;
+    }).join('');
+}
+
+function openSchedulePrintWindow(html, documentTitle) {
+    let printRoot = document.getElementById('schedule-print-root');
+    if (!printRoot) {
+        printRoot = document.createElement('div');
+        printRoot.id = 'schedule-print-root';
+        printRoot.className = 'print-view schedule-print-root';
+        document.body.appendChild(printRoot);
+    }
+    const previousTitle = document.title;
+    document.title = documentTitle || 'Schedule';
+    printRoot.innerHTML = html;
+    printRoot.style.display = 'block';
+
+    const cleanup = () => {
+        printRoot.style.display = 'none';
+        printRoot.innerHTML = '';
+        document.title = previousTitle;
+        window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+}
+
+function printStaffSchedule() {
+    const staffSelect = document.getElementById('teacher-schedule-staff-search');
+    if (staffSelect && !staffSelect.value) {
+        showMessage('Select a staff member to print their schedule.', 'error');
+        return;
+    }
+    const name = getSelectedStaffScheduleName();
+    const html = buildSchedulePrintHtml([{
+        title: `${name}'s Schedule`,
+        subtitle: 'Staff schedule',
+        kind: 'teacher',
+        periods: collectSchedulePeriodsFromTable('teacher')
+    }]);
+    openSchedulePrintWindow(html, `${name} Staff Schedule`);
+}
+
+async function printSelectedStudentSchedule() {
+    closeStudentSchedulePrintMenu();
+    if (!currentScheduleStudentId) {
+        showMessage('Select a student to print their schedule.', 'error');
+        return;
+    }
+    const name = getSelectedStudentScheduleName() || 'Student';
+    const html = buildSchedulePrintHtml([{
+        title: `${name}'s Schedule`,
+        subtitle: 'Student schedule',
+        kind: 'student',
+        periods: collectSchedulePeriodsFromTable('student')
+    }]);
+    openSchedulePrintWindow(html, `${name} Student Schedule`);
+}
+
+async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) {
+    closeStudentSchedulePrintMenu();
+    const menuBtn = document.getElementById('print-student-schedule-menu-btn');
+    const originalLabel = menuBtn ? menuBtn.textContent : 'Print';
+    if (menuBtn) {
+        menuBtn.disabled = true;
+        menuBtn.textContent = 'Preparing…';
+    }
+    try {
+        const schedulesResponse = await fetch(`/api/schedules/bulk?${query}`);
+        if (!schedulesResponse.ok) {
+            throw new Error('Could not load student schedules.');
+        }
+        const payload = await schedulesResponse.json();
+        const items = (payload && Array.isArray(payload.items)) ? payload.items : [];
+        if (!items.length) {
+            showMessage(emptyMessage || 'No student schedules are available to print.', 'error');
+            return;
+        }
+        if (items.length > 40 && !window.confirm(`Print ${items.length} student schedules?`)) {
+            return;
+        }
+        const blocks = items.map((item) => ({
+            title: `${item.name || 'Student'}'s Schedule`,
+            subtitle: 'Student schedule',
+            kind: 'student',
+            periods: item.periods || []
+        }));
+        openSchedulePrintWindow(buildSchedulePrintHtml(blocks), documentTitle);
+    } catch (error) {
+        console.error('Error printing student schedules:', error);
+        showMessage(error.message || 'Could not print student schedules.', 'error');
+    } finally {
+        if (menuBtn) {
+            menuBtn.disabled = false;
+            menuBtn.textContent = originalLabel || 'Print';
+        }
+    }
+}
+
+async function printManagedStudentSchedules() {
+    const studentsResponse = await fetch('/api/students?managed_by_me=true');
+    if (!studentsResponse.ok) {
+        showMessage('Could not load students managed by you.', 'error');
+        return;
+    }
+    const studentsData = await studentsResponse.json();
+    const students = Array.isArray(studentsData) ? studentsData : [];
+    if (!students.length) {
+        closeStudentSchedulePrintMenu();
+        showMessage('No students managed by you are available to print.', 'error');
+        return;
+    }
+    const ids = students.map((student) => student.id).filter(Boolean).join(',');
+    await printStudentSchedulesFromApi(
+        `student_ids=${encodeURIComponent(ids)}`,
+        'Managed Student Schedules',
+        'No students managed by you are available to print.'
+    );
+}
+
+async function printAllStudentSchedules() {
+    await printStudentSchedulesFromApi(
+        'all=true',
+        'All Student Schedules',
+        'No student schedules are available to print.'
+    );
+}
+
+async function printStudentSchedulesByStaff(staffId) {
+    const staffSelect = document.getElementById('print-student-schedules-staff');
+    const staffName = (staffSelect && staffSelect.selectedOptions[0])
+        ? staffSelect.selectedOptions[0].textContent.trim()
+        : 'Staff';
+    await printStudentSchedulesFromApi(
+        `staff_id=${encodeURIComponent(staffId)}`,
+        `${staffName} Student Schedules`,
+        `No students managed by ${staffName} are available to print.`
+    );
+}
+
+async function printStudentSchedulesByGrade(grade) {
+    await printStudentSchedulesFromApi(
+        `grade=${encodeURIComponent(grade)}`,
+        `Grade ${grade} Student Schedules`,
+        `No students in grade ${grade} are available to print.`
+    );
+}
+
+async function printStudentSchedulesByCardColor(color) {
+    const label = color ? color.charAt(0).toUpperCase() + color.slice(1) : color;
+    await printStudentSchedulesFromApi(
+        `card_color=${encodeURIComponent(color)}`,
+        `${label} Card Student Schedules`,
+        `No ${label.toLowerCase()} card students are available to print.`
+    );
+}
+
 // Load and apply per-user UI preferences (e.g., hidden User Management sections)
 async function loadUserPreferences() {
     try {
@@ -14759,6 +15104,66 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveStudentScheduleBtn = document.getElementById('save-student-schedule-btn');
     if (saveStudentScheduleBtn) {
         saveStudentScheduleBtn.addEventListener('click', () => saveSchedule('student'));
+    }
+
+    const printStaffScheduleBtn = document.getElementById('print-staff-schedule-btn');
+    if (printStaffScheduleBtn) {
+        printStaffScheduleBtn.addEventListener('click', printStaffSchedule);
+    }
+
+    const printStudentScheduleMenuBtn = document.getElementById('print-student-schedule-menu-btn');
+    const printStudentScheduleMenu = document.getElementById('print-student-schedule-menu');
+    if (printStudentScheduleMenuBtn && printStudentScheduleMenu) {
+        printStudentScheduleMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleStudentSchedulePrintMenu();
+        });
+        printStudentScheduleMenu.addEventListener('click', (e) => {
+            const scopeBtn = e.target.closest('[data-print-scope]');
+            if (!scopeBtn) return;
+            const scope = scopeBtn.getAttribute('data-print-scope');
+            if (scope === 'managed') {
+                printManagedStudentSchedules();
+            } else if (scope === 'all') {
+                printAllStudentSchedules();
+            } else {
+                printSelectedStudentSchedule();
+            }
+        });
+        const printStaffFilter = document.getElementById('print-student-schedules-staff');
+        if (printStaffFilter) {
+            printStaffFilter.addEventListener('change', (e) => {
+                const staffId = e.target.value;
+                if (!staffId) return;
+                printStudentSchedulesByStaff(staffId);
+            });
+        }
+        const printGradeFilter = document.getElementById('print-student-schedules-grade');
+        if (printGradeFilter) {
+            printGradeFilter.addEventListener('change', (e) => {
+                const grade = e.target.value;
+                if (!grade) return;
+                printStudentSchedulesByGrade(grade);
+            });
+        }
+        const printColorFilter = document.getElementById('print-student-schedules-color');
+        if (printColorFilter) {
+            printColorFilter.addEventListener('change', (e) => {
+                const color = e.target.value;
+                if (!color) return;
+                printStudentSchedulesByCardColor(color);
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (!printStudentScheduleMenu.hidden &&
+                !printStudentScheduleMenu.contains(e.target) &&
+                e.target !== printStudentScheduleMenuBtn) {
+                closeStudentSchedulePrintMenu();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeStudentSchedulePrintMenu();
+        });
     }
     
     // User management buttons

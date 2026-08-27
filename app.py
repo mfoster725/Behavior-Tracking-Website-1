@@ -3346,7 +3346,13 @@ def students():
             # Directory information includes name, email, grade, etc.
             students = filter_directory_info(students, include_opted_out=False)
             
-            return jsonify([{'id': s.id, 'name': s.name, 'email': s.email, 'card_color': s.card_color} for s in students])
+            return jsonify([{
+                'id': s.id,
+                'name': s.name,
+                'email': s.email,
+                'card_color': s.card_color,
+                'grade': s.grade,
+            } for s in students])
 
 @app.route('/api/students/<int:student_id>', methods=['DELETE'])
 @limiter.limit("30 per minute")
@@ -11223,6 +11229,98 @@ def get_schedule_locations():
     
     # Return as sorted list
     return jsonify(sorted(list(locations)))
+
+@app.route('/api/schedules/bulk', methods=['GET'])
+@limiter.limit("30 per minute")
+@login_required
+def bulk_student_schedules():
+    """Return student schedules grouped by student, for printing."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    student_id = request.args.get('student_id', type=int)
+    student_ids_param = request.args.get('student_ids', '')
+    staff_id = request.args.get('staff_id', type=int)
+    managed_by_me = request.args.get('managed_by_me', 'false').lower() == 'true'
+    print_all = request.args.get('all', 'false').lower() == 'true'
+    grade_filter = (request.args.get('grade') or '').strip()
+    card_color_filter = (request.args.get('card_color') or '').strip().lower()
+
+    has_scope = bool(
+        student_id
+        or (student_ids_param and student_ids_param.strip())
+        or staff_id
+        or managed_by_me
+        or print_all
+        or grade_filter
+        or card_color_filter
+    )
+    if not has_scope:
+        return jsonify({'items': []})
+
+    student_ids = _resolve_student_scope(
+        student_id=student_id,
+        student_ids_param=student_ids_param,
+        staff_id=staff_id,
+        managed_by_me=bool(managed_by_me and not staff_id and not student_id and not (student_ids_param or '').strip()),
+    )
+    if not student_ids:
+        return jsonify({'items': []})
+
+    students = (
+        Student.query.filter(Student.id.in_(student_ids))
+        .order_by(Student.name)
+        .all()
+    )
+
+    active_student_ids = {
+        u.student_id for u in User.query.filter_by(role='student').all() if u.student_id
+    }
+    students = [s for s in students if s.id in active_student_ids]
+
+    if grade_filter:
+        wanted = grade_filter.lower()
+        students = [s for s in students if (s.grade or '').strip().lower() == wanted]
+    if card_color_filter:
+        students = [
+            s for s in students
+            if (s.card_color or '').strip().lower() == card_color_filter
+        ]
+
+    students = students[:500]
+    if not students:
+        return jsonify({'items': []})
+
+    schedules = (
+        Schedule.query.filter(
+            Schedule.schedule_type == 'student',
+            Schedule.student_id.in_([s.id for s in students]),
+        )
+        .order_by(Schedule.sort_order, Schedule.id)
+        .all()
+    )
+
+    periods_by_student = {}
+    for schedule in schedules:
+        periods_by_student.setdefault(schedule.student_id, []).append({
+            'id': schedule.id,
+            'schedule_type': schedule.schedule_type,
+            'student_id': schedule.student_id,
+            'time_period': schedule.time_period,
+            'class_name': schedule.class_name,
+            'staff_name': schedule.staff_name,
+            'sort_order': schedule.sort_order,
+        })
+
+    items = [{
+        'student_id': student.id,
+        'name': student.name,
+        'grade': student.grade,
+        'card_color': student.card_color,
+        'periods': periods_by_student.get(student.id, []),
+    } for student in students]
+
+    return jsonify({'items': items})
 
 @app.route('/api/users', methods=['GET', 'POST', 'PUT', 'DELETE'])
 @limiter.limit("30 per minute")
