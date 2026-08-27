@@ -803,7 +803,80 @@ function handleDailyAttendanceChange(e) {
     scheduleDailyAutosave();
 }
 
+function isStarPointSelect(el) {
+    return !!(el && el.tagName === 'SELECT' && el.classList && el.classList.contains('daily-input'));
+}
+
+function getStarInputsInSameGrid(currentInput) {
+    const grid = currentInput && currentInput.closest
+        ? currentInput.closest('#daily-grid, #students-grid')
+        : null;
+    const root = grid || document;
+    return Array.from(root.querySelectorAll('select.daily-input'));
+}
+
+function isCoarseTouchUi() {
+    try {
+        return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    } catch (e) {
+        return false;
+    }
+}
+
+function shouldKeepStarPicker(e) {
+    if (!e) return false;
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') return true;
+    if (e.type === 'touchstart') return true;
+    if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return true;
+    if (window.__starLastPointerWasTouch) return true;
+    // Phones/tablets: keep the native dropdown for tap selection.
+    if (isCoarseTouchUi()) return true;
+    return false;
+}
+
+function suppressStarSelectPicker(e) {
+    const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+    if (!isStarPointSelect(select) || select.disabled) return;
+    if (e.type === 'pointerdown') {
+        window.__starLastPointerWasTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    }
+    if (shouldKeepStarPicker(e)) return;
+    // Mouse click opens the OS picker, which swallows 0/1/2 and Backspace on the
+    // first cell. Focus without opening so keyboard entry still auto-advances.
+    e.preventDefault();
+    if (document.activeElement !== select) {
+        select.focus();
+    }
+}
+
+function bindStarSelectEntryGuards() {
+    if (window.__starSelectEntryGuardsBound) return;
+    window.__starSelectEntryGuardsBound = true;
+    document.addEventListener('pointerdown', suppressStarSelectPicker, true);
+    document.addEventListener('mousedown', suppressStarSelectPicker, true);
+    document.addEventListener('touchstart', (e) => {
+        const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+        if (isStarPointSelect(select)) {
+            window.__starLastPointerWasTouch = true;
+            setTimeout(() => {
+                window.__starLastPointerWasTouch = false;
+            }, 700);
+        }
+    }, { capture: true, passive: true });
+    document.addEventListener('pointerup', (e) => {
+        if (e.pointerType === 'mouse') {
+            window.__starLastPointerWasTouch = false;
+        }
+    }, true);
+    document.addEventListener('keyup', (e) => {
+        if (isStarPointSelect(e.target)) {
+            handleDailyInputKeyup(e);
+        }
+    }, true);
+}
+
 function ensureDailyGridDelegatedListeners() {
+    bindStarSelectEntryGuards();
     if (dailyGridDelegationBound) return;
     const gridContainer = document.getElementById('daily-grid-container');
     if (!gridContainer) return;
@@ -2886,10 +2959,11 @@ function renderStudentsGrid() {
                 schedulePeriodAutosave();
                 
                 // Auto-advance, unless backspace clear. R uses special nav flow.
+                // Keydown already advances S/T/A when fromStarKey is set.
                 if (!e.isBackspaceClear) {
                     if (cat.short === 'r' && val !== null) {
                         afterStarREntry(select);
-                    } else {
+                    } else if (!e.fromStarKey) {
                         moveToNextInput(select);
                     }
                 }
@@ -3974,21 +4048,36 @@ function handleDailyInputChange(e) {
     scheduleDailyAutosave();
     
     // Auto-advance, unless backspace clear. R uses special nav flow.
+    // Keydown already advances S/T/A when fromStarKey is set.
     if (!e.isBackspaceClear) {
         if (category === 'r' && value !== null) {
             afterStarREntry(select);
-        } else {
+        } else if (!e.fromStarKey) {
             moveToNextInput(select);
         }
     }
 }
 
+function commitStarDigit(select, digit) {
+    select.value = digit;
+    const event = new Event('change', { bubbles: true });
+    event.fromStarKey = true;
+    select.dispatchEvent(event);
+    if (select.dataset.category !== 'r') {
+        moveToNextInput(select);
+    }
+}
+
 function handleDailyInputKeydown(e) {
     const select = e.target;
-    
+    if (!isStarPointSelect(select) || select.disabled) return;
+    if (e.starInputHandled) return;
+    e.starInputHandled = true;
+
     // Handle backspace
     if (e.key === 'Backspace') {
         e.preventDefault();
+        select.dataset.starKeyHandled = '1';
         
         // If value is already empty, move to previous input (left)
         if (select.value === '') {
@@ -3998,6 +4087,7 @@ function handleDailyInputKeydown(e) {
             select.value = '';
             const event = new Event('change', { bubbles: true });
             event.isBackspaceClear = true; // Flag to prevent auto-advance
+            event.fromStarKey = true;
             select.dispatchEvent(event);
             
             // Move to previous input (left) after clearing
@@ -4007,16 +4097,8 @@ function handleDailyInputKeydown(e) {
     // Handle number keys 0, 1, 2
     else if (e.key >= '0' && e.key <= '2') {
         e.preventDefault();
-        select.value = e.key;
-        
-        // Trigger change event (R advance handled in change handler)
-        const event = new Event('change', { bubbles: true });
-        select.dispatchEvent(event);
-
-        // S/T/A still advance here; R is handled by afterStarREntry in change
-        if (select.dataset.category !== 'r') {
-            moveToNextInput(select);
-        }
+        select.dataset.starKeyHandled = '1';
+        commitStarDigit(select, e.key);
     }
     // Handle arrow keys for navigation
     else if (e.key === 'ArrowRight' || e.key === 'Tab') {
@@ -4031,8 +4113,21 @@ function handleDailyInputKeydown(e) {
     }
 }
 
+function handleDailyInputKeyup(e) {
+    const select = e.target;
+    if (!isStarPointSelect(select) || select.disabled) return;
+    if (select.dataset.starKeyHandled === '1') {
+        delete select.dataset.starKeyHandled;
+        return;
+    }
+    // Native typeahead can change the displayed value without keydown (open picker).
+    if (e.key >= '0' && e.key <= '2' && select.value === e.key) {
+        commitStarDigit(select, e.key);
+    }
+}
+
 function moveToNextInput(currentInput) {
-    const allInputs = Array.from(document.querySelectorAll('.daily-input'));
+    const allInputs = getStarInputsInSameGrid(currentInput);
     const currentIndex = allInputs.indexOf(currentInput);
     
     if (currentIndex >= 0 && currentIndex < allInputs.length - 1) {
@@ -4042,7 +4137,7 @@ function moveToNextInput(currentInput) {
 }
 
 function moveToPreviousInput(currentInput) {
-    const allInputs = Array.from(document.querySelectorAll('.daily-input'));
+    const allInputs = getStarInputsInSameGrid(currentInput);
     const currentIndex = allInputs.indexOf(currentInput);
     
     if (currentIndex > 0) {
@@ -4389,7 +4484,10 @@ function focusStarInput(studentId, period, category = 's') {
     if (periodAttr) {
         selector = `.daily-input[data-student-id="${studentId}"][data-period="${periodAttr}"][data-category="${category}"]`;
     }
-    const input = document.querySelector(selector);
+    const root = isDailyEntryViewActive()
+        ? document.getElementById('daily-grid')
+        : (isPeriodEntryViewActive() ? document.getElementById('students-grid') : document);
+    const input = (root || document).querySelector(selector);
     if (input && !input.disabled) {
         input.focus();
         return true;
