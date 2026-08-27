@@ -12400,62 +12400,245 @@ function formatSchedulePrintDate() {
     });
 }
 
-function buildSchedulePrintHtml(blocks) {
-    const printedOn = formatSchedulePrintDate();
-    return blocks.map((block, index) => {
-        const includeStaff = block.kind === 'student';
-        const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
-        const rowHtml = rows.map((row) => `
-            <tr>
-                <td>${escapeHtml(row.time)}</td>
-                <td>${escapeHtml(row.className)}</td>
-                ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
-            </tr>
-        `).join('');
-        const pageBreakClass = index < blocks.length - 1 ? ' schedule-print-page-break' : '';
-        const subtitle = block.subtitle || (includeStaff ? 'Student schedule' : 'Staff schedule');
-        return `
-            <section class="schedule-print-page${pageBreakClass}">
-                <header class="schedule-print-header">
-                    <h1>${escapeHtml(block.title)}</h1>
-                    <p>${escapeHtml(subtitle)} · Printed ${escapeHtml(printedOn)}</p>
-                </header>
-                <table class="schedule-print-table">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Class</th>
-                            ${includeStaff ? '<th>Staff</th>' : ''}
-                        </tr>
-                    </thead>
-                    <tbody>${rowHtml}</tbody>
-                </table>
-            </section>
-        `;
-    }).join('');
+function buildSchedulePrintCardHtml(block) {
+    const includeStaff = block.kind === 'student';
+    const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
+    const printedOn = block.printedOn || formatSchedulePrintDate();
+    const rowHtml = rows.map((row) => `
+        <tr>
+            <td>${escapeHtml(row.time)}</td>
+            <td>${escapeHtml(row.className)}</td>
+            ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
+        </tr>
+    `).join('');
+    return `
+        <section class="schedule-print-card">
+            <header class="schedule-print-header">
+                <h1>${escapeHtml(block.title)}</h1>
+                <p>Printed ${escapeHtml(printedOn)}</p>
+            </header>
+            <table class="schedule-print-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Class</th>
+                        ${includeStaff ? '<th>Staff</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>${rowHtml}</tbody>
+            </table>
+        </section>
+    `;
 }
 
-function openSchedulePrintWindow(html, documentTitle) {
-    let printRoot = document.getElementById('schedule-print-root');
-    if (!printRoot) {
-        printRoot = document.createElement('div');
-        printRoot.id = 'schedule-print-root';
-        printRoot.className = 'print-view schedule-print-root';
-        document.body.appendChild(printRoot);
+function chunkSchedulePrintBlocks(blocks, perPage) {
+    const pages = [];
+    const size = Math.max(1, perPage);
+    for (let i = 0; i < blocks.length; i += size) {
+        pages.push(blocks.slice(i, i + size));
     }
-    const previousTitle = document.title;
-    document.title = documentTitle || 'Schedule';
-    printRoot.innerHTML = html;
-    printRoot.style.display = 'block';
+    return pages;
+}
 
-    const cleanup = () => {
-        printRoot.style.display = 'none';
-        printRoot.innerHTML = '';
-        document.title = previousTitle;
-        window.removeEventListener('afterprint', cleanup);
+function buildSchedulePrintSheetsHtml(blocks, perPage) {
+    return chunkSchedulePrintBlocks(blocks, perPage).map((pageBlocks) => `
+        <div class="schedule-print-sheet" data-per-page="${perPage}">
+            ${pageBlocks.map((block) => buildSchedulePrintCardHtml(block)).join('')}
+        </div>
+    `).join('');
+}
+
+const SCHEDULE_PRINT_DOCUMENT_CSS = `
+@page { size: letter; margin: 0.4in; }
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #111;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+.schedule-print-sheet {
+    display: grid;
+    gap: 0.28in 0.32in;
+    align-items: start;
+    width: 100%;
+    box-sizing: border-box;
+    page-break-after: always;
+    break-after: page;
+}
+.schedule-print-sheet:last-child {
+    page-break-after: auto;
+    break-after: auto;
+}
+.schedule-print-sheet[data-per-page="1"] { grid-template-columns: max-content; }
+.schedule-print-sheet[data-per-page="2"],
+.schedule-print-sheet[data-per-page="4"] { grid-template-columns: 1fr 1fr; }
+.schedule-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+.schedule-print-header { margin: 0 0 0.18rem; }
+.schedule-print-header h1 {
+    display: block;
+    margin: 0 0 0.1rem;
+    font-size: 14pt;
+    line-height: 1.15;
+    font-weight: 700;
+}
+.schedule-print-header p {
+    display: block;
+    margin: 0 0 0.16rem;
+    font-size: 8pt;
+    line-height: 1.25;
+    color: #444;
+}
+.schedule-print-table {
+    width: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+}
+.schedule-print-table th,
+.schedule-print-table td {
+    border: 1px solid #000;
+    padding: 0.1rem 0.26rem;
+    text-align: left;
+    font-size: 9pt;
+    vertical-align: top;
+    white-space: nowrap;
+    color: #000;
+}
+.schedule-print-table th {
+    background: #eee;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 7.5pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.schedule-print-table td:first-child { font-weight: 600; }
+.schedule-print-sheet[data-per-page="1"] .schedule-print-header h1 { font-size: 16pt; }
+.schedule-print-sheet[data-per-page="1"] .schedule-print-table th,
+.schedule-print-sheet[data-per-page="1"] .schedule-print-table td {
+    font-size: 10pt;
+    padding: 0.14rem 0.32rem;
+}
+.schedule-print-sheet[data-per-page="4"] .schedule-print-header h1 { font-size: 11pt; }
+.schedule-print-sheet[data-per-page="4"] .schedule-print-header p { font-size: 7pt; }
+.schedule-print-sheet[data-per-page="4"] .schedule-print-table th,
+.schedule-print-sheet[data-per-page="4"] .schedule-print-table td {
+    font-size: 7.5pt;
+    padding: 0.04rem 0.16rem;
+}
+`;
+
+let schedulePrintState = {
+    blocks: [],
+    title: 'Schedules',
+    perPage: 2
+};
+
+function defaultSchedulePrintPerPage(blockCount) {
+    if (blockCount <= 1) return 1;
+    if (blockCount >= 4) return 4;
+    return 2;
+}
+
+function getSchedulePrintPerPage() {
+    const selected = document.querySelector('input[name="schedule-print-per-page"]:checked');
+    const value = selected ? parseInt(selected.value, 10) : schedulePrintState.perPage;
+    return [1, 2, 4].includes(value) ? value : 2;
+}
+
+function openSchedulePrintPreview(blocks, documentTitle) {
+    schedulePrintState.blocks = Array.isArray(blocks) ? blocks : [];
+    schedulePrintState.title = documentTitle || 'Schedules';
+    schedulePrintState.perPage = defaultSchedulePrintPerPage(schedulePrintState.blocks.length);
+    const modal = document.getElementById('schedule-print-preview-modal');
+    const titleEl = document.getElementById('schedule-print-preview-title');
+    const countEl = document.getElementById('schedule-print-preview-count');
+    if (titleEl) titleEl.textContent = schedulePrintState.title;
+    if (countEl) {
+        const n = schedulePrintState.blocks.length;
+        countEl.textContent = n === 1 ? '1 schedule' : `${n} schedules`;
+    }
+    document.querySelectorAll('input[name="schedule-print-per-page"]').forEach((input) => {
+        input.checked = parseInt(input.value, 10) === schedulePrintState.perPage;
+    });
+    renderSchedulePrintPreview();
+    if (modal) modal.style.display = 'block';
+}
+
+function renderSchedulePrintPreview() {
+    const container = document.getElementById('schedule-print-preview-pages');
+    if (!container) return;
+    const perPage = getSchedulePrintPerPage();
+    schedulePrintState.perPage = perPage;
+    const pages = chunkSchedulePrintBlocks(schedulePrintState.blocks, perPage);
+    const maxPreview = 6;
+    const visible = pages.slice(0, maxPreview);
+    container.innerHTML = visible.map((pageBlocks, index) => `
+        <div class="schedule-print-preview-page">
+            <div class="schedule-print-preview-scaler">
+                <div class="schedule-print-sheet" data-per-page="${perPage}">
+                    ${pageBlocks.map((block) => buildSchedulePrintCardHtml(block)).join('')}
+                </div>
+            </div>
+            <div class="schedule-print-preview-page-label">Page ${index + 1} of ${pages.length}</div>
+        </div>
+    `).join('') + (pages.length > maxPreview
+        ? `<p class="schedule-print-preview-more">${pages.length - maxPreview} more page${pages.length - maxPreview === 1 ? '' : 's'} will print</p>`
+        : '');
+}
+
+function closeSchedulePrintPreview() {
+    const modal = document.getElementById('schedule-print-preview-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function executeSchedulePrint() {
+    const perPage = getSchedulePrintPerPage();
+    const iframe = document.getElementById('schedule-print-frame');
+    if (!iframe) {
+        window.print();
+        return;
+    }
+    const title = schedulePrintState.title || 'Schedules';
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<style>${SCHEDULE_PRINT_DOCUMENT_CSS}</style>
+</head>
+<body>
+${buildSchedulePrintSheetsHtml(schedulePrintState.blocks, perPage)}
+</body>
+</html>`;
+    const frameWindow = iframe.contentWindow;
+    const frameDoc = iframe.contentDocument || (frameWindow && frameWindow.document);
+    if (!frameDoc) {
+        window.print();
+        return;
+    }
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
+    let printed = false;
+    const triggerPrint = () => {
+        if (printed) return;
+        printed = true;
+        iframe.onload = null;
+        try {
+            frameWindow.focus();
+            frameWindow.print();
+        } catch (err) {
+            console.error('Schedule print failed:', err);
+        }
     };
-    window.addEventListener('afterprint', cleanup);
-    window.print();
+    iframe.onload = triggerPrint;
+    setTimeout(triggerPrint, 200);
 }
 
 function printStaffSchedule() {
@@ -12465,13 +12648,11 @@ function printStaffSchedule() {
         return;
     }
     const name = getSelectedStaffScheduleName();
-    const html = buildSchedulePrintHtml([{
+    openSchedulePrintPreview([{
         title: `${name}'s Schedule`,
-        subtitle: 'Staff schedule',
         kind: 'teacher',
         periods: collectSchedulePeriodsFromTable('teacher')
-    }]);
-    openSchedulePrintWindow(html, `${name} Staff Schedule`);
+    }], `${name} Staff Schedule`);
 }
 
 async function printSelectedStudentSchedule() {
@@ -12481,13 +12662,11 @@ async function printSelectedStudentSchedule() {
         return;
     }
     const name = getSelectedStudentScheduleName() || 'Student';
-    const html = buildSchedulePrintHtml([{
+    openSchedulePrintPreview([{
         title: `${name}'s Schedule`,
-        subtitle: 'Student schedule',
         kind: 'student',
         periods: collectSchedulePeriodsFromTable('student')
-    }]);
-    openSchedulePrintWindow(html, `${name} Student Schedule`);
+    }], `${name} Student Schedule`);
 }
 
 async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) {
@@ -12509,16 +12688,14 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
             showMessage(emptyMessage || 'No student schedules are available to print.', 'error');
             return;
         }
-        if (items.length > 40 && !window.confirm(`Print ${items.length} student schedules?`)) {
-            return;
-        }
+        const printedOn = formatSchedulePrintDate();
         const blocks = items.map((item) => ({
             title: `${item.name || 'Student'}'s Schedule`,
-            subtitle: 'Student schedule',
             kind: 'student',
+            printedOn,
             periods: item.periods || []
         }));
-        openSchedulePrintWindow(buildSchedulePrintHtml(blocks), documentTitle);
+        openSchedulePrintPreview(blocks, documentTitle);
     } catch (error) {
         console.error('Error printing student schedules:', error);
         showMessage(error.message || 'Could not print student schedules.', 'error');
@@ -15162,9 +15339,31 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeStudentSchedulePrintMenu();
+            if (e.key === 'Escape') {
+                closeStudentSchedulePrintMenu();
+                const previewModal = document.getElementById('schedule-print-preview-modal');
+                if (previewModal && previewModal.style.display === 'block') {
+                    closeSchedulePrintPreview();
+                }
+            }
         });
     }
+
+    const schedulePrintPreviewClose = document.getElementById('schedule-print-preview-close');
+    if (schedulePrintPreviewClose) {
+        schedulePrintPreviewClose.addEventListener('click', closeSchedulePrintPreview);
+    }
+    const schedulePrintPreviewCancel = document.getElementById('schedule-print-preview-cancel');
+    if (schedulePrintPreviewCancel) {
+        schedulePrintPreviewCancel.addEventListener('click', closeSchedulePrintPreview);
+    }
+    const schedulePrintPreviewPrint = document.getElementById('schedule-print-preview-print');
+    if (schedulePrintPreviewPrint) {
+        schedulePrintPreviewPrint.addEventListener('click', executeSchedulePrint);
+    }
+    document.querySelectorAll('input[name="schedule-print-per-page"]').forEach((input) => {
+        input.addEventListener('change', renderSchedulePrintPreview);
+    });
     
     // User management buttons
     initializeUserManagementTableAutoFitObserver();

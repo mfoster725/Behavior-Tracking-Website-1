@@ -2059,61 +2059,229 @@ table tbody tr:hover {
 
 #schedule-print-root {
     display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: #fff;
+}
+
+#schedule-print-frame {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 0;
+    left: -9999px;
+    top: 0;
+}
+
+.schedule-print-preview-modal-content {
+    max-width: 980px;
+    width: 94%;
+}
+
+.schedule-print-preview-count {
+    margin: 0 0 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.schedule-print-layout-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.schedule-print-layout-option {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    cursor: pointer;
+}
+
+.schedule-print-layout-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.schedule-print-layout-option span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.schedule-print-layout-option input:checked + span {
+    border-color: var(--accent);
+    background: var(--accent-subtle, #eff6ff);
+    color: var(--accent);
+}
+
+.schedule-print-preview-pages {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    max-height: 55vh;
     overflow: auto;
-    padding: 1.5rem;
+}
+
+.schedule-print-preview-page {
+    width: calc(8.5in * 0.28);
+    height: calc(11in * 0.28);
+    background: #fff;
+    border: 1px solid var(--border-strong);
+    overflow: hidden;
+    position: relative;
+}
+
+.schedule-print-preview-page-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 6px;
+    font-size: 10px;
+    text-align: center;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.92);
+    z-index: 1;
+}
+
+.schedule-print-preview-scaler {
+    width: 8.5in;
+    height: 11in;
+    padding: 0.4in;
+    box-sizing: border-box;
+    transform: scale(0.28);
+    transform-origin: top left;
+    background: #fff;
     color: #111;
 }
 
-.schedule-print-page {
-    max-width: 8.5in;
-    margin: 0 auto 1.5rem;
+.schedule-print-preview-more {
+    width: 100%;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    margin: 0;
+}
+
+.schedule-print-preview-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.schedule-print-sheet {
+    display: grid;
+    gap: 0.28in 0.32in;
+    align-items: start;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.schedule-print-sheet[data-per-page="1"] {
+    grid-template-columns: max-content;
+}
+
+.schedule-print-sheet[data-per-page="2"],
+.schedule-print-sheet[data-per-page="4"] {
+    grid-template-columns: 1fr 1fr;
+}
+
+.schedule-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    min-width: 0;
+}
+
+.schedule-print-header {
+    margin: 0 0 0.2rem;
 }
 
 .schedule-print-header h1 {
-    margin: 0 0 0.25rem;
-    font-size: 1.5rem;
+    display: block;
+    margin: 0 0 0.12rem;
+    padding: 0;
+    font-size: 14pt;
+    line-height: 1.15;
     font-family: var(--font-heading);
+    font-weight: 700;
     color: #111;
 }
 
 .schedule-print-header p {
-    margin: 0 0 1rem;
-    font-size: 0.875rem;
+    display: block;
+    margin: 0 0 0.2rem;
+    padding: 0;
+    font-size: 8pt;
+    line-height: 1.25;
     color: #444;
 }
 
 .schedule-print-table {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     border-collapse: collapse;
-    table-layout: fixed;
+    table-layout: auto;
 }
 
 .schedule-print-table th,
 .schedule-print-table td {
     border: 1px solid #333;
-    padding: 0.5rem 0.7rem;
+    padding: 0.12rem 0.28rem;
     text-align: left;
-    font-size: 0.9rem;
+    font-size: 9pt;
     color: #111;
     vertical-align: top;
+    white-space: nowrap;
 }
 
 .schedule-print-table th {
     background: #f3f4f6;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+    font-size: 7.5pt;
 }
 
 .schedule-print-table td:first-child {
-    width: 140px;
     font-weight: 600;
-    white-space: nowrap;
+}
+
+.schedule-print-sheet[data-per-page="1"] .schedule-print-header h1 {
+    font-size: 16pt;
+}
+
+.schedule-print-sheet[data-per-page="1"] .schedule-print-table th,
+.schedule-print-sheet[data-per-page="1"] .schedule-print-table td {
+    font-size: 10pt;
+    padding: 0.16rem 0.35rem;
+}
+
+.schedule-print-sheet[data-per-page="4"] .schedule-print-header h1 {
+    font-size: 11pt;
+}
+
+.schedule-print-sheet[data-per-page="4"] .schedule-print-header p {
+    font-size: 7pt;
+}
+
+.schedule-print-sheet[data-per-page="4"] .schedule-print-table th,
+.schedule-print-sheet[data-per-page="4"] .schedule-print-table td {
+    font-size: 7.5pt;
+    padding: 0.05rem 0.18rem;
 }
 
 .schedule-controls {
@@ -3703,52 +3871,6 @@ table tbody tr:hover {
     
     @page {
         margin: 1cm;
-    }
-
-    #schedule-print-root {
-        display: block !important;
-        position: static !important;
-        inset: auto !important;
-        overflow: visible !important;
-        padding: 0 !important;
-        background: #fff !important;
-        visibility: visible !important;
-    }
-
-    #schedule-print-root * {
-        visibility: visible !important;
-    }
-
-    .schedule-print-page {
-        margin: 0 0 0.75in;
-        max-width: none;
-    }
-
-    .schedule-print-page-break {
-        page-break-after: always;
-        break-after: page;
-    }
-
-    .schedule-print-header h1 {
-        font-size: 18pt;
-        color: #000 !important;
-    }
-
-    .schedule-print-header p {
-        color: #222 !important;
-    }
-
-    .schedule-print-table th,
-    .schedule-print-table td {
-        border: 1px solid #000;
-        color: #000 !important;
-        background: #fff !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-    }
-
-    .schedule-print-table th {
-        background: #eee !important;
     }
 }
 

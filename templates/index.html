@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=schedprint2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=schedprint3">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -2203,7 +2203,35 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=schedprint2"></script>
+    <div id="schedule-print-preview-modal" class="modal" onclick="if(event.target===this) closeSchedulePrintPreview()">
+        <div class="modal-content schedule-print-preview-modal-content" onclick="event.stopPropagation()">
+            <span class="close" id="schedule-print-preview-close">&times;</span>
+            <h2 id="schedule-print-preview-title">Print schedules</h2>
+            <p id="schedule-print-preview-count" class="schedule-print-preview-count"></p>
+            <div class="schedule-print-layout-options" role="radiogroup" aria-label="Schedules per page">
+                <label class="schedule-print-layout-option">
+                    <input type="radio" name="schedule-print-per-page" value="1">
+                    <span>1 per page</span>
+                </label>
+                <label class="schedule-print-layout-option">
+                    <input type="radio" name="schedule-print-per-page" value="2">
+                    <span>2 per page</span>
+                </label>
+                <label class="schedule-print-layout-option">
+                    <input type="radio" name="schedule-print-per-page" value="4">
+                    <span>4 per page</span>
+                </label>
+            </div>
+            <div id="schedule-print-preview-pages" class="schedule-print-preview-pages"></div>
+            <div class="schedule-print-preview-actions">
+                <button type="button" id="schedule-print-preview-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="schedule-print-preview-print" class="btn-primary">Print</button>
+            </div>
+        </div>
+    </div>
+    <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
+
+    <script src="{{ url_for('static', filename='app.js') }}?v=schedprint3"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan4"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
