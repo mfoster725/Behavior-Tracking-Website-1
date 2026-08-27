@@ -4627,6 +4627,8 @@ def daily_records():
         # Get daily records (filtered by role and optional student_id/student_ids)
         query = DailyRecord.query
         if current_user.role == 'student' and current_user.student_id:
+            if requested_student_ids and any(sid != current_user.student_id for sid in requested_student_ids):
+                return jsonify({'error': 'Access denied'}), 403
             query = query.filter_by(student_id=current_user.student_id)
         elif current_user.role == 'staff' and current_user.is_outside_staff:
             # Outside Staff can only see assigned students

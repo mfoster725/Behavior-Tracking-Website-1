@@ -7167,7 +7167,7 @@ async function loadPointCardData(studentIdOverride) {
                 <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}">
                     <div class="point-card-day-header">
                         <h4>${formattedDate}</h4>
-                        <button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>
+                        ${canEdit() ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
                     </div>
                     <div class="point-card-day-content">
                         <div class="point-card-grid" id="point-card-grid-${record.id}">
@@ -7184,9 +7184,11 @@ async function loadPointCardData(studentIdOverride) {
 
         container.innerHTML = html;
 
-        container.querySelectorAll('.edit-day-btn').forEach((btn) => {
-            btn.addEventListener('click', editPointCardDay);
-        });
+        if (canEdit()) {
+            container.querySelectorAll('.edit-day-btn').forEach((btn) => {
+                btn.addEventListener('click', editPointCardDay);
+            });
+        }
 
         container.querySelectorAll('.info-view-btn').forEach((btn) => {
             btn.addEventListener('click', (e) => {
@@ -7846,6 +7848,10 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
 }
 
 async function editPointCardDay(e) {
+    if (!canEdit()) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
     const button = e.target;
     const recordId = button.dataset.recordId;
     const date = button.dataset.date;
@@ -7875,6 +7881,10 @@ async function editPointCardDay(e) {
 }
 
 function showEditPointCardModal(record, studentId, studentName, date) {
+    if (!canEdit()) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'edit-point-card-modal';
@@ -8199,6 +8209,10 @@ function updateEditPointCardInfoDirtyState(periodIndex) {
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
+    if (!canEdit()) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
     const modal = document.getElementById('edit-point-card-modal');
     const record = window.editingPointCardRecord;
     
