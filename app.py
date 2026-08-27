@@ -909,24 +909,26 @@ def _dates_due_for_point_card_submit():
     return dates
 
 
-POINT_CARD_TIME_RANGES = (
-    'AM Bus',
-    '7:45-8:30',
-    '8:30-9:00',
-    '9:00-9:30',
-    '9:30-10:00',
-    '10:00-10:30',
-    '10:30-11:00',
-    '11:00-11:30',
-    '11:30-12:00',
-    '12:00-12:30',
-    '12:30-1:00',
-    '1:00-1:30',
-    '1:30-2:00',
-    '2:00-2:30',
-    '2:30-2:45',
-    'PM Bus',
+POINT_CARD_PERIODS = (
+    ('AM Bus', 'Bus'),
+    ('7:45-8:30', 'Bkfst'),
+    ('8:30-9:00', 'English'),
+    ('9:00-9:30', 'Math'),
+    ('9:30-10:00', 'Science'),
+    ('10:00-10:30', 'Group'),
+    ('10:30-11:00', 'Group'),
+    ('11:00-11:30', 'Individual'),
+    ('11:30-12:00', 'Lunch'),
+    ('12:00-12:30', 'Phys Ed'),
+    ('12:30-1:00', 'Social'),
+    ('1:00-1:30', 'Individual'),
+    ('1:30-2:00', 'Studio'),
+    ('2:00-2:30', 'Studio'),
+    ('2:30-2:45', 'Homeroom'),
+    ('PM Bus', 'Bus'),
 )
+POINT_CARD_TIME_RANGES = tuple(time_range for time_range, _location in POINT_CARD_PERIODS)
+POINT_CARD_DEFAULT_LOCATIONS = dict(POINT_CARD_PERIODS)
 
 STAR_POINT_FIELDS = (
     ('safety_points', 'Safety'),
@@ -945,6 +947,129 @@ def _nullable_star_points(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _period_has_entered_star_points(period_or_data):
+    if period_or_data is None:
+        return False
+    if isinstance(period_or_data, dict):
+        values = (
+            period_or_data.get('safety_points'),
+            period_or_data.get('teamwork_points'),
+            period_or_data.get('accountability_points'),
+            period_or_data.get('relationships_points'),
+        )
+    else:
+        values = (
+            getattr(period_or_data, 'safety_points', None),
+            getattr(period_or_data, 'teamwork_points', None),
+            getattr(period_or_data, 'accountability_points', None),
+            getattr(period_or_data, 'relationships_points', None),
+        )
+    return any(value is not None and value != '' for value in values)
+
+
+def _points_possible_for_star_values(period_or_data):
+    return 4 if _period_has_entered_star_points(period_or_data) else 0
+
+
+def _period_points_possible(period_or_data):
+    """Use stored points_possible, including 0 for empty rows. Infer only when unset."""
+    if period_or_data is None:
+        return 0
+    if isinstance(period_or_data, dict):
+        pp = period_or_data.get('points_possible')
+    else:
+        pp = getattr(period_or_data, 'points_possible', None)
+    if pp is None or pp == '':
+        return _points_possible_for_star_values(period_or_data)
+    try:
+        return int(pp)
+    except (TypeError, ValueError):
+        return _points_possible_for_star_values(period_or_data)
+
+
+def _empty_serialized_point_card_period(time_range, location, include_details=True):
+    period = {
+        'id': None,
+        'time_range': time_range,
+        'location': location,
+        'safety_points': None,
+        'teamwork_points': None,
+        'accountability_points': None,
+        'relationships_points': None,
+        'info': '',
+    }
+    if include_details:
+        period.update({
+            'points_possible': 0,
+            'reset': False,
+            'frenzy': False,
+            'notes': None,
+            'reminders': None,
+            'infractions': [],
+        })
+    return period
+
+
+def _expand_serialized_point_card_periods(periods, include_details=True):
+    """Return every standard point-card row, even when STAR cells are empty."""
+    periods = list(periods or [])
+    standard_times = set(POINT_CARD_TIME_RANGES)
+    by_time = {}
+    extras = []
+    for period in periods:
+        if not isinstance(period, dict):
+            continue
+        time_range = (period.get('time_range') or '').strip()
+        if time_range in standard_times:
+            by_time.setdefault(time_range, period)
+        else:
+            extras.append(period)
+    expanded = []
+    for time_range, location in POINT_CARD_PERIODS:
+        existing = by_time.get(time_range)
+        if existing:
+            if not (existing.get('location') or '').strip():
+                existing = dict(existing)
+                existing['location'] = location
+            expanded.append(existing)
+        else:
+            expanded.append(_empty_serialized_point_card_period(time_range, location, include_details))
+    for period in extras:
+        time_range = (period.get('time_range') or '').strip()
+        location = (period.get('location') or '').strip()
+        if time_range or location:
+            expanded.append(period)
+    return expanded
+
+
+def _ensure_full_point_card_periods(daily_record):
+    """Persist every standard point-card row, including empty STAR cells."""
+    if not daily_record:
+        return
+    if not getattr(daily_record, 'id', None):
+        db.session.flush()
+    if not getattr(daily_record, 'id', None):
+        return
+    existing = {
+        (period.time_range or '').strip()
+        for period in list(daily_record.periods or [])
+        if (period.time_range or '').strip()
+    }
+    for time_range, location in POINT_CARD_PERIODS:
+        if time_range in existing:
+            continue
+        daily_record.periods.append(PeriodRecord(
+            time_range=time_range,
+            location=location,
+            safety_points=None,
+            teamwork_points=None,
+            accountability_points=None,
+            relationships_points=None,
+            points_possible=0,
+        ))
+        existing.add(time_range)
 
 
 def _format_school_date(record_date):
@@ -1300,11 +1425,11 @@ class PeriodRecord(db.Model):
     location = db.Column(db.String(50))  # e.g., "English", "Math", "Bus"
     
     # STAR points (Safety, Teamwork, Accountability, Relationships)
-    safety_points = db.Column(db.Integer, default=0)
-    teamwork_points = db.Column(db.Integer, default=0)
-    accountability_points = db.Column(db.Integer, default=0)
-    relationships_points = db.Column(db.Integer, default=0)
-    points_possible = db.Column(db.Integer, default=4)
+    safety_points = db.Column(db.Integer, nullable=True)
+    teamwork_points = db.Column(db.Integer, nullable=True)
+    accountability_points = db.Column(db.Integer, nullable=True)
+    relationships_points = db.Column(db.Integer, nullable=True)
+    points_possible = db.Column(db.Integer, nullable=True, default=0)
     
     # Flags
     reset = db.Column(db.Boolean, default=False)
@@ -4179,6 +4304,7 @@ def period_data():
             }
         
         saved_count = 0
+        saved_daily_ids = []
         
         # Process each student's data
         for student_id_str, student_data in students_data.items():
@@ -4219,25 +4345,36 @@ def period_data():
                 period_record.teamwork_points = _nullable_star_points(student_data.get('teamwork_points'))
                 period_record.accountability_points = _nullable_star_points(student_data.get('accountability_points'))
                 period_record.relationships_points = _nullable_star_points(student_data.get('relationships_points'))
-                period_record.points_possible = 4
+                period_record.points_possible = _points_possible_for_star_values(period_record)
                 period_record.info = student_data.get('info')
             else:
                 # Create new
                 period_record = PeriodRecord(
-                    daily_record_id=daily_record.id,
                     time_range=period,
                     location=location,
                     safety_points=_nullable_star_points(student_data.get('safety_points')),
                     teamwork_points=_nullable_star_points(student_data.get('teamwork_points')),
                     accountability_points=_nullable_star_points(student_data.get('accountability_points')),
                     relationships_points=_nullable_star_points(student_data.get('relationships_points')),
-                    points_possible=4,
+                    points_possible=_points_possible_for_star_values(student_data),
                     info=student_data.get('info')
                 )
-                db.session.add(period_record)
+                daily_record.periods.append(period_record)
+
+            db.session.flush()
+            db.session.expire(daily_record, ['periods'])
+            _ensure_full_point_card_periods(daily_record)
             
             saved_count += 1
+            saved_daily_ids.append(daily_record.id)
         
+        db.session.commit()
+        for daily_id in dict.fromkeys(saved_daily_ids):
+            daily_record = DailyRecord.query.get(daily_id)
+            if not daily_record:
+                continue
+            db.session.expire(daily_record, ['periods'])
+            _ensure_full_point_card_periods(daily_record)
         db.session.commit()
         maybe_auto_submit_point_cards_for_date(record_date)
         
@@ -4354,6 +4491,9 @@ def daily_records():
             )
             db.session.add(daily_record)
         
+        db.session.flush()
+        db.session.expire(daily_record, ['periods'])
+
         # Clear existing periods safely: delete dependent infractions first to satisfy FK constraints.
         existing_period_ids = [
             period_id for (period_id,) in db.session.query(PeriodRecord.id)
@@ -4363,25 +4503,26 @@ def daily_records():
         if existing_period_ids:
             Infraction.query.filter(Infraction.period_record_id.in_(existing_period_ids)).delete(synchronize_session=False)
             PeriodRecord.query.filter(PeriodRecord.id.in_(existing_period_ids)).delete(synchronize_session=False)
+            db.session.flush()
+            db.session.expire(daily_record, ['periods'])
         
         # Add periods
         for period_data in data.get('periods', []):
             period = PeriodRecord(
-                daily_record_id=daily_record.id,
                 time_range=period_data.get('time_range'),
                 location=period_data.get('location'),
                 safety_points=_nullable_star_points(period_data.get('safety_points')),
                 teamwork_points=_nullable_star_points(period_data.get('teamwork_points')),
                 accountability_points=_nullable_star_points(period_data.get('accountability_points')),
                 relationships_points=_nullable_star_points(period_data.get('relationships_points')),
-                points_possible=period_data.get('points_possible', 4),
+                points_possible=_points_possible_for_star_values(period_data),
                 reset=period_data.get('reset', False),
                 frenzy=period_data.get('frenzy', False),
                 notes=period_data.get('notes'),
                 reminders=period_data.get('reminders'),
                 info=period_data.get('info')
             )
-            db.session.add(period)
+            daily_record.periods.append(period)
             db.session.flush()
             
             # Add infractions
@@ -4396,7 +4537,8 @@ def daily_records():
                 db.session.add(infraction)
         
         # Add frenzy events
-        FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete()
+        FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete(synchronize_session=False)
+        db.session.expire(daily_record, ['frenzies'])
         for frenzy_data in data.get('frenzies', []):
             sev_raw = frenzy_data.get('severity')
             sev_int = None
@@ -4408,7 +4550,6 @@ def daily_records():
             if sev_int is not None:
                 sev_int = max(1, min(5, sev_int))
             frenzy = FrenzyEvent(
-                daily_record_id=daily_record.id,
                 time_range=frenzy_data.get('time_range'),
                 location=frenzy_data.get('location'),
                 purpose=frenzy_data.get('purpose'),
@@ -4417,10 +4558,21 @@ def daily_records():
                 result=frenzy_data.get('result'),
                 severity=sev_int if sev_int is not None else 1,
             )
-            db.session.add(frenzy)
+            daily_record.frenzies.append(frenzy)
         
+        db.session.flush()
+        _ensure_full_point_card_periods(daily_record)
+        db.session.flush()
         mark_daily_record_submitted_if_due(daily_record)
         db.session.commit()
+
+        # Cascade/delete-orphan can drop rows that were not in the loaded collection.
+        # Re-load and persist any missing standard point-card rows.
+        daily_record = DailyRecord.query.get(daily_record.id)
+        if daily_record:
+            db.session.expire(daily_record, ['periods'])
+            _ensure_full_point_card_periods(daily_record)
+            db.session.commit()
         
         # Audit: Log daily record creation/update
         action = 'UPDATE' if existing else 'CREATE'
@@ -4597,7 +4749,7 @@ def daily_records():
                 'attendance_status': attendance_status,
                 'submitted': bool(record.submitted_at),
                 'submitted_at': record.submitted_at.isoformat() if record.submitted_at else None,
-                'periods': periods,
+                'periods': _expand_serialized_point_card_periods(periods, include_details),
                 'frenzies': frenzies
             })
         
@@ -4754,7 +4906,7 @@ def api_trends():
             entry['teamwork'] += int(period.teamwork_points or 0)
             entry['accountability'] += int(period.accountability_points or 0)
             entry['relationships'] += int(period.relationships_points or 0)
-            entry['possible'] += int(period.points_possible or 4)
+            entry['possible'] += _period_points_possible(period)
 
     series = []
     for date_key in sorted(by_date.keys()):
@@ -6397,11 +6549,11 @@ def summary():
                     )
 
             for period in record.periods:
-                total_safety += period.safety_points
-                total_teamwork += period.teamwork_points
-                total_accountability += period.accountability_points
-                total_relationships += period.relationships_points
-                total_possible += period.points_possible
+                total_safety += (period.safety_points or 0)
+                total_teamwork += (period.teamwork_points or 0)
+                total_accountability += (period.accountability_points or 0)
+                total_relationships += (period.relationships_points or 0)
+                total_possible += (period.points_possible or 0)
 
                 # Normalize time period label (matches point card data tables)
                 raw_time_period = (period.time_range or '').strip()
@@ -6424,11 +6576,11 @@ def summary():
                     }
                 time_data = by_time[time_label]
 
-                time_data['safety_points'] += period.safety_points
-                time_data['teamwork_points'] += period.teamwork_points
-                time_data['accountability_points'] += period.accountability_points
-                time_data['relationships_points'] += period.relationships_points
-                time_data['possible_points'] += period.points_possible
+                time_data['safety_points'] += (period.safety_points or 0)
+                time_data['teamwork_points'] += (period.teamwork_points or 0)
+                time_data['accountability_points'] += (period.accountability_points or 0)
+                time_data['relationships_points'] += (period.relationships_points or 0)
+                time_data['possible_points'] += (period.points_possible or 0)
 
                 # Track unique days per time period
                 if record.date not in time_data['_unique_dates']:
@@ -6437,11 +6589,11 @@ def summary():
                 
                 # Track day-of-week and day+time statistics for this period
                 if is_weekday:
-                    by_day_of_week[day_of_week]['safety_points'] += period.safety_points
-                    by_day_of_week[day_of_week]['teamwork_points'] += period.teamwork_points
-                    by_day_of_week[day_of_week]['accountability_points'] += period.accountability_points
-                    by_day_of_week[day_of_week]['relationships_points'] += period.relationships_points
-                    by_day_of_week[day_of_week]['possible_points'] += period.points_possible
+                    by_day_of_week[day_of_week]['safety_points'] += (period.safety_points or 0)
+                    by_day_of_week[day_of_week]['teamwork_points'] += (period.teamwork_points or 0)
+                    by_day_of_week[day_of_week]['accountability_points'] += (period.accountability_points or 0)
+                    by_day_of_week[day_of_week]['relationships_points'] += (period.relationships_points or 0)
+                    by_day_of_week[day_of_week]['possible_points'] += (period.points_possible or 0)
 
                     # Nested time-of-day stats for this day of week
                     day_time_map = by_time_by_day[day_of_week]
@@ -6459,11 +6611,11 @@ def summary():
                             '_unique_dates': set(),
                         }
                     dt_bucket = day_time_map[time_label]
-                    dt_bucket['safety_points'] += period.safety_points
-                    dt_bucket['teamwork_points'] += period.teamwork_points
-                    dt_bucket['accountability_points'] += period.accountability_points
-                    dt_bucket['relationships_points'] += period.relationships_points
-                    dt_bucket['possible_points'] += period.points_possible
+                    dt_bucket['safety_points'] += (period.safety_points or 0)
+                    dt_bucket['teamwork_points'] += (period.teamwork_points or 0)
+                    dt_bucket['accountability_points'] += (period.accountability_points or 0)
+                    dt_bucket['relationships_points'] += (period.relationships_points or 0)
+                    dt_bucket['possible_points'] += (period.points_possible or 0)
                     if record.date not in dt_bucket['_unique_dates']:
                         dt_bucket['_unique_dates'].add(record.date)
                         dt_bucket['total_days'] += 1
@@ -6483,11 +6635,11 @@ def summary():
                         'total_resets': 0,
                         '_unique_dates': set()
                     }
-                by_class[class_name]['safety_points'] += period.safety_points
-                by_class[class_name]['teamwork_points'] += period.teamwork_points
-                by_class[class_name]['accountability_points'] += period.accountability_points
-                by_class[class_name]['relationships_points'] += period.relationships_points
-                by_class[class_name]['possible_points'] += period.points_possible
+                by_class[class_name]['safety_points'] += (period.safety_points or 0)
+                by_class[class_name]['teamwork_points'] += (period.teamwork_points or 0)
+                by_class[class_name]['accountability_points'] += (period.accountability_points or 0)
+                by_class[class_name]['relationships_points'] += (period.relationships_points or 0)
+                by_class[class_name]['possible_points'] += (period.points_possible or 0)
                 
                 # Track unique days per class (count once per date)
                 if record.date not in by_class[class_name]['_unique_dates']:
@@ -8487,11 +8639,11 @@ def case_manager_comparison():
 
             for period in record.periods:
                 if count_star_points:
-                    total_safety += period.safety_points
-                    total_teamwork += period.teamwork_points
-                    total_accountability += period.accountability_points
-                    total_relationships += period.relationships_points
-                    total_possible += period.points_possible
+                    total_safety += (period.safety_points or 0)
+                    total_teamwork += (period.teamwork_points or 0)
+                    total_accountability += (period.accountability_points or 0)
+                    total_relationships += (period.relationships_points or 0)
+                    total_possible += (period.points_possible or 0)
 
                 if not count_infractions_here:
                     continue
@@ -11765,7 +11917,7 @@ def export_student_data(student_id):
             'date': record.date.isoformat(),
             'day_of_week': record.day_of_week,
             'attendance_status': record.attendance_status,
-            'periods': periods_data,
+            'periods': _expand_serialized_point_card_periods(periods_data, include_details=True),
             'frenzy_events': [{
                 'time_range': f.time_range,
                 'location': f.location,
@@ -11924,11 +12076,11 @@ def calculate_weekly_star_percent(student_id, start_date, end_date):
     
     for record in records:
         for period in record.periods:
-            total_safety += period.safety_points
-            total_teamwork += period.teamwork_points
-            total_accountability += period.accountability_points
-            total_relationships += period.relationships_points
-            total_possible += period.points_possible
+            total_safety += (period.safety_points or 0)
+            total_teamwork += (period.teamwork_points or 0)
+            total_accountability += (period.accountability_points or 0)
+            total_relationships += (period.relationships_points or 0)
+            total_possible += (period.points_possible or 0)
     
     if total_possible == 0:
         return Decimal('0.00')
@@ -14721,7 +14873,7 @@ def _daily_star_overall_percent_for_level_up(record):
         total_teamwork += int(period.teamwork_points or 0)
         total_accountability += int(period.accountability_points or 0)
         total_relationships += int(period.relationships_points or 0)
-        total_possible += int(period.points_possible or 4)
+        total_possible += _period_points_possible(period)
     return _daily_star_overall_percent_from_totals(
         status,
         total_safety,
@@ -15322,11 +15474,11 @@ def incentive_tracking():
         bucket = per_student[student.id]
         bucket['student'] = student
         for period in record.periods:
-            bucket['total_safety'] += period.safety_points or 0
-            bucket['total_teamwork'] += period.teamwork_points or 0
-            bucket['total_accountability'] += period.accountability_points or 0
-            bucket['total_relationships'] += period.relationships_points or 0
-            bucket['total_possible'] += period.points_possible or 0
+            bucket['total_safety'] += (period.safety_points or 0) or 0
+            bucket['total_teamwork'] += (period.teamwork_points or 0) or 0
+            bucket['total_accountability'] += (period.accountability_points or 0) or 0
+            bucket['total_relationships'] += (period.relationships_points or 0) or 0
+            bucket['total_possible'] += (period.points_possible or 0) or 0
 
     yellow_list = []
     green_list = []

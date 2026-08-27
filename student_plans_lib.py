@@ -100,6 +100,27 @@ def parse_period_end_time(time_range):
     return parse_hhmm(end)
 
 
+def period_has_entered_points(period):
+    """True when at least one STAR cell was actually entered (including explicit 0)."""
+    if period is None:
+        return False
+    if isinstance(period, dict):
+        values = (
+            period.get('safety_points'),
+            period.get('teamwork_points'),
+            period.get('accountability_points'),
+            period.get('relationships_points'),
+        )
+    else:
+        values = (
+            getattr(period, 'safety_points', None),
+            getattr(period, 'teamwork_points', None),
+            getattr(period, 'accountability_points', None),
+            getattr(period, 'relationships_points', None),
+        )
+    return any(value is not None and value != '' for value in values)
+
+
 def period_points_tuple(period):
     """Return (s, t, a, r) ints from a PeriodRecord-like object."""
     def _n(v):
@@ -136,9 +157,10 @@ def percent_from_periods(periods, star_category=None):
     totals = {'safety': 0, 'teamwork': 0, 'accountability': 0, 'relationships': 0}
     n = 0
     for p in periods:
+        if not period_has_entered_points(p):
+            continue
         s, t, a, r = period_points_tuple(p)
-        # Skip completely empty / null-looking rows if all zero and no points entered —
-        # still count zeros as entered days for threshold fairness when record exists.
+        # Explicit zeros count; unfilled (null) rows are skipped above.
         totals['safety'] += s
         totals['teamwork'] += t
         totals['accountability'] += a

@@ -530,6 +530,128 @@ function isStudentSubmittedForDate(dateStr, studentId) {
     return !!(dateStr && submittedStudents[dateStr] && submittedStudents[dateStr].has(id));
 }
 
+function periodHasEnteredStarPoints(periodOrCell) {
+    if (!periodOrCell) return false;
+    const values = [
+        periodOrCell.s,
+        periodOrCell.t,
+        periodOrCell.a,
+        periodOrCell.r,
+        periodOrCell.safety_points,
+        periodOrCell.teamwork_points,
+        periodOrCell.accountability_points,
+        periodOrCell.relationships_points
+    ];
+    return values.some((value) => value !== null && value !== undefined && value !== '');
+}
+
+function defaultPointCardPeriod(standardPeriod) {
+    return {
+        time_range: standardPeriod.time,
+        location: standardPeriod.location,
+        safety_points: null,
+        teamwork_points: null,
+        accountability_points: null,
+        relationships_points: null,
+        points_possible: 0,
+        reset: false,
+        frenzy: false,
+        notes: '',
+        reminders: '',
+        info: '',
+        infractions: []
+    };
+}
+
+function expandPointCardPeriods(periods) {
+    const list = Array.isArray(periods) ? periods : [];
+    const standardTimes = new Set(STANDARD_PERIODS.map((sp) => sp.time));
+    const byTime = new Map();
+    const extras = [];
+    list.forEach((period) => {
+        if (!period) return;
+        const time = String(period.time_range || '').trim();
+        if (time && standardTimes.has(time)) {
+            if (!byTime.has(time)) byTime.set(time, period);
+        } else {
+            extras.push(period);
+        }
+    });
+    const expanded = STANDARD_PERIODS.map((sp) => {
+        const existing = byTime.get(sp.time);
+        if (!existing) return defaultPointCardPeriod(sp);
+        return {
+            ...defaultPointCardPeriod(sp),
+            ...existing,
+            time_range: sp.time,
+            location: existing.location || sp.location
+        };
+    });
+    extras.forEach((period) => {
+        const time = String(period.time_range || '').trim();
+        const location = String(period.location || '').trim();
+        if (time || location) expanded.push(period);
+    });
+    return expanded;
+}
+
+function starPointsPossible(periodOrCell) {
+    return periodHasEnteredStarPoints(periodOrCell) ? 4 : 0;
+}
+
+function periodPointsPossibleValue(period) {
+    if (!period) return 0;
+    const raw = period.points_possible;
+    if (raw === 0 || raw === '0') return 0;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+    return starPointsPossible(period);
+}
+
+function buildCompleteDailyPeriodsForStudent(studentId) {
+    const studentData = dailyData[studentId] || {};
+    const used = new Set();
+    const periods = STANDARD_PERIODS.map((sp) => {
+        used.add(sp.time);
+        const data = studentData[sp.time] || { s: null, t: null, a: null, r: null, info: '' };
+        return {
+            time_range: sp.time,
+            location: sp.location,
+            safety_points: data.s,
+            teamwork_points: data.t,
+            accountability_points: data.a,
+            relationships_points: data.r,
+            points_possible: starPointsPossible(data),
+            reset: false,
+            frenzy: false,
+            notes: '',
+            reminders: '',
+            info: data.info || '',
+            infractions: []
+        };
+    });
+    Object.keys(studentData).forEach((periodTime) => {
+        if (used.has(periodTime)) return;
+        const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
+        periods.push({
+            time_range: periodTime,
+            location: periodTime,
+            safety_points: data.s,
+            teamwork_points: data.t,
+            accountability_points: data.a,
+            relationships_points: data.r,
+            points_possible: starPointsPossible(data),
+            reset: false,
+            frenzy: false,
+            notes: '',
+            reminders: '',
+            info: data.info || '',
+            infractions: []
+        });
+    });
+    return periods;
+}
+
 function studentDailyDataHasInput(studentId) {
     const studentData = dailyData[studentId];
     if (!studentData) {
@@ -4613,30 +4735,9 @@ async function saveDailyAllData(options = {}) {
     
     Object.keys(dailyData).forEach(studentId => {
         const periods = [];
-        
-        Object.keys(dailyData[studentId]).forEach(periodTime => {
-            const data = dailyData[studentId][periodTime];
-            const periodInfo = STANDARD_PERIODS.find(p => p.time === periodTime);
-            
-            // Only save if at least one value is not null
-            if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
-                periods.push({
-                    time_range: periodTime,
-                    location: periodInfo ? periodInfo.location : periodTime,
-                    safety_points: data.s,
-                    teamwork_points: data.t,
-                    accountability_points: data.a,
-                    relationships_points: data.r,
-                    points_possible: 4,
-                    reset: false,
-                    frenzy: false,
-                    notes: '',
-                    reminders: '',
-                    info: data.info || '',
-                    infractions: []
-                });
-            }
-        });
+        if (studentDailyDataHasInput(studentId)) {
+            periods.push(...buildCompleteDailyPeriodsForStudent(studentId));
+        }
 
         if (periods.length > 0) {
             // Get attendance status for this student
@@ -4711,29 +4812,7 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
         return false;
     }
 
-    const periods = [];
-    Object.keys(dailyData[studentId]).forEach(periodTime => {
-        const data = dailyData[studentId][periodTime];
-        const periodInfo = STANDARD_PERIODS.find(p => p.time === periodTime);
-
-        if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
-            periods.push({
-                time_range: periodTime,
-                location: periodInfo ? periodInfo.location : periodTime,
-                safety_points: data.s,
-                teamwork_points: data.t,
-                accountability_points: data.a,
-                relationships_points: data.r,
-                points_possible: 4,
-                reset: false,
-                frenzy: false,
-                notes: '',
-                reminders: '',
-                info: data.info || '',
-                infractions: []
-            });
-        }
-    });
+    const periods = buildCompleteDailyPeriodsForStudent(studentId);
 
     if (periods.length === 0) {
         if (!silent) {
@@ -5121,14 +5200,28 @@ async function saveDailyRecord() {
             }
         });
 
+        const safetyRaw = card.querySelector('.points-safety').value;
+        const teamworkRaw = card.querySelector('.points-teamwork').value;
+        const accountabilityRaw = card.querySelector('.points-accountability').value;
+        const relationshipsRaw = card.querySelector('.points-relationships').value;
+        const safetyPoints = safetyRaw === '' ? null : parseInt(safetyRaw, 10);
+        const teamworkPoints = teamworkRaw === '' ? null : parseInt(teamworkRaw, 10);
+        const accountabilityPoints = accountabilityRaw === '' ? null : parseInt(accountabilityRaw, 10);
+        const relationshipsPoints = relationshipsRaw === '' ? null : parseInt(relationshipsRaw, 10);
+
         periods.push({
             time_range: card.querySelector('.period-time').value,
             location: card.querySelector('.period-location').value,
-            safety_points: parseInt(card.querySelector('.points-safety').value) || 0,
-            teamwork_points: parseInt(card.querySelector('.points-teamwork').value) || 0,
-            accountability_points: parseInt(card.querySelector('.points-accountability').value) || 0,
-            relationships_points: parseInt(card.querySelector('.points-relationships').value) || 0,
-            points_possible: 4,
+            safety_points: safetyPoints,
+            teamwork_points: teamworkPoints,
+            accountability_points: accountabilityPoints,
+            relationships_points: relationshipsPoints,
+            points_possible: starPointsPossible({
+                s: safetyPoints,
+                t: teamworkPoints,
+                a: accountabilityPoints,
+                r: relationshipsPoints
+            }),
             reset: card.querySelector('.period-reset').checked,
             frenzy: card.querySelector('.period-frenzy').checked,
             notes: card.querySelector('.period-notes').value,
@@ -5154,7 +5247,7 @@ async function saveDailyRecord() {
         student_id: parseInt(currentStudentId),
         date: date,
         present: true,
-        periods,
+        periods: expandPointCardPeriods(periods),
         frenzies
     };
 
@@ -6957,6 +7050,9 @@ async function loadPointCardData(studentIdOverride) {
         }
 
         records.sort((a, b) => new Date(b.date) - new Date(a.date));
+        records.forEach((record) => {
+            record.periods = expandPointCardPeriods(record.periods);
+        });
 
         const student = Array.isArray(allStudents) ? allStudents.find((s) => s.id === parseInt(studentId, 10)) : null;
         const studentName = window.currentPointCardStudentName || (student ? student.name : 'Student');
@@ -7323,14 +7419,12 @@ function clearHighlights(dayElement) {
 }
 
 function renderPointCardGrid(record) {
-    if (!record.periods || record.periods.length === 0) {
-        return '<p>No period data available for this day.</p>';
-    }
+    const periods = expandPointCardPeriods(record && record.periods);
 
     let totals = { s: 0, t: 0, a: 0, r: 0 };
     let counts = { s: 0, t: 0, a: 0, r: 0 };
 
-    record.periods.forEach(period => {
+    periods.forEach(period => {
         if (period.safety_points !== null && period.safety_points !== undefined) {
             totals.s += period.safety_points; counts.s++;
         }
@@ -7364,7 +7458,7 @@ function renderPointCardGrid(record) {
             <div class="pc-header-cell" data-category="i">Info</div>
     `;
 
-    record.periods.forEach((period, periodIndex) => {
+    periods.forEach((period, periodIndex) => {
         let hasInfo = false;
         if (period.info && period.info.trim() !== '') {
             try {
@@ -7671,6 +7765,7 @@ async function editPointCardDay(e) {
         }
         
         const record = records[0];
+        record.periods = expandPointCardPeriods(record.periods);
         
         // Create edit modal or inline edit view
         showEditPointCardModal(record, studentId, studentName, date);
@@ -7686,6 +7781,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     modal.className = 'modal';
     modal.id = 'edit-point-card-modal';
     modal.style.display = 'block';
+    record.periods = expandPointCardPeriods(record.periods);
 
     const [year, month, day] = date.split('-').map(Number);
     const dateObj = new Date(year, month - 1, day);
@@ -7835,7 +7931,7 @@ function addPointCardRow() {
         teamwork_points: null,
         accountability_points: null,
         relationships_points: null,
-        points_possible: 4,
+        points_possible: 0,
         reset: false,
         frenzy: false,
         notes: '',
@@ -8046,14 +8142,24 @@ async function saveEditedPointCard(recordId, studentId, date) {
         const accountabilitySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="accountability"]`);
         const relationshipsSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="relationships"]`);
         
+        const safetyPoints = !safetySelect || safetySelect.value === '' ? null : parseInt(safetySelect.value);
+        const teamworkPoints = !teamworkSelect || teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value);
+        const accountabilityPoints = !accountabilitySelect || accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value);
+        const relationshipsPoints = !relationshipsSelect || relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value);
+
         return {
             time_range: (time_range && String(time_range).trim()) ? String(time_range).trim() : (period.time_range || ''),
             location: (location && String(location).trim()) ? String(location).trim() : (period.location || ''),
-            safety_points: safetySelect.value === '' ? null : parseInt(safetySelect.value),
-            teamwork_points: teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value),
-            accountability_points: accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value),
-            relationships_points: relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value),
-            points_possible: 4,
+            safety_points: safetyPoints,
+            teamwork_points: teamworkPoints,
+            accountability_points: accountabilityPoints,
+            relationships_points: relationshipsPoints,
+            points_possible: starPointsPossible({
+                safety_points: safetyPoints,
+                teamwork_points: teamworkPoints,
+                accountability_points: accountabilityPoints,
+                relationships_points: relationshipsPoints
+            }),
             reset: period.reset || false,
             frenzy: period.frenzy || false,
             notes: period.notes || '',
@@ -8063,8 +8169,11 @@ async function saveEditedPointCard(recordId, studentId, date) {
         };
     });
     
-    // Omit periods that have neither time nor location (e.g. added but left blank)
-    const periodsToSave = updatedPeriods.filter(p => (p.time_range && p.time_range.trim()) || (p.location && p.location.trim()));
+    const periodsToSave = expandPointCardPeriods(updatedPeriods).filter((p) => {
+        const time = String(p.time_range || '').trim();
+        const location = String(p.location || '').trim();
+        return !!(time || location);
+    });
     
     try {
         const response = await fetch('/api/daily-records', {
@@ -22045,7 +22154,7 @@ async function fetchSummaryTrendRecordsForRange(rangeOverride) {
                 row.teamwork += Number(period.teamwork_points) || 0;
                 row.accountability += Number(period.accountability_points) || 0;
                 row.relationships += Number(period.relationships_points) || 0;
-                row.possible += Number(period.points_possible) || 4;
+                row.possible += periodPointsPossibleValue(period);
             });
         });
         const series = Array.from(byDate.keys()).sort().map((date) => {
@@ -22138,7 +22247,7 @@ function calculateTrendPercent(records, metric) {
             teamwork += Number(period.teamwork_points) || 0;
             accountability += Number(period.accountability_points) || 0;
             relationships += Number(period.relationships_points) || 0;
-            possible += Number(period.points_possible) || 4;
+            possible += periodPointsPossibleValue(period);
         });
     });
 
