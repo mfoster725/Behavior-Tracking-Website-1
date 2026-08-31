@@ -1141,6 +1141,53 @@ table tbody tr:hover {
     align-items: center;
     justify-content: flex-start;
     font-size: 11px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Freeze period and schedule columns when scrolling point-card grids horizontally */
+.daily-grid--freeze-cols {
+    --daily-period-col-width: 120px;
+}
+
+.daily-grid--freeze-cols .daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-header-period.daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-frozen-col-2,
+.daily-grid--freeze-cols .daily-header-location.daily-frozen-col-2 {
+    position: sticky;
+    z-index: 2;
+    background: var(--bg-surface);
+}
+
+.daily-grid--freeze-cols .daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-header-period.daily-frozen-col-1 {
+    left: 0;
+}
+
+.daily-grid--freeze-cols .daily-frozen-col-2,
+.daily-grid--freeze-cols .daily-header-location.daily-frozen-col-2 {
+    left: var(--daily-period-col-width);
+}
+
+.daily-grid--freeze-cols .daily-header .daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-header .daily-frozen-col-2 {
+    z-index: 4;
+}
+
+.daily-grid--freeze-cols .star-category-header.daily-frozen-col-1,
+.daily-grid--freeze-cols .star-category-header.daily-frozen-col-2 {
+    z-index: 3;
+}
+
+.daily-grid--freeze-cols .daily-frozen-col-1::after,
+.daily-grid--freeze-cols .daily-frozen-col-2::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border);
+    pointer-events: none;
 }
 
 .daily-data-cell {

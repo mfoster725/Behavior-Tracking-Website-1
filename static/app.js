@@ -1187,6 +1187,64 @@ function getPeriodEntryScheduleItems() {
     return [];
 }
 
+const DAILY_PERIOD_COL_WIDTH = '120px';
+const DAILY_SCHEDULE_COL_WIDTH = 'minmax(90px, max-content)';
+
+function getDailyGridColumnTemplate(studentColumns, spacerWidth = '7px') {
+    return `${DAILY_PERIOD_COL_WIDTH} ${DAILY_SCHEDULE_COL_WIDTH} ${spacerWidth} ${studentColumns}`;
+}
+
+function formatPointCardScheduleForPeriod(timePeriod) {
+    const items = getPeriodEntryScheduleItems().filter((s) => s && s.time_period === timePeriod);
+    if (!items.length) return '';
+    const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
+    const staffNames = [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))];
+    const classText = classNames.join(', ');
+    const staffText = staffNames.join(', ');
+    if (isStudent()) {
+        if (classText && staffText) return `${classText} / ${staffText}`;
+        return classText || staffText || '';
+    }
+    return classText || '';
+}
+
+function createDailyScheduleHeaderCell() {
+    const scheduleHeader = document.createElement('div');
+    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2';
+    scheduleHeader.textContent = 'Schedule';
+    return scheduleHeader;
+}
+
+function createDailyScheduleCategoryHeaderCell() {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-frozen-col-2';
+    cell.style.background = '#f8f9fa';
+    return cell;
+}
+
+function createDailyScheduleCell(timePeriod, options = {}) {
+    const cell = document.createElement('div');
+    cell.className = 'daily-location-cell daily-frozen-col-2';
+    cell.textContent = formatPointCardScheduleForPeriod(timePeriod);
+    if (options.isOddRow) {
+        cell.style.background = 'var(--bg-page)';
+    }
+    if (options.borderTop) {
+        cell.style.borderTop = '2px solid #000';
+        cell.style.background = options.background || '#f8f9fa';
+    }
+    return cell;
+}
+
+function refreshPointCardGridsAfterScheduleLoad() {
+    if (document.getElementById('entry-view')?.classList.contains('active')) {
+        renderDailyGrid();
+    }
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        renderStudentsGrid();
+    }
+}
+
 function loadPeriodEntrySchedule() {
     if (canEdit()) {
         return loadSchedules('teacher');
@@ -2105,6 +2163,7 @@ async function switchView(viewName) {
     
     // If switching to daily entry view, reload data
     if (viewName === 'entry') {
+        loadPeriodEntrySchedule();
         // Sync "managed by me" checkbox to role (staff = checked, admin = unchecked)
         const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
         if (dailyManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
@@ -2788,14 +2847,17 @@ function renderStudentsGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    grid.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    header.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    grid.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    const studentsGridEl = document.getElementById('students-grid');
+    if (studentsGridEl) studentsGridEl.classList.add('daily-grid--freeze-cols');
 
-    // 1. Period/Location Header
+    // 1. Period/Schedule Header
     const periodHeader = document.createElement('div');
-    periodHeader.className = 'daily-header-cell daily-header-period';
+    periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = currentPeriod || 'Period';
     header.appendChild(periodHeader);
+    header.appendChild(createDailyScheduleHeaderCell());
 
     const periodSpacer = document.createElement('div');
     // Gutter between period and first student: keep space but make it visually transparent
@@ -2847,9 +2909,10 @@ function renderStudentsGrid() {
     // 3. Category Labels (S, T, A, R, I)
     const categoryLabels = ['S', 'T', 'A', 'R', 'I'];
     const emptyCell = document.createElement('div');
-    emptyCell.className = 'star-category-header';
+    emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
+    header.appendChild(createDailyScheduleCategoryHeaderCell());
     
     const emptySpacerCell = document.createElement('div');
     // Gutter column under the period header
@@ -2877,9 +2940,10 @@ function renderStudentsGrid() {
     // 4. Data Row
     // Period Name cell
     const periodCell = document.createElement('div');
-    periodCell.className = 'daily-period-cell';
+    periodCell.className = 'daily-period-cell daily-frozen-col-1';
     periodCell.textContent = currentPeriod || '';
     grid.appendChild(periodCell);
+    grid.appendChild(createDailyScheduleCell(currentPeriod || ''));
 
     const rowSpacer = document.createElement('div');
     // Gutter column next to period in this compact grid
@@ -3000,12 +3064,13 @@ function renderStudentsGrid() {
     
     // Add percentage row
     const percentLabel = document.createElement('div');
-    percentLabel.className = 'daily-period-cell';
+    percentLabel.className = 'daily-period-cell daily-frozen-col-1';
     percentLabel.textContent = 'Percent';
     percentLabel.style.fontWeight = '600';
     percentLabel.style.borderTop = '2px solid #000';
     percentLabel.style.background = '#f8f9fa';
     grid.appendChild(percentLabel);
+    grid.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     const percentSpacer = document.createElement('div');
     // Gutter at the start of the percentage row
@@ -3569,14 +3634,16 @@ function renderDailyGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    body.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    header.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    body.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    if (dailyGridEl) dailyGridEl.classList.add('daily-grid--freeze-cols');
 
     // Create header row
     const periodHeader = document.createElement('div');
-    periodHeader.className = 'daily-header-cell daily-header-period';
+    periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = 'Period';
     header.appendChild(periodHeader);
+    header.appendChild(createDailyScheduleHeaderCell());
 
     // Add spacer after period column (gutter, but visually transparent)
     const periodSpacer = document.createElement('div');
@@ -3688,9 +3755,10 @@ function renderDailyGrid() {
     
     // Empty cell for Period column
     const emptyCell = document.createElement('div');
-    emptyCell.className = 'star-category-header';
+    emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
+    header.appendChild(createDailyScheduleCategoryHeaderCell());
     
     // Empty spacer cell after period column
     const emptySpacerCell = document.createElement('div');
@@ -3725,13 +3793,14 @@ function renderDailyGrid() {
         const isOddRow = periodIndex % 2 === 1;
         // Period cell
         const periodCell = document.createElement('div');
-        periodCell.className = 'daily-period-cell';
+        periodCell.className = 'daily-period-cell daily-frozen-col-1';
         periodCell.textContent = period.time;
         periodCell.dataset.periodIndex = periodIndex;
         if (isOddRow) {
             periodCell.style.background = 'var(--bg-page)';
         }
         body.appendChild(periodCell);
+        body.appendChild(createDailyScheduleCell(period.time, { isOddRow }));
 
         // Add spacer after period column (gutter, but visually transparent)
         const periodRowSpacer = document.createElement('div');
@@ -3847,12 +3916,13 @@ function renderDailyGrid() {
     // Add percentage row for each student
     // Empty cell for period column
     const percentPeriodCell = document.createElement('div');
-    percentPeriodCell.className = 'daily-period-cell';
+    percentPeriodCell.className = 'daily-period-cell daily-frozen-col-1';
     percentPeriodCell.textContent = 'Percent';
     percentPeriodCell.style.fontWeight = '600';
     percentPeriodCell.style.borderTop = '2px solid #000';
     percentPeriodCell.style.background = '#f8f9fa';
     body.appendChild(percentPeriodCell);
+    body.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     // Add spacer after period column (gutter, but visually transparent)
     const percentSpacer = document.createElement('div');
@@ -11507,6 +11577,7 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                     autoSelectCurrentPeriod();
                 }, 100);
             }
+            refreshPointCardGridsAfterScheduleLoad();
             return data;
         })
         .catch(error => {
