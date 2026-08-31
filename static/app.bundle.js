@@ -27199,7 +27199,7 @@ function attachOverviewCardInteractions(container, data) {
 
         const overviewContent = starFirstTimeText + `
             <div class="overview-star-layout" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
-                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 100%; width:100%; max-width:100%; min-height:320px; margin:0;">
+                <div class="dashboard-chart-wrap summary-star-chart-wrap" style="flex:1 1 100%; width:100%; max-width:100%; min-height:352px; margin:0;">
                     <canvas id="overview-star-chart"></canvas>
                 </div>
                 <div id="summary-star-details" class="overview-star-details" style="flex:1 1 260px; font-size:0.9rem; color:var(--text-primary);"></div>
@@ -27340,8 +27340,10 @@ function attachOverviewCardInteractions(container, data) {
                         legend: { display: false },
                         datalabels: {
                             clip: false,
+                            padding: 0,
                             labels: {
                                 value: {
+                                    clip: false,
                                     anchor: 'end',
                                     align: 'top',
                                     offset: 18,
@@ -27350,6 +27352,7 @@ function attachOverviewCardInteractions(container, data) {
                                     formatter: (value) => `${Math.round(value)}%`
                                 },
                                 delta: {
+                                    clip: false,
                                     anchor: 'end',
                                     align: 'top',
                                     offset: 2,
@@ -27368,7 +27371,7 @@ function attachOverviewCardInteractions(container, data) {
                     },
                     layout: {
                         // Room above 100% bars for the value + delta datalabels
-                        padding: { top: 40, right: 8, bottom: 4, left: 8 }
+                        padding: { top: 52, right: 8, bottom: 4, left: 8 }
                     },
                     scales: {
                         x: {

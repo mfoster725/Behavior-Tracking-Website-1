@@ -1171,6 +1171,91 @@ function canEdit() {
     return window.currentUser && ((window.currentUser.role === 'staff' && !window.currentUser.is_outside_staff) || window.currentUser.role === 'admin');
 }
 
+function getLoggedInStudentId() {
+    const id = window.currentUser && window.currentUser.studentId;
+    return id != null ? id : null;
+}
+
+/** Schedule rows that drive Period Entry: teacher schedule for staff, student schedule for students. */
+function getPeriodEntryScheduleItems() {
+    if (isStudent()) {
+        return Array.isArray(studentScheduleData) ? studentScheduleData : [];
+    }
+    if (canEdit()) {
+        return Array.isArray(teacherScheduleData) ? teacherScheduleData : [];
+    }
+    return [];
+}
+
+function loadPeriodEntrySchedule() {
+    if (canEdit()) {
+        return loadSchedules('teacher');
+    }
+    if (isStudent()) {
+        const studentId = getLoggedInStudentId();
+        if (studentId) {
+            return loadSchedules('student', studentId);
+        }
+    }
+    return Promise.resolve([]);
+}
+
+function setPeriodEntryLocation(value) {
+    const locationInput = document.getElementById('location-input');
+    const location = value || '';
+    currentLocation = location;
+    if (locationInput) {
+        locationInput.value = location;
+        if (isStudent()) {
+            locationInput.readOnly = true;
+            locationInput.removeAttribute('onfocus');
+            locationInput.onfocus = null;
+        }
+    }
+}
+
+function applyPeriodEntrySelection() {
+    currentClass = '';
+    const classSelectorGroup = document.getElementById('class-selector-group');
+    const classSelect = document.getElementById('class-select');
+    const scheduleItems = getPeriodEntryScheduleItems();
+    const classesForPeriod = scheduleItems
+        .filter(s => s && s.time_period === currentPeriod && s.class_name)
+        .map(s => s.class_name)
+        .filter((name, index, self) => self.indexOf(name) === index);
+
+    if (classesForPeriod.length > 1 && canEdit()) {
+        if (classSelectorGroup) classSelectorGroup.style.display = 'block';
+        if (classSelect) {
+            classSelect.innerHTML = '<option value="">Select Class</option>';
+            classesForPeriod.forEach(className => {
+                const option = document.createElement('option');
+                option.value = className;
+                option.textContent = className;
+                classSelect.appendChild(option);
+            });
+            classSelect.value = '';
+        }
+        setPeriodEntryLocation('');
+        filteredStudentsForPeriod = [];
+        renderStudentsGrid();
+        return;
+    }
+
+    if (classSelectorGroup) classSelectorGroup.style.display = 'none';
+    if (classSelect) classSelect.value = '';
+
+    if (classesForPeriod.length >= 1) {
+        currentClass = classesForPeriod[0];
+        setPeriodEntryLocation(classesForPeriod[0]);
+    } else {
+        const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
+        setPeriodEntryLocation(selectedPeriod ? selectedPeriod.location : '');
+    }
+
+    loadPeriodData();
+}
+
 /** Set "Show students managed by me" checkboxes based on role: staff = checked, admin = unchecked. */
 function applyManagedByMeDefaultForRole() {
     if (!window.currentUser || !['staff', 'admin'].includes(window.currentUser.role)) return;
@@ -1357,10 +1442,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {}
         
-        // Load teacher schedule and auto-select period if in period-entry view
-        if (canEdit()) {
-            loadSchedules('teacher');
-        }
+        // Load schedule and auto-select period if in period-entry view
+        // Staff/admin: teacher schedule. Students: their own schedule from the Schedules tab.
+        loadPeriodEntrySchedule();
         
         startPointCardNightlySubmitScheduler();
         
@@ -1405,79 +1489,8 @@ function setupEventListeners() {
         if (periodSelect) {
             periodSelect.addEventListener('change', (e) => {
                 currentPeriod = e.target.value;
-                currentClass = ''; // Reset class selection
                 console.log('Period selected:', currentPeriod);
-                
-                // Check for multiple classes at this time period
-                const classSelectorGroup = document.getElementById('class-selector-group');
-                const classSelect = document.getElementById('class-select');
-                const locationInput = document.getElementById('location-input');
-                
-                if (teacherScheduleData && teacherScheduleData.length > 0) {
-                    // Find all classes for this time period
-                    const classesForPeriod = teacherScheduleData
-                        .filter(s => s && s.time_period === currentPeriod && s.class_name)
-                        .map(s => s.class_name)
-                        .filter((name, index, self) => self.indexOf(name) === index); // Get unique class names
-                    
-                    if (classesForPeriod.length > 1) {
-                        // Multiple classes - show selector
-                        if (classSelectorGroup) classSelectorGroup.style.display = 'block';
-                        if (classSelect) {
-                            classSelect.innerHTML = '<option value="">Select Class</option>';
-                            classesForPeriod.forEach(className => {
-                                const option = document.createElement('option');
-                                option.value = className;
-                                option.textContent = className;
-                                classSelect.appendChild(option);
-                            });
-                            classSelect.value = '';
-                        }
-                        if (locationInput) {
-                            locationInput.value = '';
-                            currentLocation = '';
-                        }
-                        // Don't load data until class is selected
-                        filteredStudentsForPeriod = [];
-                        renderStudentsGrid();
-                    } else {
-                        // Single class or none - hide selector and auto-fill
-                        if (classSelectorGroup) classSelectorGroup.style.display = 'none';
-                        if (classSelect) classSelect.value = '';
-                        
-                        const scheduleItem = teacherScheduleData.find(s => s && s.time_period === currentPeriod);
-                        if (scheduleItem && scheduleItem.class_name) {
-                            currentClass = scheduleItem.class_name;
-                            if (locationInput) {
-                                locationInput.value = scheduleItem.class_name;
-                                currentLocation = scheduleItem.class_name;
-                            }
-                        } else {
-                            // Fall back to standard periods
-                            const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
-                            if (selectedPeriod) {
-                                currentClass = '';
-                                if (locationInput) {
-                                    locationInput.value = selectedPeriod.location;
-                                    currentLocation = selectedPeriod.location;
-                                }
-                            }
-                        }
-                        
-                        // Load data after setting class
-                        loadPeriodData();
-                    }
-                } else {
-                    // No schedule data - hide selector and use defaults
-                    if (classSelectorGroup) classSelectorGroup.style.display = 'none';
-                    if (classSelect) classSelect.value = '';
-                    const selectedPeriod = STANDARD_PERIODS.find(p => p.time === currentPeriod);
-                    if (selectedPeriod && locationInput) {
-                        locationInput.value = selectedPeriod.location;
-                        currentLocation = selectedPeriod.location;
-                    }
-                    loadPeriodData();
-                }
+                applyPeriodEntrySelection();
             });
         }
         
@@ -2114,10 +2127,8 @@ async function switchView(viewName) {
     } catch (e) {}
     
     if (viewName === 'period-entry') {
-        // Load teacher schedule if user is staff/admin
-        if (canEdit()) {
-            loadSchedules('teacher');
-        }
+        // Staff/admin: teacher schedule. Students: their own schedule from the Schedules tab.
+        loadPeriodEntrySchedule();
         // If period is already selected, reload data
         if (currentPeriod) {
             loadPeriodData();
@@ -2460,6 +2471,9 @@ function setupPeriodSelector() {
             periodSelect.appendChild(option);
         });
     }
+    if (isStudent()) {
+        setPeriodEntryLocation('');
+    }
 }
 
 // Function to parse time string (e.g., "7:45-8:30" or "1:00-1:30") and return start and end times in minutes
@@ -2500,13 +2514,9 @@ function parseTimeRange(timeStr) {
 
 // Function to get current period based on current time and user's schedule
 function getCurrentPeriodFromSchedule() {
-    // Only for staff/admin users who have a teacher schedule
-    if (!canEdit()) {
-        console.log('getCurrentPeriodFromSchedule: user cannot edit');
-        return null;
-    }
-    if (!teacherScheduleData || teacherScheduleData.length === 0) {
-        console.log('getCurrentPeriodFromSchedule: no schedule data', teacherScheduleData);
+    const scheduleItems = getPeriodEntryScheduleItems();
+    if (!scheduleItems.length) {
+        console.log('getCurrentPeriodFromSchedule: no schedule data');
         return null;
     }
     
@@ -2515,10 +2525,10 @@ function getCurrentPeriodFromSchedule() {
     const currentMinutes = now.getMinutes();
     const currentTimeInMinutes = currentHours * 60 + currentMinutes;
     console.log('getCurrentPeriodFromSchedule: current time', currentHours + ':' + currentMinutes, '(', currentTimeInMinutes, 'minutes)');
-    console.log('getCurrentPeriodFromSchedule: schedule data', teacherScheduleData);
+    console.log('getCurrentPeriodFromSchedule: schedule data', scheduleItems);
     
     // Find the period that matches the current time
-    for (const scheduleItem of teacherScheduleData) {
+    for (const scheduleItem of scheduleItems) {
         if (!scheduleItem || !scheduleItem.time_period) continue;
         
         const timeRange = parseTimeRange(scheduleItem.time_period);
@@ -11079,15 +11089,20 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                 renderTeacherSchedule();
                 updateTeacherScheduleSubtitle();
                 updateTeacherScheduleEditability();
-                // Auto-select current period if we're in period-entry view
-                if (document.getElementById('period-entry-view')?.classList.contains('active')) {
-                    setTimeout(() => {
-                        autoSelectCurrentPeriod();
-                    }, 100);
-                }
             } else {
-                studentScheduleData = data;
-                renderStudentSchedule();
+                studentScheduleData = Array.isArray(data) ? data : [];
+                if (document.getElementById('student-schedule-body')) {
+                    renderStudentSchedule();
+                }
+            }
+            const shouldAutoSelect = document.getElementById('period-entry-view')?.classList.contains('active') && (
+                (type === 'teacher' && canEdit()) ||
+                (type === 'student' && isStudent())
+            );
+            if (shouldAutoSelect) {
+                setTimeout(() => {
+                    autoSelectCurrentPeriod();
+                }, 100);
             }
             return data;
         })
