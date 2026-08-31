@@ -2818,6 +2818,18 @@ table tbody tr:hover {
 }
 
 .plan-kebab-menu button:hover { background: #f1f5f9; }
+
+.plan-student-view .plan-editor-table th:last-child,
+.plan-student-view .plan-row-actions {
+    display: none;
+}
+.plan-student-view .plan-if-input,
+.plan-student-view .plan-then-input {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    resize: none;
+    cursor: default;
+}
 .plan-met-popover {
     position: absolute;
     z-index: 80;

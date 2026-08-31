@@ -2110,7 +2110,7 @@
         <div class="modal-content" style="max-width: 920px;">
             <span class="close" onclick="closeStudentPlanModal()">&times;</span>
             <h2 id="student-plan-modal-title">Student plan</h2>
-            <p style="margin: 0 0 16px; color: #64748b; font-size: 14px;">
+            <p id="student-plan-modal-help" style="margin: 0 0 16px; color: #64748b; font-size: 14px;">
                 Add If / Then rows. Optionally attach a structured point-card percent threshold so the system can detect when it is met.
             </p>
             <div class="plan-table-wrap" style="overflow-x: auto;">
@@ -2232,7 +2232,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
 
     <script src="{{ url_for('static', filename='app.js') }}?v=studentperiod1"></script>
-    <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan4"></script>
+    <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
     {% endif %}

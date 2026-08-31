@@ -43,6 +43,20 @@
         return typeof isStaff === 'function' && (isStaff() || (typeof isAdmin === 'function' && isAdmin()));
     }
 
+    function loggedInStudentId() {
+        if (typeof getLoggedInStudentId === 'function') return getLoggedInStudentId();
+        const id = global.currentUser && global.currentUser.studentId;
+        return id != null ? id : null;
+    }
+
+    function canViewStudentPlan(studentId) {
+        if (canEditPlans()) return true;
+        if (typeof isStudent === 'function' && isStudent()) {
+            return Number(loggedInStudentId()) === Number(studentId);
+        }
+        return false;
+    }
+
     function escapeHtml(str) {
         if (global.escapeHtml) return global.escapeHtml(String(str ?? ''));
         return String(str ?? '')
@@ -202,17 +216,17 @@
         btn.textContent = '⋮';
         const menu = document.createElement('div');
         menu.className = 'plan-kebab-menu';
-        const planItems = canEditPlans()
-            ? `
-                <button type="button" data-action="edit">Attach / Edit plan</button>
-                <button type="button" data-action="show">Show plan</button>
-                <button type="button" data-action="history">Delivery history</button>
-            `
-            : '';
-        menu.innerHTML = `
-            <button type="button" data-action="past-cards">View past point cards</button>
-            ${planItems}
-        `;
+        const menuItems = ['<button type="button" data-action="past-cards">View past point cards</button>'];
+        if (canEditPlans()) {
+            menuItems.push(
+                '<button type="button" data-action="edit">Attach / Edit plan</button>',
+                '<button type="button" data-action="show">Show plan</button>',
+                '<button type="button" data-action="history">Delivery history</button>'
+            );
+        } else if (canViewStudentPlan(student.id)) {
+            menuItems.push('<button type="button" data-action="show">Show If/Then plan</button>');
+        }
+        menu.innerHTML = menuItems.join('');
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const wasOpen = menu.classList.contains('open');
@@ -313,22 +327,30 @@
         const tbody = document.getElementById('plan-rows-body');
         if (!tbody) return;
         const readOnly = planModalState.readOnly;
+        const studentView = readOnly && !canEditPlans();
         tbody.innerHTML = '';
+        if (!planModalState.rows.length) {
+            tbody.innerHTML = '<tr><td colspan="3"><p class="info-message" style="margin:12px 0;">No If / Then plan has been set yet.</p></td></tr>';
+            return;
+        }
         planModalState.rows.forEach((row, idx) => {
             const tr = document.createElement('tr');
             tr.className = 'plan-row';
             tr.dataset.rowIndex = String(idx);
+            const thresholdUi = studentView
+                ? ''
+                : `<label class="plan-threshold-toggle" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;">
+                        <input type="checkbox" class="plan-has-threshold" ${row.has_threshold ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
+                        Add point-card % threshold
+                    </label>
+                    ${thresholdFieldsHtml(row, idx, readOnly)}`;
             tr.innerHTML = `
                 <td class="plan-if-cell">
                     <div class="plan-if-autocomplete-wrap">
                         <textarea class="plan-if-input" rows="2" ${readOnly ? 'readonly' : ''} placeholder="If…">${escapeHtml(row.if_text || '')}</textarea>
                         <div class="plan-if-dropdown" style="display:none;"></div>
                     </div>
-                    <label class="plan-threshold-toggle" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;">
-                        <input type="checkbox" class="plan-has-threshold" ${row.has_threshold ? 'checked' : ''} ${readOnly ? 'disabled' : ''}>
-                        Add point-card % threshold
-                    </label>
-                    ${thresholdFieldsHtml(row, idx, readOnly)}
+                    ${thresholdUi}
                 </td>
                 <td>
                     <textarea class="plan-then-input" rows="3" ${readOnly ? 'readonly' : ''} placeholder="Then…">${escapeHtml(row.then_text || '')}</textarea>
@@ -485,31 +507,49 @@
             alert('Only staff and admin can edit plans.');
             return;
         }
+        if (readOnly && !canViewStudentPlan(studentId)) {
+            alert('You can only view your own If/Then plan.');
+            return;
+        }
         const modal = document.getElementById('student-plan-modal');
         if (!modal) return;
+        const studentView = !!readOnly && !canEditPlans();
         planModalState.studentId = studentId;
         planModalState.studentName = studentName || '';
         planModalState.readOnly = !!readOnly;
         try {
             const data = await fetchPlan(studentId);
-            planModalState.rows = (data.rows && data.rows.length) ? data.rows.map((r) => ({
-                ...emptyRow(),
-                ...r,
-                threshold_percent: r.threshold_percent != null ? r.threshold_percent : '',
-            })) : [emptyRow()];
+            if (data.rows && data.rows.length) {
+                planModalState.rows = data.rows.map((r) => ({
+                    ...emptyRow(),
+                    ...r,
+                    threshold_percent: r.threshold_percent != null ? r.threshold_percent : '',
+                }));
+            } else {
+                planModalState.rows = studentView ? [] : [emptyRow()];
+            }
         } catch (e) {
-            planModalState.rows = [emptyRow()];
+            planModalState.rows = studentView ? [] : [emptyRow()];
         }
         const title = document.getElementById('student-plan-modal-title');
         if (title) {
-            title.textContent = readOnly
-                ? `Plan — ${studentName || 'Student'}`
-                : `Edit plan — ${studentName || 'Student'}`;
+            title.textContent = studentView
+                ? `Your If/Then plan${studentName ? ` — ${studentName}` : ''}`
+                : readOnly
+                    ? `Plan — ${studentName || 'Student'}`
+                    : `Edit plan — ${studentName || 'Student'}`;
+        }
+        const help = document.getElementById('student-plan-modal-help');
+        if (help) {
+            help.textContent = studentView
+                ? 'These are the If / Then steps on your plan.'
+                : 'Add If / Then rows. Optionally attach a structured point-card percent threshold so the system can detect when it is met.';
         }
         const addBtn = document.getElementById('plan-add-row-btn');
         const saveBtn = document.getElementById('plan-save-btn');
         if (addBtn) addBtn.style.display = readOnly ? 'none' : '';
         if (saveBtn) saveBtn.style.display = readOnly ? 'none' : '';
+        modal.classList.toggle('plan-student-view', studentView);
         renderPlanRows();
         modal.style.display = 'block';
     }
