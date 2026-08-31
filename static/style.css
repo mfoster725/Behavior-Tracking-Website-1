@@ -1370,6 +1370,80 @@ table tbody tr:hover {
     margin-bottom: 0;
 }
 
+.info-edit-history-group {
+    margin-top: 0.15rem;
+}
+
+.info-edit-history {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.info-edit-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+}
+
+.info-edit-history-table th,
+.info-edit-history-table td {
+    padding: 3px 6px;
+    vertical-align: middle;
+}
+
+.info-edit-history-table thead th {
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text-secondary);
+    padding-bottom: 4px;
+}
+
+.info-edit-history-label {
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding-left: 0 !important;
+    width: 1%;
+}
+
+.info-edit-history-who {
+    text-align: left;
+    white-space: nowrap;
+    padding-right: 14px;
+}
+
+.info-edit-history-star {
+    text-align: center;
+    width: 1.75em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.info-edit-history-info {
+    text-align: left;
+    padding-left: 10px;
+    font-size: 12px;
+    min-width: 4.5rem;
+}
+
+.info-edit-history-changed {
+    background: #ffe082;
+    color: #1c1917;
+    border-radius: 3px;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.35);
+}
+
+.info-edit-history-empty {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-style: italic;
+    padding: 2px 0 0;
+}
+
 #info-modal .delete-btn {
     position: static !important;
     top: auto !important;

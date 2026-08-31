@@ -2964,6 +2964,7 @@ function renderStudentsGrid() {
                     periodData[student.id] = { student_id: student.id };
                 }
                 periodData[student.id][`${cat.full}_points`] = val;
+                recordPeriodEditHistory(student.id, currentPeriod);
                 
                 // Update percentage row in real-time
                 updatePeriodPercentageRow();
@@ -4050,6 +4051,7 @@ function handleDailyInputChange(e) {
         dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
     }
     dailyData[studentId][period][category] = value;
+    recordPeriodEditHistory(studentId, period);
     
     // Update percentage row in real-time
     updateDailyPercentageRow();
@@ -8200,6 +8202,13 @@ function syncEditingPointCardRecordField(input) {
     }
     if (['safety', 'teamwork', 'accountability', 'relationships'].includes(category)) {
         record.periods[periodIndex][`${category}_points`] = value === '' ? null : parseInt(value, 10);
+        const period = record.periods[periodIndex];
+        recordPeriodEditHistory(
+            window.editingPointCardStudentId,
+            period?.time_range || '',
+            [],
+            periodIndex
+        );
     }
 }
 
@@ -9651,6 +9660,418 @@ function createPurposeRow(purpose = '', isReadOnly = false) {
     return row;
 }
 
+const EDIT_HISTORY_COALESCE_MS = 10 * 60 * 1000;
+const EDIT_HISTORY_MAX_ENTRIES = 50;
+const EDIT_HISTORY_INFO_FIELDS = [
+    { keys: ['notes'], label: 'Notes', kind: 'text' },
+    { keys: ['reminder1', 'reminder2', 'reminder3'], label: 'Reminders', kind: 'bool-any' },
+    { keys: ['reset'], label: 'Reset', kind: 'bool' },
+    { keys: ['alternate_location'], label: 'Alternate Location', kind: 'text' },
+    { keys: ['infractions'], label: 'Infractions', kind: 'infractions' },
+    { keys: ['frenzy'], label: 'Frenzy', kind: 'bool' },
+    { keys: ['purposes'], label: 'Purposes', kind: 'list' },
+    { keys: ['duration'], label: 'Duration', kind: 'text' },
+    { keys: ['results'], label: 'Frenzy Notes', kind: 'text' },
+    { keys: ['severity'], label: 'Highest Level of Staff Called', kind: 'number' }
+];
+
+function canRecordEditHistory() {
+    return !!(window.currentUser && ['staff', 'admin'].includes(window.currentUser.role) && !isStudent());
+}
+
+function getSignedInEditorName() {
+    if (!window.currentUser) return 'Staff';
+    return String(window.currentUser.name || window.currentUser.username || 'Staff').trim() || 'Staff';
+}
+
+function formatEditHistoryTime(date = new Date()) {
+    try {
+        return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    } catch (e) {
+        const hours = date.getHours();
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const hour12 = hours % 12 || 12;
+        const suffix = hours >= 12 ? 'PM' : 'AM';
+        return `${hour12}:${minutes} ${suffix}`;
+    }
+}
+
+function escapeEditHistoryHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function parseInfoObject(rawInfo) {
+    if (!rawInfo || !String(rawInfo).trim()) return {};
+    try {
+        const parsed = JSON.parse(rawInfo);
+        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : { notes: String(rawInfo) };
+    } catch (e) {
+        return { notes: String(rawInfo) };
+    }
+}
+
+function getEditHistoryList(infoData) {
+    return Array.isArray(infoData?.edit_history) ? infoData.edit_history.filter(Boolean) : [];
+}
+
+function normalizeStarHistoryValue(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function starSnapshotsEqual(a, b) {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    return normalizeStarHistoryValue(a.s) === normalizeStarHistoryValue(b.s)
+        && normalizeStarHistoryValue(a.t) === normalizeStarHistoryValue(b.t)
+        && normalizeStarHistoryValue(a.a) === normalizeStarHistoryValue(b.a)
+        && normalizeStarHistoryValue(a.r) === normalizeStarHistoryValue(b.r);
+}
+
+function formatStarHistoryDisplay(value) {
+    const normalized = normalizeStarHistoryValue(value);
+    return normalized === null ? '–' : String(normalized);
+}
+
+function getStarSnapshot(studentId, period, periodIndex) {
+    if (Number.isInteger(periodIndex) && window.editingPointCardRecord?.periods?.[periodIndex]) {
+        const row = window.editingPointCardRecord.periods[periodIndex];
+        return {
+            s: normalizeStarHistoryValue(row.safety_points),
+            t: normalizeStarHistoryValue(row.teamwork_points),
+            a: normalizeStarHistoryValue(row.accountability_points),
+            r: normalizeStarHistoryValue(row.relationships_points)
+        };
+    }
+    if (typeof isPeriodEntryViewActive === 'function' && isPeriodEntryViewActive()
+        && studentId != null && periodData[studentId]
+        && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
+        const row = periodData[studentId];
+        return {
+            s: normalizeStarHistoryValue(row.safety_points),
+            t: normalizeStarHistoryValue(row.teamwork_points),
+            a: normalizeStarHistoryValue(row.accountability_points),
+            r: normalizeStarHistoryValue(row.relationships_points)
+        };
+    }
+    if (studentId != null && period && dailyData[studentId]?.[period]) {
+        const row = dailyData[studentId][period];
+        return {
+            s: normalizeStarHistoryValue(row.s),
+            t: normalizeStarHistoryValue(row.t),
+            a: normalizeStarHistoryValue(row.a),
+            r: normalizeStarHistoryValue(row.r)
+        };
+    }
+    if (studentId != null && periodData[studentId] && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
+        const row = periodData[studentId];
+        return {
+            s: normalizeStarHistoryValue(row.safety_points),
+            t: normalizeStarHistoryValue(row.teamwork_points),
+            a: normalizeStarHistoryValue(row.accountability_points),
+            r: normalizeStarHistoryValue(row.relationships_points)
+        };
+    }
+    const values = getPeriodStarValues(studentId, period);
+    return {
+        s: normalizeStarHistoryValue(values[0]),
+        t: normalizeStarHistoryValue(values[1]),
+        a: normalizeStarHistoryValue(values[2]),
+        r: normalizeStarHistoryValue(values[3])
+    };
+}
+
+function normalizeInfoText(value) {
+    return String(value ?? '').trim();
+}
+
+function normalizeInfoBool(value) {
+    return !!value;
+}
+
+function normalizeInfoNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function normalizeInfractionsForHistory(infoData) {
+    if (Array.isArray(infoData?.infractions)) {
+        return infoData.infractions
+            .map((item) => {
+                const type = String(item?.type || '').trim().toLowerCase();
+                const count = Number(item?.count) || 1;
+                return type ? `${type}:${count}` : '';
+            })
+            .filter(Boolean)
+            .sort()
+            .join('|');
+    }
+    const legacy = [];
+    if (infoData?.infraction1) {
+        legacy.push(`${String(infoData.infraction1).trim().toLowerCase()}:${Number(infoData.infraction1Count) || 1}`);
+    }
+    if (infoData?.infraction2) {
+        legacy.push(`${String(infoData.infraction2).trim().toLowerCase()}:${Number(infoData.infraction2Count) || 1}`);
+    }
+    return legacy.sort().join('|');
+}
+
+function normalizePurposesForHistory(infoData) {
+    const list = Array.isArray(infoData?.purposes)
+        ? infoData.purposes
+        : [infoData?.purpose1, infoData?.purpose2].filter(Boolean);
+    return list
+        .map((item) => String(item || '').trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join('|');
+}
+
+function getInfoFieldChanges(previousInfo, nextInfo) {
+    const prev = previousInfo || {};
+    const next = nextInfo || {};
+    const changes = [];
+    EDIT_HISTORY_INFO_FIELDS.forEach((field) => {
+        let changed = false;
+        if (field.kind === 'text') {
+            changed = normalizeInfoText(prev[field.keys[0]]) !== normalizeInfoText(next[field.keys[0]]);
+        } else if (field.kind === 'bool') {
+            changed = normalizeInfoBool(prev[field.keys[0]]) !== normalizeInfoBool(next[field.keys[0]]);
+        } else if (field.kind === 'bool-any') {
+            const prevValue = field.keys.map((key) => normalizeInfoBool(prev[key])).join(',');
+            const nextValue = field.keys.map((key) => normalizeInfoBool(next[key])).join(',');
+            changed = prevValue !== nextValue;
+        } else if (field.kind === 'number') {
+            changed = normalizeInfoNumber(prev[field.keys[0]]) !== normalizeInfoNumber(next[field.keys[0]]);
+        } else if (field.kind === 'infractions') {
+            changed = normalizeInfractionsForHistory(prev) !== normalizeInfractionsForHistory(next);
+        } else if (field.kind === 'list') {
+            changed = normalizePurposesForHistory(prev) !== normalizePurposesForHistory(next);
+        }
+        if (changed) changes.push(field.label);
+    });
+    return changes;
+}
+
+function getPeriodInfoObject(studentId, period, periodIndex) {
+    if (Number.isInteger(periodIndex) && window.editingPointCardRecord?.periods?.[periodIndex]) {
+        return parseInfoObject(window.editingPointCardRecord.periods[periodIndex].info);
+    }
+    if (typeof isPeriodEntryViewActive === 'function' && isPeriodEntryViewActive()
+        && studentId != null && periodData[studentId]
+        && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
+        return parseInfoObject(periodData[studentId].info);
+    }
+    if (studentId != null && period && dailyData[studentId]?.[period]) {
+        return parseInfoObject(dailyData[studentId][period].info);
+    }
+    if (studentId != null && periodData[studentId] && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
+        return parseInfoObject(periodData[studentId].info);
+    }
+    const button = document.querySelector(`button.info-btn[data-student-id="${studentId}"][data-period="${period}"]`);
+    return parseInfoObject(button?.dataset?.info || '');
+}
+
+function persistPeriodInfoObject(studentId, period, infoData, periodIndex) {
+    const infoString = JSON.stringify(infoData || {});
+    const editingThisPeriod = Number.isInteger(periodIndex) && window.editingPointCardRecord?.periods?.[periodIndex];
+    if (editingThisPeriod) {
+        window.editingPointCardRecord.periods[periodIndex].info = infoString;
+    } else {
+        if (studentId != null && period && dailyData[studentId]?.[period]) {
+            dailyData[studentId][period].info = infoString;
+        }
+        if (studentId != null && periodData[studentId] && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
+            periodData[studentId].info = infoString;
+        }
+        document.querySelectorAll(`button.info-btn[data-student-id="${studentId}"][data-period="${period}"]`).forEach((button) => {
+            button.dataset.info = infoString;
+        });
+    }
+    const infoModal = document.getElementById('info-modal');
+    if (infoModal && infoModal.style.display === 'block'
+        && String(infoModal.dataset.studentId) === String(studentId)
+        && String(infoModal.dataset.period) === String(period)) {
+        renderInfoEditHistory(infoData.edit_history);
+    }
+    return infoString;
+}
+
+function upsertEditHistoryEntry(infoData, snapshot, infoChanges) {
+    const history = getEditHistoryList(infoData);
+    const now = Date.now();
+    const name = getSignedInEditorName();
+    const userId = window.currentUser?.id ?? null;
+    const changes = Array.isArray(infoChanges) ? infoChanges.filter(Boolean) : [];
+    const last = history[0];
+    const lastAt = last?.at ? Date.parse(last.at) : NaN;
+    const canCoalesce = !!(last
+        && last.userId === userId
+        && last.name === name
+        && Number.isFinite(lastAt)
+        && (now - lastAt) < EDIT_HISTORY_COALESCE_MS);
+
+    if (canCoalesce) {
+        const mergedChanges = Array.isArray(last.info_changes) ? [...last.info_changes] : [];
+        changes.forEach((label) => {
+            if (!mergedChanges.includes(label)) mergedChanges.push(label);
+        });
+        last.at = new Date(now).toISOString();
+        last.time = formatEditHistoryTime(new Date(now));
+        last.s = snapshot.s;
+        last.t = snapshot.t;
+        last.a = snapshot.a;
+        last.r = snapshot.r;
+        last.info_changes = mergedChanges;
+        infoData.edit_history = history;
+        return infoData;
+    }
+
+    history.unshift({
+        at: new Date(now).toISOString(),
+        time: formatEditHistoryTime(new Date(now)),
+        name,
+        userId,
+        s: snapshot.s,
+        t: snapshot.t,
+        a: snapshot.a,
+        r: snapshot.r,
+        info_changes: changes
+    });
+    if (history.length > EDIT_HISTORY_MAX_ENTRIES) {
+        history.length = EDIT_HISTORY_MAX_ENTRIES;
+    }
+    infoData.edit_history = history;
+    return infoData;
+}
+
+function recordPeriodEditHistory(studentId, period, infoChanges = [], periodIndex = null) {
+    if (!canRecordEditHistory() || studentId == null) return null;
+    const parsedIndex = periodIndex === null || periodIndex === undefined || periodIndex === ''
+        ? NaN
+        : Number(periodIndex);
+    const resolvedIndex = Number.isInteger(parsedIndex) ? parsedIndex : undefined;
+    const snapshot = getStarSnapshot(studentId, period, resolvedIndex);
+    const infoData = getPeriodInfoObject(studentId, period, resolvedIndex);
+    const history = getEditHistoryList(infoData);
+    const last = history[0];
+    const changes = Array.isArray(infoChanges) ? infoChanges.filter(Boolean) : [];
+    if (starSnapshotsEqual(last, snapshot) && changes.length === 0) {
+        return infoData;
+    }
+    upsertEditHistoryEntry(infoData, snapshot, changes);
+    persistPeriodInfoObject(studentId, period, infoData, resolvedIndex);
+    return infoData;
+}
+
+function buildEditHistoryHtml(history) {
+    const entries = Array.isArray(history) ? history.filter(Boolean) : [];
+    if (!entries.length) {
+        return `
+            <table class="info-edit-history-table">
+                <thead>
+                    <tr>
+                        <th class="info-edit-history-label"></th>
+                        <th></th>
+                        <th class="info-edit-history-star">S</th>
+                        <th class="info-edit-history-star">T</th>
+                        <th class="info-edit-history-star">A</th>
+                        <th class="info-edit-history-star">R</th>
+                        <th class="info-edit-history-info">I</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th class="info-edit-history-label" scope="row">Edit History:</th>
+                        <td class="info-edit-history-empty" colspan="6">No edits recorded for this period yet.</td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
+    }
+    const rows = entries.map((entry, index) => {
+        const previous = entries[index + 1];
+        const changed = {
+            s: !!(previous && normalizeStarHistoryValue(entry.s) !== normalizeStarHistoryValue(previous.s)),
+            t: !!(previous && normalizeStarHistoryValue(entry.t) !== normalizeStarHistoryValue(previous.t)),
+            a: !!(previous && normalizeStarHistoryValue(entry.a) !== normalizeStarHistoryValue(previous.a)),
+            r: !!(previous && normalizeStarHistoryValue(entry.r) !== normalizeStarHistoryValue(previous.r))
+        };
+        const infoLabels = Array.isArray(entry.info_changes) ? entry.info_changes.filter(Boolean) : [];
+        const infoText = infoLabels.join(', ');
+        const labelCell = index === 0
+            ? '<th class="info-edit-history-label" scope="row">Edit History:</th>'
+            : '<th class="info-edit-history-label" scope="row"></th>';
+        const starCell = (key) => {
+            const cls = changed[key] ? 'info-edit-history-star info-edit-history-changed' : 'info-edit-history-star';
+            return `<td class="${cls}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</td>`;
+        };
+        const infoCls = infoText ? 'info-edit-history-info info-edit-history-changed' : 'info-edit-history-info';
+        const who = [entry.time, entry.name || 'Staff'].filter(Boolean).join(' - ');
+        return `
+            <tr>
+                ${labelCell}
+                <td class="info-edit-history-who">${escapeEditHistoryHtml(who)}</td>
+                ${starCell('s')}
+                ${starCell('t')}
+                ${starCell('a')}
+                ${starCell('r')}
+                <td class="${infoCls}">${escapeEditHistoryHtml(infoText)}</td>
+            </tr>
+        `;
+    }).join('');
+    return `
+        <table class="info-edit-history-table">
+            <thead>
+                <tr>
+                    <th class="info-edit-history-label"></th>
+                    <th></th>
+                    <th class="info-edit-history-star">S</th>
+                    <th class="info-edit-history-star">T</th>
+                    <th class="info-edit-history-star">A</th>
+                    <th class="info-edit-history-star">R</th>
+                    <th class="info-edit-history-info">I</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows}
+            </tbody>
+        </table>
+    `;
+}
+
+function ensureInfoEditHistoryContainer() {
+    let container = document.getElementById('info-edit-history');
+    if (container) return container;
+    const notesGroup = document.getElementById('info-notes')?.closest('.form-group');
+    const altGroup = document.getElementById('info-alternate-location')?.closest('.form-group');
+    if (!notesGroup || !notesGroup.parentNode) return null;
+    const group = document.createElement('div');
+    group.className = 'form-group info-edit-history-group';
+    container = document.createElement('div');
+    container.id = 'info-edit-history';
+    container.className = 'info-edit-history';
+    group.appendChild(container);
+    if (altGroup) {
+        notesGroup.parentNode.insertBefore(group, altGroup);
+    } else {
+        notesGroup.parentNode.insertBefore(group, notesGroup.nextSibling);
+    }
+    return container;
+}
+
+function renderInfoEditHistory(history) {
+    const container = ensureInfoEditHistoryContainer();
+    if (!container) return;
+    container.innerHTML = buildEditHistoryHtml(history);
+}
+
 async function showInfoModal(event) {
     const button = event.target;
     const studentId = button.dataset.studentId;
@@ -9683,9 +10104,19 @@ async function showInfoModal(event) {
     const student = allStudents.find(s => s.id === studentIdInt);
     const cardColor = student?.card_color || null;
     
+    // Prefer live period info so STAR edits recorded after the button was rendered still show.
+    const periodIndexFromButton = button.dataset.periodIndex === undefined || button.dataset.periodIndex === ''
+        ? undefined
+        : Number(button.dataset.periodIndex);
+    const liveInfo = getPeriodInfoObject(parseInt(studentId, 10), period, periodIndexFromButton);
+    if (liveInfo && Object.keys(liveInfo).length) {
+        infoData = liveInfo;
+    }
+
     // Basic fields
     document.getElementById('info-notes').value = infoData.notes || '';
     document.getElementById('info-notes').disabled = isReadOnly;
+    renderInfoEditHistory(infoData.edit_history);
     
     // Alternate Location
     const alternateLocationInput = document.getElementById('info-alternate-location');
@@ -10029,6 +10460,10 @@ async function showInfoModal(event) {
         modal.dataset.periodIndex = button.dataset.periodIndex ?? '';
         // Ensure info modal appears above edit point card modal
         modal.style.zIndex = '2000';
+    } else {
+        delete modal.dataset.isEditPointCard;
+        delete modal.dataset.periodIndex;
+        modal.style.zIndex = '';
     }
 
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
@@ -10415,6 +10850,17 @@ function saveInfoModal() {
     })();
     infoData = normalizeInfoFromTextFields(infoData, knownLocations);
     updateInfoModalAutoBadges(infoData.auto_from_notes);
+
+    const periodIndex = modal.dataset.periodIndex === undefined || modal.dataset.periodIndex === ''
+        ? undefined
+        : Number(modal.dataset.periodIndex);
+    const studentIdNum = parseInt(studentId, 10);
+    const previousInfo = getPeriodInfoObject(studentIdNum, period, periodIndex);
+    const fieldChanges = getInfoFieldChanges(previousInfo, infoData);
+    infoData.edit_history = getEditHistoryList(previousInfo);
+    if (fieldChanges.length && canRecordEditHistory()) {
+        upsertEditHistoryEntry(infoData, getStarSnapshot(studentIdNum, period, periodIndex), fieldChanges);
+    }
     
     // Convert to JSON string
     const infoString = JSON.stringify(infoData);
@@ -10545,6 +10991,10 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <div class="form-group">
                     <label>Notes:</label>
                     <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+
+                <div class="form-group info-edit-history-group">
+                    <div class="info-edit-history">${buildEditHistoryHtml(infoData.edit_history)}</div>
                 </div>
 
                 <!-- Reminders -->

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=managedbyme4">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=edithistory1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1674,6 +1674,11 @@
                     <textarea id="info-notes" rows="3" placeholder="Enter notes..."></textarea>
                 </div>
 
+                <!-- Per-period edit history -->
+                <div class="form-group info-edit-history-group">
+                    <div id="info-edit-history" class="info-edit-history"></div>
+                </div>
+
                 <!-- Alternate Location -->
                 <div class="form-group">
                     <label for="info-alternate-location">Alternate Location:</label>
@@ -2231,7 +2236,7 @@
     </div>
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=studentperiod2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=edithistory1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
