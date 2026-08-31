@@ -4223,12 +4223,51 @@ function moveToNextInput(currentInput) {
 }
 
 function moveToPreviousInput(currentInput) {
+    const category = currentInput.dataset.category;
+    const studentId = parseInt(currentInput.dataset.studentId, 10);
+    const period = getPeriodForStarInput(currentInput);
+    const starCategories = ['s', 't', 'a', 'r'];
+    const catIdx = starCategories.indexOf(category);
+
+    if (catIdx > 0) {
+        focusStarInput(studentId, period, starCategories[catIdx - 1]);
+        return;
+    }
+
+    if (category !== 's') return;
+
+    const mode = getStarEntryMode();
+    if (mode === 'student' && !isPeriodEntryViewActive()) {
+        const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+        if (periodIdx > 0) {
+            focusStarInput(studentId, STANDARD_PERIODS[periodIdx - 1].time, 'r');
+        }
+        return;
+    }
+
+    if (mode === 'period' || isPeriodEntryViewActive()) {
+        const students = getStudentsForStarNav();
+        const studentIdx = students.findIndex((s) => String(s.id) === String(studentId));
+        if (studentIdx > 0) {
+            focusStarInput(students[studentIdx - 1].id, period, 'r');
+            return;
+        }
+        if (!isPeriodEntryViewActive()) {
+            const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+            if (periodIdx > 0) {
+                const prevPeriod = STANDARD_PERIODS[periodIdx - 1].time;
+                const lastStudent = students[students.length - 1];
+                focusStarInput(lastStudent.id, prevPeriod, 'r');
+            }
+        }
+        return;
+    }
+
+    // No mode chosen yet: flat DOM order (legacy behavior)
     const allInputs = getStarInputsInSameGrid(currentInput);
     const currentIndex = allInputs.indexOf(currentInput);
-    
     if (currentIndex > 0) {
-        const prevInput = allInputs[currentIndex - 1];
-        focusDailyStarInput(prevInput);
+        focusDailyStarInput(allInputs[currentIndex - 1]);
     }
 }
 
