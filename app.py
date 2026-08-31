@@ -4044,15 +4044,21 @@ def plan_if_library():
 @app.route('/api/students/<int:student_id>/plan', methods=['GET', 'PUT'])
 @login_required
 def student_plan(student_id):
-    if current_user.role not in ('staff', 'admin'):
-        return jsonify({'error': 'Permission denied'}), 403
-    student = Student.query.get_or_404(student_id)
-
+    is_own_student = (
+        current_user.role == 'student' and current_user.student_id == student_id
+    )
     if request.method == 'GET':
+        if current_user.role not in ('staff', 'admin') and not is_own_student:
+            return jsonify({'error': 'Permission denied'}), 403
+        student = Student.query.get_or_404(student_id)
         plan = StudentPlan.query.filter_by(student_id=student.id).first()
         return jsonify(serialize_plan(plan) if plan else {
             'id': None, 'student_id': student.id, 'rows': [], 'updated_at': None
         })
+
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    student = Student.query.get_or_404(student_id)
 
     data = request.json or {}
     rows_data = data.get('rows')
@@ -11162,6 +11168,14 @@ def schedules():
         schedule_type = request.args.get('schedule_type', 'teacher')
         student_id = request.args.get('student_id', type=int)
         teacher_user_id = request.args.get('user_id', type=int)  # For teacher schedule: whose schedule to load
+
+        # Students may only read their own student schedule (used by Period Entry).
+        if current_user.role == 'student':
+            if schedule_type != 'student' or not current_user.student_id:
+                return jsonify({'error': 'Permission denied'}), 403
+            if student_id is not None and student_id != current_user.student_id:
+                return jsonify({'error': 'Permission denied'}), 403
+            student_id = current_user.student_id
         
         query = Schedule.query.filter_by(schedule_type=schedule_type)
         if schedule_type == 'teacher':
