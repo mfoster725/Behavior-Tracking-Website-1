@@ -228,9 +228,18 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-i
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=[],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
+
+
+def _login_attempt_key():
+    """Rate-limit password guesses per username so a shared school IP is not one bucket."""
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip().lower()
+    if username:
+        return f"login-user:{username}"
+    return get_remote_address()
 
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
@@ -2393,8 +2402,10 @@ def ensure_db_initialized():
             traceback.print_exc()
 
 # Login route
+# Shared school Wi-Fi: do not cap page loads. Cap POST guesses per username, with a high IP ceiling.
 @app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("30 per minute", key_func=_login_attempt_key, methods=["POST"])
+@limiter.limit("300 per minute", key_func=get_remote_address, methods=["POST"])
 def login():
     if request.method == 'GET':
         return render_template('login.html')
@@ -2462,7 +2473,8 @@ def login():
         return jsonify({'success': False, 'error': f'An error occurred during login: {str(e)}'}), 500
 
 @app.route('/api/register', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("60 per minute")
+@limiter.limit("300 per hour")
 def register():
     """Public registration endpoint for creating accounts"""
     try:
@@ -2871,7 +2883,6 @@ def billing_status():
 
 
 @app.route('/api/billing/checkout', methods=['POST'])
-@limiter.limit("10 per hour")
 @login_required
 @admin_required
 def billing_checkout():
@@ -2963,7 +2974,6 @@ def billing_checkout():
 
 
 @app.route('/api/billing/portal', methods=['POST'])
-@limiter.limit("20 per hour")
 @login_required
 @admin_required
 def billing_portal():
@@ -3081,7 +3091,6 @@ def insights_dashboard():
 
 
 @app.route('/api/insights', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def api_insights():
     student_id_arg = request.args.get('student_id', type=int)
@@ -3122,7 +3131,6 @@ def api_insights():
     })
 
 @app.route('/api/students', methods=['GET', 'POST'])
-@limiter.limit("30 per minute")
 @login_required
 def students():
     if request.method == 'POST':
@@ -3355,7 +3363,6 @@ def students():
             } for s in students])
 
 @app.route('/api/students/<int:student_id>', methods=['DELETE'])
-@limiter.limit("30 per minute")
 @login_required
 def delete_student(student_id):
     # Only staff and admin can delete students
@@ -3394,7 +3401,6 @@ def delete_student(student_id):
     return jsonify({'message': 'Student deleted successfully'}), 200
 
 @app.route('/api/students/by-staff-period', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def students_by_staff_period():
     """Get students who have the current staff member in their schedule for a given period and optionally class"""
@@ -3444,7 +3450,6 @@ def students_by_staff_period():
         return jsonify([])
 
 @app.route('/api/students/by-staff-name', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def students_by_staff_name():
     """Get students who have a specific staff member in their team members"""
@@ -3527,7 +3532,6 @@ def students_by_staff_name():
 
 
 @app.route('/api/students/archived', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @admin_required
 def archived_students():
@@ -3571,7 +3575,6 @@ def archived_students():
 
 
 @app.route('/api/students/<int:student_id>/restore-user', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 @admin_required
 def restore_student_user(student_id):
@@ -4016,7 +4019,6 @@ def empty_plan_threshold_stats():
 
 
 @app.route('/api/plan-if-library', methods=['GET', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def plan_if_library():
     if current_user.role not in ('staff', 'admin'):
@@ -4040,7 +4042,6 @@ def plan_if_library():
 
 
 @app.route('/api/students/<int:student_id>/plan', methods=['GET', 'PUT'])
-@limiter.limit("60 per minute")
 @login_required
 def student_plan(student_id):
     if current_user.role not in ('staff', 'admin'):
@@ -4113,7 +4114,6 @@ def student_plan(student_id):
 
 
 @app.route('/api/students/<int:student_id>/plan/evaluate', methods=['POST'])
-@limiter.limit("60 per minute")
 @login_required
 def student_plan_evaluate(student_id):
     if current_user.role not in ('staff', 'admin'):
@@ -4131,7 +4131,6 @@ def student_plan_evaluate(student_id):
 
 
 @app.route('/api/students/<int:student_id>/plan/active-mets', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def student_plan_active_mets(student_id):
     if current_user.role not in ('staff', 'admin'):
@@ -4148,7 +4147,6 @@ def student_plan_active_mets(student_id):
 
 
 @app.route('/api/plan-threshold-events/<int:event_id>/deliver', methods=['POST'])
-@limiter.limit("60 per minute")
 @login_required
 def deliver_plan_threshold_event(event_id):
     if current_user.role not in ('staff', 'admin'):
@@ -4167,7 +4165,6 @@ def deliver_plan_threshold_event(event_id):
 
 
 @app.route('/api/students/<int:student_id>/plan/rows/<int:row_id>/manual-met', methods=['POST'])
-@limiter.limit("60 per minute")
 @login_required
 def manual_plan_row_met(student_id, row_id):
     """
@@ -4215,7 +4212,6 @@ def manual_plan_row_met(student_id, row_id):
 
 
 @app.route('/api/students/<int:student_id>/plan/delivery-history', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def student_plan_delivery_history(student_id):
     if current_user.role not in ('staff', 'admin') and not (
@@ -4252,7 +4248,6 @@ def student_plan_delivery_history(student_id):
 
 
 @app.route('/api/admin/purge-student-emails', methods=['POST'])
-@limiter.limit("5 per minute")
 @login_required
 @admin_required
 def purge_student_emails():
@@ -4288,7 +4283,6 @@ def purge_student_emails():
     }), 200
 
 @app.route('/api/period-data', methods=['GET', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def period_data():
     """Get or save period-based data for all students"""
@@ -4449,7 +4443,6 @@ def period_data():
         return jsonify(result)
 
 @app.route('/api/daily-records', methods=['GET', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def daily_records():
     """Get or save daily records"""
@@ -4858,7 +4851,6 @@ def _serialize_checkpoint(checkpoint):
 
 
 @app.route('/api/trends', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def api_trends():
     student_id = request.args.get('student_id', type=int)
@@ -4939,7 +4931,6 @@ def api_trends():
 
 
 @app.route('/api/checkpoints', methods=['GET', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def api_checkpoints():
     if request.method == 'POST':
@@ -5050,7 +5041,6 @@ def api_checkpoints():
 
 
 @app.route('/api/checkpoints/<int:checkpoint_id>', methods=['PUT', 'DELETE'])
-@limiter.limit("60 per minute")
 @login_required
 def api_checkpoint_item(checkpoint_id):
     if current_user.role not in ['staff', 'admin']:
@@ -5203,7 +5193,6 @@ def _chunked_id_list(seq, size=900):
 
 
 @app.route('/api/summary', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @api_json_errors
 def summary():
@@ -8458,7 +8447,6 @@ def summary():
 
 
 @app.route('/api/case-manager-comparison', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def case_manager_comparison():
     """Compare STAR and infraction data across all case managers"""
@@ -9958,7 +9946,6 @@ def _import_users_payload(success, errors, warnings, updated_names, duplicate_co
 
 
 @app.route('/api/import-users', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def import_users():
     """Import staff, outside staff, or student users from CSV."""
@@ -10466,7 +10453,6 @@ def api_sync_google_sheet():
 
 
 @app.route('/api/frenzy-stats', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def frenzy_stats():
     student_id = request.args.get('student_id', type=int)
@@ -11113,7 +11099,6 @@ def frenzy_stats():
         return _frenzy_response(stats)
 
 @app.route('/api/schedules', methods=['GET', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def schedules():
     """Get or save schedules"""
@@ -11211,7 +11196,6 @@ def schedules():
         return jsonify(result)
 
 @app.route('/api/schedules/locations', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_schedule_locations():
     """Get list of unique class names from teacher schedules"""
@@ -11231,7 +11215,6 @@ def get_schedule_locations():
     return jsonify(sorted(list(locations)))
 
 @app.route('/api/schedules/bulk', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def bulk_student_schedules():
     """Return student schedules grouped by student, for printing."""
@@ -11323,7 +11306,6 @@ def bulk_student_schedules():
     return jsonify({'items': items})
 
 @app.route('/api/users', methods=['GET', 'POST', 'PUT', 'DELETE'])
-@limiter.limit("30 per minute")
 @login_required
 def manage_users():
     """Manage user accounts"""
@@ -11618,7 +11600,6 @@ def manage_users():
 
 
 @app.route('/api/user/preferences', methods=['GET', 'POST'])
-@limiter.limit("30 per minute")
 @login_required
 def user_preferences():
     """
@@ -11648,7 +11629,6 @@ def user_preferences():
 
 
 @app.route('/api/outside-staff/<int:user_id>/students', methods=['GET', 'POST', 'DELETE'])
-@limiter.limit("30 per minute")
 @login_required
 @admin_required
 def outside_staff_students(user_id):
@@ -11726,7 +11706,6 @@ def outside_staff_students(user_id):
         return jsonify({'message': 'Student unassigned successfully'}), 200
 
 @app.route('/api/team-members/<int:student_id>', methods=['GET', 'PUT'])
-@limiter.limit("30 per minute")
 @login_required
 def team_members(student_id):
     """Get or update team members for a student"""
@@ -11790,7 +11769,6 @@ def team_members(student_id):
 
 # Amendment Request Endpoints
 @app.route('/api/amendment-requests', methods=['GET', 'POST'])
-@limiter.limit("30 per minute")
 @login_required
 def amendment_requests():
     """Create or view amendment requests"""
@@ -11875,7 +11853,6 @@ def amendment_requests():
         return jsonify(result)
 
 @app.route('/api/amendment-requests/<int:request_id>/review', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def review_amendment_request(request_id):
@@ -11921,7 +11898,6 @@ def review_amendment_request(request_id):
 
 # Directory Information Opt-Out
 @app.route('/api/students/<int:student_id>/directory-opt-out', methods=['POST', 'DELETE'])
-@limiter.limit("30 per minute")
 @login_required
 def directory_opt_out(student_id):
     """Opt-out or opt-in to directory information sharing"""
@@ -11964,7 +11940,6 @@ def directory_opt_out(student_id):
 
 # Data Export Endpoint
 @app.route('/api/export-student-data/<int:student_id>', methods=['GET'])
-@limiter.limit("10 per minute")
 @login_required
 def export_student_data(student_id):
     """Export all student data (parents/students can request copies)"""
@@ -12044,7 +12019,6 @@ def export_student_data(student_id):
 
 # Rights Notification Endpoint
 @app.route('/api/rights-notification', methods=['GET', 'POST'])
-@limiter.limit("10 per minute")
 @login_required
 def rights_notification():
     """Handle rights notification acknowledgment"""
@@ -12301,7 +12275,6 @@ def get_or_create_bank_account(student_id):
 
 # Bank Account Routes
 @app.route('/api/bank-account/<int:student_id>', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_bank_account(student_id):
     """Get student's bank account balance and transaction history"""
@@ -12326,7 +12299,6 @@ def get_bank_account(student_id):
     })
 
 @app.route('/api/paychecks/<int:student_id>', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_paychecks(student_id):
     """Get all paychecks for a student"""
@@ -12370,7 +12342,6 @@ def get_paychecks(student_id):
     return jsonify([paycheck_item(p) for p in paychecks])
 
 @app.route('/api/paycheck/<int:paycheck_id>', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_paycheck(paycheck_id):
     """Get specific paycheck details"""
@@ -12656,7 +12627,6 @@ def run_paycheck_generation(target_date=None):
 
 
 @app.route('/api/paycheck/generate', methods=['POST'])
-@limiter.limit("10 per minute")
 @login_required
 @staff_required
 def generate_paychecks():
@@ -12758,7 +12728,6 @@ def auto_submit_point_cards_cron():
 
 
 @app.route('/api/paycheck/<int:paycheck_id>/complete-worksheet', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def complete_paycheck_worksheet(paycheck_id):
     """Student submits completed worksheet - allows unlimited resubmissions until verified"""
@@ -12793,7 +12762,6 @@ def complete_paycheck_worksheet(paycheck_id):
     return verify_paycheck(paycheck_id)
 
 @app.route('/api/paycheck/<int:paycheck_id>/verify', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def verify_paycheck(paycheck_id):
     """Auto-verify worksheet (if correct, deposit)"""
@@ -13096,7 +13064,6 @@ def _validate_lesson_responses(slug, responses, story):
 
 
 @app.route('/api/curriculum/me', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def curriculum_me():
     student_id = _curriculum_resolve_student_id()
@@ -13118,7 +13085,6 @@ def curriculum_me():
 
 
 @app.route('/api/curriculum/lessons', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def curriculum_lessons():
     seed_curriculum_lessons()
@@ -13131,7 +13097,6 @@ def curriculum_lessons():
 
 
 @app.route('/api/curriculum/assignments', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def curriculum_assign():
@@ -13194,7 +13159,6 @@ def curriculum_assign():
 
 
 @app.route('/api/curriculum/roster', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def curriculum_roster():
@@ -13247,7 +13211,6 @@ def curriculum_roster():
 
 
 @app.route('/api/curriculum/assignments/<int:assignment_id>/start', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def curriculum_start(assignment_id):
     assignment = CurriculumAssignment.query.get_or_404(assignment_id)
@@ -13261,7 +13224,6 @@ def curriculum_start(assignment_id):
 
 
 @app.route('/api/curriculum/assignments/<int:assignment_id>/needs-help', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def curriculum_needs_help(assignment_id):
     assignment = CurriculumAssignment.query.get_or_404(assignment_id)
@@ -13274,7 +13236,6 @@ def curriculum_needs_help(assignment_id):
 
 
 @app.route('/api/curriculum/assignments/<int:assignment_id>/complete', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def curriculum_complete(assignment_id):
     assignment = CurriculumAssignment.query.get_or_404(assignment_id)
@@ -13332,7 +13293,6 @@ def curriculum_complete(assignment_id):
 
 
 @app.route('/api/curriculum/goals', methods=['GET', 'POST', 'PATCH'])
-@limiter.limit("30 per minute")
 @login_required
 def curriculum_goals():
     student_id = _curriculum_resolve_student_id()
@@ -13374,7 +13334,6 @@ def curriculum_goals():
 
 # Marketplace catalog: grade-filtered for student (or view-as student_id); staff can get all items with staff=1
 @app.route('/api/marketplace/catalog', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_marketplace_catalog():
     """Get marketplace items.
@@ -13596,7 +13555,6 @@ def _resolve_marketplace_image_url(raw_url):
 
 
 @app.route('/api/marketplace/image-proxy', methods=['GET'])
-@limiter.limit("120 per minute")
 @login_required
 def marketplace_image_proxy():
     """Proxy marketplace images from Google Drive and Imgur so they load without CORS/referrer blocks."""
@@ -13633,7 +13591,6 @@ def marketplace_image_proxy():
 
 
 @app.route('/api/marketplace/checkout', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 def marketplace_checkout():
     """Checkout cart: create one purchase order per cart line. Student only (or staff view-as not used for checkout)."""
@@ -13728,7 +13685,6 @@ def marketplace_checkout():
 
 # Legacy list (all items for staff; kept for compatibility)
 @app.route('/api/marketplace-items', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_marketplace_items():
     """Get marketplace items (all active for staff/admin; for student use catalog)"""
@@ -13769,7 +13725,6 @@ def get_marketplace_items():
     } for item in items])
 
 @app.route('/api/marketplace-items', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 def create_marketplace_item():
     """Create new marketplace item (staff except outside staff, and admin)"""
@@ -13902,7 +13857,6 @@ def create_marketplace_item():
         return jsonify({'error': err_msg}), 500
 
 @app.route('/api/marketplace-items/<int:item_id>', methods=['PUT'])
-@limiter.limit("20 per minute")
 @login_required
 def update_marketplace_item(item_id):
     """Update marketplace item (creator or admin)"""
@@ -13949,7 +13903,6 @@ def update_marketplace_item(item_id):
     })
 
 @app.route('/api/marketplace-items/<int:item_id>', methods=['DELETE'])
-@limiter.limit("20 per minute")
 @login_required
 def delete_marketplace_item(item_id):
     """Delete marketplace item (creator or admin)"""
@@ -13967,7 +13920,6 @@ def delete_marketplace_item(item_id):
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_marketplace_item_hidden_rules(item_id):
     """List hidden rules for an item (staff/admin)."""
@@ -13979,7 +13931,6 @@ def get_marketplace_item_hidden_rules(item_id):
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 def add_marketplace_item_hidden_rule(item_id):
     """Add a hidden rule: hide item from specific student, card_color, or grade_section (staff/admin)."""
@@ -14002,7 +13953,6 @@ def add_marketplace_item_hidden_rule(item_id):
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules/<int:rule_id>', methods=['DELETE'])
-@limiter.limit("30 per minute")
 @login_required
 def remove_marketplace_item_hidden_rule(item_id, rule_id):
     """Remove a hidden rule (staff/admin)."""
@@ -14014,7 +13964,6 @@ def remove_marketplace_item_hidden_rule(item_id, rule_id):
     return jsonify({'message': 'Rule removed'})
 
 @app.route('/api/marketplace-items/<int:item_id>/request-global', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 def request_global_marketplace_item(item_id):
     """Request item to be added to global list"""
@@ -14050,7 +13999,6 @@ def request_global_marketplace_item(item_id):
     }), 201
 
 @app.route('/api/marketplace-item-requests', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_marketplace_item_requests():
     """Get pending requests (admin/case manager)"""
@@ -14079,7 +14027,6 @@ def get_marketplace_item_requests():
     } for r in requests])
 
 @app.route('/api/marketplace-item-requests/<int:request_id>/approve', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 @admin_required
 def approve_marketplace_item_request(request_id):
@@ -14103,7 +14050,6 @@ def approve_marketplace_item_request(request_id):
     return jsonify({'message': 'Request approved', 'status': 'approved'})
 
 @app.route('/api/marketplace-item-requests/<int:request_id>/deny', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 @admin_required
 def deny_marketplace_item_request(request_id):
@@ -14150,7 +14096,6 @@ def _po_to_json(o):
 
 
 @app.route('/api/purchase-orders', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_purchase_orders():
     """Get purchase orders (student: own; staff: support team students only)"""
@@ -14170,7 +14115,6 @@ def get_purchase_orders():
     return jsonify([_po_to_json(o) for o in orders])
 
 @app.route('/api/purchase-orders', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 def create_purchase_order():
     """Create single purchase order (legacy; prefer checkout for cart)"""
@@ -14241,7 +14185,6 @@ def create_purchase_order():
     }), 201
 
 @app.route('/api/purchase-orders/<int:order_id>', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_purchase_order(order_id):
     """Get specific purchase order"""
@@ -14258,7 +14201,6 @@ def get_purchase_order(order_id):
     return jsonify(_po_to_json(order))
 
 @app.route('/api/purchase-orders/<int:order_id>/status', methods=['PUT'])
-@limiter.limit("20 per minute")
 @login_required
 def update_purchase_order_status(order_id):
     """Fulfill or deny purchase order (any support team member)"""
@@ -14378,7 +14320,6 @@ def update_purchase_order_status(order_id):
     return jsonify({'error': 'Invalid status'}), 400
 
 @app.route('/api/purchase-orders/case-manager/<int:user_id>', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_case_manager_purchase_orders(user_id):
     """Get purchase orders for students on the given staff member's support team."""
@@ -14408,7 +14349,6 @@ def get_case_manager_purchase_orders(user_id):
 
 # Notifications API
 @app.route('/api/notifications', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_notifications():
     """Get current user's notifications (unread first, limit 50)"""
@@ -14428,7 +14368,6 @@ def get_notifications():
 
 
 @app.route('/api/notifications/<int:notification_id>/read', methods=['PATCH', 'POST'])
-@limiter.limit("60 per minute")
 @login_required
 def mark_notification_read(notification_id):
     """Mark a notification as read"""
@@ -14441,7 +14380,6 @@ def mark_notification_read(notification_id):
 
 
 @app.route('/api/notifications/read-all', methods=['PATCH', 'POST'])
-@limiter.limit("20 per minute")
 @login_required
 def mark_all_notifications_read():
     """Mark all notifications as read for current user"""
@@ -14454,7 +14392,6 @@ def mark_all_notifications_read():
 
 # Case managers that the current user can assign marketplace items to (same team for staff, all for admin)
 @app.route('/api/marketplace/case-managers', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_marketplace_assignable_case_managers():
     """Return case managers the current user can assign items to. Staff: only those on same student team; Admin: all."""
@@ -14474,7 +14411,6 @@ def get_marketplace_assignable_case_managers():
 
 # Marketplace admin: item types and categories
 @app.route('/api/marketplace/types', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_marketplace_types():
     """Get all marketplace item types (admin-managed)"""
@@ -14483,7 +14419,6 @@ def get_marketplace_types():
 
 
 @app.route('/api/marketplace/types', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def create_marketplace_type():
@@ -14501,7 +14436,6 @@ def create_marketplace_type():
 
 
 @app.route('/api/marketplace/categories', methods=['GET'])
-@limiter.limit("60 per minute")
 @login_required
 def get_marketplace_categories():
     """Get all marketplace categories (admin-managed)"""
@@ -14510,7 +14444,6 @@ def get_marketplace_categories():
 
 
 @app.route('/api/marketplace/categories', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def create_marketplace_category():
@@ -14528,7 +14461,6 @@ def create_marketplace_category():
 
 
 @app.route('/api/marketplace/analytics', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def get_marketplace_analytics():
     """Purchase analytics for staff/admin: most/least purchased, demographics by grade and card color."""
@@ -14619,7 +14551,6 @@ def get_marketplace_analytics():
 
 
 @app.route('/api/bank-account/search', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def search_bank_accounts():
@@ -14752,7 +14683,6 @@ def search_bank_accounts():
 
 
 @app.route('/api/starbucks', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def list_starbucks_balances():
@@ -14852,7 +14782,6 @@ def list_starbucks_balances():
 
 
 @app.route('/api/starbucks/bulk', methods=['POST'])
-@limiter.limit("30 per minute")
 @login_required
 @staff_required
 def update_starbucks_balances_bulk():
@@ -15283,7 +15212,6 @@ def _build_level_up_entry(student, daily_pcts):
 
 
 @app.route('/api/level-ups', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 @api_json_errors
 def level_ups():
@@ -15392,7 +15320,6 @@ def level_ups():
 
 
 @app.route('/api/students/<int:student_id>/level-up', methods=['POST'])
-@limiter.limit("20 per minute")
 @login_required
 @api_json_errors
 def level_up_student(student_id):
@@ -15449,7 +15376,6 @@ def level_up_student(student_id):
 
 
 @app.route('/api/incentive-tracking', methods=['GET'])
-@limiter.limit("30 per minute")
 @login_required
 def incentive_tracking():
     """
