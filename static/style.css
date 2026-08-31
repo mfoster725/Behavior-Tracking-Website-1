@@ -1385,7 +1385,7 @@ table tbody tr:hover {
 }
 
 .info-edit-history {
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-primary);
 }
 
@@ -1402,7 +1402,7 @@ table tbody tr:hover {
 }
 
 .info-edit-history-head {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
     text-align: center;
     padding: 2px 0;
@@ -1434,7 +1434,7 @@ table tbody tr:hover {
 }
 
 .info-edit-history-info {
-    font-size: 12px;
+    font-size: 10px;
     overflow: visible;
     white-space: nowrap;
     width: auto;
@@ -1497,7 +1497,7 @@ table tbody tr:hover {
 
 .info-edit-history-empty {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 10px;
     font-style: italic;
     padding: 4px 0 0;
 }
