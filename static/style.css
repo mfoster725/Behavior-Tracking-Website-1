@@ -1394,10 +1394,11 @@ table tbody tr:hover {
     grid-template-columns: max-content repeat(5, 2rem);
     justify-content: start;
     justify-items: stretch;
-    align-items: center;
+    align-items: stretch;
     width: max-content;
     max-width: 100%;
-    column-gap: 0;
+    column-gap: 3px;
+    row-gap: 2px;
 }
 
 .info-edit-history-head {
@@ -1406,6 +1407,7 @@ table tbody tr:hover {
     text-align: center;
     padding: 2px 0;
     border-radius: 3px;
+    box-sizing: border-box;
 }
 
 .info-edit-history-who {
@@ -1413,48 +1415,83 @@ table tbody tr:hover {
     white-space: nowrap;
     padding: 3px 12px 3px 0;
     justify-self: start;
+    align-self: center;
 }
 
 .info-edit-history-star,
 .info-edit-history-info {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 1.5rem;
     width: 2rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
-    padding: 3px 0;
-    justify-self: center;
+    padding: 3px 2px;
     border-radius: 3px;
+    border: 2px solid transparent;
 }
 
 .info-edit-history-info {
     font-size: 12px;
     overflow: visible;
     white-space: nowrap;
+    width: auto;
+    min-width: 2rem;
 }
 
-.info-edit-history [data-category="s"] {
+/* Header row — full STARI colors */
+.info-edit-history-head[data-category="s"] {
     background: #FEE2E2;
     color: #B91C1C;
 }
-.info-edit-history [data-category="t"] {
+.info-edit-history-head[data-category="t"] {
     background: #DBEAFE;
     color: #1E40AF;
 }
-.info-edit-history [data-category="a"] {
+.info-edit-history-head[data-category="a"] {
     background: #D1FAE5;
     color: #047857;
 }
-.info-edit-history [data-category="r"] {
+.info-edit-history-head[data-category="r"] {
     background: #FEF3C7;
     color: #B45309;
 }
-.info-edit-history [data-category="i"] {
+.info-edit-history-head[data-category="i"] {
     background: #E5E7EB;
     color: #374151;
 }
 
+/* Data cells — lighter tints than headers */
+.info-edit-history-star[data-category="s"] {
+    background: rgba(254, 226, 226, 0.45);
+    color: #B91C1C;
+}
+.info-edit-history-star[data-category="t"] {
+    background: rgba(219, 234, 254, 0.45);
+    color: #1E40AF;
+}
+.info-edit-history-star[data-category="a"] {
+    background: rgba(209, 250, 229, 0.45);
+    color: #047857;
+}
+.info-edit-history-star[data-category="r"] {
+    background: rgba(254, 243, 199, 0.45);
+    color: #B45309;
+}
+
+.info-edit-history-info[data-category="i"] {
+    background: #fff;
+    color: #374151;
+}
+
+.info-edit-history-info[data-category="i"].info-edit-history-changed {
+    background: rgba(229, 231, 235, 0.35);
+}
+
 .info-edit-history-changed {
-    box-shadow: 0 0 0 2px #D97706;
+    border-color: #D97706;
     font-weight: 700;
 }
 
