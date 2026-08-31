@@ -738,7 +738,6 @@ table tbody tr:hover {
     margin-bottom: 1.5rem;
 }
 
-#daily-grid-container .grid-controls,
 #students-grid-container .grid-header {
     position: sticky;
     top: 0;
@@ -842,6 +841,19 @@ table tbody tr:hover {
 
 .daily-selector .daily-managed-by-me-label input[type="checkbox"] {
     cursor: pointer;
+}
+
+.daily-search-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+}
+
+.daily-search-actions #save-daily-all-btn {
+    min-height: 34px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8125rem;
 }
 
 .star-entry-mode-toggle {

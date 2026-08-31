@@ -1596,6 +1596,11 @@ function setupEventListeners() {
         initUiHoverTips();
         initStarNavModals();
 
+        const saveDailyAllBtn = document.getElementById('save-daily-all-btn');
+        if (saveDailyAllBtn) {
+            saveDailyAllBtn.addEventListener('click', () => saveDailyAllData());
+        }
+
         ensureDailyGridDelegatedListeners();
         
         const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');

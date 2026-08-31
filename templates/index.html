@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=schedprint3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=savedaily1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -183,9 +183,12 @@
                                 <input type="checkbox" id="daily-managed-by-me-checkbox">
                                 <span>Show students managed by me</span>
                             </label>
-                            <div class="star-entry-mode-toggle" id="star-entry-mode-toggle" role="group" aria-label="STAR entry mode">
-                                <button type="button" class="star-entry-mode-btn" data-mode="student" id="star-entry-mode-student" data-tooltip="After finishing a STAR row, stay on this student and move to their next period.">Student Entry</button>
-                                <button type="button" class="star-entry-mode-btn" data-mode="period" id="star-entry-mode-period" data-tooltip="After finishing a STAR row, stay on this period and move to the next student.">Period Entry</button>
+                            <div class="daily-search-actions">
+                                <div class="star-entry-mode-toggle" id="star-entry-mode-toggle" role="group" aria-label="STAR entry mode">
+                                    <button type="button" class="star-entry-mode-btn" data-mode="student" id="star-entry-mode-student" data-tooltip="After finishing a STAR row, stay on this student and move to their next period.">Student Entry</button>
+                                    <button type="button" class="star-entry-mode-btn" data-mode="period" id="star-entry-mode-period" data-tooltip="After finishing a STAR row, stay on this period and move to the next student.">Period Entry</button>
+                                </div>
+                                <button type="button" id="save-daily-all-btn" class="btn-primary">Save All Data</button>
                             </div>
                         </div>
                     </div>
@@ -202,11 +205,6 @@
                         <p class="daily-grid-loading-text">Loading point cards...</p>
                     </div>
                     <div id="daily-staff-filter-title" class="daily-staff-filter-title" style="display: none;"></div>
-                    {% if user.role in ['staff', 'admin'] %}
-                    <div class="grid-controls">
-                        <button id="save-daily-all-btn" class="btn-primary">Save All Data</button>
-                    </div>
-                    {% endif %}
                     <div id="daily-grid" class="daily-grid">
                         <div id="daily-header" class="daily-header"></div>
                         <div id="daily-body" class="daily-body"></div>
@@ -2231,7 +2229,7 @@
     </div>
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=schedprint3"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=savedaily1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan4"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
