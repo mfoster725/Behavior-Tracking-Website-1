@@ -9940,21 +9940,8 @@ function recordPeriodEditHistory(studentId, period, infoChanges = [], periodInde
 
 function buildEditHistoryHtml(history) {
     const entries = Array.isArray(history) ? history.filter(Boolean) : [];
-    const header = `
-        <div class="info-edit-history-grid">
-            <div class="info-edit-history-who"></div>
-            <div class="info-edit-history-head info-edit-history-star">S</div>
-            <div class="info-edit-history-head info-edit-history-star">T</div>
-            <div class="info-edit-history-head info-edit-history-star">A</div>
-            <div class="info-edit-history-head info-edit-history-star">R</div>
-            <div class="info-edit-history-head info-edit-history-star">I</div>
-    `;
     if (!entries.length) {
-        return `
-            ${header}
-            </div>
-            <div class="info-edit-history-empty">No edits recorded for this period yet.</div>
-        `;
+        return `<div class="info-edit-history-empty">No edits recorded for this period yet.</div>`;
     }
     const rows = entries.map((entry, index) => {
         const previous = entries[index + 1];
@@ -9982,13 +9969,20 @@ function buildEditHistoryHtml(history) {
         `;
     }).join('');
     return `
-        ${header}
+        <div class="info-edit-history-grid">
+            <div class="info-edit-history-who"></div>
+            <div class="info-edit-history-head info-edit-history-star">S</div>
+            <div class="info-edit-history-head info-edit-history-star">T</div>
+            <div class="info-edit-history-head info-edit-history-star">A</div>
+            <div class="info-edit-history-head info-edit-history-star">R</div>
+            <div class="info-edit-history-head info-edit-history-star">I</div>
             ${rows}
         </div>
     `;
 }
 
 function ensureInfoEditHistoryContainer() {
+    if (isStudent()) return null;
     let container = document.getElementById('info-edit-history');
     if (container) return container;
     const notesGroup = document.getElementById('info-notes')?.closest('.form-group');
@@ -10012,8 +10006,16 @@ function ensureInfoEditHistoryContainer() {
 }
 
 function renderInfoEditHistory(history) {
+    if (isStudent()) {
+        document.querySelectorAll('.info-edit-history-group').forEach((group) => {
+            group.style.display = 'none';
+        });
+        return;
+    }
     const container = ensureInfoEditHistoryContainer();
     if (!container) return;
+    const group = container.closest('.info-edit-history-group');
+    if (group) group.style.display = '';
     container.innerHTML = buildEditHistoryHtml(history);
 }
 
@@ -10938,10 +10940,12 @@ function showInfoViewPopup(infoDataString, time, location) {
                     <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
 
+                ${!isStudent() ? `
                 <div class="form-group info-edit-history-group">
                     <label>Edit History:</label>
                     <div class="info-edit-history">${buildEditHistoryHtml(infoData.edit_history)}</div>
                 </div>
+                ` : ''}
 
                 <!-- Reminders -->
                 <div class="form-group">
