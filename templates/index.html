@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=savedaily1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=managedbyme2">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -179,11 +179,11 @@
                                 <input type="text" id="daily-search-input" placeholder="Search by staff or student name">
                                 <div class="daily-search-autocomplete-dropdown"></div>
                             </div>
-                            <label for="daily-managed-by-me-checkbox" class="daily-managed-by-me-label">
-                                <input type="checkbox" id="daily-managed-by-me-checkbox">
-                                <span>Show students managed by me</span>
-                            </label>
                             <div class="daily-search-actions">
+                                <label for="daily-managed-by-me-checkbox" class="daily-managed-by-me-label">
+                                    <input type="checkbox" id="daily-managed-by-me-checkbox">
+                                    <span>Managed by me</span>
+                                </label>
                                 <div class="star-entry-mode-toggle" id="star-entry-mode-toggle" role="group" aria-label="STAR entry mode">
                                     <button type="button" class="star-entry-mode-btn" data-mode="student" id="star-entry-mode-student" data-tooltip="After finishing a STAR row, stay on this student and move to their next period.">Student Entry</button>
                                     <button type="button" class="star-entry-mode-btn" data-mode="period" id="star-entry-mode-period" data-tooltip="After finishing a STAR row, stay on this period and move to the next student.">Period Entry</button>

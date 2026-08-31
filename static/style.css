@@ -850,6 +850,10 @@ table tbody tr:hover {
     flex-shrink: 0;
 }
 
+.daily-search-actions .daily-managed-by-me-label {
+    font-size: 0.8125rem;
+}
+
 .daily-search-actions #save-daily-all-btn {
     min-height: 34px;
     padding: 0.4rem 0.75rem;
