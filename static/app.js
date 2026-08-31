@@ -1188,10 +1188,35 @@ function getPeriodEntryScheduleItems() {
 }
 
 const DAILY_PERIOD_COL_WIDTH = '120px';
-const DAILY_SCHEDULE_COL_WIDTH = 'minmax(90px, max-content)';
+const DAILY_SCHEDULE_COL_MIN = 90;
+const DAILY_SCHEDULE_COL_MAX = 200;
 
-function getDailyGridColumnTemplate(studentColumns, spacerWidth = '7px') {
-    return `${DAILY_PERIOD_COL_WIDTH} ${DAILY_SCHEDULE_COL_WIDTH} ${spacerWidth} ${studentColumns}`;
+function measureDailyScheduleColumnWidth(texts) {
+    const measureEl = document.createElement('div');
+    measureEl.className = 'daily-location-cell';
+    measureEl.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(measureEl);
+
+    let maxWidth = DAILY_SCHEDULE_COL_MIN;
+    (texts || []).forEach((text) => {
+        if (!text) return;
+        measureEl.textContent = text;
+        maxWidth = Math.max(maxWidth, measureEl.offsetWidth);
+    });
+    document.body.removeChild(measureEl);
+
+    return Math.min(Math.ceil(maxWidth), DAILY_SCHEDULE_COL_MAX);
+}
+
+function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx) {
+    const scheduleCol = `${scheduleWidthPx}px`;
+    const template = `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol} ${spacerWidth} ${studentColumns}`;
+    header.style.gridTemplateColumns = template;
+    body.style.gridTemplateColumns = template;
+    const grid = header.closest('#daily-grid, #students-grid');
+    if (grid) {
+        grid.style.setProperty('--daily-schedule-col-width', scheduleCol);
+    }
 }
 
 function getDailyFrozenColumnsWidth(grid) {
@@ -2878,8 +2903,11 @@ function renderStudentsGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
-    grid.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    const scheduleWidth = measureDailyScheduleColumnWidth([
+        'Schedule',
+        formatPointCardScheduleForPeriod(currentPeriod || ''),
+    ]);
+    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth);
     const studentsGridEl = document.getElementById('students-grid');
     if (studentsGridEl) studentsGridEl.classList.add('daily-grid--freeze-cols');
 
@@ -3665,8 +3693,9 @@ function renderDailyGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
-    body.style.gridTemplateColumns = getDailyGridColumnTemplate(studentColumns, spacerWidth);
+    const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
+    const scheduleWidth = measureDailyScheduleColumnWidth(['Schedule', ...scheduleTexts]);
+    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth);
     if (dailyGridEl) dailyGridEl.classList.add('daily-grid--freeze-cols');
 
     // Create header row
