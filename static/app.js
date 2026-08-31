@@ -1194,6 +1194,37 @@ function getDailyGridColumnTemplate(studentColumns, spacerWidth = '7px') {
     return `${DAILY_PERIOD_COL_WIDTH} ${DAILY_SCHEDULE_COL_WIDTH} ${spacerWidth} ${studentColumns}`;
 }
 
+function getDailyFrozenColumnsWidth(grid) {
+    if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) return 0;
+    const periodCell = grid.querySelector('.daily-frozen-col-1');
+    const scheduleCell = grid.querySelector('.daily-frozen-col-2');
+    if (!periodCell || !scheduleCell) return 0;
+    return periodCell.offsetWidth + scheduleCell.offsetWidth;
+}
+
+function focusDailyStarInput(input) {
+    if (!input || input.disabled) return false;
+    const grid = input.closest('#daily-grid, #students-grid');
+    if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) {
+        input.focus();
+        return true;
+    }
+    input.focus({ preventScroll: true });
+    const frozenWidth = getDailyFrozenColumnsWidth(grid);
+    if (!frozenWidth) return true;
+    const gridRect = grid.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    const padding = 4;
+    const minVisibleLeft = gridRect.left + frozenWidth + padding;
+    const maxVisibleRight = gridRect.right - padding;
+    if (inputRect.right > maxVisibleRight) {
+        grid.scrollLeft += inputRect.right - maxVisibleRight;
+    } else if (inputRect.left < minVisibleLeft) {
+        grid.scrollLeft = Math.max(0, grid.scrollLeft - (minVisibleLeft - inputRect.left));
+    }
+    return true;
+}
+
 function formatPointCardScheduleForPeriod(timePeriod) {
     const items = getPeriodEntryScheduleItems().filter((s) => s && s.time_period === timePeriod);
     if (!items.length) return '';
@@ -4187,7 +4218,7 @@ function moveToNextInput(currentInput) {
     
     if (currentIndex >= 0 && currentIndex < allInputs.length - 1) {
         const nextInput = allInputs[currentIndex + 1];
-        nextInput.focus();
+        focusDailyStarInput(nextInput);
     }
 }
 
@@ -4197,7 +4228,7 @@ function moveToPreviousInput(currentInput) {
     
     if (currentIndex > 0) {
         const prevInput = allInputs[currentIndex - 1];
-        prevInput.focus();
+        focusDailyStarInput(prevInput);
     }
 }
 
@@ -4544,8 +4575,7 @@ function focusStarInput(studentId, period, category = 's') {
         : (isPeriodEntryViewActive() ? document.getElementById('students-grid') : document);
     const input = (root || document).querySelector(selector);
     if (input && !input.disabled) {
-        input.focus();
-        return true;
+        return focusDailyStarInput(input);
     }
     return false;
 }

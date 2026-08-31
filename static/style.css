@@ -1149,13 +1149,19 @@ table tbody tr:hover {
     --daily-period-col-width: 120px;
 }
 
+.daily-grid--freeze-cols .daily-header,
+.daily-grid--freeze-cols .daily-body {
+    width: max-content;
+    min-width: 100%;
+}
+
 .daily-grid--freeze-cols .daily-frozen-col-1,
-.daily-grid--freeze-cols .daily-header-period.daily-frozen-col-1,
-.daily-grid--freeze-cols .daily-frozen-col-2,
-.daily-grid--freeze-cols .daily-header-location.daily-frozen-col-2 {
+.daily-grid--freeze-cols .daily-frozen-col-2 {
     position: sticky;
-    z-index: 2;
-    background: var(--bg-surface);
+    box-sizing: border-box;
+    z-index: 10;
+    background-color: var(--bg-surface);
+    opacity: 1;
 }
 
 .daily-grid--freeze-cols .daily-frozen-col-1,
@@ -1170,15 +1176,23 @@ table tbody tr:hover {
 
 .daily-grid--freeze-cols .daily-header .daily-frozen-col-1,
 .daily-grid--freeze-cols .daily-header .daily-frozen-col-2 {
-    z-index: 4;
+    z-index: 12;
+    background-color: var(--bg-surface);
 }
 
 .daily-grid--freeze-cols .star-category-header.daily-frozen-col-1,
 .daily-grid--freeze-cols .star-category-header.daily-frozen-col-2 {
-    z-index: 3;
+    z-index: 11;
+    background-color: #f8f9fa;
 }
 
-.daily-grid--freeze-cols .daily-frozen-col-1::after,
+.daily-grid--freeze-cols .daily-header-period.daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-header-location.daily-frozen-col-2,
+.daily-grid--freeze-cols .daily-period-cell.daily-frozen-col-1,
+.daily-grid--freeze-cols .daily-location-cell.daily-frozen-col-2 {
+    background-color: var(--bg-surface);
+}
+
 .daily-grid--freeze-cols .daily-frozen-col-2::after {
     content: '';
     position: absolute;
@@ -1188,6 +1202,21 @@ table tbody tr:hover {
     width: 1px;
     background: var(--border);
     pointer-events: none;
+    box-shadow: 2px 0 4px rgba(15, 23, 42, 0.08);
+}
+
+/* Keep student card menus underneath the frozen columns when they overlap during scroll */
+.daily-grid--freeze-cols .daily-header-student {
+    z-index: 0;
+}
+
+.daily-grid--freeze-cols .plan-kebab-wrap {
+    z-index: 0;
+    pointer-events: auto;
+}
+
+.daily-grid--freeze-cols .plan-kebab-menu {
+    z-index: 1;
 }
 
 .daily-data-cell {

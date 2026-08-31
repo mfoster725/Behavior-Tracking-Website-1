@@ -196,6 +196,14 @@
         openKebabMenu = null;
     }
 
+    function bindPointCardGridScrollHandlers() {
+        if (window.__planGridScrollKebabBound) return;
+        window.__planGridScrollKebabBound = true;
+        document.querySelectorAll('#daily-grid, #students-grid').forEach((grid) => {
+            grid.addEventListener('scroll', closeKebabMenus, { passive: true });
+        });
+    }
+
     function buildStudentHeaderPlanControls(student) {
         const wrap = document.createElement('div');
         wrap.className = 'plan-header-controls';
@@ -776,7 +784,10 @@
         });
     }
 
-    document.addEventListener('DOMContentLoaded', bindModalChrome);
+    document.addEventListener('DOMContentLoaded', () => {
+        bindModalChrome();
+        bindPointCardGridScrollHandlers();
+    });
 
     global.StudentPlans = {
         PLAN_MET_ICON_SRC,
