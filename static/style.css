@@ -803,6 +803,18 @@ table tbody tr:hover {
     min-width: 260px;
 }
 
+.daily-search-label-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.375rem;
+    min-height: 21px;
+}
+
+.daily-search-label-row > label[for="daily-search-input"] {
+    margin-bottom: 0;
+}
+
 .daily-selector .daily-search-row {
     display: flex;
     align-items: center;
@@ -841,6 +853,11 @@ table tbody tr:hover {
 
 .daily-selector .daily-managed-by-me-label input[type="checkbox"] {
     cursor: pointer;
+    width: auto;
+    min-height: 0;
+    height: 14px;
+    padding: 0;
+    margin: 0;
 }
 
 .daily-search-actions {
@@ -848,10 +865,6 @@ table tbody tr:hover {
     align-items: center;
     gap: 0.75rem;
     flex-shrink: 0;
-}
-
-.daily-search-actions .daily-managed-by-me-label {
-    font-size: 0.8125rem;
 }
 
 .daily-search-actions #save-daily-all-btn {
