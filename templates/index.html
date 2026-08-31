@@ -62,9 +62,12 @@
                         </button>
                         <span id="notifications-badge" style="display: none; position: absolute; top: -2px; right: -2px; background: #dc2626; color: white; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; align-items: center; justify-content: center; padding: 0 4px;">0</span>
                         <div id="notifications-dropdown" style="display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; width: 360px; max-height: 400px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 10px 25px rgba(0,0,0,0.1); z-index: 1000;">
-                            <div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                            <div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <strong>Notifications</strong>
-                                <button type="button" id="notifications-mark-all-read" style="font-size: 12px; background: none; border: none; color: var(--accent); cursor: pointer;">Mark all read</button>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <button type="button" id="notifications-mark-all-read" style="font-size: 12px; background: none; border: none; color: var(--accent); cursor: pointer;">Mark all read</button>
+                                    <button type="button" id="notifications-show-read" style="font-size: 12px; background: none; border: none; color: var(--accent); cursor: pointer;">Show read notifications</button>
+                                </div>
                             </div>
                             <div id="notifications-list" style="padding: 8px;"></div>
                         </div>
@@ -2244,7 +2247,7 @@
     </div>
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=edithistory5"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=edithistory6"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

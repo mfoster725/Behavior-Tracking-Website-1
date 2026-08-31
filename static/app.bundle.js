@@ -20145,35 +20145,58 @@ document.addEventListener('DOMContentLoaded', function () {
 window.closeMarketplaceAnalytics = destroyMarketplaceAnalyticsCharts;
 window.closeMarketplaceAddItemModal = closeMarketplaceAddItemModal;
 
+var notificationsCache = [];
+var showReadNotifications = false;
+
+function updateShowReadButtonLabel() {
+    var btn = document.getElementById('notifications-show-read');
+    if (btn) btn.textContent = showReadNotifications ? 'Hide read notifications' : 'Show read notifications';
+}
+
+function renderNotificationsList() {
+    var listEl = document.getElementById('notifications-list');
+    if (!listEl) return;
+    var visible = showReadNotifications
+        ? notificationsCache
+        : notificationsCache.filter(function (n) { return !n.read_at; });
+    if (!visible.length) {
+        var emptyMsg = showReadNotifications || !notificationsCache.length
+            ? 'No notifications.'
+            : 'No unread notifications.';
+        listEl.innerHTML = '<div style="padding:12px; color:#64748b; font-size:13px;">' + emptyMsg + '</div>';
+        return;
+    }
+    listEl.innerHTML = visible.slice(0, 30).map(function (n) {
+        return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
+            '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
+            '<div style="color:#64748b; white-space:pre-wrap;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+            '</div>';
+    }).join('');
+    listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
+        el.addEventListener('click', function () {
+            var id = parseInt(el.getAttribute('data-notification-id'), 10);
+            var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
+            fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
+            if (assignmentId && isAdmin()) {
+                window.curriculumFocusAssignmentId = assignmentId;
+                if (typeof switchView === 'function') switchView('curriculum');
+                var dropdownEl = document.getElementById('notifications-dropdown');
+                if (dropdownEl) dropdownEl.style.display = 'none';
+            }
+        });
+    });
+}
+
 function loadNotifications() {
     fetch('/api/notifications').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+        notificationsCache = list;
         var unread = list.filter(function (n) { return !n.read_at; });
         var badge = document.getElementById('notifications-badge');
         if (badge) {
             badge.style.display = unread.length ? 'inline-flex' : 'none';
             badge.textContent = unread.length > 99 ? '99+' : unread.length;
         }
-        var listEl = document.getElementById('notifications-list');
-        if (!listEl) return;
-        listEl.innerHTML = list.slice(0, 30).map(function (n) {
-            return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
-                '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
-                '<div style="color:#64748b; white-space:pre-wrap;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
-                '</div>';
-        }).join('');
-        listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
-            el.addEventListener('click', function () {
-                var id = parseInt(el.getAttribute('data-notification-id'), 10);
-                var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
-                fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
-                if (assignmentId && isAdmin()) {
-                    window.curriculumFocusAssignmentId = assignmentId;
-                    if (typeof switchView === 'function') switchView('curriculum');
-                    var dropdownEl = document.getElementById('notifications-dropdown');
-                    if (dropdownEl) dropdownEl.style.display = 'none';
-                }
-            });
-        });
+        renderNotificationsList();
     });
 }
 
@@ -20186,7 +20209,11 @@ document.addEventListener('DOMContentLoaded', function () {
             e.stopPropagation();
             var show = dropdown.style.display === 'block';
             dropdown.style.display = show ? 'none' : 'block';
-            if (!show) loadNotifications();
+            if (!show) {
+                showReadNotifications = false;
+                updateShowReadButtonLabel();
+                loadNotifications();
+            }
         });
     }
     document.addEventListener('click', function (e) {
@@ -20197,6 +20224,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var markAll = document.getElementById('notifications-mark-all-read');
     if (markAll) markAll.addEventListener('click', function () {
         fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications(); });
+    });
+    var showRead = document.getElementById('notifications-show-read');
+    if (showRead) showRead.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showReadNotifications = !showReadNotifications;
+        updateShowReadButtonLabel();
+        renderNotificationsList();
     });
 });
 
