@@ -9939,7 +9939,9 @@ function recordPeriodEditHistory(studentId, period, infoChanges = [], periodInde
 }
 
 function buildEditHistoryHtml(history) {
-    const entries = Array.isArray(history) ? history.filter(Boolean) : [];
+    const entries = (Array.isArray(history) ? history : []).filter((entry) =>
+        entry && typeof entry === 'object' && (entry.name || entry.time || entry.at)
+    );
     if (!entries.length) {
         return `<div class="info-edit-history-empty">No edits recorded for this period yet.</div>`;
     }
@@ -9955,7 +9957,7 @@ function buildEditHistoryHtml(history) {
         const infoText = infoLabels.join(', ');
         const starCell = (key) => {
             const cls = changed[key] ? 'info-edit-history-star info-edit-history-changed' : 'info-edit-history-star';
-            return `<div class="${cls}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</div>`;
+            return `<div class="${cls}" data-category="${key}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</div>`;
         };
         const infoCls = infoText ? 'info-edit-history-info info-edit-history-changed' : 'info-edit-history-info';
         const who = [entry.time, entry.name || 'Staff'].filter(Boolean).join(' - ');
@@ -9965,17 +9967,17 @@ function buildEditHistoryHtml(history) {
             ${starCell('t')}
             ${starCell('a')}
             ${starCell('r')}
-            <div class="${infoCls}">${escapeEditHistoryHtml(infoText)}</div>
+            <div class="${infoCls}" data-category="i">${escapeEditHistoryHtml(infoText)}</div>
         `;
     }).join('');
     return `
         <div class="info-edit-history-grid">
             <div class="info-edit-history-who"></div>
-            <div class="info-edit-history-head info-edit-history-star">S</div>
-            <div class="info-edit-history-head info-edit-history-star">T</div>
-            <div class="info-edit-history-head info-edit-history-star">A</div>
-            <div class="info-edit-history-head info-edit-history-star">R</div>
-            <div class="info-edit-history-head info-edit-history-star">I</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="s">S</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="t">T</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="a">A</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="r">R</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="i">I</div>
             ${rows}
         </div>
     `;
@@ -10016,6 +10018,7 @@ function renderInfoEditHistory(history) {
     if (!container) return;
     const group = container.closest('.info-edit-history-group');
     if (group) group.style.display = '';
+    container.replaceChildren();
     container.innerHTML = buildEditHistoryHtml(history);
 }
 

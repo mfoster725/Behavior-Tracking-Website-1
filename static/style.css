@@ -1403,9 +1403,9 @@ table tbody tr:hover {
 .info-edit-history-head {
     font-size: 12px;
     font-weight: 700;
-    color: var(--text-secondary);
     text-align: center;
-    padding: 0 0 4px;
+    padding: 2px 0;
+    border-radius: 3px;
 }
 
 .info-edit-history-who {
@@ -1423,6 +1423,7 @@ table tbody tr:hover {
     font-weight: 600;
     padding: 3px 0;
     justify-self: center;
+    border-radius: 3px;
 }
 
 .info-edit-history-info {
@@ -1431,12 +1432,30 @@ table tbody tr:hover {
     white-space: nowrap;
 }
 
+.info-edit-history [data-category="s"] {
+    background: #FEE2E2;
+    color: #B91C1C;
+}
+.info-edit-history [data-category="t"] {
+    background: #DBEAFE;
+    color: #1E40AF;
+}
+.info-edit-history [data-category="a"] {
+    background: #D1FAE5;
+    color: #047857;
+}
+.info-edit-history [data-category="r"] {
+    background: #FEF3C7;
+    color: #B45309;
+}
+.info-edit-history [data-category="i"] {
+    background: #E5E7EB;
+    color: #374151;
+}
+
 .info-edit-history-changed {
-    background: #ffe082;
-    color: #1c1917;
-    border-radius: 3px;
+    box-shadow: 0 0 0 2px #D97706;
     font-weight: 700;
-    box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.35);
 }
 
 .info-edit-history-empty {
@@ -1444,6 +1463,11 @@ table tbody tr:hover {
     font-size: 12px;
     font-style: italic;
     padding: 4px 0 0;
+}
+
+.info-edit-history:has(.info-edit-history-empty) .info-edit-history-grid,
+.info-edit-history-grid:not(:has(.info-edit-history-who:not(:empty))) {
+    display: none !important;
 }
 
 #info-modal .delete-btn {
