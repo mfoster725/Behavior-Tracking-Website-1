@@ -1356,42 +1356,10 @@ document.addEventListener('DOMContentLoaded', () => {
         attachNavAndHamburger();
         applyUnifiedChartTooltipStyle();
         console.log('Current user:', window.currentUser);
-        
-        // Disable browser autocomplete/autofill on all inputs in the main app
-        // (login page does not load this script, so its username/password can still be autofilled)
-        try {
-            const inputs = document.querySelectorAll('input');
-            inputs.forEach((input) => {
-                const type = (input.type || '').toLowerCase();
-                if (input.dataset && input.dataset.allowAutocomplete === 'true') return;
-                if (['hidden', 'checkbox', 'radio', 'file', 'button', 'submit', 'reset'].includes(type)) return;
-                input.setAttribute('autocomplete', 'off');
-                input.setAttribute('autocapitalize', 'off');
-                input.setAttribute('autocorrect', 'off');
-                input.setAttribute('spellcheck', 'false');
-            });
 
-            // Further discourage third‑party password managers on non-login screens
-            const passwordInputs = document.querySelectorAll('input[type="password"]');
-            passwordInputs.forEach((input) => {
-                if (input.dataset && input.dataset.allowPasswordManager === 'true') return;
-                // Hint that these are "new" passwords, not login fields
-                if (!input.hasAttribute('autocomplete')) {
-                    input.setAttribute('autocomplete', 'new-password');
-                }
-                // Some managers scan password fields on load; delay exposing type="password" until user interacts
-                if (!input.value) {
-                    input.dataset.originalType = 'password';
-                    input.type = 'text';
-                    input.addEventListener('focus', () => {
-                        if (input.dataset.originalType === 'password') {
-                            input.type = 'password';
-                        }
-                    }, { once: true });
-                }
-            });
-        } catch (e) {
-            console.error('Error disabling autocomplete:', e);
+        // Login username/password keep browser autofill (login.html does not load no-autofill.js).
+        if (window.BTSKillAutofill && typeof window.BTSKillAutofill.scan === 'function') {
+            window.BTSKillAutofill.scan();
         }
         
         // Set default date if not already set
@@ -5785,7 +5753,7 @@ async function loadSummary() {
                 <div class="form-group" style="margin-bottom: 10px;">
                     <label for="summary-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                     <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                        <input type="text" id="summary-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                        <input type="text" id="summary-day-search" placeholder="Type to search (e.g., Mon, Tue)" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                         <div class="table-column-search-dropdown"></div>
                     </div>
                 </div>
@@ -5870,7 +5838,7 @@ async function loadSummary() {
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="summary-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="summary-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                            <input type="text" id="summary-class-search" placeholder="Type to search class name" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
@@ -8586,7 +8554,7 @@ async function loadFrenzyStats() {
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-day-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Day of Week:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-day-search" placeholder="Type to search (e.g., Mon, Tue)" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                            <input type="text" id="frenzy-day-search" placeholder="Type to search (e.g., Mon, Tue)" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
@@ -8669,7 +8637,7 @@ async function loadFrenzyStats() {
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                            <input type="text" id="frenzy-class-search" placeholder="Type to search class name" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
@@ -8753,7 +8721,7 @@ async function loadFrenzyStats() {
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-purpose-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Purpose:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-purpose-search" placeholder="Type to search purpose name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                            <input type="text" id="frenzy-purpose-search" placeholder="Type to search purpose name" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
@@ -9082,7 +9050,7 @@ async function loadFrenzyStats() {
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label for="frenzy-single-class-search" style="display: block; margin-bottom: 8px; font-weight: 600;">Search Class:</label>
                         <div class="table-column-search-wrapper" style="width: 100%; max-width: 400px; position: relative;">
-                            <input type="text" id="frenzy-single-class-search" placeholder="Type to search class name" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+                            <input type="text" id="frenzy-single-class-search" placeholder="Type to search class name" autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                             <div class="table-column-search-dropdown"></div>
                         </div>
                     </div>
@@ -15158,7 +15126,7 @@ async function manageOutsideStaffStudents(userId, name) {
             <h2>Manage Students for ${displayName}</h2>
             <p style="margin-bottom: 15px; color: var(--text-secondary);">Select students to assign to this Outside Staff user:</p>
             <div class="form-group" style="margin-bottom: 15px;">
-                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;">
+                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." autocomplete="off" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;">
             </div>
             <div id="student-assignment-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 4px;">
                 ${allStudents.map(student => `
@@ -21732,37 +21700,19 @@ let summaryLoadRequestToken = 0;
 // ---- Input hardening to resist password managers on search fields ----
 function hardenSearchInput(input) {
     if (!input) return;
+    if (window.BTSKillAutofill && typeof window.BTSKillAutofill.harden === 'function') {
+        window.BTSKillAutofill.harden(input);
+        return;
+    }
     try {
         input.setAttribute('autocomplete', 'off');
         input.setAttribute('autocapitalize', 'off');
         input.setAttribute('autocorrect', 'off');
         input.setAttribute('spellcheck', 'false');
-
         if (!input.hasAttribute('readonly')) {
             input.setAttribute('readonly', '');
         }
-
-        input.addEventListener('focus', () => {
-            if (input.hasAttribute('readonly')) {
-                input.removeAttribute('readonly');
-            }
-        });
-
-        let userInteracted = false;
-        ['keydown', 'mousedown', 'touchstart'].forEach(evt => {
-            input.addEventListener(evt, () => {
-                userInteracted = true;
-            }, { once: true });
-        });
-
-        const clearIfInjected = () => {
-            if (!userInteracted && input.value && !input.dataset.allowPrefill) {
-                input.value = '';
-            }
-        };
-
-        setTimeout(clearIfInjected, 600);
-        input.addEventListener('blur', clearIfInjected);
+        input.addEventListener('focus', () => input.removeAttribute('readonly'));
     } catch (e) {
         console.error('Error hardening search input:', e);
     }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" autocomplete="off">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,8 +7,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=edithistory2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=noautofill1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+    <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -23,7 +24,7 @@
         }
     </script>
 </head>
-<body>
+<body autocomplete="off">
     <div class="container">
         <div id="billing-unpaid-banner" class="password-change-banner" style="display: none; background: #b45309;">
             <div>
@@ -182,7 +183,7 @@
                         </div>
                         <div class="daily-search-row">
                             <div class="daily-search-autocomplete-wrapper">
-                                <input type="text" id="daily-search-input" placeholder="Search by staff or student name">
+                                <input type="text" id="daily-search-input" placeholder="Search by staff or student name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                                 <div class="daily-search-autocomplete-dropdown"></div>
                             </div>
                             <div class="daily-search-actions">
@@ -225,13 +226,13 @@
                     <div class="dashboard-search-row">
                         <div class="dashboard-search-wrap" id="summary-student-search-wrap">
                             <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                            <input type="text" id="summary-student-search" placeholder="Search student..." autocomplete="off">
+                            <input type="text" id="summary-student-search" placeholder="Search student..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                             <div class="dashboard-search-dropdown" id="summary-student-dropdown"></div>
                         </div>
                         {% if user.role in ['staff', 'admin'] %}
                         <div class="dashboard-search-wrap" id="summary-staff-search-wrap">
                             <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            <input type="text" id="summary-staff-search" placeholder="Search staff..." autocomplete="off">
+                            <input type="text" id="summary-staff-search" placeholder="Search staff..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                             <div class="dashboard-search-dropdown" id="summary-staff-dropdown"></div>
                         </div>
                         <label class="dashboard-managed-check">
@@ -444,7 +445,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-students-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -521,7 +522,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-staff-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -554,7 +555,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-outside-staff-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -587,7 +588,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-admin-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;" readonly>
+                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -1001,8 +1002,12 @@
                                 id="curriculum-student-search-input"
                                 placeholder="Search or select student"
                                 autocomplete="off"
-                                autocapitalize="none"
+                                autocapitalize="off"
                                 spellcheck="false"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
+                                readonly
+                                onfocus="this.removeAttribute('readonly')"
                                 style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
                             >
                             <div class="curriculum-student-autocomplete-dropdown bank-search-autocomplete-dropdown"></div>
@@ -1140,7 +1145,7 @@
                 <div id="marketplace-student-select-wrap" style="display: none; margin-bottom: 16px;">
                     <label for="marketplace-student-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Select student</label>
                     <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
-                        <input type="text" id="marketplace-student-search-input" placeholder="Search or select student" autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                        <input type="text" id="marketplace-student-search-input" placeholder="Search or select student" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
                         <div class="marketplace-student-autocomplete-dropdown"></div>
                     </div>
                     <label style="display: inline-flex; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; margin-top: 10px; font-size: 13px; color: #475569;">
@@ -1169,7 +1174,7 @@
                 <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; align-items: flex-end;">
                     <div style="flex: 1; min-width: 200px;">
                         <label for="marketplace-search-input" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Search</label>
-                        <input type="text" id="marketplace-search-input" placeholder="Search items..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                        <input type="text" id="marketplace-search-input" placeholder="Search items..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
                     </div>
                     <div>
                         <label for="marketplace-filter-type" style="display: block; margin-bottom: 6px; font-size: 13px; color: #64748b;">Type</label>
@@ -1280,7 +1285,7 @@
                     <h3 style="margin-bottom: 15px;">Login Credentials</h3>
                     <div class="form-group">
                         <label for="student-username">Username: *</label>
-                        <input type="text" id="student-username" required placeholder="Enter username">
+                        <input type="text" id="student-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                         <small style="color: #666;">Used for student login</small>
                     </div>
                     <div class="form-group">
@@ -1345,7 +1350,7 @@
                 </div>
                 <div class="form-group">
                     <label for="staff-username">Username: *</label>
-                    <input type="text" id="staff-username" required placeholder="Enter username">
+                    <input type="text" id="staff-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                 </div>
                 <div class="form-group">
                     <label for="staff-password">Password: *</label>
@@ -1401,7 +1406,7 @@
                 </div>
                 <div class="form-group">
                     <label for="outside-staff-username">Username: *</label>
-                    <input type="text" id="outside-staff-username" required placeholder="Enter username">
+                    <input type="text" id="outside-staff-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                 </div>
                 <div class="form-group">
                     <label for="outside-staff-district">District: *</label>
@@ -1441,7 +1446,7 @@
                 </div>
                 <div class="form-group">
                     <label for="admin-username">Username: *</label>
-                    <input type="text" id="admin-username" required placeholder="Enter username">
+                    <input type="text" id="admin-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                 </div>
                 <div class="form-group">
                     <label for="admin-password">Password: *</label>
@@ -1472,7 +1477,7 @@
             <div id="billing-manage-body" style="display: grid; gap: 16px; margin-top: 12px;"></div>
             <div id="billing-manage-email-wrap" style="display: none; margin-top: 16px;">
                 <label for="billing-manage-email" style="display:block;font-size:13px;margin-bottom:6px;">Billing email</label>
-                <input type="email" id="billing-manage-email" placeholder="Billing email" autocomplete="email"
+                <input type="email" id="billing-manage-email" placeholder="Billing email" autocomplete="off"
                        style="padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); width: 100%; box-sizing: border-box;">
             </div>
             <p id="billing-manage-msg" style="display: none; margin-top: 10px; font-size: 13px;"></p>
@@ -1504,7 +1509,7 @@
                     </div>
                     <div class="form-group">
                         <label for="edit-user-username">Username: *</label>
-                        <input type="text" id="edit-user-username" required placeholder="Enter username">
+                        <input type="text" id="edit-user-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div class="form-group" id="edit-user-role-group">
                         <label for="edit-user-role">Role: *</label>
@@ -1603,7 +1608,7 @@
                     <div id="edit-parent-claimed-name" style="display: none; margin-bottom: 12px; padding: 8px 12px; background: #e3f2fd; border-radius: 4px; font-size: 13px; color: #1565c0;"></div>
                     <div class="form-group" id="edit-parent-add-student-combobox-wrap" style="position: relative;">
                         <label for="edit-parent-add-student-combobox-input">Add Student:</label>
-                        <input type="text" id="edit-parent-add-student-combobox-input" placeholder="Type to search students..." autocomplete="off">
+                        <input type="text" id="edit-parent-add-student-combobox-input" placeholder="Type to search students..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                         <input type="hidden" id="edit-parent-add-student-id" value="">
                         <div id="edit-parent-add-student-dropdown" class="student-combobox-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; max-height: 200px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 4px 12px rgba(0,0,0,0.08); z-index: 1000;"></div>
                     </div>
@@ -1997,7 +2002,7 @@
             <div id="marketplace-hide-value-student" style="display: none; margin-bottom: 12px;">
                 <label for="marketplace-hide-student-search">Select student</label>
                 <div class="bank-search-autocomplete-wrapper" style="position: relative;">
-                    <input type="text" id="marketplace-hide-student-search" placeholder="Search student..." autocomplete="off" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <input type="text" id="marketplace-hide-student-search" placeholder="Search student..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
                     <div id="marketplace-hide-student-dropdown" class="marketplace-combobox-dropdown" style="position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto;"></div>
                 </div>
                 <input type="hidden" id="marketplace-hide-student-id" value="">
@@ -2102,7 +2107,7 @@
                 </label>
                 <label class="point-card-filter-field point-card-filter-search">
                     <span>Search</span>
-                    <input type="search" id="point-card-search-input" placeholder="Times, locations, STAR values, or info…">
+                    <input type="search" id="point-card-search-input" placeholder="Times, locations, STAR values, or info…" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                 </label>
                 <button type="button" class="btn-secondary" id="point-card-filter-clear">Clear</button>
             </div>
@@ -2237,7 +2242,7 @@
     </div>
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=edithistory2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=noautofill1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

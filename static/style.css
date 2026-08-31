@@ -31,6 +31,16 @@
     --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* Detect Chrome/Safari credential autofill so JS can clear non-login fields */
+@keyframes bts-on-autofill {
+    from { opacity: 0.99; }
+    to { opacity: 1; }
+}
+input:-webkit-autofill {
+    animation-name: bts-on-autofill;
+    -webkit-animation-name: bts-on-autofill;
+}
+
 /* ============================================================
    RESET & BASE
    ============================================================ */
@@ -1381,10 +1391,13 @@ table tbody tr:hover {
 
 .info-edit-history-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) repeat(5, 1.75rem);
-    column-gap: 0;
+    grid-template-columns: max-content repeat(5, 2rem);
+    justify-content: start;
+    justify-items: stretch;
     align-items: center;
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
+    column-gap: 0;
 }
 
 .info-edit-history-head {
@@ -1398,18 +1411,18 @@ table tbody tr:hover {
 .info-edit-history-who {
     text-align: left;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 3px 8px 3px 0;
+    padding: 3px 12px 3px 0;
+    justify-self: start;
 }
 
 .info-edit-history-star,
 .info-edit-history-info {
     text-align: center;
-    width: 1.75rem;
+    width: 2rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     padding: 3px 0;
+    justify-self: center;
 }
 
 .info-edit-history-info {
