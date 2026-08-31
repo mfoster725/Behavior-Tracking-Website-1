@@ -1379,54 +1379,43 @@ table tbody tr:hover {
     color: var(--text-primary);
 }
 
-.info-edit-history-table {
+.info-edit-history-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(5, 1.75rem);
+    column-gap: 0;
+    align-items: center;
     width: 100%;
-    border-collapse: collapse;
-    table-layout: auto;
 }
 
-.info-edit-history-table th,
-.info-edit-history-table td {
-    padding: 3px 6px;
-    vertical-align: middle;
-}
-
-.info-edit-history-table thead th {
+.info-edit-history-head {
     font-size: 12px;
     font-weight: 700;
-    text-align: center;
     color: var(--text-secondary);
-    padding-bottom: 4px;
-}
-
-.info-edit-history-label {
-    letter-spacing: 0 !important;
-    text-align: left !important;
-    white-space: nowrap;
-    font-weight: 600;
-    color: var(--text-primary);
-    padding-left: 0 !important;
-    width: 1%;
+    text-align: center;
+    padding: 0 0 4px;
 }
 
 .info-edit-history-who {
     text-align: left;
     white-space: nowrap;
-    padding-right: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 3px 8px 3px 0;
 }
 
-.info-edit-history-star {
+.info-edit-history-star,
+.info-edit-history-info {
     text-align: center;
-    width: 1.75em;
+    width: 1.75rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+    padding: 3px 0;
 }
 
 .info-edit-history-info {
-    text-align: left;
-    padding-left: 10px;
     font-size: 12px;
-    min-width: 4.5rem;
+    overflow: visible;
+    white-space: nowrap;
 }
 
 .info-edit-history-changed {
@@ -1441,7 +1430,7 @@ table tbody tr:hover {
     color: var(--text-secondary);
     font-size: 12px;
     font-style: italic;
-    padding: 2px 0 0;
+    padding: 4px 0 0;
 }
 
 #info-modal .delete-btn {

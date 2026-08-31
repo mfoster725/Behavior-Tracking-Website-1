@@ -9972,27 +9972,20 @@ function recordPeriodEditHistory(studentId, period, infoChanges = [], periodInde
 
 function buildEditHistoryHtml(history) {
     const entries = Array.isArray(history) ? history.filter(Boolean) : [];
+    const header = `
+        <div class="info-edit-history-grid">
+            <div class="info-edit-history-who"></div>
+            <div class="info-edit-history-head info-edit-history-star">S</div>
+            <div class="info-edit-history-head info-edit-history-star">T</div>
+            <div class="info-edit-history-head info-edit-history-star">A</div>
+            <div class="info-edit-history-head info-edit-history-star">R</div>
+            <div class="info-edit-history-head info-edit-history-star">I</div>
+    `;
     if (!entries.length) {
         return `
-            <table class="info-edit-history-table">
-                <thead>
-                    <tr>
-                        <th class="info-edit-history-label"></th>
-                        <th></th>
-                        <th class="info-edit-history-star">S</th>
-                        <th class="info-edit-history-star">T</th>
-                        <th class="info-edit-history-star">A</th>
-                        <th class="info-edit-history-star">R</th>
-                        <th class="info-edit-history-info">I</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <th class="info-edit-history-label" scope="row">Edit History:</th>
-                        <td class="info-edit-history-empty" colspan="6">No edits recorded for this period yet.</td>
-                    </tr>
-                </tbody>
-            </table>
+            ${header}
+            </div>
+            <div class="info-edit-history-empty">No edits recorded for this period yet.</div>
         `;
     }
     const rows = entries.map((entry, index) => {
@@ -10005,44 +9998,25 @@ function buildEditHistoryHtml(history) {
         };
         const infoLabels = Array.isArray(entry.info_changes) ? entry.info_changes.filter(Boolean) : [];
         const infoText = infoLabels.join(', ');
-        const labelCell = index === 0
-            ? '<th class="info-edit-history-label" scope="row">Edit History:</th>'
-            : '<th class="info-edit-history-label" scope="row"></th>';
         const starCell = (key) => {
             const cls = changed[key] ? 'info-edit-history-star info-edit-history-changed' : 'info-edit-history-star';
-            return `<td class="${cls}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</td>`;
+            return `<div class="${cls}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</div>`;
         };
         const infoCls = infoText ? 'info-edit-history-info info-edit-history-changed' : 'info-edit-history-info';
         const who = [entry.time, entry.name || 'Staff'].filter(Boolean).join(' - ');
         return `
-            <tr>
-                ${labelCell}
-                <td class="info-edit-history-who">${escapeEditHistoryHtml(who)}</td>
-                ${starCell('s')}
-                ${starCell('t')}
-                ${starCell('a')}
-                ${starCell('r')}
-                <td class="${infoCls}">${escapeEditHistoryHtml(infoText)}</td>
-            </tr>
+            <div class="info-edit-history-who">${escapeEditHistoryHtml(who)}</div>
+            ${starCell('s')}
+            ${starCell('t')}
+            ${starCell('a')}
+            ${starCell('r')}
+            <div class="${infoCls}">${escapeEditHistoryHtml(infoText)}</div>
         `;
     }).join('');
     return `
-        <table class="info-edit-history-table">
-            <thead>
-                <tr>
-                    <th class="info-edit-history-label"></th>
-                    <th></th>
-                    <th class="info-edit-history-star">S</th>
-                    <th class="info-edit-history-star">T</th>
-                    <th class="info-edit-history-star">A</th>
-                    <th class="info-edit-history-star">R</th>
-                    <th class="info-edit-history-info">I</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${rows}
-            </tbody>
-        </table>
+        ${header}
+            ${rows}
+        </div>
     `;
 }
 
@@ -10054,6 +10028,9 @@ function ensureInfoEditHistoryContainer() {
     if (!notesGroup || !notesGroup.parentNode) return null;
     const group = document.createElement('div');
     group.className = 'form-group info-edit-history-group';
+    const label = document.createElement('label');
+    label.textContent = 'Edit History:';
+    group.appendChild(label);
     container = document.createElement('div');
     container.id = 'info-edit-history';
     container.className = 'info-edit-history';
@@ -10994,6 +10971,7 @@ function showInfoViewPopup(infoDataString, time, location) {
                 </div>
 
                 <div class="form-group info-edit-history-group">
+                    <label>Edit History:</label>
                     <div class="info-edit-history">${buildEditHistoryHtml(infoData.edit_history)}</div>
                 </div>
 
