@@ -448,6 +448,120 @@ const STAR_COLUMN_CRITERIA = {
         ]
     }
 };
+const STAR_POINT_OPTION_VALUES = ['2', '1', '0', 'E', 'U'];
+
+function normalizeStarValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'string') {
+        const text = value.trim().toUpperCase();
+        if (text === 'E' || text === 'U') {
+            return text;
+        }
+        if (text === '0' || text === '1' || text === '2') {
+            return text;
+        }
+    }
+    const num = Number(value);
+    if (num === 0 || num === 1 || num === 2) {
+        return String(num);
+    }
+    return null;
+}
+
+function parseStarInputValue(raw) {
+    if (raw === null || raw === undefined || raw === '') {
+        return null;
+    }
+    return normalizeStarValue(raw);
+}
+
+function formatStarDisplayValue(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '-' : normalized;
+}
+
+function starValueCountsTowardStats(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized !== null && normalized !== 'E';
+}
+
+function starValueForPercentage(value) {
+    const normalized = normalizeStarValue(value);
+    if (normalized === null || normalized === 'E') {
+        return null;
+    }
+    if (normalized === 'U') {
+        return 0;
+    }
+    return Number(normalized);
+}
+
+function isStarValueZero(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized === '0' || normalized === 'U';
+}
+
+function starValuesEquivalent(a, b) {
+    return normalizeStarValue(a) === normalizeStarValue(b);
+}
+
+function populateStarPointSelectOptions(select, currentValue) {
+    if (!select) return;
+    const normalizedCurrent = normalizeStarValue(currentValue);
+    select.innerHTML = '';
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '-';
+    if (normalizedCurrent === null) {
+        emptyOption.selected = true;
+    }
+    select.appendChild(emptyOption);
+
+    STAR_POINT_OPTION_VALUES.forEach((val) => {
+        const option = document.createElement('option');
+        option.value = val;
+        option.textContent = val;
+        if (normalizedCurrent === val) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+}
+
+function getAttendanceStarLockValue(studentId) {
+    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+    if (attendance === 'excused') return 'E';
+    if (attendance === 'unexcused') return 'U';
+    return null;
+}
+
+function applyAttendanceStarCellState(studentId) {
+    const lockValue = getAttendanceStarLockValue(studentId);
+    const studentIdStr = String(studentId);
+    document.querySelectorAll(`.daily-input[data-student-id="${studentIdStr}"]`).forEach((inputEl) => {
+        const category = inputEl.dataset.category;
+        if (!category || !['s', 't', 'a', 'r'].includes(category)) {
+            return;
+        }
+        if (lockValue) {
+            inputEl.value = lockValue;
+            inputEl.disabled = true;
+            const period = inputEl.dataset.period;
+            if (!dailyData[studentId]) {
+                dailyData[studentId] = {};
+            }
+            if (!dailyData[studentId][period]) {
+                dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
+            }
+            dailyData[studentId][period][category] = lockValue;
+        } else if (!isStudent()) {
+            inputEl.disabled = false;
+        }
+    });
+}
+
 let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
 let starNavKeydownBound = false;
 let starZeroWarningKeydownBound = false;
@@ -546,7 +660,7 @@ function periodHasEnteredStarPoints(periodOrCell) {
         periodOrCell.accountability_points,
         periodOrCell.relationships_points
     ];
-    return values.some((value) => value !== null && value !== undefined && value !== '');
+    return values.some((value) => starValueCountsTowardStats(value));
 }
 
 function defaultPointCardPeriod(standardPeriod) {
@@ -600,7 +714,18 @@ function expandPointCardPeriods(periods) {
 }
 
 function starPointsPossible(periodOrCell) {
-    return periodHasEnteredStarPoints(periodOrCell) ? 4 : 0;
+    if (!periodOrCell) return 0;
+    const values = [
+        periodOrCell.s,
+        periodOrCell.t,
+        periodOrCell.a,
+        periodOrCell.r,
+        periodOrCell.safety_points,
+        periodOrCell.teamwork_points,
+        periodOrCell.accountability_points,
+        periodOrCell.relationships_points
+    ];
+    return values.filter((value) => starValueCountsTowardStats(value)).length;
 }
 
 function periodPointsPossibleValue(period) {
@@ -884,7 +1009,8 @@ function handleDailyAttendanceChange(e) {
     attendanceData[currentDate][studentId] = newStatus;
     markAttendanceDirty(studentId);
 
-    if (newStatus === 'unexcused') {
+    if (newStatus === 'excused' || newStatus === 'unexcused') {
+        const lockValue = newStatus === 'excused' ? 'E' : 'U';
         if (!dailyData[studentId]) {
             dailyData[studentId] = {};
         }
@@ -893,22 +1019,19 @@ function handleDailyAttendanceChange(e) {
             if (!dailyData[studentId][period.time]) {
                 dailyData[studentId][period.time] = { s: null, t: null, a: null, r: null, info: '' };
             }
-            dailyData[studentId][period.time].s = 0;
-            dailyData[studentId][period.time].t = 0;
-            dailyData[studentId][period.time].a = 0;
-            dailyData[studentId][period.time].r = 0;
+            dailyData[studentId][period.time].s = lockValue;
+            dailyData[studentId][period.time].t = lockValue;
+            dailyData[studentId][period.time].a = lockValue;
+            dailyData[studentId][period.time].r = lockValue;
             markDailyFieldDirty(studentId, period.time, 's');
             markDailyFieldDirty(studentId, period.time, 't');
             markDailyFieldDirty(studentId, period.time, 'a');
             markDailyFieldDirty(studentId, period.time, 'r');
         });
 
-        document.querySelectorAll(`.daily-input[data-student-id="${studentId}"]`).forEach(inputEl => {
-            const category = inputEl.dataset.category;
-            if (category && ['s', 't', 'a', 'r'].includes(category)) {
-                inputEl.value = '0';
-            }
-        });
+        applyAttendanceStarCellState(studentId);
+    } else {
+        applyAttendanceStarCellState(studentId);
     }
 
     updateDailyPercentageRow();
@@ -1465,10 +1588,183 @@ function formatPointCardScheduleForPeriod(timePeriod) {
     return classText || '';
 }
 
+function isShowStudentSchedulesInPointCards() {
+    return !!(userPreferences && userPreferences.showStudentSchedulesInPointCards);
+}
+
+function getPointCardColumnsPerStudent() {
+    return isShowStudentSchedulesInPointCards() && canEdit() ? 6 : 5;
+}
+
+function buildPointCardStudentColumnsTemplate(studentCount, spacerWidth, studentScheduleColWidth) {
+    const showStudentSched = isShowStudentSchedulesInPointCards() && canEdit();
+    const schedulePart = showStudentSched ? `${studentScheduleColWidth}px ` : '';
+    const studentBlock = `${schedulePart}repeat(4, 40px) 40px`;
+    const parts = [];
+    for (let i = 0; i < studentCount; i++) {
+        parts.push(studentBlock);
+        if (i < studentCount - 1) {
+            parts.push(spacerWidth);
+        }
+    }
+    return parts.join(' ');
+}
+
+function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
+    const texts = ['Sched'];
+    (students || []).forEach((student) => {
+        (timePeriods || []).forEach((period) => {
+            const time = typeof period === 'string' ? period : period.time;
+            const text = getStudentScheduleLocationForPeriod(student.id, time);
+            if (text) texts.push(text);
+        });
+    });
+    return measureDailyScheduleColumnWidth(texts);
+}
+
+function collectPointCardVisibleStudentIds() {
+    const ids = new Set();
+    if (document.getElementById('entry-view')?.classList.contains('active')) {
+        getVisibleDailyStudents().forEach((student) => ids.add(student.id));
+    }
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        (filteredStudentsForPeriod || []).forEach((student) => ids.add(student.id));
+    }
+    return [...ids];
+}
+
+function ensureStudentSchedulesLoadedForVisibleStudents(students) {
+    if (!isShowStudentSchedulesInPointCards() || !canEdit() || !students?.length) return;
+    const missing = students
+        .filter((student) => !studentSchedulesByStudentId[student.id] && !studentSchedulesByStudentId[String(student.id)])
+        .map((student) => student.id);
+    if (!missing.length) return;
+    loadStudentSchedulesForIds(missing).then(() => refreshPointCardGridsAfterScheduleLoad());
+}
+
+async function setShowStudentSchedulesInPointCards(enabled) {
+    const existing = userPreferences || {};
+    userPreferences = { ...existing, showStudentSchedulesInPointCards: !!enabled };
+    try {
+        await fetch('/api/user/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userPreferences)
+        });
+    } catch (error) {
+        console.warn('Failed to save show student schedules preference:', error);
+    }
+    if (enabled && canEdit()) {
+        const studentIds = collectPointCardVisibleStudentIds();
+        if (studentIds.length) {
+            await loadStudentSchedulesForIds(studentIds);
+        }
+    }
+    refreshPointCardGridsAfterScheduleLoad();
+}
+
+async function toggleShowStudentSchedulesInPointCards() {
+    await setShowStudentSchedulesInPointCards(!isShowStudentSchedulesInPointCards());
+}
+
+let scheduleHeaderKebabOpen = null;
+
+function closeScheduleHeaderKebabMenus() {
+    document.querySelectorAll('.schedule-header-kebab-menu.open').forEach((menu) => menu.classList.remove('open'));
+    scheduleHeaderKebabOpen = null;
+}
+
+function bindScheduleHeaderKebabHandlers() {
+    if (window.__scheduleHeaderKebabBound) return;
+    window.__scheduleHeaderKebabBound = true;
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.schedule-header-kebab-wrap')) {
+            closeScheduleHeaderKebabMenus();
+        }
+    });
+    document.querySelectorAll('#daily-grid, #students-grid').forEach((grid) => {
+        grid.addEventListener('scroll', closeScheduleHeaderKebabMenus, { passive: true });
+    });
+}
+
+function appendStudentScheduleCategoryHeader(parent) {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-student-schedule-header';
+    cell.textContent = 'Sched';
+    cell.style.background = '#f8f9fa';
+    cell.style.fontSize = '9px';
+    parent.appendChild(cell);
+    return cell;
+}
+
+function createStudentScheduleDataCell(studentId, timePeriod, options = {}) {
+    const cell = document.createElement('div');
+    cell.className = 'daily-student-schedule-cell';
+    cell.textContent = getStudentScheduleLocationForPeriod(studentId, timePeriod);
+    if (options.isOddRow) {
+        cell.style.background = 'var(--bg-page)';
+    }
+    if (options.borderTop) {
+        cell.style.borderTop = '2px solid #000';
+        cell.style.background = options.background || '#f8f9fa';
+    }
+    if (options.dataset) {
+        Object.entries(options.dataset).forEach(([key, value]) => {
+            cell.dataset[key] = value;
+        });
+    }
+    return cell;
+}
+
 function createDailyScheduleHeaderCell() {
+    bindScheduleHeaderKebabHandlers();
     const scheduleHeader = document.createElement('div');
-    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2';
-    scheduleHeader.textContent = 'Schedule';
+    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2 daily-schedule-header-with-menu';
+
+    const label = document.createElement('span');
+    label.className = 'daily-schedule-header-label';
+    label.textContent = 'Schedule';
+    scheduleHeader.appendChild(label);
+
+    if (canEdit()) {
+        const kebabWrap = document.createElement('div');
+        kebabWrap.className = 'schedule-header-kebab-wrap';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'schedule-header-kebab-btn';
+        btn.setAttribute('aria-label', 'Schedule column menu');
+        btn.textContent = '⋮';
+        const menu = document.createElement('div');
+        menu.className = 'schedule-header-kebab-menu';
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.dataset.action = 'toggle-student-schedules';
+        menuBtn.textContent = isShowStudentSchedulesInPointCards()
+            ? '✓ Show student schedules'
+            : 'Show student schedules';
+        menu.appendChild(menuBtn);
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const wasOpen = menu.classList.contains('open');
+            closeScheduleHeaderKebabMenus();
+            if (!wasOpen) {
+                menuBtn.textContent = isShowStudentSchedulesInPointCards()
+                    ? '✓ Show student schedules'
+                    : 'Show student schedules';
+                menu.classList.add('open');
+                scheduleHeaderKebabOpen = menu;
+            }
+        });
+        menuBtn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            closeScheduleHeaderKebabMenus();
+            await toggleShowStudentSchedulesInPointCards();
+        });
+        kebabWrap.appendChild(btn);
+        kebabWrap.appendChild(menu);
+        scheduleHeader.appendChild(kebabWrap);
+    }
+
     return scheduleHeader;
 }
 
@@ -3084,10 +3380,11 @@ function updatePeriodPercentageRow() {
             
             if (cell) {
                 const value = data[catFull];
-                if (value !== null && value !== undefined) {
-                    const percentage = ((value / 2) * 100).toFixed(0);
+                const points = starValueForPercentage(value);
+                if (points !== null) {
+                    const percentage = ((points / 2) * 100).toFixed(0);
                     cell.textContent = `${percentage}%`;
-                    totalPoints += value;
+                    totalPoints += points;
                     countedCategories++;
                 } else {
                     cell.textContent = '-';
@@ -3273,21 +3570,10 @@ function renderStudentsGrid() {
             
             if (isStudent()) select.disabled = true;
             
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = '-';
-            select.appendChild(emptyOption);
-            
-            [2, 1, 0].forEach(val => {
-                const option = document.createElement('option');
-                option.value = val;
-                option.textContent = val;
-                if (data[`${cat.full}_points`] === val) option.selected = true;
-                select.appendChild(option);
-            });
+            populateStarPointSelectOptions(select, data[`${cat.full}_points`]);
             
             select.addEventListener('change', (e) => {
-                const val = e.target.value === '' ? null : parseInt(e.target.value);
+                const val = parseStarInputValue(e.target.value);
                 if (!periodData[student.id]) {
                     periodData[student.id] = { student_id: student.id };
                 }
@@ -3401,10 +3687,11 @@ function renderStudentsGrid() {
             cell.style.background = '#f8f9fa';
             
             const value = data[catFull];
-            if (value !== null && value !== undefined) {
-                const percentage = ((value / 2) * 100).toFixed(0);
+            const points = starValueForPercentage(value);
+            if (points !== null) {
+                const percentage = ((points / 2) * 100).toFixed(0);
                 cell.textContent = `${percentage}%`;
-                totalPoints += value;
+                totalPoints += points;
                 countedCategories++;
                 
                 // Color code based on category
@@ -3783,10 +4070,10 @@ async function loadDailyData() {
 
             record.periods.forEach(period => {
                 nextDailyData[studentId][period.time_range] = {
-                    s: period.safety_points,
-                    t: period.teamwork_points,
-                    a: period.accountability_points,
-                    r: period.relationships_points,
+                    s: normalizeStarValue(period.safety_points),
+                    t: normalizeStarValue(period.teamwork_points),
+                    a: normalizeStarValue(period.accountability_points),
+                    r: normalizeStarValue(period.relationships_points),
                     info: period.info || ''
                 };
             });
@@ -3850,10 +4137,12 @@ function calculateStudentPercentages(studentId) {
     // Calculate totals and counts for each category
     Object.values(studentData).forEach(periodData => {
         ['s', 't', 'a', 'r'].forEach(category => {
-            if (periodData[category] !== null && periodData[category] !== undefined) {
-                totals[category] += periodData[category];
-                counts[category]++;
+            const points = starValueForPercentage(periodData[category]);
+            if (points === null) {
+                return;
             }
+            totals[category] += points;
+            counts[category]++;
         });
     });
     
@@ -4127,27 +4416,12 @@ function renderDailyGrid() {
                 select.dataset.category = category;
                 select.dataset.studentName = student.name || '';
                 
-                // Disable for students
-                if (isStudent()) {
+                // Disable for students or when attendance locks STAR cells
+                if (isStudent() || getAttendanceStarLockValue(student.id)) {
                     select.disabled = true;
                 }
                 
-                // Add empty option
-                const emptyOption = document.createElement('option');
-                emptyOption.value = '';
-                emptyOption.textContent = '-';
-                select.appendChild(emptyOption);
-                
-                // Add options 2, 1, 0
-                [2, 1, 0].forEach(val => {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.textContent = val;
-                    if (studentData[category] === val) {
-                        option.selected = true;
-                    }
-                    select.appendChild(option);
-                });
+                populateStarPointSelectOptions(select, studentData[category]);
                 
                 cell.appendChild(select);
                 body.appendChild(cell);
@@ -4290,6 +4564,7 @@ function renderDailyGrid() {
     
     // Update "I" box highlights for all students and periods on initial load
     studentsToDisplay.forEach(student => {
+        applyAttendanceStarCellState(student.id);
         STANDARD_PERIODS.forEach(period => {
             updateInfoButtonHighlight(student.id, period.time);
         });
@@ -4345,15 +4620,16 @@ function updateInfoButtonHighlight(studentId, period) {
         if (studentData && studentData[period]) {
             const periodData = studentData[period];
             // Check if any STAR value is 0
-            hasZero = periodData.s === 0 || periodData.t === 0 || periodData.a === 0 || periodData.r === 0;
+            hasZero = isStarValueZero(periodData.s) || isStarValueZero(periodData.t) ||
+                     isStarValueZero(periodData.a) || isStarValueZero(periodData.r);
         }
     } else if (isPeriodEntry) {
         // Check periodData structure: periodData[studentId] with safety_points, teamwork_points, etc.
         const data = periodData[studentId];
         if (data) {
             // Check if any STAR value is 0
-            hasZero = data.safety_points === 0 || data.teamwork_points === 0 || 
-                     data.accountability_points === 0 || data.relationships_points === 0;
+            hasZero = isStarValueZero(data.safety_points) || isStarValueZero(data.teamwork_points) ||
+                     isStarValueZero(data.accountability_points) || isStarValueZero(data.relationships_points);
         }
     }
     
@@ -4374,7 +4650,7 @@ function handleDailyInputChange(e) {
     const studentId = parseInt(select.dataset.studentId);
     const period = select.dataset.period;
     const category = select.dataset.category;
-    const value = select.value === '' ? null : parseInt(select.value);
+    const value = parseStarInputValue(select.value);
     
     // Update dailyData
     if (!dailyData[studentId]) {
@@ -4409,14 +4685,19 @@ function handleDailyInputChange(e) {
     }
 }
 
-function commitStarDigit(select, digit) {
-    select.value = digit;
+function commitStarValue(select, rawValue) {
+    const normalized = normalizeStarValue(rawValue);
+    select.value = normalized === null ? '' : normalized;
     const event = new Event('change', { bubbles: true });
     event.fromStarKey = true;
     select.dispatchEvent(event);
     if (select.dataset.category !== 'r') {
         moveToNextInput(select);
     }
+}
+
+function commitStarDigit(select, digit) {
+    commitStarValue(select, digit);
 }
 
 const STAR_GRID_CATEGORIES = ['s', 't', 'a', 'r'];
@@ -4584,11 +4865,16 @@ function handleDailyInputKeydown(e) {
             moveToPreviousInput(select);
         }
     }
-    // Handle number keys 0, 1, 2
+    // Handle number keys 0, 1, 2 and letter keys E/U
     else if (e.key >= '0' && e.key <= '2') {
         e.preventDefault();
         select.dataset.starKeyHandled = '1';
         commitStarDigit(select, e.key);
+    }
+    else if (e.key === 'e' || e.key === 'E' || e.key === 'u' || e.key === 'U') {
+        e.preventDefault();
+        select.dataset.starKeyHandled = '1';
+        commitStarValue(select, e.key);
     }
     // Arrow keys move between grid cells; prevent native select option cycling.
     else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -4616,6 +4902,8 @@ function handleDailyInputKeyup(e) {
     // Native typeahead can change the displayed value without keydown (open picker).
     if (e.key >= '0' && e.key <= '2' && select.value === e.key) {
         commitStarDigit(select, e.key);
+    } else if ((e.key === 'e' || e.key === 'E' || e.key === 'u' || e.key === 'U') && starValuesEquivalent(select.value, e.key)) {
+        commitStarValue(select, e.key);
     }
 }
 
@@ -4958,15 +5246,15 @@ function getPeriodStarValues(studentId, period) {
     const inputs = document.querySelectorAll(
         `.daily-input[data-student-id="${studentId}"][data-period="${period}"]`
     );
-    return Array.from(inputs).map((el) => (el.value === '' ? null : parseInt(el.value, 10)));
+    return Array.from(inputs).map((el) => parseStarInputValue(el.value));
 }
 
 function rowHasStarZero(studentId, period) {
-    return getPeriodStarValues(studentId, period).some((v) => v === 0);
+    return getPeriodStarValues(studentId, period).some((v) => isStarValueZero(v));
 }
 
 function rowHasStarOne(studentId, period) {
-    return getPeriodStarValues(studentId, period).some((v) => v === 1);
+    return getPeriodStarValues(studentId, period).some((v) => normalizeStarValue(v) === '1');
 }
 
 function clearInfoModalStarHighlights() {
@@ -8143,10 +8431,10 @@ function renderPointCardAttendanceBadge(record) {
 
 function formatPointCardStarCell(record, value) {
     const attendance = getPointCardAttendanceStatus(record);
-    if (attendance === 'excused') return '-';
-    if (value !== null && value !== undefined) return value;
-    if (attendance === 'unexcused') return '0';
-    return '-';
+    if (attendance === 'excused') return 'E';
+    if (attendance === 'unexcused') return 'U';
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '-' : normalized;
 }
 
 function renderPointCardGrid(record) {
@@ -8157,17 +8445,21 @@ function renderPointCardGrid(record) {
     let counts = { s: 0, t: 0, a: 0, r: 0 };
 
     periods.forEach(period => {
-        if (period.safety_points !== null && period.safety_points !== undefined) {
-            totals.s += period.safety_points; counts.s++;
+        const safetyPoints = starValueForPercentage(period.safety_points);
+        if (safetyPoints !== null) {
+            totals.s += safetyPoints; counts.s++;
         }
-        if (period.teamwork_points !== null && period.teamwork_points !== undefined) {
-            totals.t += period.teamwork_points; counts.t++;
+        const teamworkPoints = starValueForPercentage(period.teamwork_points);
+        if (teamworkPoints !== null) {
+            totals.t += teamworkPoints; counts.t++;
         }
-        if (period.accountability_points !== null && period.accountability_points !== undefined) {
-            totals.a += period.accountability_points; counts.a++;
+        const accountabilityPoints = starValueForPercentage(period.accountability_points);
+        if (accountabilityPoints !== null) {
+            totals.a += accountabilityPoints; counts.a++;
         }
-        if (period.relationships_points !== null && period.relationships_points !== undefined) {
-            totals.r += period.relationships_points; counts.r++;
+        const relationshipsPoints = starValueForPercentage(period.relationships_points);
+        if (relationshipsPoints !== null) {
+            totals.r += relationshipsPoints; counts.r++;
         }
     });
 
@@ -8336,10 +8628,12 @@ function getPointCardAveragePercent(record) {
             period?.relationships_points
         ];
         values.forEach((value) => {
-            if (value !== null && value !== undefined && value !== '') {
-                totalPoints += Number(value) || 0;
-                totalPossiblePoints += 2;
+            const points = starValueForPercentage(value);
+            if (points === null) {
+                return;
             }
+            totalPoints += points;
+            totalPossiblePoints += 2;
         });
     });
     if (!totalPossiblePoints) return null;
@@ -8550,13 +8844,20 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     const formattedDate = dateObj.toLocaleDateString('en-US', options);
 
+    const attendance = getPointCardAttendanceStatus(record);
+    const starDisabled = attendance === 'excused' || attendance === 'unexcused';
+    const lockedStarValue = attendance === 'excused' ? 'E' : (attendance === 'unexcused' ? 'U' : null);
+
     const buildSelectHtml = (index, category, currentValue) => {
-        const opts = ['', '2', '1', '0'].map(v => {
+        const displayValue = lockedStarValue || currentValue;
+        const normalized = normalizeStarValue(displayValue);
+        const opts = ['', ...STAR_POINT_OPTION_VALUES].map(v => {
             const label = v === '' ? '-' : v;
-            const sel = (v !== '' && parseInt(v) === currentValue) ? 'selected' : (v === '' && (currentValue === null || currentValue === undefined) ? 'selected' : '');
-            return `<option value="${v}" ${sel}>${label}</option>`;
+            const selected = (v !== '' && normalized === v) || (v === '' && normalized === null);
+            return `<option value="${v}" ${selected ? 'selected' : ''}>${label}</option>`;
         }).join('');
-        return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}">${opts}</select>`;
+        const disabledAttr = starDisabled ? ' disabled' : '';
+        return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}"${disabledAttr}>${opts}</select>`;
     };
 
     let gridRows = '';
@@ -8712,12 +9013,7 @@ function addPointCardRow() {
         sel.className = 'pc-edit-input edit-input';
         sel.dataset.periodIndex = index;
         sel.dataset.category = cat;
-        ['', '2', '1', '0'].forEach(v => {
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = v === '' ? '-' : v;
-            sel.appendChild(opt);
-        });
+        populateStarPointSelectOptions(sel, null);
         return sel;
     };
 
@@ -8844,7 +9140,7 @@ function syncEditingPointCardRecordField(input) {
         return;
     }
     if (['safety', 'teamwork', 'accountability', 'relationships'].includes(category)) {
-        record.periods[periodIndex][`${category}_points`] = value === '' ? null : parseInt(value, 10);
+        record.periods[periodIndex][`${category}_points`] = parseStarInputValue(value);
         const period = record.periods[periodIndex];
         recordPeriodEditHistory(
             window.editingPointCardStudentId,
@@ -8921,10 +9217,10 @@ async function saveEditedPointCard(recordId, studentId, date) {
         const accountabilitySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="accountability"]`);
         const relationshipsSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="relationships"]`);
         
-        const safetyPoints = !safetySelect || safetySelect.value === '' ? null : parseInt(safetySelect.value);
-        const teamworkPoints = !teamworkSelect || teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value);
-        const accountabilityPoints = !accountabilitySelect || accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value);
-        const relationshipsPoints = !relationshipsSelect || relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value);
+        const safetyPoints = !safetySelect || safetySelect.value === '' ? null : parseStarInputValue(safetySelect.value);
+        const teamworkPoints = !teamworkSelect || teamworkSelect.value === '' ? null : parseStarInputValue(teamworkSelect.value);
+        const accountabilityPoints = !accountabilitySelect || accountabilitySelect.value === '' ? null : parseStarInputValue(accountabilitySelect.value);
+        const relationshipsPoints = !relationshipsSelect || relationshipsSelect.value === '' ? null : parseStarInputValue(relationshipsSelect.value);
 
         return {
             time_range: (time_range && String(time_range).trim()) ? String(time_range).trim() : (period.time_range || ''),
@@ -10412,23 +10708,21 @@ function getEditHistoryList(infoData) {
 }
 
 function normalizeStarHistoryValue(value) {
-    if (value === null || value === undefined || value === '') return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
+    return normalizeStarValue(value);
 }
 
 function starSnapshotsEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
-    return normalizeStarHistoryValue(a.s) === normalizeStarHistoryValue(b.s)
-        && normalizeStarHistoryValue(a.t) === normalizeStarHistoryValue(b.t)
-        && normalizeStarHistoryValue(a.a) === normalizeStarHistoryValue(b.a)
-        && normalizeStarHistoryValue(a.r) === normalizeStarHistoryValue(b.r);
+    return normalizeStarValue(a.s) === normalizeStarValue(b.s)
+        && normalizeStarValue(a.t) === normalizeStarValue(b.t)
+        && normalizeStarValue(a.a) === normalizeStarValue(b.a)
+        && normalizeStarValue(a.r) === normalizeStarValue(b.r);
 }
 
 function formatStarHistoryDisplay(value) {
-    const normalized = normalizeStarHistoryValue(value);
-    return normalized === null ? '–' : String(normalized);
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '–' : normalized;
 }
 
 function getStarSnapshot(studentId, period, periodIndex) {
