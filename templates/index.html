@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=notiflive1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=transition1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <!-- jsPDF library for PDF generation -->
@@ -360,7 +360,9 @@
                     </div>
                     <div class="schedule-section-header schedule-area-title-student">
                         <h3>Student's Schedule</h3>
-                        <div class="schedule-print-menu">
+                        <div class="schedule-student-header-actions">
+                            <button type="button" id="student-transition-btn" class="btn-secondary" disabled>Transition</button>
+                            <div class="schedule-print-menu">
                             <button type="button" id="print-student-schedule-menu-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="print-student-schedule-menu">Print</button>
                             <div id="print-student-schedule-menu" class="schedule-print-menu-dropdown" role="menu" hidden>
                                 <button type="button" role="menuitem" data-print-scope="selected">This student</button>
@@ -389,6 +391,7 @@
                                     </select>
                                 </div>
                             </div>
+                        </div>
                         </div>
                     </div>
 
@@ -2289,6 +2292,32 @@
         </div>
     </div>
 
+    <div id="student-transition-modal" class="modal">
+        <div class="modal-content" style="max-width: 420px;">
+            <span class="close" id="student-transition-modal-close">&times;</span>
+            <h2>Student Transition</h2>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 0;">
+                Mark when this student arrives from or leaves for their other school. Periods on the other side of that time are greyed out for our staff.
+            </p>
+            <div class="form-group">
+                <label for="student-transition-direction">This student is:</label>
+                <select id="student-transition-direction">
+                    <option value="arrive">Arriving from the other school</option>
+                    <option value="leave">Leaving to the other school</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="student-transition-time">Time:</label>
+                <input type="time" id="student-transition-time" step="300">
+            </div>
+            <p id="student-transition-modal-msg" style="display: none; font-size: 13px;"></p>
+            <div class="modal-buttons" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
+                <button type="button" id="student-transition-remove-btn" class="btn-secondary">Remove</button>
+                <button type="button" id="student-transition-save-btn" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
     <div id="schedule-print-preview-modal" class="modal" onclick="if(event.target===this) closeSchedulePrintPreview()">
         <div class="modal-content schedule-print-preview-modal-content" onclick="event.stopPropagation()">
             <span class="close" id="schedule-print-preview-close">&times;</span>
@@ -2318,7 +2347,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=stafflevel1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=transition1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

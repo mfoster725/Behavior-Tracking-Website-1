@@ -976,6 +976,139 @@ POINT_CARD_PERIODS = (
 POINT_CARD_TIME_RANGES = tuple(time_range for time_range, _location in POINT_CARD_PERIODS)
 POINT_CARD_DEFAULT_LOCATIONS = dict(POINT_CARD_PERIODS)
 
+# School-day clock helpers for student transitions (arrive/leave split).
+# AM Bus ends at first bell; PM Bus starts at last bell. 1:00–6:59 on the
+# labeled grid is afternoon.
+_TRANSITION_CLOCK_RE = re.compile(r'^(\d{1,2}):(\d{2})$')
+_TRANSITION_RANGE_RE = re.compile(r'^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$')
+_FIRST_BELL_MINUTES = 7 * 60 + 45
+_LAST_BELL_MINUTES = 14 * 60 + 45
+
+
+def _clock_token_to_minutes(token, *, afternoon_hint=False):
+    """Parse '7:45', '10:00', or '13:30' into minutes from midnight."""
+    raw = (token or '').strip().lower().replace('a.m.', '').replace('p.m.', '')
+    raw = raw.replace('am', '').replace('pm', '').strip()
+    match = _TRANSITION_CLOCK_RE.match(raw)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        return None
+    if hour > 12:
+        return hour * 60 + minute
+    if hour == 12:
+        return 12 * 60 + minute
+    if hour <= 6 or afternoon_hint:
+        hour += 12
+    return hour * 60 + minute
+
+
+def _normalize_transition_time(raw):
+    minutes = _clock_token_to_minutes(raw)
+    if minutes is None:
+        return None
+    return f'{minutes // 60:02d}:{minutes % 60:02d}'
+
+
+def _period_start_end_minutes(time_period):
+    label = (time_period or '').strip()
+    if not label:
+        return None
+    lowered = label.lower()
+    if lowered == 'am bus':
+        return (_FIRST_BELL_MINUTES - 45, _FIRST_BELL_MINUTES)
+    if lowered == 'pm bus':
+        return (_LAST_BELL_MINUTES, _LAST_BELL_MINUTES + 30)
+    match = _TRANSITION_RANGE_RE.match(label)
+    if not match:
+        return None
+    start = _clock_token_to_minutes(match.group(1))
+    end = _clock_token_to_minutes(
+        match.group(2),
+        afternoon_hint=(start is not None and start >= 12 * 60),
+    )
+    if start is None or end is None:
+        return None
+    if end <= start:
+        end = _clock_token_to_minutes(match.group(2), afternoon_hint=True) or end
+    return (start, end)
+
+
+def is_home_period(transition, time_period):
+    """True when this school owns the period. No transition → all periods are ours."""
+    if not transition:
+        return True
+    bounds = _period_start_end_minutes(time_period)
+    if not bounds:
+        return True
+    start, end = bounds
+    if isinstance(transition, dict):
+        time_value = transition.get('time')
+        direction = (transition.get('direction') or '').strip().lower()
+    else:
+        time_value = getattr(transition, 'time', None)
+        direction = (getattr(transition, 'direction', None) or '').strip().lower()
+    split_at = _clock_token_to_minutes(time_value)
+    if split_at is None:
+        return True
+    if direction == 'arrive':
+        return start >= split_at
+    if direction == 'leave':
+        return end <= split_at
+    return True
+
+
+def _serialize_student_transition(transition):
+    if not transition:
+        return None
+    return {
+        'student_id': transition.student_id,
+        'direction': transition.direction,
+        'time': transition.time,
+        'updated_by': transition.updated_by,
+        'updated_at': transition.updated_at.isoformat() if transition.updated_at else None,
+    }
+
+
+def _get_student_transition(student_id):
+    if not student_id:
+        return None
+    return StudentTransition.query.filter_by(student_id=student_id).first()
+
+
+def _transitions_by_student_id(student_ids):
+    ids = [sid for sid in (student_ids or []) if sid]
+    if not ids:
+        return {}
+    rows = StudentTransition.query.filter(StudentTransition.student_id.in_(ids)).all()
+    return {row.student_id: row for row in rows}
+
+
+def user_can_edit_student_transition(user, student_id):
+    if not user or not student_id:
+        return False
+    if user.role == 'admin':
+        return True
+    if user.role == 'staff':
+        if getattr(user, 'is_outside_staff', False):
+            return has_student_access(user, student_id)
+        return True
+    return False
+
+
+def user_can_write_student_period(user, student_id, time_period):
+    """Our staff/admin write home periods; assigned outside staff write other-school periods."""
+    if not user or user.role not in ('staff', 'admin'):
+        return False
+    is_home = is_home_period(_get_student_transition(student_id), time_period)
+    if user.role == 'admin' or (user.role == 'staff' and not getattr(user, 'is_outside_staff', False)):
+        return is_home
+    if not has_student_access(user, student_id):
+        return False
+    return not is_home
+
 
 def _format_student_schedule_location(schedule_rows, time_period):
     """Format a student's schedule rows for one point-card period."""
@@ -1035,6 +1168,9 @@ def _student_location_for_period(student_id, time_period, schedule_rows=None, fa
     fallback = (fallback or '').strip()
     if fallback:
         return fallback
+    transition = _get_student_transition(student_id)
+    if not is_home_period(transition, time_period):
+        return 'Other school'
     return POINT_CARD_DEFAULT_LOCATIONS.get((time_period or '').strip(), '')
 
 
@@ -1931,6 +2067,21 @@ class Schedule(db.Model):
     sort_order = db.Column(db.Integer, default=0)  # Explicit sort order to maintain position
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StudentTransition(db.Model):
+    """Standing daily arrive/leave split between this school and another school."""
+    __tablename__ = 'student_transitions'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    direction = db.Column(db.String(10), nullable=False)  # 'arrive' or 'leave'
+    time = db.Column(db.String(8), nullable=False)  # 24h HH:MM
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    student = db.relationship('Student', backref=db.backref('transition', uselist=False))
+
 
 class BankAccount(db.Model):
     __tablename__ = 'bank_accounts'
@@ -3931,6 +4082,19 @@ def students_by_staff_period():
     
     # Get unique student IDs
     student_ids = list(set([s.student_id for s in matching_schedules if s.student_id]))
+
+    # Assigned outside staff also see students who are at the other school this period
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        assigned_ids = [
+            assoc.student_id
+            for assoc in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()
+        ]
+        extra_ids = []
+        transitions = _transitions_by_student_id(assigned_ids)
+        for sid in assigned_ids:
+            if not is_home_period(transitions.get(sid), period):
+                extra_ids.append(sid)
+        student_ids = list(set(student_ids) | set(extra_ids))
     
     # Get student details
     if student_ids:
@@ -4835,6 +4999,9 @@ def period_data():
                 if not has_student_access(current_user, student_id):
                     continue  # Skip this student if no access
 
+            if not user_can_write_student_period(current_user, student_id, period):
+                continue
+
             if not isinstance(student_data, dict):
                 student_data = {}
             period_payload = dict(student_data)
@@ -4976,6 +5143,19 @@ def daily_records():
             # Migration: convert old present boolean to new attendance_status
             present = data.get('present', True)
             attendance_status = 'present' if present else 'unexcused'
+
+        is_outside = current_user.role == 'staff' and current_user.is_outside_staff
+        has_split = _get_student_transition(student_id) is not None
+        periods_in = data.get('periods') or []
+        writable_periods = [
+            period_data for period_data in periods_in
+            if isinstance(period_data, dict)
+            and user_can_write_student_period(
+                current_user,
+                student_id,
+                (period_data.get('time_range') or '').strip(),
+            )
+        ]
         
         merge = bool(data.get('merge'))
 
@@ -4988,28 +5168,26 @@ def daily_records():
         existing = daily_record
         
         if existing:
-            # Update attendance_status
-            daily_record.attendance_status = attendance_status
-            # Keep present field updated for backward compatibility
-            daily_record.present = (attendance_status == 'present')
+            if not is_outside:
+                daily_record.attendance_status = attendance_status
+                daily_record.present = (attendance_status == 'present')
         else:
             daily_record = DailyRecord(
                 student_id=student_id,
                 date=record_date,
                 day_of_week=record_date.strftime('%A'),
-                attendance_status=attendance_status,
-                present=(attendance_status == 'present')  # Keep for backward compatibility
+                attendance_status='present' if is_outside else attendance_status,
+                present=True if is_outside else (attendance_status == 'present')
             )
             db.session.add(daily_record)
         
         db.session.flush()
 
-        if merge:
-            # Concurrent grid/period saves: update only the periods and fields
-            # in this payload. Never delete sibling periods, infractions, or
-            # frenzy events belonging to other staff.
-            for period_data in data.get('periods', []):
-                _upsert_period_record(daily_record, period_data, merge=True)
+        if merge or has_split:
+            # Concurrent saves, and split-day cards: never delete the other
+            # side's periods. Only upsert periods this user is allowed to write.
+            for period_data in writable_periods:
+                _upsert_period_record(daily_record, period_data, merge=True if merge else False)
         else:
             # Full replace used by the dedicated point-card editors that send
             # a complete day snapshot for one student.
@@ -5023,7 +5201,7 @@ def daily_records():
                 PeriodRecord.query.filter(PeriodRecord.id.in_(existing_period_ids)).delete(synchronize_session=False)
                 db.session.flush()
 
-            for period_data in data.get('periods', []):
+            for period_data in writable_periods:
                 period = PeriodRecord(
                     daily_record_id=daily_record.id,
                     time_range=period_data.get('time_range'),
@@ -5052,28 +5230,29 @@ def daily_records():
                     )
                     db.session.add(infraction)
 
-            FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete(synchronize_session=False)
-            for frenzy_data in data.get('frenzies', []):
-                sev_raw = frenzy_data.get('severity')
-                sev_int = None
-                if sev_raw is not None and sev_raw != '':
-                    try:
-                        sev_int = int(sev_raw)
-                    except (TypeError, ValueError):
-                        sev_int = None
-                if sev_int is not None:
-                    sev_int = max(1, min(5, sev_int))
-                frenzy = FrenzyEvent(
-                    daily_record_id=daily_record.id,
-                    time_range=frenzy_data.get('time_range'),
-                    location=frenzy_data.get('location'),
-                    purpose=frenzy_data.get('purpose'),
-                    purpose2=frenzy_data.get('purpose2'),
-                    duration_minutes=frenzy_data.get('duration_minutes'),
-                    result=frenzy_data.get('result'),
-                    severity=sev_int if sev_int is not None else 1,
-                )
-                db.session.add(frenzy)
+            if not is_outside:
+                FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete(synchronize_session=False)
+                for frenzy_data in data.get('frenzies', []):
+                    sev_raw = frenzy_data.get('severity')
+                    sev_int = None
+                    if sev_raw is not None and sev_raw != '':
+                        try:
+                            sev_int = int(sev_raw)
+                        except (TypeError, ValueError):
+                            sev_int = None
+                    if sev_int is not None:
+                        sev_int = max(1, min(5, sev_int))
+                    frenzy = FrenzyEvent(
+                        daily_record_id=daily_record.id,
+                        time_range=frenzy_data.get('time_range'),
+                        location=frenzy_data.get('location'),
+                        purpose=frenzy_data.get('purpose'),
+                        purpose2=frenzy_data.get('purpose2'),
+                        duration_minutes=frenzy_data.get('duration_minutes'),
+                        result=frenzy_data.get('result'),
+                        severity=sev_int if sev_int is not None else 1,
+                    )
+                    db.session.add(frenzy)
         
         db.session.flush()
         _ensure_full_point_card_periods(daily_record)
@@ -11906,30 +12085,110 @@ def schedules():
             
             # Delete existing schedules
             target_user_id = current_user.id  # for teacher schedule
+            is_outside = current_user.role == 'staff' and current_user.is_outside_staff
             if schedule_type == 'teacher':
+                if is_outside:
+                    return jsonify({'error': 'Outside staff cannot save teacher schedules'}), 403
                 # Staff can only save their own; admin can save for any user via user_id
                 if teacher_user_id is not None:
                     if current_user.role != 'admin':
                         return jsonify({'error': 'Only admin can save another user\'s teacher schedule'}), 403
                     target_user_id = int(teacher_user_id)
                 Schedule.query.filter_by(schedule_type='teacher', user_id=target_user_id).delete()
+                for index, period in enumerate(periods):
+                    schedule = Schedule(
+                        schedule_type=schedule_type,
+                        user_id=target_user_id,
+                        student_id=None,
+                        time_period=period.get('time_period', '').strip(),
+                        class_name=period.get('class_name', '').strip() or None,
+                        staff_name=period.get('staff_name', '').strip() or None,
+                        sort_order=index
+                    )
+                    db.session.add(schedule)
             else:
                 if not student_id:
                     return jsonify({'error': 'student_id is required for student schedules'}), 400
-                Schedule.query.filter_by(schedule_type='student', student_id=student_id).delete()
-            
-            # Add new schedules with explicit sort order
-            for index, period in enumerate(periods):
-                schedule = Schedule(
-                    schedule_type=schedule_type,
-                    user_id=target_user_id if schedule_type == 'teacher' else None,
-                    student_id=student_id if schedule_type == 'student' else None,
-                    time_period=period.get('time_period', '').strip(),
-                    class_name=period.get('class_name', '').strip() or None,
-                    staff_name=period.get('staff_name', '').strip() or None,
-                    sort_order=index  # Maintain the order
+                if is_outside and not has_student_access(current_user, student_id):
+                    return jsonify({'error': 'Access denied to this student'}), 403
+                existing_rows = (
+                    Schedule.query
+                    .filter_by(schedule_type='student', student_id=student_id)
+                    .order_by(Schedule.sort_order, Schedule.id)
+                    .all()
                 )
-                db.session.add(schedule)
+                transition = _get_student_transition(student_id)
+                if is_outside and not transition:
+                    return jsonify({'error': 'Set a transition before editing the other-school schedule'}), 403
+
+                payload_by_period = {}
+                payload_order = []
+                for period in periods:
+                    time_period = period.get('time_period', '').strip()
+                    if time_period not in payload_by_period:
+                        payload_order.append(time_period)
+                    payload_by_period[time_period] = {
+                        'time_period': time_period,
+                        'class_name': (period.get('class_name') or '').strip() or None,
+                        'staff_name': (period.get('staff_name') or '').strip() or None,
+                    }
+
+                existing_by_period = {}
+                existing_order = []
+                for row in existing_rows:
+                    if row.time_period not in existing_by_period:
+                        existing_order.append(row.time_period)
+                    existing_by_period[row.time_period] = row
+
+                if transition:
+                    merged = []
+                    seen = set()
+                    for time_period in existing_order + payload_order:
+                        if time_period in seen:
+                            continue
+                        seen.add(time_period)
+                        owns = user_can_write_student_period(current_user, student_id, time_period)
+                        if owns:
+                            incoming = payload_by_period.get(time_period)
+                            if incoming:
+                                merged.append(incoming)
+                            else:
+                                merged.append({
+                                    'time_period': time_period,
+                                    'class_name': None,
+                                    'staff_name': None,
+                                })
+                        else:
+                            existing = existing_by_period.get(time_period)
+                            if existing:
+                                merged.append({
+                                    'time_period': existing.time_period,
+                                    'class_name': existing.class_name,
+                                    'staff_name': existing.staff_name,
+                                })
+                    Schedule.query.filter_by(schedule_type='student', student_id=student_id).delete()
+                    for index, period in enumerate(merged):
+                        db.session.add(Schedule(
+                            schedule_type='student',
+                            user_id=None,
+                            student_id=student_id,
+                            time_period=period['time_period'],
+                            class_name=period.get('class_name'),
+                            staff_name=period.get('staff_name'),
+                            sort_order=index
+                        ))
+                else:
+                    Schedule.query.filter_by(schedule_type='student', student_id=student_id).delete()
+                    for index, period in enumerate(periods):
+                        db.session.add(Schedule(
+                            schedule_type='student',
+                            user_id=None,
+                            student_id=student_id,
+                            time_period=period.get('time_period', '').strip(),
+                            class_name=period.get('class_name', '').strip() or None,
+                            staff_name=period.get('staff_name', '').strip() or None,
+                            sort_order=index
+                        ))
             
             db.session.commit()
             return jsonify({'message': 'Schedule saved successfully'}), 200
@@ -11966,6 +12225,9 @@ def schedules():
                     return jsonify({'error': 'Permission denied'}), 403
                 query = query.filter_by(user_id=current_user.id)
         elif schedule_type == 'student' and student_id:
+            if current_user.role == 'staff' and current_user.is_outside_staff:
+                if not has_student_access(current_user, student_id):
+                    return jsonify({'error': 'Access denied to this student'}), 403
             query = query.filter_by(student_id=student_id)
         
         # Order by sort_order to maintain the saved order
@@ -11981,8 +12243,70 @@ def schedules():
             'staff_name': s.staff_name,
             'sort_order': s.sort_order
         } for s in schedules]
+
+        if schedule_type == 'student' and student_id:
+            return jsonify({
+                'periods': result,
+                'transition': _serialize_student_transition(_get_student_transition(student_id)),
+            })
         
         return jsonify(result)
+
+@app.route('/api/students/<int:student_id>/transition', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def student_transition(student_id):
+    """Get, set, or remove a student's arrive/leave split."""
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
+    if not has_student_access(current_user, student_id) and current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    if current_user.role == 'staff' and current_user.is_outside_staff:
+        if not has_student_access(current_user, student_id):
+            return jsonify({'error': 'Access denied to this student'}), 403
+
+    if request.method == 'GET':
+        return jsonify({'transition': _serialize_student_transition(_get_student_transition(student_id))})
+
+    if current_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Permission denied'}), 403
+    if not user_can_edit_student_transition(current_user, student_id):
+        return jsonify({'error': 'Permission denied'}), 403
+
+    if request.method == 'DELETE':
+        existing = _get_student_transition(student_id)
+        if existing:
+            db.session.delete(existing)
+            db.session.commit()
+        return jsonify({'message': 'Transition removed', 'transition': None})
+
+    data = request.json or {}
+    direction = (data.get('direction') or '').strip().lower()
+    if direction not in ('arrive', 'leave'):
+        return jsonify({'error': 'direction must be "arrive" or "leave"'}), 400
+    time_value = _normalize_transition_time(data.get('time'))
+    if not time_value:
+        return jsonify({'error': 'A valid time is required (e.g. 10:00)'}), 400
+
+    existing = _get_student_transition(student_id)
+    if existing:
+        existing.direction = direction
+        existing.time = time_value
+        existing.updated_by = current_user.id
+        existing.updated_at = datetime.utcnow()
+    else:
+        existing = StudentTransition(
+            student_id=student_id,
+            direction=direction,
+            time=time_value,
+            updated_by=current_user.id,
+        )
+        db.session.add(existing)
+    db.session.commit()
+    return jsonify({
+        'message': 'Transition saved',
+        'transition': _serialize_student_transition(existing),
+    })
 
 @app.route('/api/schedules/locations', methods=['GET'])
 @login_required
@@ -12084,12 +12408,15 @@ def bulk_student_schedules():
             'sort_order': schedule.sort_order,
         })
 
+    transitions = _transitions_by_student_id([student.id for student in students])
+
     items = [{
         'student_id': student.id,
         'name': student.name,
         'grade': student.grade,
         'card_color': student.card_color,
         'periods': periods_by_student.get(student.id, []),
+        'transition': _serialize_student_transition(transitions.get(student.id)),
     } for student in students]
 
     return jsonify({'items': items})

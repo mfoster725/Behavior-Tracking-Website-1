@@ -38,6 +38,122 @@ const SCHEDULE_PERIODS = [
     'PM Bus'
 ];
 
+const TRANSITION_FIRST_BELL_MINUTES = 7 * 60 + 45;
+const TRANSITION_LAST_BELL_MINUTES = 14 * 60 + 45;
+const studentTransitionsByStudentId = {};
+
+function clockTokenToMinutes(token, afternoonHint = false) {
+    if (token == null) return null;
+    let raw = String(token).trim().toLowerCase().replace(/a\.?m\.?/g, '').replace(/p\.?m\.?/g, '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    let hour = parseInt(match[1], 10);
+    const minute = parseInt(match[2], 10);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return null;
+    if (hour > 12) return hour * 60 + minute;
+    if (hour === 12) return 12 * 60 + minute;
+    if (hour <= 6 || afternoonHint) hour += 12;
+    return hour * 60 + minute;
+}
+
+function periodStartEndMinutes(timePeriod) {
+    const label = String(timePeriod || '').trim();
+    if (!label) return null;
+    const lowered = label.toLowerCase();
+    if (lowered === 'am bus') {
+        return [TRANSITION_FIRST_BELL_MINUTES - 45, TRANSITION_FIRST_BELL_MINUTES];
+    }
+    if (lowered === 'pm bus') {
+        return [TRANSITION_LAST_BELL_MINUTES, TRANSITION_LAST_BELL_MINUTES + 30];
+    }
+    const match = label.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+    if (!match) return null;
+    const start = clockTokenToMinutes(match[1]);
+    let end = clockTokenToMinutes(match[2], start != null && start >= 12 * 60);
+    if (start == null || end == null) return null;
+    if (end <= start) {
+        end = clockTokenToMinutes(match[2], true) || end;
+    }
+    return [start, end];
+}
+
+function setStudentTransition(studentId, transition) {
+    if (studentId == null) return;
+    studentTransitionsByStudentId[studentId] = transition || null;
+    studentTransitionsByStudentId[String(studentId)] = transition || null;
+}
+
+function getStudentTransition(studentId) {
+    if (studentId == null) return null;
+    return studentTransitionsByStudentId[studentId] || studentTransitionsByStudentId[String(studentId)] || null;
+}
+
+function isHomePeriod(transition, timePeriod) {
+    if (!transition) return true;
+    const bounds = periodStartEndMinutes(timePeriod);
+    if (!bounds) return true;
+    const splitAt = clockTokenToMinutes(transition.time);
+    if (splitAt == null) return true;
+    const direction = String(transition.direction || '').trim().toLowerCase();
+    if (direction === 'arrive') return bounds[0] >= splitAt;
+    if (direction === 'leave') return bounds[1] <= splitAt;
+    return true;
+}
+
+function isOtherSchoolPeriod(studentId, timePeriod) {
+    const transition = getStudentTransition(studentId);
+    if (!transition) return false;
+    return !isHomePeriod(transition, timePeriod);
+}
+
+function canEditStarPeriod(studentId, timePeriod) {
+    if (isStudent()) return false;
+    const transition = getStudentTransition(studentId);
+    const home = isHomePeriod(transition, timePeriod);
+    if (isStaff() || isAdmin()) return home;
+    if (isOutsideStaff()) return !!transition && !home;
+    return false;
+}
+
+function canEditSchedulePeriod(studentId, timePeriod) {
+    if (isStudent()) return false;
+    const transition = getStudentTransition(studentId);
+    const home = isHomePeriod(transition, timePeriod);
+    if (isStaff() || isAdmin()) return home;
+    if (isOutsideStaff()) return !!transition && !home;
+    return false;
+}
+
+function canEditStudentTransition(studentId) {
+    if (studentId == null) return false;
+    if (isAdmin() || isStaff()) return true;
+    if (isOutsideStaff()) return true;
+    return false;
+}
+
+function canEditPointCardForStudent(studentId) {
+    if (canEdit()) return true;
+    return isOutsideStaff() && !!getStudentTransition(studentId);
+}
+
+function formatTransitionClock(hhmm) {
+    const minutes = clockTokenToMinutes(hhmm);
+    if (minutes == null) return String(hhmm || '');
+    let hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    if (hour === 0) hour = 12;
+    else if (hour > 12) hour -= 12;
+    return `${hour}:${String(minute).padStart(2, '0')}`;
+}
+
+function formatTransitionMarkerLabel(transition) {
+    if (!transition) return '';
+    const clock = formatTransitionClock(transition.time);
+    if (String(transition.direction).toLowerCase() === 'arrive') return `Arrives ${clock}`;
+    if (String(transition.direction).toLowerCase() === 'leave') return `Leaves ${clock}`;
+    return clock;
+}
+
 const INFRACTION_TYPES = {
     social: [
         { value: 'Language', label: 'Language (lang)', aliases: ['lang'] },
@@ -555,8 +671,8 @@ function applyAttendanceStarCellState(studentId) {
                 dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
             }
             dailyData[studentId][period][category] = lockValue;
-        } else if (!isStudent()) {
-            inputEl.disabled = false;
+        } else {
+            inputEl.disabled = !canEditStarPeriod(studentId, inputEl.dataset.period);
         }
     });
 }
@@ -1966,6 +2082,9 @@ function createStudentScheduleDataCell(studentId, timePeriod, options = {}) {
             cell.dataset[key] = value;
         });
     }
+    if (timePeriod && isOtherSchoolPeriod(studentId, timePeriod)) {
+        cell.classList.add('other-school-period');
+    }
     return cell;
 }
 
@@ -2132,13 +2251,34 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
     });
 }
 
-function populateStudentScheduleTbody(tbody, scheduleData) {
+function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentScheduleStudentId) {
     if (!tbody) return;
     tbody.innerHTML = '';
+    const transition = getStudentTransition(studentId);
+    const markerLabel = formatTransitionMarkerLabel(transition);
+    let insertedMarker = false;
+    let prevHome = null;
     SCHEDULE_PERIODS.forEach((time) => {
         const savedSchedule = (scheduleData || []).find((item) => item && item.time_period === time);
-        addScheduleRow('student', time, savedSchedule || null, tbody);
+        const home = isHomePeriod(transition, time);
+        if (transition && prevHome !== null && home !== prevHome && !insertedMarker) {
+            appendTransitionMarkerRow(tbody, markerLabel);
+            insertedMarker = true;
+        }
+        addScheduleRow('student', time, savedSchedule || null, tbody, studentId);
+        prevHome = home;
     });
+}
+
+function appendTransitionMarkerRow(tbody, label) {
+    if (!tbody) return;
+    const row = document.createElement('tr');
+    row.className = 'schedule-row-split-marker';
+    const cell = document.createElement('td');
+    cell.colSpan = 3;
+    cell.textContent = label || 'Transition';
+    row.appendChild(cell);
+    tbody.appendChild(row);
 }
 
 async function openPointCardScheduleEditModal({ type, studentId = null, studentName = '' } = {}) {
@@ -2172,7 +2312,7 @@ async function openPointCardScheduleEditModal({ type, studentId = null, studentN
             </tr>
         `;
         await loadSchedules('student', studentId);
-        populateStudentScheduleTbody(tbody, studentScheduleData);
+        populateStudentScheduleTbody(tbody, studentScheduleData, studentId);
     } else {
         return;
     }
@@ -4078,9 +4218,9 @@ function renderStudentsGrid() {
             { full: 'relationships', short: 'r' }
         ];
 
-        if (showStudentSchedules) {
-            grid.appendChild(createStudentScheduleDataCell(student.id, currentPeriod || ''));
-        }
+            if (showStudentSchedules) {
+                grid.appendChild(createStudentScheduleDataCell(student.id, currentPeriod || ''));
+            }
         
         categories.forEach(cat => {
             const cell = document.createElement('div');
@@ -4089,6 +4229,9 @@ function renderStudentsGrid() {
             cell.style.display = 'flex';
             cell.style.justifyContent = 'center';
             cell.style.alignItems = 'center';
+            if (isOtherSchoolPeriod(student.id, currentPeriod || '')) {
+                cell.classList.add('other-school-period');
+            }
             
             const select = document.createElement('select');
             select.className = 'daily-input';
@@ -4097,7 +4240,7 @@ function renderStudentsGrid() {
             select.dataset.category = cat.short;
             select.dataset.studentName = student.name || '';
             
-            if (isStudent()) select.disabled = true;
+            if (isStudent() || !canEditStarPeriod(student.id, currentPeriod || '')) select.disabled = true;
             
             populateStarPointSelectOptions(select, data[`${cat.full}_points`]);
             
@@ -4975,6 +5118,9 @@ function renderDailyGrid() {
                 if (isOddRow) {
                     cell.style.background = 'var(--bg-page)';
                 }
+                if (isOtherSchoolPeriod(student.id, period.time)) {
+                    cell.classList.add('other-school-period');
+                }
                 
                 const select = document.createElement('select');
                 select.className = 'daily-input';
@@ -4983,8 +5129,8 @@ function renderDailyGrid() {
                 select.dataset.category = category;
                 select.dataset.studentName = student.name || '';
                 
-                // Disable for students or when attendance locks STAR cells
-                if (isStudent() || getAttendanceStarLockValue(student.id)) {
+                // Disable for students, attendance lock, or unowned transition periods
+                if (isStudent() || getAttendanceStarLockValue(student.id) || !canEditStarPeriod(student.id, period.time)) {
                     select.disabled = true;
                 }
                 
@@ -8590,6 +8736,7 @@ async function loadPointCardData(studentIdOverride) {
     updatePointCardFilterStatus(0, 0);
 
     try {
+        await loadStudentSchedulesForIds([studentId]);
         const response = await fetch(`/api/daily-records?student_id=${studentId}`);
         const records = await response.json();
         if (loadToken !== pastPointCardsLoadToken) return;
@@ -8626,11 +8773,11 @@ async function loadPointCardData(studentIdOverride) {
                             <h4>${formattedDate}</h4>
                             ${renderPointCardAttendanceBadge(record)}
                         </div>
-                        ${canEdit() ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
+                        ${canEditPointCardForStudent(studentId) ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
                     </div>
                     <div class="point-card-day-content">
                         <div class="point-card-grid" id="point-card-grid-${record.id}">
-                            ${renderPointCardGrid(record)}
+                            ${renderPointCardGrid(record, studentId)}
                         </div>
                         <div class="point-card-info-aggregate">
                             ${renderPointCardInfoAggregate(record, records[recordIndex + 1] || null)}
@@ -8643,7 +8790,7 @@ async function loadPointCardData(studentIdOverride) {
 
         container.innerHTML = html;
 
-        if (canEdit()) {
+        if (canEditPointCardForStudent(studentId)) {
             container.querySelectorAll('.edit-day-btn').forEach((btn) => {
                 btn.addEventListener('click', editPointCardDay);
             });
@@ -9011,9 +9158,10 @@ function formatPointCardStarCell(record, value) {
     return normalized === null ? '-' : normalized;
 }
 
-function renderPointCardGrid(record) {
+function renderPointCardGrid(record, studentId) {
     const periods = expandPointCardPeriods(record && record.periods);
     const attendance = getPointCardAttendanceStatus(record);
+    const sid = studentId || record?.student_id;
 
     let totals = { s: 0, t: 0, a: 0, r: 0 };
     let counts = { s: 0, t: 0, a: 0, r: 0 };
@@ -9083,14 +9231,17 @@ function renderPointCardGrid(record) {
             : '<span style="color: var(--text-secondary);">-</span>';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
 
+        const otherClass = (sid && isOtherSchoolPeriod(sid, period.time_range)) ? ' other-school-period' : '';
+        const locationText = period.location || (otherClass ? 'Other school' : '');
+
         html += `
-            <div class="pc-cell pc-time-cell">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell">${period.location}</div>
-            <div class="pc-cell pc-data-cell" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
-            <div class="pc-cell pc-data-cell" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
-            <div class="pc-cell pc-data-cell" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
-            <div class="pc-cell pc-data-cell" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
-            <div class="${infoCellClass}">${infoHtml}</div>
+            <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${locationText}</div>
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
+            <div class="${infoCellClass}${otherClass}">${infoHtml}</div>
         `;
     });
 
@@ -9418,7 +9569,7 @@ async function editPointCardDay(e) {
 }
 
 function showEditPointCardModal(record, studentId, studentName, date) {
-    if (!canEdit()) {
+    if (!canEditPointCardForStudent(studentId)) {
         showMessage('View-only access. Contact staff to make changes.', 'error');
         return;
     }
@@ -9437,7 +9588,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     const starDisabled = attendance === 'excused' || attendance === 'unexcused';
     const lockedStarValue = attendance === 'excused' ? 'E' : (attendance === 'unexcused' ? 'U' : null);
 
-    const buildSelectHtml = (index, category, currentValue) => {
+    const buildSelectHtml = (index, category, currentValue, timeRange) => {
         const displayValue = lockedStarValue || currentValue;
         const normalized = normalizeStarValue(displayValue);
         const opts = ['', ...STAR_POINT_OPTION_VALUES].map(v => {
@@ -9445,7 +9596,8 @@ function showEditPointCardModal(record, studentId, studentName, date) {
             const selected = (v !== '' && normalized === v) || (v === '' && normalized === null);
             return `<option value="${v}" ${selected ? 'selected' : ''}>${label}</option>`;
         }).join('');
-        const disabledAttr = starDisabled ? ' disabled' : '';
+        const periodLocked = starDisabled || !canEditStarPeriod(studentId, timeRange);
+        const disabledAttr = periodLocked ? ' disabled' : '';
         return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}"${disabledAttr}>${opts}</select>`;
     };
 
@@ -9453,24 +9605,26 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     record.periods.forEach((period, index) => {
         const parsedInfo = parsePointCardInfoData(period.info || '');
         const hasInfo = !!(parsedInfo && hasInfoData(parsedInfo));
+        const otherClass = isOtherSchoolPeriod(studentId, period.time_range) ? ' other-school-period' : '';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
+        const infoLabel = canEditStarPeriod(studentId, period.time_range) ? (hasInfo ? 'Edit' : 'Add') : (hasInfo ? 'View' : 'Info');
         gridRows += `
-            <div class="pc-cell pc-time-cell">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell">${period.location}</div>
-            <div class="pc-cell pc-data-cell" data-category="s" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'safety', period.safety_points)}
+            <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${period.location || (otherClass ? 'Other school' : '')}</div>
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="s" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'safety', period.safety_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="t" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'teamwork', period.teamwork_points)}
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="t" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'teamwork', period.teamwork_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="a" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'accountability', period.accountability_points)}
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="a" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'accountability', period.accountability_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="r" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'relationships', period.relationships_points)}
+            <div class="pc-cell pc-data-cell${otherClass}" data-category="r" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'relationships', period.relationships_points, period.time_range)}
             </div>
-            <div class="${infoCellClass}" style="padding: 2px; justify-content: center;">
-                <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${hasInfo ? 'Edit' : 'Add'}</button>
+            <div class="${infoCellClass}${otherClass}" style="padding: 2px; justify-content: center;">
+                <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${infoLabel}</button>
             </div>
         `;
     });
@@ -9761,7 +9915,7 @@ function updateEditPointCardInfoDirtyState(periodIndex) {
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
-    if (!canEdit()) {
+    if (!canEditPointCardForStudent(studentId)) {
         showMessage('View-only access. Contact staff to make changes.', 'error');
         return;
     }
@@ -11821,7 +11975,7 @@ async function showInfoModal(event) {
     const modal = document.getElementById('info-modal');
     const modalTitle = document.getElementById('info-modal-title');
     
-    const viewOnly = isStudent() ? ' (View Only)' : '';
+    const viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
     modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
     
     // Parse existing info (stored as JSON string)
@@ -11836,7 +11990,7 @@ async function showInfoModal(event) {
     }
     
     // Populate form fields and disable for students
-    const isReadOnly = isStudent();
+    const isReadOnly = isStudent() || !canEditStarPeriod(studentId, period);
     
     // Get student's card color
     const studentIdInt = parseInt(studentId);
@@ -12124,6 +12278,9 @@ async function showInfoModal(event) {
     bindInfoModalAutoPreview();
     refreshInfoModalAutoPreview();
     applyInfoModalStarHighlights(studentId, period);
+
+    const saveBtn = document.querySelector('#info-modal .modal-buttons .btn-primary');
+    if (saveBtn) saveBtn.style.display = isReadOnly ? 'none' : '';
     
     modal.style.display = 'block';
 }
@@ -12433,15 +12590,14 @@ function closeInfoModal() {
 }
 
 function saveInfoModal() {
-    // Students cannot save
-    if (isStudent()) {
-        showMessage('View-only access. Contact staff to make changes.', 'error');
-        return;
-    }
-    
     const modal = document.getElementById('info-modal');
     const studentId = modal.dataset.studentId;
     const period = modal.dataset.period;
+
+    if (isStudent() || !canEditStarPeriod(studentId, period)) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
     
     // Collect all form data
     let infoData = {
@@ -13181,6 +13337,7 @@ function getStudentScheduleLocationForPeriod(studentId, timePeriod) {
         || [];
     const location = formatStudentScheduleLocation(items, timePeriod);
     if (location) return location;
+    if (isOtherSchoolPeriod(studentId, timePeriod)) return 'Other school';
     const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
     return standard ? standard.location : timePeriod;
 }
@@ -13189,7 +13346,10 @@ async function loadStudentSchedulesForIds(studentIds) {
     const ids = [...new Set((studentIds || []).filter((id) => id != null))];
     if (!ids.length) return;
     const missing = ids.filter((id) => {
-        return !studentSchedulesByStudentId[id] && !studentSchedulesByStudentId[String(id)];
+        const hasSched = studentSchedulesByStudentId[id] || studentSchedulesByStudentId[String(id)];
+        const hasTransitionKey = Object.prototype.hasOwnProperty.call(studentTransitionsByStudentId, id)
+            || Object.prototype.hasOwnProperty.call(studentTransitionsByStudentId, String(id));
+        return !hasSched || !hasTransitionKey;
     });
     if (!missing.length) return;
     try {
@@ -13199,6 +13359,7 @@ async function loadStudentSchedulesForIds(studentIds) {
         (payload.items || []).forEach((item) => {
             if (item && item.student_id != null) {
                 studentSchedulesByStudentId[item.student_id] = item.periods || [];
+                setStudentTransition(item.student_id, item.transition || null);
             }
         });
     } catch (error) {
@@ -13230,10 +13391,20 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                 updateTeacherScheduleSubtitle();
                 updateTeacherScheduleEditability();
             } else {
-                studentScheduleData = Array.isArray(data) ? data : [];
+                let periods = [];
+                let transition = null;
+                if (Array.isArray(data)) {
+                    periods = data;
+                } else if (data && typeof data === 'object') {
+                    periods = Array.isArray(data.periods) ? data.periods : [];
+                    transition = data.transition || null;
+                }
+                studentScheduleData = periods;
                 if (studentId) {
                     studentSchedulesByStudentId[studentId] = studentScheduleData;
+                    setStudentTransition(studentId, transition);
                 }
+                updateTransitionButtonState();
                 if (document.getElementById('student-schedule-body')) {
                     renderStudentSchedule();
                 }
@@ -13366,7 +13537,8 @@ function syncScheduleRowHeights() {
     const teacherHeader = teacherTable.querySelector('thead tr');
     const studentHeader = studentTable.querySelector('thead tr');
     const teacherRows = teacherTable.querySelectorAll('tbody tr');
-    const studentRows = studentTable.querySelectorAll('tbody tr');
+    const studentRows = Array.from(studentTable.querySelectorAll('tbody tr'))
+        .filter((row) => !row.classList.contains('schedule-row-split-marker'));
 
     const clearHeight = (el) => {
         if (el) el.style.height = '';
@@ -14184,7 +14356,7 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
     });
 }
 
-function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null) {
+function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, studentId = currentScheduleStudentId) {
     const tbody = targetTbody || document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
     
@@ -14251,9 +14423,134 @@ function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null) 
         
         // Setup autocomplete for class input
         setupClassAutocomplete(row.querySelector('.class-input'));
+        applyStudentScheduleRowOwnership(row, timePeriod, studentId);
     }
     
     tbody.appendChild(row);
+}
+
+function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
+    if (!row) return;
+    const other = isOtherSchoolPeriod(studentId, timePeriod);
+    const canEditPeriod = canEditSchedulePeriod(studentId, timePeriod);
+    row.classList.toggle('schedule-row-other-school', other);
+    row.querySelectorAll('input').forEach((input) => {
+        input.disabled = !canEditPeriod;
+        if (!canEditPeriod) input.tabIndex = -1;
+    });
+    const timeCell = row.querySelector('.time-cell');
+    if (timeCell) {
+        let tag = timeCell.querySelector('.schedule-other-school-tag');
+        if (other) {
+            if (!tag) {
+                tag = document.createElement('span');
+                tag.className = 'schedule-other-school-tag';
+                tag.textContent = 'Other school';
+                timeCell.appendChild(tag);
+            }
+        } else if (tag) {
+            tag.remove();
+        }
+    }
+}
+
+function updateTransitionButtonState() {
+    const btn = document.getElementById('student-transition-btn');
+    if (!btn) return;
+    const studentId = currentScheduleStudentId;
+    const enabled = !!(studentId && canEditStudentTransition(studentId));
+    btn.disabled = !enabled;
+    const transition = getStudentTransition(studentId);
+    btn.textContent = transition ? 'Edit Transition' : 'Transition';
+}
+
+function openStudentTransitionModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId || !canEditStudentTransition(studentId)) return;
+    const modal = document.getElementById('student-transition-modal');
+    if (!modal) return;
+    const transition = getStudentTransition(studentId);
+    const directionEl = document.getElementById('student-transition-direction');
+    const timeEl = document.getElementById('student-transition-time');
+    const msg = document.getElementById('student-transition-modal-msg');
+    const removeBtn = document.getElementById('student-transition-remove-btn');
+    if (directionEl) directionEl.value = transition?.direction === 'leave' ? 'leave' : 'arrive';
+    if (timeEl) timeEl.value = transition?.time || '';
+    if (msg) {
+        msg.style.display = 'none';
+        msg.textContent = '';
+    }
+    if (removeBtn) removeBtn.style.display = transition ? '' : 'none';
+    modal.style.display = 'block';
+}
+
+function closeStudentTransitionModal() {
+    const modal = document.getElementById('student-transition-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveStudentTransitionFromModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId) return;
+    const directionEl = document.getElementById('student-transition-direction');
+    const timeEl = document.getElementById('student-transition-time');
+    const msg = document.getElementById('student-transition-modal-msg');
+    const direction = directionEl ? directionEl.value : 'arrive';
+    const time = timeEl ? timeEl.value : '';
+    if (!time) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = 'Please choose a time.';
+        }
+        return;
+    }
+    try {
+        const response = await fetch(`/api/students/${studentId}/transition`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ direction, time }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Could not save transition');
+        }
+        setStudentTransition(studentId, payload.transition || null);
+        closeStudentTransitionModal();
+        renderStudentSchedule();
+        updateTransitionButtonState();
+        refreshPointCardGridsAfterScheduleLoad();
+    } catch (error) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = error.message || 'Could not save transition';
+        }
+    }
+}
+
+async function removeStudentTransitionFromModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId) return;
+    try {
+        const response = await fetch(`/api/students/${studentId}/transition`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Could not remove transition');
+        }
+        setStudentTransition(studentId, null);
+        closeStudentTransitionModal();
+        renderStudentSchedule();
+        updateTransitionButtonState();
+        refreshPointCardGridsAfterScheduleLoad();
+    } catch (error) {
+        const msg = document.getElementById('student-transition-modal-msg');
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = error.message || 'Could not remove transition';
+        }
+    }
 }
 
 async function saveSchedule(type) {
@@ -14467,13 +14764,17 @@ function buildSchedulePrintCardHtml(block) {
     const includeStaff = block.kind === 'student';
     const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
     const printedOn = block.printedOn || formatSchedulePrintDate();
-    const rowHtml = rows.map((row) => `
-        <tr>
-            <td>${escapeHtml(row.time)}</td>
+    const transition = block.transition || null;
+    const rowHtml = rows.map((row) => {
+        const other = transition && !isHomePeriod(transition, row.time);
+        const extra = other ? ' class="schedule-print-other-school"' : '';
+        return `
+        <tr${extra}>
+            <td>${escapeHtml(row.time)}${other ? '<div class="schedule-print-other-label">Other school</div>' : ''}</td>
             <td>${escapeHtml(row.className)}</td>
             ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
     return `
         <section class="schedule-print-card">
             <header class="schedule-print-header">
@@ -14570,6 +14871,17 @@ html, body {
     vertical-align: top;
     white-space: nowrap;
     color: #000;
+}
+.schedule-print-other-school td {
+    background: #e7e5e4;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.schedule-print-other-label {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #444;
 }
 .schedule-print-table th {
     background: #eee;
@@ -14728,7 +15040,8 @@ async function printSelectedStudentSchedule() {
     openSchedulePrintPreview([{
         title: `${name}'s Schedule`,
         kind: 'student',
-        periods: collectSchedulePeriodsFromTable('student')
+        periods: collectSchedulePeriodsFromTable('student'),
+        transition: getStudentTransition(currentScheduleStudentId)
     }], `${name} Student Schedule`);
 }
 
@@ -14756,7 +15069,8 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
             title: `${item.name || 'Student'}'s Schedule`,
             kind: 'student',
             printedOn,
-            periods: item.periods || []
+            periods: item.periods || [],
+            transition: item.transition || null
         }));
         openSchedulePrintPreview(blocks, documentTitle);
     } catch (error) {
@@ -17366,10 +17680,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const scheduleStudentSelect = document.getElementById('schedule-student-select');
     if (scheduleStudentSelect) {
         scheduleStudentSelect.addEventListener('change', (e) => {
-            currentScheduleStudentId = parseInt(e.target.value);
+            const parsed = parseInt(e.target.value, 10);
+            currentScheduleStudentId = Number.isFinite(parsed) ? parsed : null;
             if (currentScheduleStudentId) {
                 loadSchedules('student', currentScheduleStudentId);
+            } else {
+                studentScheduleData = [];
+                renderStudentSchedule();
             }
+            updateTransitionButtonState();
         });
         // Note: Student dropdown is now populated by loadStudents() function
     }
@@ -17387,6 +17706,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentScheduleStudentId = null;
                     studentScheduleData = [];
                     renderStudentSchedule();
+                    updateTransitionButtonState();
                 }
             }
         });
@@ -17418,6 +17738,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveStudentScheduleBtn = document.getElementById('save-student-schedule-btn');
     if (saveStudentScheduleBtn) {
         saveStudentScheduleBtn.addEventListener('click', () => saveSchedule('student'));
+    }
+
+    const studentTransitionBtn = document.getElementById('student-transition-btn');
+    if (studentTransitionBtn) {
+        studentTransitionBtn.addEventListener('click', openStudentTransitionModal);
+    }
+    const studentTransitionClose = document.getElementById('student-transition-modal-close');
+    if (studentTransitionClose) {
+        studentTransitionClose.addEventListener('click', closeStudentTransitionModal);
+    }
+    const studentTransitionSave = document.getElementById('student-transition-save-btn');
+    if (studentTransitionSave) {
+        studentTransitionSave.addEventListener('click', saveStudentTransitionFromModal);
+    }
+    const studentTransitionRemove = document.getElementById('student-transition-remove-btn');
+    if (studentTransitionRemove) {
+        studentTransitionRemove.addEventListener('click', removeStudentTransitionFromModal);
+    }
+    const studentTransitionModal = document.getElementById('student-transition-modal');
+    if (studentTransitionModal) {
+        studentTransitionModal.addEventListener('click', (e) => {
+            if (e.target === studentTransitionModal) closeStudentTransitionModal();
+        });
     }
 
     const printStaffScheduleBtn = document.getElementById('print-staff-schedule-btn');

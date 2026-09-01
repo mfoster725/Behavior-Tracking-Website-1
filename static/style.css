@@ -3087,6 +3087,56 @@ table tbody tr:hover {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
+.schedule-student-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.schedule-table tr.schedule-row-other-school td {
+    background: #e7e5e4;
+}
+
+.schedule-table tr.schedule-row-other-school input {
+    background: #d6d3d1;
+    color: #57534e;
+    cursor: not-allowed;
+}
+
+.schedule-table tr.schedule-row-split-marker td {
+    background: #1c1917;
+    color: #fafaf9;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.4rem 0.75rem;
+}
+
+.schedule-other-school-tag {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    color: #57534e;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+.daily-data-cell.other-school-period,
+.daily-period-cell.other-school-period,
+.daily-student-schedule-cell.other-school-period,
+.pc-cell.other-school-period {
+    background: #d6d3d1 !important;
+    opacity: 0.92;
+}
+
+.daily-input:disabled,
+.pc-edit-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.85;
+}
+
 .schedule-table .time-cell {
     font-weight: 600;
     background: var(--bg-elevated);
