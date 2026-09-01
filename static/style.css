@@ -2109,6 +2109,24 @@ table tbody tr:hover {
     min-width: 0;
 }
 
+.info-frenzy-lock-warning {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm, 4px);
+}
+
+#info-modal .form-group.info-frenzy-locked {
+    cursor: not-allowed;
+}
+
+#info-modal .form-group.info-frenzy-locked input,
+#info-modal .form-group.info-frenzy-locked select,
+#info-modal .form-group.info-frenzy-locked textarea,
+#info-modal .form-group.info-frenzy-locked button {
+    pointer-events: none;
+    opacity: 0.65;
+}
+
 /* Highlight reminder / reset / frenzy rows when STAR period has a 0 or 1 */
 #info-modal .inline-checkbox-row.info-field-highlight {
     outline: 2px solid #dc3545;

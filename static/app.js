@@ -12255,8 +12255,13 @@ async function showInfoModal(event) {
         });
         
         newAddPurposeBtn.addEventListener('click', function() {
+            if (!document.getElementById('info-frenzy')?.checked) {
+                warnInfoFrenzyFieldsLocked();
+                return;
+            }
             const row = createPurposeRow('', false);
             purposesContainer.appendChild(row);
+            syncInfoFrenzyDependentFields(true, false);
             refreshInfoModalAutoPreview();
         });
     } else {
@@ -12273,12 +12278,15 @@ async function showInfoModal(event) {
     if (severitySelect) {
         const frenzyOn = isInfoFrenzyChecked(infoData);
         severitySelect.value = (frenzyOn && infoData.severity) ? String(infoData.severity) : '';
-        severitySelect.disabled = isReadOnly;
     }
-    syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
     if (frenzyCheckbox && frenzyCheckbox.dataset.severityVisibilityBound !== 'true') {
         frenzyCheckbox.addEventListener('change', () => {
-            syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
+            const frenzyOn = !!frenzyCheckbox.checked;
+            syncInfoFrenzyDependentFields(frenzyOn, frenzyCheckbox.disabled);
+            if (!frenzyOn) {
+                clearInfoFrenzyDependentFields();
+                refreshInfoModalAutoPreview();
+            }
         });
         frenzyCheckbox.dataset.severityVisibilityBound = 'true';
     }
@@ -12293,9 +12301,8 @@ async function showInfoModal(event) {
     }
     
     document.getElementById('info-duration').value = infoData.duration || '';
-    document.getElementById('info-duration').disabled = isReadOnly;
     document.getElementById('info-results').value = infoData.results || '';
-    document.getElementById('info-results').disabled = isReadOnly;
+    syncInfoFrenzyDependentFields(!!frenzyCheckbox.checked, isReadOnly);
     
     // Store context for saving
     modal.dataset.studentId = studentId;
@@ -12354,13 +12361,105 @@ function ensureInfoSeverityControl() {
     return document.getElementById('info-severity');
 }
 
-function syncInfoSeverityVisibility(frenzyChecked) {
+const INFO_FRENZY_FIELD_WARNING = 'These fields cannot be filled out unless Frenzy is checked.';
+let infoFrenzyWarningLastShown = 0;
+
+function getInfoFrenzyDependentGroups() {
+    const severityGroup = document.getElementById('info-severity-group');
+    const purposesGroup = document.getElementById('purposes-container')?.closest('.form-group');
+    const durationGroup = document.getElementById('info-duration')?.closest('.form-group');
+    const resultsGroup = document.getElementById('info-results')?.closest('.form-group');
+    return [severityGroup, purposesGroup, durationGroup, resultsGroup].filter(Boolean);
+}
+
+function warnInfoFrenzyFieldsLocked() {
+    const now = Date.now();
+    if (now - infoFrenzyWarningLastShown < 2000) return;
+    infoFrenzyWarningLastShown = now;
+
+    let warningEl = document.getElementById('info-frenzy-lock-warning');
+    if (!warningEl) {
+        warningEl = document.createElement('div');
+        warningEl.id = 'info-frenzy-lock-warning';
+        warningEl.className = 'info-frenzy-lock-warning error';
+        const title = document.getElementById('info-modal-title');
+        if (title?.parentNode) {
+            title.parentNode.insertBefore(warningEl, title.nextSibling);
+        }
+    }
+    warningEl.textContent = INFO_FRENZY_FIELD_WARNING;
+    warningEl.style.display = 'block';
+    clearTimeout(warningEl._hideTimer);
+    warningEl._hideTimer = setTimeout(() => {
+        warningEl.style.display = 'none';
+    }, 5000);
+}
+
+function clearInfoFrenzyDependentFields() {
     const severitySelect = document.getElementById('info-severity');
+    if (severitySelect) severitySelect.value = '';
+
+    const durationInput = document.getElementById('info-duration');
+    if (durationInput) durationInput.value = '';
+
+    const resultsInput = document.getElementById('info-results');
+    if (resultsInput) resultsInput.value = '';
+
+    const purposesContainer = document.getElementById('purposes-container');
+    if (purposesContainer) {
+        purposesContainer.innerHTML = '';
+        purposesContainer.appendChild(createPurposeRow('', false));
+    }
+}
+
+function bindInfoFrenzyFieldGuard() {
+    getInfoFrenzyDependentGroups().forEach((group) => {
+        if (group.dataset.frenzyLockBound === 'true') return;
+        group.addEventListener('mousedown', (e) => {
+            if (!group.classList.contains('info-frenzy-locked')) return;
+            e.preventDefault();
+            warnInfoFrenzyFieldsLocked();
+        });
+        group.dataset.frenzyLockBound = 'true';
+    });
+}
+
+function syncInfoFrenzyDependentFields(frenzyChecked, isReadOnly = false) {
+    const locked = !frenzyChecked && !isReadOnly;
+
     const severityGroup = document.getElementById('info-severity-group')
-        || severitySelect?.closest('.form-group');
+        || document.getElementById('info-severity')?.closest('.form-group');
     if (severityGroup) {
         severityGroup.style.display = frenzyChecked ? '' : 'none';
     }
+
+    const durationInput = document.getElementById('info-duration');
+    const resultsInput = document.getElementById('info-results');
+    const severitySelect = document.getElementById('info-severity');
+    [durationInput, resultsInput, severitySelect].forEach((el) => {
+        if (el) el.disabled = isReadOnly || !frenzyChecked;
+    });
+
+    const addPurposeBtn = document.getElementById('add-purpose-btn');
+    if (addPurposeBtn) addPurposeBtn.disabled = isReadOnly || !frenzyChecked;
+
+    document.querySelectorAll('#purposes-container .info-purpose-select, #purposes-container .purpose-row .delete-btn').forEach((el) => {
+        el.disabled = isReadOnly || !frenzyChecked;
+    });
+
+    bindInfoFrenzyFieldGuard();
+    getInfoFrenzyDependentGroups().forEach((group) => {
+        group.classList.toggle('info-frenzy-locked', locked);
+    });
+
+    if (!locked) {
+        const warningEl = document.getElementById('info-frenzy-lock-warning');
+        if (warningEl) warningEl.style.display = 'none';
+    }
+}
+
+function syncInfoSeverityVisibility(frenzyChecked) {
+    syncInfoFrenzyDependentFields(frenzyChecked, !!document.getElementById('info-frenzy')?.disabled);
 }
 
 function readInfoModalSeverityValue(frenzyChecked) {
@@ -12534,8 +12633,8 @@ function collectInfoModalDraftData() {
         alternate_location_manual: isAlternateLocationManual(),
         frenzy: frenzyChecked,
         severity: readInfoModalSeverityValue(frenzyChecked),
-        duration: getValue('info-duration'),
-        results: getValue('info-results'),
+        duration: frenzyChecked ? getValue('info-duration') : '',
+        results: frenzyChecked ? getValue('info-results') : '',
         infractions: [],
         purposes: []
     };
@@ -12550,10 +12649,12 @@ function collectInfoModalDraftData() {
             });
         }
     });
-    document.querySelectorAll('#purposes-container .purpose-row').forEach((row) => {
-        const select = row.querySelector('.info-purpose-select');
-        if (select && select.value) draft.purposes.push(select.value);
-    });
+    if (frenzyChecked) {
+        document.querySelectorAll('#purposes-container .purpose-row').forEach((row) => {
+            const select = row.querySelector('.info-purpose-select');
+            if (select && select.value) draft.purposes.push(select.value);
+        });
+    }
     return draft;
 }
 
@@ -12649,8 +12750,12 @@ function saveInfoModal() {
         alternate_location_manual: isAlternateLocationManual(),
         frenzy: document.getElementById('info-frenzy').checked,
         severity: readInfoModalSeverityValue(!!document.getElementById('info-frenzy')?.checked),
-        duration: document.getElementById('info-duration').value,
-        results: document.getElementById('info-results').value
+        duration: document.getElementById('info-frenzy').checked
+            ? document.getElementById('info-duration').value
+            : '',
+        results: document.getElementById('info-frenzy').checked
+            ? document.getElementById('info-results').value
+            : ''
     };
     
     // Collect infractions from dynamic rows
@@ -12668,15 +12773,17 @@ function saveInfoModal() {
     });
     infoData.infractions = infractions;
     
-    // Collect purposes from dynamic rows
+    // Collect purposes from dynamic rows (only when Frenzy is checked)
     const purposes = [];
-    const purposeRows = document.querySelectorAll('#purposes-container .purpose-row');
-    purposeRows.forEach(row => {
-        const select = row.querySelector('.info-purpose-select');
-        if (select && select.value) {
-            purposes.push(select.value);
-        }
-    });
+    if (infoData.frenzy) {
+        const purposeRows = document.querySelectorAll('#purposes-container .purpose-row');
+        purposeRows.forEach(row => {
+            const select = row.querySelector('.info-purpose-select');
+            if (select && select.value) {
+                purposes.push(select.value);
+            }
+        });
+    }
     infoData.purposes = purposes;
 
     // Parse text fields for exact keyword matches and auto-fill related Info values.
