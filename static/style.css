@@ -1549,7 +1549,7 @@ table tbody tr:hover {
 
 /* Freeze period and schedule columns when scrolling point-card grids horizontally */
 .daily-grid--freeze-cols {
-    --daily-period-col-width: 120px;
+    --daily-period-col-width: auto;
 }
 
 .daily-grid--freeze-cols .daily-header,

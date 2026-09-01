@@ -1507,9 +1507,44 @@ function getPeriodEntryScheduleItems() {
     return [];
 }
 
-const DAILY_PERIOD_COL_WIDTH = '120px';
+const DAILY_PERIOD_COL_MIN = 44;
+const DAILY_PERIOD_COL_SEPARATION = 3;
 const DAILY_SCHEDULE_COL_MIN = 90;
 const DAILY_SCHEDULE_COL_MAX = 200;
+
+function measureDailyPeriodColumnWidth(texts, options = {}) {
+    const measureHeader = document.createElement('div');
+    measureHeader.className = 'daily-header-cell daily-header-period';
+    measureHeader.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+
+    const measureBody = document.createElement('div');
+    measureBody.className = 'daily-period-cell';
+    measureBody.style.cssText = measureHeader.style.cssText;
+
+    document.body.appendChild(measureHeader);
+    document.body.appendChild(measureBody);
+
+    let maxWidth = options.minWidth || DAILY_PERIOD_COL_MIN;
+    (texts || []).forEach((text) => {
+        if (!text) return;
+        measureHeader.textContent = text;
+        measureBody.textContent = text;
+        maxWidth = Math.max(maxWidth, measureHeader.offsetWidth, measureBody.offsetWidth);
+    });
+
+    document.body.removeChild(measureHeader);
+    document.body.removeChild(measureBody);
+
+    if (options.extraWidth) {
+        maxWidth += options.extraWidth;
+    }
+
+    return Math.ceil(maxWidth) + DAILY_PERIOD_COL_SEPARATION;
+}
+
+function measurePointCardPeriodColumnWidth(texts, options = {}) {
+    return measureDailyPeriodColumnWidth(texts, options);
+}
 
 function measureDailyScheduleColumnWidth(texts, options = {}) {
     const measureEl = document.createElement('div');
@@ -1535,14 +1570,17 @@ function measureDailyScheduleColumnWidth(texts, options = {}) {
 
 function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx, options = {}) {
     const hideOwnSchedule = !!options.hideOwnSchedule;
+    const periodWidthPx = options.periodWidthPx || DAILY_PERIOD_COL_MIN;
+    const periodCol = `${periodWidthPx}px`;
     const scheduleCol = hideOwnSchedule ? '' : `${scheduleWidthPx}px `;
     const template = hideOwnSchedule
-        ? `${DAILY_PERIOD_COL_WIDTH} ${spacerWidth} ${studentColumns}`
-        : `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol}${spacerWidth} ${studentColumns}`;
+        ? `${periodCol} ${spacerWidth} ${studentColumns}`
+        : `${periodCol} ${scheduleCol}${spacerWidth} ${studentColumns}`;
     header.style.gridTemplateColumns = template;
     body.style.gridTemplateColumns = template;
     const grid = header.closest('#daily-grid, #students-grid');
     if (grid) {
+        grid.style.setProperty('--daily-period-col-width', periodCol);
         if (hideOwnSchedule) {
             grid.style.removeProperty('--daily-schedule-col-width');
         } else {
@@ -3883,7 +3921,14 @@ function renderStudentsGrid() {
         formatPointCardScheduleForPeriod(currentPeriod || ''),
     ]);
     const hideOwnSchedule = isHideOwnScheduleInPointCards();
-    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth, { hideOwnSchedule });
+    const periodWidth = measurePointCardPeriodColumnWidth(
+        ['Period', currentPeriod || '', 'Percent'],
+        hideOwnSchedule && canEdit() ? { extraWidth: 18 } : {}
+    );
+    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth, {
+        hideOwnSchedule,
+        periodWidthPx: periodWidth,
+    });
     const studentsGridEl = document.getElementById('students-grid');
     if (studentsGridEl) {
         studentsGridEl.classList.add('daily-grid--freeze-cols');
@@ -4689,7 +4734,14 @@ function renderDailyGrid() {
     const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
     const scheduleWidth = measurePointCardOwnScheduleColumnWidth(['Schedule', ...scheduleTexts]);
     const hideOwnSchedule = isHideOwnScheduleInPointCards();
-    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth, { hideOwnSchedule });
+    const periodWidth = measurePointCardPeriodColumnWidth(
+        ['Period', 'Percent', ...STANDARD_PERIODS.map((period) => period.time)],
+        hideOwnSchedule && canEdit() ? { extraWidth: 18 } : {}
+    );
+    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth, {
+        hideOwnSchedule,
+        periodWidthPx: periodWidth,
+    });
     if (dailyGridEl) {
         dailyGridEl.classList.add('daily-grid--freeze-cols');
         applyPointCardGridScheduleClasses(dailyGridEl, showStudentSchedules);
