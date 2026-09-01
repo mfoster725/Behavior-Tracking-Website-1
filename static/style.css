@@ -1820,6 +1820,22 @@ table tbody tr:hover {
     cursor: pointer;
 }
 
+.alternate-location-row {
+    display: flex;
+    gap: 0.625rem;
+    align-items: center;
+}
+
+.alternate-location-row select {
+    flex: 0 0 11rem;
+    min-width: 0;
+}
+
+.alternate-location-row input[type="text"] {
+    flex: 1;
+    min-width: 0;
+}
+
 /* Highlight reminder / reset / frenzy rows when STAR period has a 0 or 1 */
 #info-modal .inline-checkbox-row.info-field-highlight {
     outline: 2px solid #dc3545;

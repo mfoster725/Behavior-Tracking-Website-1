@@ -135,7 +135,7 @@ function normalizeOverviewTrendLabel(s) {
 
 function formatInfractionCountDeltaHtml(delta) {
     if (delta == null || !Number.isFinite(delta)) {
-        return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">â€”</span>';
+        return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">—</span>';
     }
     const dClass = delta > 0 ? 'is-neg' : delta < 0 ? 'is-pos' : 'is-muted';
     const text = delta >= 0 ? `+${delta}` : `${delta}`;
@@ -589,7 +589,7 @@ function expandPointCardPeriods(periods) {
             ...defaultPointCardPeriod(sp),
             ...existing,
             time_range: sp.time,
-            location: existing.location || sp.location
+            location: existing.location || ''
         };
     });
     extras.forEach((period) => {
@@ -621,7 +621,7 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
         const data = studentData[sp.time] || { s: null, t: null, a: null, r: null, info: '' };
         return {
             time_range: sp.time,
-            location: sp.location,
+            location: getStudentScheduleLocationForPeriod(studentId, sp.time),
             safety_points: data.s,
             teamwork_points: data.t,
             accountability_points: data.a,
@@ -640,7 +640,7 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
         const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
         periods.push({
             time_range: periodTime,
-            location: periodTime,
+            location: getStudentScheduleLocationForPeriod(studentId, periodTime),
             safety_points: data.s,
             teamwork_points: data.t,
             accountability_points: data.a,
@@ -2314,7 +2314,7 @@ function setupEventListeners() {
                             const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
                                 u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
                             );
-                            editCaseManagerSelect.innerHTML = '<option value="">â€” Select Case Manager (optional) â€”</option>';
+                            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
                             caseManagers.forEach(cm => {
                                 const opt = document.createElement('option');
                                 opt.value = cm.id;
@@ -3476,7 +3476,6 @@ async function savePeriodData(options = {}) {
     }
 
     const locationInput = document.getElementById('location-input');
-    const location = locationInput ? locationInput.value || currentPeriod : currentPeriod;
 
     const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
         ? filteredStudentsForPeriod 
@@ -3519,7 +3518,6 @@ async function savePeriodData(options = {}) {
             body: JSON.stringify({
                 date: currentDate,
                 period: currentPeriod,
-                location: location,
                 merge: true,
                 students: studentsMap
             })
@@ -3545,7 +3543,7 @@ async function savePeriodData(options = {}) {
     } catch (error) {
         mergeDirtyMaps(dirtyPeriodFields, pendingDirty);
         console.error('Error saving period data:', error);
-        updatePointCardSaveStatus('error', !silent ? 'Save failed â€” click to retry' : undefined);
+        updatePointCardSaveStatus('error', !silent ? 'Save failed — click to retry' : undefined);
         throw error;
     }
 }
@@ -3585,11 +3583,11 @@ async function filterDailyStudents() {
         );
         
         if (studentsMatchingName.length > 0) {
-            // At least one student name matches â€” use student name search (expected behavior)
+            // At least one student name matches — use student name search (expected behavior)
             studentsToFilter = studentsMatchingName;
             dailyEntryStaffFilterName = null;
         } else {
-            // No student name match â€” try staff name search (full name match only)
+            // No student name match — try staff name search (full name match only)
             const matchingStaff = allStaffMembers.filter(staff => {
                 const staffName = (staff.name || staff.username || '').toLowerCase();
                 return staffName === query;
@@ -4621,7 +4619,7 @@ function starColumnCriteriaHtml(category) {
     const meta = STAR_COLUMN_CRITERIA[category];
     if (!meta) return '';
     const items = meta.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
-    return `<div class="ui-hover-tip-title" style="color:${meta.color}">${escapeHtml(meta.letter)} â€” ${escapeHtml(meta.title)}</div><ul>${items}</ul>`;
+    return `<div class="ui-hover-tip-title" style="color:${meta.color}">${escapeHtml(meta.letter)} — ${escapeHtml(meta.title)}</div><ul>${items}</ul>`;
 }
 
 function resolveUiHoverTipSource(node) {
@@ -4820,7 +4818,7 @@ function applyInfoModalStarHighlights(studentId, period) {
     const resetRow = document.getElementById('info-reset')?.closest('.inline-checkbox-row');
     const frenzyRow = document.getElementById('info-frenzy')?.closest('.inline-checkbox-row');
 
-    // 0 â†’ highlight reminders, reset, and frenzy; 1 â†’ highlight reminders only
+    // 0 → highlight reminders, reset, and frenzy; 1 → highlight reminders only
     if (hasZero) {
         reminderRow?.classList.add('info-field-highlight');
         resetRow?.classList.add('info-field-highlight');
@@ -4939,7 +4937,7 @@ function continueAfterStarREntry(context) {
     }
     if (mode === 'student') {
         pendingStarNavContext = null;
-        // On last row / period entry, Next Period is unavailable â€” fall back to next student
+        // On last row / period entry, Next Period is unavailable — fall back to next student
         if (!navigateNextPeriod(context.select)) {
             navigateNextStudent(context.select);
         }
@@ -5143,8 +5141,8 @@ function onInfoModalClosedForNav() {
 function updatePointCardSaveStatus(state, label) {
     const labels = {
         saved: 'Saved',
-        saving: 'Savingâ€¦',
-        error: 'Save failed â€” click to retry'
+        saving: 'Saving…',
+        error: 'Save failed — click to retry'
     };
     const text = label || labels[state] || 'Saved';
     document.querySelectorAll('.point-card-save-status').forEach((el) => {
@@ -5153,7 +5151,7 @@ function updatePointCardSaveStatus(state, label) {
         el.setAttribute('aria-label', text);
         const labelEl = el.querySelector('.save-status-label');
         if (labelEl) {
-            labelEl.textContent = label || (state === 'error' ? 'Save failed' : (state === 'saving' ? 'Savingâ€¦' : 'Saved'));
+            labelEl.textContent = label || (state === 'error' ? 'Save failed' : (state === 'saving' ? 'Saving…' : 'Saved'));
         }
     });
 }
@@ -5251,10 +5249,8 @@ async function saveDailyAllData(options = {}) {
         Object.keys(fieldMap).forEach((periodTime) => {
             const fields = fieldMap[periodTime] || {};
             const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
-            const standard = (typeof STANDARD_PERIODS !== 'undefined' ? STANDARD_PERIODS : []).find(p => p.time === periodTime);
             const payload = {
-                time_range: periodTime,
-                location: standard ? standard.location : periodTime
+                time_range: periodTime
             };
             if (fields.s) payload.safety_points = data.s ?? null;
             if (fields.t) payload.teamwork_points = data.t ?? null;
@@ -5312,7 +5308,7 @@ async function saveDailyAllData(options = {}) {
         mergeDirtyMaps(dirtyDailyFields, pendingDaily);
         mergeDirtyMaps(dirtyAttendanceIds, pendingAttendance);
         console.error('Error saving daily data:', error);
-        updatePointCardSaveStatus('error', !silent ? 'Save failed â€” click to retry' : undefined);
+        updatePointCardSaveStatus('error', !silent ? 'Save failed — click to retry' : undefined);
         throw error;
     }
 }
@@ -5336,6 +5332,7 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
         return false;
     }
 
+    await loadStudentSchedulesForIds([studentId]);
     const periods = buildCompleteDailyPeriodsForStudent(studentId);
 
     if (periods.length === 0) {
@@ -5444,6 +5441,7 @@ async function autoSubmitPointCardsIfDue() {
         }
 
         for (const studentId of dailyIds) {
+            await loadStudentSchedulesForIds([studentId]);
             const ok = await submitStudentPointCard(studentId, getStudentNameById(studentId), { silent: true });
             if (ok) {
                 submittedCount += 1;
@@ -5554,7 +5552,7 @@ function addPeriod(timeRange = '', location = '', safety = 0, teamwork = 0, acco
     card.className = 'period-card';
     
     card.innerHTML = `
-        <button class="delete-btn" onclick="this.parentElement.remove()">Ã—</button>
+        <button class="delete-btn" onclick="this.parentElement.remove()">×</button>
         <h4>Period</h4>
         <div class="form-group">
             <label>Time Range:</label>
@@ -5645,7 +5643,7 @@ function addInfractionToCard(list, type = '', count = 1, isGeneral = true, isHar
             `).join('')}
         </select>
         <input type="number" class="infraction-count" value="${count}" min="1" placeholder="Count">
-        <button type="button" class="delete-btn" onclick="this.parentElement.remove()">Ã—</button>
+        <button type="button" class="delete-btn" onclick="this.parentElement.remove()">×</button>
     `;
     
     list.appendChild(item);
@@ -5662,7 +5660,7 @@ function addFrenzy(timeRange = '', location = '', purpose = '', purpose2 = '', d
     card.className = 'frenzy-card';
     
     card.innerHTML = `
-        <button class="delete-btn" onclick="this.parentElement.remove()">Ã—</button>
+        <button class="delete-btn" onclick="this.parentElement.remove()">×</button>
         <h4>Frenzy Event</h4>
         <div class="form-group">
             <label>Time Range:</label>
@@ -7535,7 +7533,7 @@ function openPastPointCardsModal(studentId, studentName) {
         || 'Student';
     window.currentPointCardStudentName = resolvedName;
     const title = document.getElementById('past-point-cards-modal-title');
-    if (title) title.textContent = `Past Point Cards â€” ${resolvedName}`;
+    if (title) title.textContent = `Past Point Cards — ${resolvedName}`;
     resetPointCardFilters();
     bindPastPointCardsModalChrome();
     modal.style.display = 'block';
@@ -7674,7 +7672,7 @@ function openPointCardPrintWindow() {
         return;
     }
 
-    // If html2canvas + jsPDF are available, use the robust snapshot â†’ single-page PDF approach
+    // If html2canvas + jsPDF are available, use the robust snapshot → single-page PDF approach
     if (window.html2canvas && window.jspdf && window.jspdf.jsPDF) {
         const { jsPDF } = window.jspdf;
 
@@ -8087,7 +8085,7 @@ function renderAggregateMetricRow(label, currentValue, previousValue, options = 
     if (previousValue !== null && previousValue !== undefined) {
         const delta = (Number(currentValue) || 0) - (Number(previousValue) || 0);
         if (delta === 0) {
-            deltaText = 'â€”';
+            deltaText = '—';
         } else {
             const sign = delta > 0 ? '+' : '';
             deltaText = `${sign}${delta}${suffix}`;
@@ -8232,23 +8230,23 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
             if (b[1] !== a[1]) return b[1] - a[1];
             return a[0].localeCompare(b[0]);
         });
-        if (!entries.length) return 'â€”';
+        if (!entries.length) return '—';
         const maxCount = entries[0][1];
         const ties = entries
             .filter(([, count]) => count === maxCount)
             .map(([label]) => label);
-        if (!ties.length) return 'â€”';
+        if (!ties.length) return '—';
         return ties.map((label) => escapeHtml(label)).join('<br>');
     };
     const formatSeverityAverage = () => {
-        if (!severityValues.length) return 'â€”';
+        if (!severityValues.length) return '—';
         const average = severityValues.reduce((sum, val) => sum + val, 0) / severityValues.length;
         const rounded = Math.round(average * 10) / 10;
         return Number.isInteger(rounded) ? `${rounded}.0` : String(rounded);
     };
     const formatMultilineList = (items) => {
         const cleaned = items.map((item) => String(item).replace(/\s+/g, ' ').trim()).filter(Boolean);
-        if (!cleaned.length) return 'â€”';
+        if (!cleaned.length) return '—';
         return cleaned.map((item) => escapeHtml(item)).join('<br>');
     };
     const formatNotesEntered = () => {
@@ -10055,7 +10053,7 @@ function createInfractionRow(infractionType = '', count = '', isReadOnly = false
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'delete-btn';
-    removeBtn.textContent = 'Ã—';
+    removeBtn.textContent = '×';
     removeBtn.style.padding = '4px 8px';
     removeBtn.style.fontSize = '14px';
     removeBtn.disabled = isReadOnly;
@@ -10104,7 +10102,7 @@ function createPurposeRow(purpose = '', isReadOnly = false) {
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'delete-btn';
-    removeBtn.textContent = 'Ã—';
+    removeBtn.textContent = '×';
     removeBtn.style.padding = '4px 8px';
     removeBtn.style.fontSize = '14px';
     removeBtn.disabled = isReadOnly;
@@ -10195,7 +10193,7 @@ function starSnapshotsEqual(a, b) {
 
 function formatStarHistoryDisplay(value) {
     const normalized = normalizeStarHistoryValue(value);
-    return normalized === null ? 'â€“' : String(normalized);
+    return normalized === null ? '–' : String(normalized);
 }
 
 function getStarSnapshot(studentId, period, periodIndex) {
@@ -10516,6 +10514,185 @@ function renderInfoEditHistory(history) {
     container.innerHTML = buildEditHistoryHtml(history);
 }
 
+const DEFAULT_ALTERNATE_LOCATIONS = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+
+function markAlternateLocationManual(manual = true) {
+    const input = document.getElementById('info-alternate-location');
+    if (input) input.dataset.manualOverride = manual ? 'true' : '';
+}
+
+function isAlternateLocationManual() {
+    const input = document.getElementById('info-alternate-location');
+    return input?.dataset?.manualOverride === 'true';
+}
+
+function populateAlternateLocationOptions(locations) {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    const datalist = document.getElementById('alternate-location-options');
+    if (!alternateLocationInput) return locations;
+
+    if (datalist) {
+        datalist.innerHTML = '';
+        locations.forEach((location) => {
+            const option = document.createElement('option');
+            option.value = location;
+            datalist.appendChild(option);
+        });
+    }
+
+    if (locationSelect) {
+        const currentValue = alternateLocationInput.value.trim();
+        locationSelect.innerHTML = '';
+        const blankOption = document.createElement('option');
+        blankOption.value = '';
+        blankOption.textContent = 'Select location...';
+        locationSelect.appendChild(blankOption);
+        locations.forEach((location) => {
+            const option = document.createElement('option');
+            option.value = location;
+            option.textContent = location;
+            locationSelect.appendChild(option);
+        });
+        const customOption = document.createElement('option');
+        customOption.value = '__custom__';
+        customOption.textContent = 'Other (type below)';
+        locationSelect.appendChild(customOption);
+        if (currentValue && locations.some((loc) => loc.toLowerCase() === currentValue.toLowerCase())) {
+            locationSelect.value = locations.find((loc) => loc.toLowerCase() === currentValue.toLowerCase());
+        } else if (currentValue) {
+            locationSelect.value = '__custom__';
+        } else {
+            locationSelect.value = '';
+        }
+    }
+
+    alternateLocationInput.dataset.locations = JSON.stringify(locations);
+    return locations;
+}
+
+async function loadAlternateLocationOptions() {
+    let allLocations = [...DEFAULT_ALTERNATE_LOCATIONS];
+    try {
+        const response = await fetch('/api/schedules/locations');
+        if (response.ok) {
+            const apiLocations = await response.json();
+            allLocations = [...new Set([...DEFAULT_ALTERNATE_LOCATIONS, ...apiLocations])].sort();
+        }
+    } catch (error) {
+        console.error('Error loading alternate locations:', error);
+    }
+    return populateAlternateLocationOptions(allLocations);
+}
+
+function syncAlternateLocationSelectFromInput() {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    if (!alternateLocationInput || !locationSelect) return;
+
+    const currentValue = alternateLocationInput.value.trim();
+    if (!currentValue) {
+        locationSelect.value = '';
+        return;
+    }
+
+    const locationsStr = alternateLocationInput.dataset.locations;
+    let locations = DEFAULT_ALTERNATE_LOCATIONS;
+    if (locationsStr) {
+        try {
+            const parsed = JSON.parse(locationsStr);
+            if (Array.isArray(parsed)) locations = parsed;
+        } catch (e) {
+            locations = DEFAULT_ALTERNATE_LOCATIONS;
+        }
+    }
+
+    const match = locations.find((loc) => loc.toLowerCase() === currentValue.toLowerCase());
+    locationSelect.value = match || '__custom__';
+}
+
+function bindAlternateLocationInput() {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    if (!alternateLocationInput || alternateLocationInput.dataset.bound === 'true') return;
+    alternateLocationInput.dataset.bound = 'true';
+
+    if (locationSelect && locationSelect.dataset.bound !== 'true') {
+        locationSelect.dataset.bound = 'true';
+        locationSelect.addEventListener('change', function() {
+            if (this.value === '__custom__') {
+                markAlternateLocationManual(true);
+                alternateLocationInput.focus();
+                alternateLocationInput.select();
+                return;
+            }
+            alternateLocationInput.value = this.value;
+            markAlternateLocationManual(true);
+            alternateLocationInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+
+    alternateLocationInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const inputValue = this.value.trim();
+            const locationsStr = this.dataset.locations;
+
+            if (locationsStr && inputValue) {
+                const locations = JSON.parse(locationsStr);
+                const match = locations.find((loc) => {
+                    const locLower = loc.toLowerCase();
+                    const inputLower = inputValue.toLowerCase();
+                    return locLower === inputLower || locLower.startsWith(inputLower);
+                });
+
+                if (match) {
+                    this.value = match;
+                    markAlternateLocationManual(true);
+                    syncAlternateLocationSelectFromInput();
+                    this.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+            this.blur();
+        }
+    });
+
+    let previousValueLength = alternateLocationInput.value.length;
+    alternateLocationInput.addEventListener('input', function(e) {
+        markAlternateLocationManual(true);
+        syncAlternateLocationSelectFromInput();
+
+        if (this.selectionStart !== this.selectionEnd) {
+            previousValueLength = this.value.length;
+            return;
+        }
+
+        const inputValue = this.value;
+        const isDeleting = inputValue.length < previousValueLength
+            || (e.inputType && String(e.inputType).startsWith('delete'));
+        previousValueLength = inputValue.length;
+
+        if (!inputValue || isDeleting) return;
+
+        const locationsStr = this.dataset.locations;
+        if (!locationsStr) return;
+
+        const locations = JSON.parse(locationsStr);
+        const match = locations.find((loc) =>
+            loc.toLowerCase().startsWith(inputValue.toLowerCase())
+        );
+
+        if (match && match.toLowerCase() !== inputValue.toLowerCase()) {
+            const cursorPos = this.selectionStart;
+            if (cursorPos === inputValue.length) {
+                this.value = match;
+                previousValueLength = match.length;
+                this.setSelectionRange(inputValue.length, match.length);
+            }
+        }
+    });
+}
+
 async function showInfoModal(event) {
     const button = event.target;
     const studentId = button.dataset.studentId;
@@ -10564,112 +10741,19 @@ async function showInfoModal(event) {
     
     // Alternate Location
     const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
     alternateLocationInput.value = infoData.alternate_location || '';
     alternateLocationInput.disabled = isReadOnly;
-    
-    // Load alternate locations from API and add default locations
+    alternateLocationInput.dataset.manualOverride = infoData.alternate_location_manual ? 'true' : '';
+    if (locationSelect) locationSelect.disabled = isReadOnly;
+
+    bindAlternateLocationInput();
     if (!isReadOnly) {
-        // Default locations that should always be available
-        const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
-        
-        try {
-            const response = await fetch('/api/schedules/locations');
-            if (response.ok) {
-                const apiLocations = await response.json();
-                // Combine default locations with API locations, removing duplicates
-                const allLocations = [...new Set([...defaultLocations, ...apiLocations])].sort();
-                const datalist = document.getElementById('alternate-location-options');
-                datalist.innerHTML = '';
-                allLocations.forEach(location => {
-                    const option = document.createElement('option');
-                    option.value = location;
-                    datalist.appendChild(option);
-                });
-                
-                // Store locations for autocomplete matching
-                alternateLocationInput.dataset.locations = JSON.stringify(allLocations);
-            } else {
-                // If API fails, at least use default locations
-                const datalist = document.getElementById('alternate-location-options');
-                datalist.innerHTML = '';
-                defaultLocations.forEach(location => {
-                    const option = document.createElement('option');
-                    option.value = location;
-                    datalist.appendChild(option);
-                });
-                alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
-            }
-        } catch (error) {
-            console.error('Error loading alternate locations:', error);
-            // If API fails, at least use default locations
-            const datalist = document.getElementById('alternate-location-options');
-            datalist.innerHTML = '';
-            defaultLocations.forEach(location => {
-                const option = document.createElement('option');
-                option.value = location;
-                datalist.appendChild(option);
-            });
-            alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
-        }
-        
-        // Set up autocomplete behavior - auto-select top matching result on Enter
-        alternateLocationInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const inputValue = this.value.trim();
-                const locationsStr = this.dataset.locations;
-                
-                if (locationsStr && inputValue) {
-                    const locations = JSON.parse(locationsStr);
-                    // Find first matching location (case-insensitive, starts with or exact match)
-                    const match = locations.find(loc => {
-                        const locLower = loc.toLowerCase();
-                        const inputLower = inputValue.toLowerCase();
-                        return locLower === inputLower || locLower.startsWith(inputLower);
-                    });
-                    
-                    if (match) {
-                        this.value = match;
-                        // Trigger input event to ensure value is set
-                        this.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                }
-                // Blur to confirm selection
-                this.blur();
-            }
-        });
-        
-        // Auto-select top matching result as user types
-        alternateLocationInput.addEventListener('input', function(e) {
-            // Don't interfere if user is selecting text or using arrow keys
-            if (this.selectionStart !== this.selectionEnd) return;
-            
-            const inputValue = this.value;
-            if (!inputValue) return;
-            
-            const locationsStr = this.dataset.locations;
-            if (!locationsStr) return;
-            
-            const locations = JSON.parse(locationsStr);
-            
-            // Find first matching location (case-insensitive)
-            const match = locations.find(loc => 
-                loc.toLowerCase().startsWith(inputValue.toLowerCase())
-            );
-            
-            if (match && match.toLowerCase() !== inputValue.toLowerCase()) {
-                // Store cursor position before we modify the value
-                const cursorPos = this.selectionStart;
-                
-                // Only auto-complete if cursor is at the end
-                if (cursorPos === inputValue.length) {
-                    // Set the full match and highlight the completion part
-                    this.value = match;
-                    this.setSelectionRange(inputValue.length, match.length);
-                }
-            }
-        });
+        await loadAlternateLocationOptions();
+    } else {
+        populateAlternateLocationOptions(DEFAULT_ALTERNATE_LOCATIONS);
     }
+    syncAlternateLocationSelectFromInput();
     
     // Reminders
     const reminder1 = document.getElementById('info-reminder-1');
@@ -11058,7 +11142,11 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
         }
     });
     if (detectedLocation) {
-        if (!String(clone.alternate_location || '').trim()) {
+        if (clone.alternate_location_manual) {
+            if (String(clone.alternate_location || '').trim().toLowerCase() === detectedLocation.toLowerCase()) {
+                autoFromNotes.alternate_location = true;
+            }
+        } else if (!String(clone.alternate_location || '').trim()) {
             clone.alternate_location = detectedLocation;
             autoFromNotes.alternate_location = true;
         } else if (String(clone.alternate_location).trim().toLowerCase() === detectedLocation.toLowerCase()) {
@@ -11098,7 +11186,6 @@ function updateInfoModalAutoBadges(autoFromNotes) {
 
 function getKnownLocationsFromInfoModal() {
     const locationInput = document.getElementById('info-alternate-location');
-    const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
     let fromDataset = [];
     if (locationInput?.dataset?.locations) {
         try {
@@ -11108,7 +11195,7 @@ function getKnownLocationsFromInfoModal() {
             fromDataset = [];
         }
     }
-    return [...new Set([...defaults, ...fromDataset])];
+    return [...new Set([...DEFAULT_ALTERNATE_LOCATIONS, ...fromDataset])];
 }
 
 function collectInfoModalDraftData() {
@@ -11123,6 +11210,7 @@ function collectInfoModalDraftData() {
         reminder3: getChecked('info-reminder-3'),
         reset: getChecked('info-reset'),
         alternate_location: getValue('info-alternate-location'),
+        alternate_location_manual: isAlternateLocationManual(),
         frenzy: getChecked('info-frenzy'),
         severity: severityValue ? parseInt(severityValue, 10) : null,
         duration: getValue('info-duration'),
@@ -11249,6 +11337,7 @@ function saveInfoModal() {
         reminder3: document.getElementById('info-reminder-3').checked,
         reset: document.getElementById('info-reset').checked,
         alternate_location: document.getElementById('info-alternate-location').value || '',
+        alternate_location_manual: isAlternateLocationManual(),
         frenzy: document.getElementById('info-frenzy').checked,
         severity: (() => {
             const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
@@ -11286,12 +11375,7 @@ function saveInfoModal() {
     infoData.purposes = purposes;
 
     // Parse text fields for exact keyword matches and auto-fill related Info values.
-    const knownLocations = (() => {
-        const locationInput = document.getElementById('info-alternate-location');
-        const fromDataset = locationInput?.dataset?.locations ? JSON.parse(locationInput.dataset.locations) : [];
-        const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
-        return [...new Set([...(Array.isArray(fromDataset) ? fromDataset : []), ...defaults])];
-    })();
+    const knownLocations = getKnownLocationsFromInfoModal();
     infoData = normalizeInfoFromTextFields(infoData, knownLocations);
     updateInfoModalAutoBadges(infoData.auto_from_notes);
 
@@ -11463,7 +11547,7 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <!-- Reset -->
                 <div class="form-group">
                     <label>Reset:</label>
-                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.reset ? 'âœ“ Yes' : 'âœ— No'}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.reset ? '✓ Yes' : '✗ No'}</div>
                 </div>
 
                 <!-- Alternate Location -->
@@ -11508,7 +11592,7 @@ function showInfoViewPopup(infoDataString, time, location) {
                 <!-- Frenzy -->
                 <div class="form-group">
                     <label>Frenzy:</label>
-                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.frenzy ? 'âœ“ Yes' : 'âœ— No'}</div>
+                    <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
                 </div>
                 <div class="form-group">
                     <label>Highest Level of Staff Called:</label>
@@ -11938,6 +12022,7 @@ window.closePastPointCardsModal = closePastPointCardsModal;
 // Schedule Management Functions
 let teacherScheduleData = [];
 let studentScheduleData = [];
+let studentSchedulesByStudentId = {};
 let currentScheduleStudentId = null;
 let currentTeacherScheduleUserId = null; // User ID whose teacher schedule is being viewed (null = current user)
 let allTeacherClassNames = []; // Store all class names from all teacher schedules
@@ -11970,6 +12055,44 @@ function updateAllClassAutocompletes() {
     // when they are focused or typed in, so no manual update needed
 }
 
+function formatStudentScheduleLocation(scheduleItems, timePeriod) {
+    const items = (scheduleItems || []).filter((item) => item && item.time_period === timePeriod);
+    if (!items.length) return '';
+    const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
+    return classNames.join(', ');
+}
+
+function getStudentScheduleLocationForPeriod(studentId, timePeriod) {
+    const items = studentSchedulesByStudentId[studentId]
+        || studentSchedulesByStudentId[String(studentId)]
+        || [];
+    const location = formatStudentScheduleLocation(items, timePeriod);
+    if (location) return location;
+    const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
+    return standard ? standard.location : timePeriod;
+}
+
+async function loadStudentSchedulesForIds(studentIds) {
+    const ids = [...new Set((studentIds || []).filter((id) => id != null))];
+    if (!ids.length) return;
+    const missing = ids.filter((id) => {
+        return !studentSchedulesByStudentId[id] && !studentSchedulesByStudentId[String(id)];
+    });
+    if (!missing.length) return;
+    try {
+        const response = await fetch(`/api/schedules/bulk?student_ids=${encodeURIComponent(missing.join(','))}`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        (payload.items || []).forEach((item) => {
+            if (item && item.student_id != null) {
+                studentSchedulesByStudentId[item.student_id] = item.periods || [];
+            }
+        });
+    } catch (error) {
+        console.error('Error loading student schedules:', error);
+    }
+}
+
 function loadSchedules(type, studentId = null, teacherUserId = null) {
     let url = `/api/schedules?schedule_type=${type}`;
     if (studentId) {
@@ -11995,6 +12118,9 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                 updateTeacherScheduleEditability();
             } else {
                 studentScheduleData = Array.isArray(data) ? data : [];
+                if (studentId) {
+                    studentSchedulesByStudentId[studentId] = studentScheduleData;
+                }
                 if (document.getElementById('student-schedule-body')) {
                     renderStudentSchedule();
                 }
@@ -12067,11 +12193,11 @@ function populateTeacherScheduleStaffSearch() {
 
     const isAdmin = role === 'admin';
 
-    // For admins, add a "Select staffâ€¦" placeholder so nothing is auto-selected
+    // For admins, add a "Select staff…" placeholder so nothing is auto-selected
     if (isAdmin) {
         const placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = 'Select staffâ€¦';
+        placeholder.textContent = 'Select staff…';
         select.appendChild(placeholder);
     }
 
@@ -12228,7 +12354,7 @@ window.addEventListener('resize', () => {
 
 /**
  * Mount autocomplete options from a DocumentFragment.
- * Count nodes before appendChild(frag) â€” the fragment is emptied when mounted.
+ * Count nodes before appendChild(frag) — the fragment is emptied when mounted.
  * Supports marketplace-combobox (.is-open), dashboard (.active), or display:block.
  * Pass an input element as shouldShow to only open when that input is focused.
  */
@@ -12954,7 +13080,7 @@ function addClassInputGroup(container, value = '') {
     group.className = 'class-input-group';
     group.innerHTML = `
         <input type="text" value="${value}" class="class-input" placeholder="Enter class/activity">
-        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">Ã—</button>
+        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
     `;
     
     // Add delete button event listener
@@ -13029,7 +13155,7 @@ function addScheduleRow(type, timePeriod = '', data = null) {
                 <div class="classes-container">
                     ${initialClassValue ? `<div class="class-input-group">
                         <input type="text" value="${initialClassValue}" class="class-input" placeholder="Enter class/activity">
-                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">Ã—</button>
+                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
                     </div>` : ''}
                 </div>
             </td>
@@ -13195,7 +13321,7 @@ function populateStudentSchedulePrintFilters() {
         const currentVal = staffSelect.value;
         let list = (allStaffMembers || []).filter((u) => u.role === 'staff');
         list.sort((a, b) => (a.name || a.username || '').localeCompare(b.name || b.username || ''));
-        staffSelect.innerHTML = '<option value="">Select staffâ€¦</option>';
+        staffSelect.innerHTML = '<option value="">Select staff…</option>';
         list.forEach((u) => {
             const opt = document.createElement('option');
             opt.value = u.id;
@@ -13225,7 +13351,7 @@ function populateStudentSchedulePrintFilters() {
             if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
             return a.localeCompare(b, undefined, { numeric: true });
         });
-        gradeSelect.innerHTML = '<option value="">Select gradeâ€¦</option>';
+        gradeSelect.innerHTML = '<option value="">Select grade…</option>';
         sorted.forEach((grade) => {
             const opt = document.createElement('option');
             opt.value = grade;
@@ -13602,7 +13728,7 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
     const originalLabel = menuBtn ? menuBtn.textContent : 'Print';
     if (menuBtn) {
         menuBtn.disabled = true;
-        menuBtn.textContent = 'Preparingâ€¦';
+        menuBtn.textContent = 'Preparing…';
     }
     try {
         const schedulesResponse = await fetch(`/api/schedules/bulk?${query}`);
@@ -14383,7 +14509,7 @@ function createStudentRow(user) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="plan-cell">
-            ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : 'â€”'}
+            ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
         </td>
         <td class="actions-cell">
             ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
@@ -14508,7 +14634,7 @@ async function resetAndViewPassword(userId, username) {
                 cell.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; font-weight: bold; color: #2e7d32; font-size: 14px;">${newPassword}</code>
-                        <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyToClipboard('${newPassword}', this)">ðŸ“‹ Copy</button>
+                        <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyToClipboard('${newPassword}', this)">📋 Copy</button>
                         <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${userId}, '${username}')">Reset Again</button>
                     </div>
                 `;
@@ -14527,7 +14653,7 @@ async function resetAndViewPassword(userId, username) {
 function copyToClipboard(text, buttonElement) {
     navigator.clipboard.writeText(text).then(() => {
         const originalText = buttonElement.textContent;
-        buttonElement.textContent = 'âœ“ Copied!';
+        buttonElement.textContent = '✓ Copied!';
         buttonElement.style.background = '#4caf50';
         buttonElement.style.color = 'white';
         
@@ -14593,7 +14719,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
                 u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
             );
             const currentVal = linkedCaseManagerId != null && linkedCaseManagerId !== '' ? String(linkedCaseManagerId) : '';
-            editCaseManagerSelect.innerHTML = '<option value="">â€” Select Case Manager (optional) â€”</option>';
+            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
             caseManagers.forEach(cm => {
                 const opt = document.createElement('option');
                 opt.value = cm.id;
@@ -14738,7 +14864,7 @@ async function loadParentStudentsForEdit(parentId) {
                     <div>
                         <strong>${student.student_name || 'Unknown'}</strong>
                         <span style="color: var(--text-secondary); margin-left: 10px;">(${student.relationship})</span>
-                        ${student.verified ? '<span style="color: green; margin-left: 10px;">âœ“ Verified</span>' : '<span style="color: orange; margin-left: 10px;">Pending Verification</span>'}
+                        ${student.verified ? '<span style="color: green; margin-left: 10px;">✓ Verified</span>' : '<span style="color: orange; margin-left: 10px;">Pending Verification</span>'}
                     </div>
                     <div style="display: flex; gap: 8px;">
                         ${!student.verified ? `<button type="button" class="btn-primary" style="padding: 4px 12px; font-size: 12px;" onclick="verifyParentStudent(${parentId}, ${student.student_id})">Verify</button>` : ''}
@@ -14937,7 +15063,7 @@ function createTeamMemberRow(containerId, selectedUsername = '', roles = []) {
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'delete-btn';
-    removeBtn.textContent = 'Ã—';
+    removeBtn.textContent = '×';
     removeBtn.style.padding = '4px 8px';
     removeBtn.style.fontSize = '14px';
     removeBtn.onclick = function() {
@@ -15288,7 +15414,7 @@ async function deleteUser(userId, username, role) {
     const roleText = role === 'admin' ? 'ADMIN USER' : 
                      role === 'staff' ? 'STAFF USER' : 'STUDENT USER';
     
-    if (!confirm(`âš ï¸ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`)) {
+    if (!confirm(`⚠️ WARNING: Delete ${roleText}\n\nAre you sure you want to delete user "${username}"?\n\nThis action CANNOT be undone!`)) {
         return;
     }
     
@@ -15344,7 +15470,7 @@ function updateStaffCaseManagerGroup() {
         u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
     );
     const currentValue = staffCaseManagerSelect.value;
-    staffCaseManagerSelect.innerHTML = '<option value="">â€” Select Case Manager (optional) â€”</option>';
+    staffCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
     caseManagers.forEach(cm => {
         const opt = document.createElement('option');
         opt.value = cm.id;
@@ -15645,7 +15771,7 @@ async function manageOutsideStaffStudents(userId, name) {
             <h2>Manage Students for ${displayName}</h2>
             <p style="margin-bottom: 15px; color: var(--text-secondary);">Select students to assign to this Outside Staff user:</p>
             <div class="form-group" style="margin-bottom: 15px;">
-                <input type="text" id="student-assignment-search" placeholder="ðŸ” Search students by name..." autocomplete="off" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;">
+                <input type="text" id="student-assignment-search" placeholder="🔍 Search students by name..." autocomplete="off" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;">
             </div>
             <div id="student-assignment-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 4px;">
                 ${allStudents.map(student => `
@@ -15820,7 +15946,7 @@ function billingPill(ok, okText, badText) {
 
 function billingSubscribedCheck(ok) {
     if (!ok) return '';
-    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#dcfce7;color:#16a34a;font-weight:700;font-size:13px;" title="Subscribed" aria-label="Subscribed">âœ“</span>';
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#dcfce7;color:#16a34a;font-weight:700;font-size:13px;" title="Subscribed" aria-label="Subscribed">✓</span>';
 }
 
 let _schoolBillingStatus = null;
@@ -15848,7 +15974,7 @@ function billingPlanRow(plan, selectedId) {
                 ${plan.current && plan.kind === 'paid' ? billingSubscribedCheck(true) : ''}
                 ${current}
             </div>
-            ${extra.length ? `<div style="font-size:13px;color:var(--text-secondary);">${extra.join(' Â· ')}</div>` : ''}
+            ${extra.length ? `<div style="font-size:13px;color:var(--text-secondary);">${extra.join(' · ')}</div>` : ''}
         </div>
     </label>`;
 }
@@ -15919,9 +16045,9 @@ function renderBillingManageModal(data) {
         ];
         if (data.build_fee_label) buildBits.unshift(escapeHtml(data.build_fee_label));
         if (data.build_fee_paid && buildPaidAt) {
-            sections.push(`<div style="font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' Â· ')} Â· Paid ${escapeHtml(buildPaidAt)}</div>`);
+            sections.push(`<div style="font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')} · Paid ${escapeHtml(buildPaidAt)}</div>`);
         } else {
-            sections.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' Â· ')}</div>`);
+            sections.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;"><strong>Build fee:</strong> ${buildBits.join(' · ')}</div>`);
         }
     }
     if (period && data.on_paid_plan) {
@@ -16393,12 +16519,12 @@ function filterUserTable(tableType, searchQuery) {
 async function removeStudent(userId, studentId, studentName) {
     // First confirmation - basic warning
     const firstConfirm = confirm(
-        `âš ï¸ WARNING: Remove Student\n\n` +
+        `⚠️ WARNING: Remove Student\n\n` +
         `You are about to remove "${studentName}" from the system.\n\n` +
         `This will:\n` +
-        `â€¢ Delete the student's user account\n` +
-        `â€¢ Delete the student record\n` +
-        `â€¢ Remove all associated data\n\n` +
+        `• Delete the student's user account\n` +
+        `• Delete the student record\n` +
+        `• Remove all associated data\n\n` +
         `This action CANNOT be undone!\n\n` +
         `Are you sure you want to continue?`
     );
@@ -16409,7 +16535,7 @@ async function removeStudent(userId, studentId, studentName) {
     
     // Second confirmation - require typing student name
     const typedName = prompt(
-        `âš ï¸ FINAL CONFIRMATION\n\n` +
+        `⚠️ FINAL CONFIRMATION\n\n` +
         `To confirm deletion, please type the student's name exactly:\n\n` +
         `"${studentName}"\n\n` +
         `Type the name to confirm:`
@@ -16417,7 +16543,7 @@ async function removeStudent(userId, studentId, studentName) {
     
     if (typedName !== studentName) {
         if (typedName !== null) { // null means they clicked cancel
-            alert('âŒ Deletion cancelled: Name did not match.\n\nThe student was NOT removed.');
+            alert('❌ Deletion cancelled: Name did not match.\n\nThe student was NOT removed.');
         }
         return; // User cancelled or name didn't match
     }
@@ -16676,7 +16802,7 @@ function showStarCategoryDetails(categoryKey, categoryLabel, summaryData) {
     const formatDrillDelta = (delta) => {
         const n = Number(delta);
         if (!Number.isFinite(n)) return 'No data';
-        if (Math.abs(n) < 0.000001) return 'â€”';
+        if (Math.abs(n) < 0.000001) return '—';
         return `${formatOverviewSignedInt(n)}%`;
     };
     const drillDeltaColor = (delta) => {
@@ -16867,7 +16993,7 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
     const formatDrillDelta = (delta) => {
         const n = Number(delta);
         if (!Number.isFinite(n)) return 'No data';
-        if (Math.abs(n) < 0.000001) return 'â€”';
+        if (Math.abs(n) < 0.000001) return '—';
         return `${formatOverviewSignedInt(n)}%`;
     };
     const drillDeltaColor = (delta) => {
@@ -16972,7 +17098,7 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
                 `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
             ).join('');
             const tableHtml = `
-                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} â€” Average STAR % by time period</h4>
+                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by time period</h4>
                 <table style="${tableStyle}">
                     <thead><tr><th style="${thLeft}">Time Period</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
                     <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
@@ -16998,7 +17124,7 @@ function wireStarCategoryDrilldown(root, data, categoryKey) {
                 `<tr><td style="${tdLeft}">${escapeHtml(r.label)}</td><td style="${tdRight}">${(r.pct != null ? r.pct.toFixed(1) : '')}%</td><td style="${tdRight}"><span style="color:${drillDeltaColor(r.delta)};font-weight:600;">${escapeHtml(formatDrillDelta(r.delta))}</span></td></tr>`
             ).join('');
             const tableHtml = `
-                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} â€” Average STAR % by day of week</h4>
+                <h4 style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600;">${escapeHtml(metaLabel)} — Average STAR % by day of week</h4>
                 <table style="${tableStyle}">
                     <thead><tr><th style="${thLeft}">Day</th><th style="${thRight}">Average %</th><th style="${thRight}">Delta</th></tr></thead>
                     <tbody>${bodyRows || '<tr><td style="' + tdLeft + '" colspan="3">No data</td></tr>'}</tbody>
@@ -18863,9 +18989,9 @@ function renderMarketplaceCart() {
         total += subtotal;
         var itemId = line.item_id;
         return '<div class="marketplace-cart-line" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; gap:8px;">' +
-            '<span style="flex:1; min-width:0;">' + (line.name || 'Item') + ' Ã— ' + (line.quantity || 1) + '</span>' +
+            '<span style="flex:1; min-width:0;">' + (line.name || 'Item') + ' × ' + (line.quantity || 1) + '</span>' +
             '<span>$' + subtotal.toFixed(2) + '</span>' +
-            '<button type="button" class="marketplace-cart-remove-btn" data-item-id="' + itemId + '" title="Remove from cart" style="flex-shrink:0; padding:2px 6px; font-size:12px; color:#64748b; background:var(--bg-elevated); border:none; border-radius:var(--radius-sm); cursor:pointer;">âœ•</button>' +
+            '<button type="button" class="marketplace-cart-remove-btn" data-item-id="' + itemId + '" title="Remove from cart" style="flex-shrink:0; padding:2px 6px; font-size:12px; color:#64748b; background:var(--bg-elevated); border:none; border-radius:var(--radius-sm); cursor:pointer;">✕</button>' +
             '</div>';
     }).join('');
     el.querySelectorAll('.marketplace-cart-remove-btn').forEach(function (btn) {
@@ -19133,7 +19259,7 @@ function renderMarketplaceCatalog(items) {
         return '<div class="marketplace-item-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
             imgHtml +
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
-            '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? 'â€¦' : '') + '</p>' +
+            '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
             '<div style="display:flex; justify-content:space-between; align-items:center;">' +
             '<span style="font-weight:700; color:var(--accent);">$' + Number(item.price).toFixed(2) + '</span>' + btnHtml +
             '</div>' + staffBtns + adminBtns + '</div>';
@@ -19184,7 +19310,7 @@ function openMarketplaceItemDetailModal(itemId) {
     var metaParts = [];
     if (item.item_type_name) metaParts.push(item.item_type_name);
     if (item.category_name) metaParts.push(item.category_name);
-    metaEl.textContent = metaParts.length ? metaParts.join(' Â· ') : '';
+    metaEl.textContent = metaParts.length ? metaParts.join(' · ') : '';
     metaEl.style.display = metaParts.length ? 'block' : 'none';
     descEl.textContent = item.description || 'No description.';
     descEl.style.display = (item.description || '').trim() ? 'block' : 'block';
@@ -19273,7 +19399,7 @@ function loadMarketplacePOApprovals() {
             }
             list.innerHTML = pending.map(function (o) {
                 return '<div style="border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; margin-bottom:10px; background:var(--bg-surface);">' +
-                    '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' â€” $' + Number(o.item_price).toFixed(2) + '</div>' +
+                    '<div style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + ' — $' + Number(o.item_price).toFixed(2) + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">Student: ' + (o.student_name || '').replace(/</g, '&lt;') + '</div>' +
                     '<div style="font-size:13px; color:#64748b;">' + formatApiDateTime(o.created_at) + '</div>' +
                     '<div style="margin-top:10px; display:flex; gap:8px; align-items:center;">' +
@@ -19362,7 +19488,7 @@ function renderMarketplaceAnalyticsCharts(data) {
         marketplaceAnalyticsCharts.most = new Chart(mostCtx, {
             type: 'bar',
             data: {
-                labels: data.most_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + 'â€¦' : x.item_name; }),
+                labels: data.most_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + '…' : x.item_name; }),
                 datasets: [{ label: 'Purchases', data: data.most_purchased.map(function (x) { return x.purchase_count; }), backgroundColor: data.most_purchased.map(function (_, i) { return hex(i); }) }]
             },
             options: {
@@ -19379,7 +19505,7 @@ function renderMarketplaceAnalyticsCharts(data) {
         marketplaceAnalyticsCharts.least = new Chart(leastCtx, {
             type: 'bar',
             data: {
-                labels: data.least_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + 'â€¦' : x.item_name; }),
+                labels: data.least_purchased.map(function (x) { return x.item_name.length > 20 ? x.item_name.slice(0, 17) + '…' : x.item_name; }),
                 datasets: [{ label: 'Purchases', data: data.least_purchased.map(function (x) { return x.purchase_count; }), backgroundColor: data.least_purchased.map(function (_, i) { return hex(i); }) }]
             },
             options: {
@@ -19518,7 +19644,7 @@ function loadMarketplaceAnalytics() {
             }
             if (itemSelect) {
                 var idx = data.item_index || {};
-                var opts = '<option value="">â€” Select item â€”</option>';
+                var opts = '<option value="">— Select item —</option>';
                 var ids = Object.keys(data.demographics_by_item || {}).map(Number).sort(function (a, b) {
                     var na = idx[a] || idx[String(a)] || '';
                     var nb = idx[b] || idx[String(b)] || '';
@@ -19557,7 +19683,7 @@ function renderMarketplaceAddItemCaseManagerChips() {
         var chip = document.createElement('span');
         chip.className = 'marketplace-case-manager-chip';
         chip.setAttribute('data-id', item.id === 'school_wide' ? 'school_wide' : String(item.id));
-        chip.innerHTML = '<span class="marketplace-case-manager-chip-label">' + (item.name || '').replace(/</g, '&lt;') + '</span><span class="marketplace-case-manager-chip-remove" aria-label="Remove">Ã—</span>';
+        chip.innerHTML = '<span class="marketplace-case-manager-chip-label">' + (item.name || '').replace(/</g, '&lt;') + '</span><span class="marketplace-case-manager-chip-remove" aria-label="Remove">×</span>';
         chip.addEventListener('click', function () {
             marketplaceAddItemSelected = marketplaceAddItemSelected.filter(function (s) { return s.id !== item.id; });
             renderMarketplaceAddItemCaseManagerChips();
@@ -20097,8 +20223,8 @@ function openMarketplaceEditModal(itemId) {
         ]).then(function (arr) {
             var types = arr[0] || [];
             var cats = arr[1] || [];
-            typeSel.innerHTML = '<option value="">â€” None â€”</option>' + types.map(function (t) { return '<option value="' + t.id + '">' + (t.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
-            catSel.innerHTML = '<option value="">â€” None â€”</option>' + cats.map(function (c) { return '<option value="' + c.id + '">' + (c.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
+            typeSel.innerHTML = '<option value="">— None —</option>' + types.map(function (t) { return '<option value="' + t.id + '">' + (t.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
+            catSel.innerHTML = '<option value="">— None —</option>' + cats.map(function (c) { return '<option value="' + c.id + '">' + (c.name || '').replace(/</g, '&lt;') + '</option>'; }).join('');
             typeSel.value = item.item_type_id || '';
             catSel.value = item.category_id || '';
         });
@@ -20278,7 +20404,7 @@ function renderBankBalancesPreview(rows) {
 
     if (metaEl) {
         metaEl.textContent = sorted.length
-            ? (sorted.length + ' student' + (sorted.length === 1 ? '' : 's') + ' Â· $' + total.toFixed(2) + ' total')
+            ? (sorted.length + ' student' + (sorted.length === 1 ? '' : 's') + ' · $' + total.toFixed(2) + ' total')
             : '';
     }
 
@@ -20443,10 +20569,10 @@ function loadMarketplaceMyOrders() {
                 var statusColor = o.status === 'approved' ? '#059669' : o.status === 'denied' ? '#dc2626' : '#64748b';
                 var statusLabel = o.status === 'approved' ? 'fulfilled' : (o.status || '');
                 return '<div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">' +
-                    '<span style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + '</span> â€” $' + Number(o.item_price).toFixed(2) +
+                    '<span style="font-weight:600;">' + (o.item_name || '').replace(/</g, '&lt;') + '</span> — $' + Number(o.item_price).toFixed(2) +
                     ' <span style="color:' + statusColor + ';">(' + statusLabel + ')</span>' +
-                    (o.approved_by_name ? ' â€” Fulfilled by ' + o.approved_by_name.replace(/</g, '&lt;') : '') +
-                    (o.denial_reason ? ' â€” ' + o.denial_reason.replace(/</g, '&lt;') : '') +
+                    (o.approved_by_name ? ' — Fulfilled by ' + o.approved_by_name.replace(/</g, '&lt;') : '') +
+                    (o.denial_reason ? ' — ' + o.denial_reason.replace(/</g, '&lt;') : '') +
                     '</div>';
             }).join('');
         })
@@ -20919,7 +21045,7 @@ async function loadBankAccount(studentId) {
                 type: 'deposit',
                 amount: starbucksDollarValue,
                 balance_after: lastBalanceAfter + starbucksDollarValue,
-                description: `Starbucks (${starbucksTotal} Ã— $0.10)`,
+                description: `Starbucks (${starbucksTotal} × $0.10)`,
                 created_at: nowIso,
             });
         }
@@ -21441,7 +21567,7 @@ function renderTransactions(transactions) {
         .map(t => {
             const isDeposit = t.type === 'deposit';
             const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
-            const amountStr = (isDeposit ? '+' : 'âˆ’') + '$' + Math.abs(t.amount).toFixed(2);
+            const amountStr = (isDeposit ? '+' : '−') + '$' + Math.abs(t.amount).toFixed(2);
             const amtColor = isDeposit ? '#059669' : '#dc2626';
             return `
                 <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #f1f5f9;">
@@ -21991,7 +22117,7 @@ async function exportChildData(studentId) {
 }
 
 // ============================================================
-//  DASHBOARD â€” Search, Filters, Card Rendering
+//  DASHBOARD — Search, Filters, Card Rendering
 // ============================================================
 
 const DASHBOARD_COLORS = {
@@ -22003,7 +22129,7 @@ const DASHBOARD_COLORS = {
     palette: ['#ff3b30', '#007aff', '#34c759', '#ffcc00', '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80']
 };
 
-/** Frenzy severity 1â€“5 colors (matches trigger-time / heatmap severity scale). */
+/** Frenzy severity 1–5 colors (matches trigger-time / heatmap severity scale). */
 const FRENZY_SEVERITY_COLORS = ['#369E2C', '#7EB851', '#BCB432', '#E3AA30', '#BB2317'];
 
 // Use the exact same STAR colors as the Overview STAR Percent gauge
@@ -22014,7 +22140,7 @@ const STAR_CHART_BAR_COLORS = [
     '#ffcc00'  // relationships
 ];
 
-/** Rounded-axis ceiling for small bar charts (matches Chart.js-style â€œniceâ€ ticks). */
+/** Rounded-axis ceiling for small bar charts (matches Chart.js-style “nice” ticks). */
 function niceCeilingAxisMax(maxValue) {
     const v = Math.max(0, Number(maxValue) || 0);
     if (v <= 0) return 1;
@@ -22373,7 +22499,7 @@ function setupDashboardSearch(prefix, type) {
     const dropdown = document.getElementById(`${prefix}-${type}-dropdown`);
     if (!input || !dropdown) return;
 
-    // Extra protection against browser/passwordâ€‘manager autofill on dashboard searches
+    // Extra protection against browser/password‑manager autofill on dashboard searches
     hardenSearchInput(input);
 
     let debounceTimer = null;
@@ -22784,7 +22910,7 @@ async function fetchLevelUpsData() {
     const response = await fetch(url, { credentials: 'same-origin' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-        const msg = data && data.error ? data.error : 'Failed to load Level Upâ€™s data.';
+        const msg = data && data.error ? data.error : 'Failed to load Level Up’s data.';
         throw new Error(msg);
     }
     return data;
@@ -22814,9 +22940,9 @@ async function refreshLevelUpsOverviewTeaser(overviewCard) {
     try {
         await loadPromise;
     } catch (err) {
-        console.warn('Unable to load Level Upâ€™s teaser:', err);
+        console.warn('Unable to load Level Up’s teaser:', err);
         const countEl = overviewCard.querySelector('[data-level-ups-eligible-count]');
-        if (countEl) countEl.textContent = 'â€”';
+        if (countEl) countEl.textContent = '—';
     } finally {
         if (overviewCard._levelUpsPromise === loadPromise) {
             overviewCard._levelUpsPromise = null;
@@ -22969,17 +23095,17 @@ async function loadIncentiveTracking(startDate, endDate) {
 
         const yellowCardBlock = buildTable(
             data.yellow_students || [],
-            'Yellow Card (â‰¥ 85%)',
+            'Yellow Card (≥ 85%)',
             'Students with a yellow card whose overall point card average is at least 85% in this date range.'
         );
         const greenCardBlock = buildTable(
             data.green_students || [],
-            'Green Card (â‰¥ 90%)',
+            'Green Card (≥ 90%)',
             'Students with a green card whose overall point card average is at least 90% in this date range.'
         );
         const blueCardBlock = buildTable(
             data.blue_students || [],
-            'Blue Card (â‰¥ 90%)',
+            'Blue Card (≥ 90%)',
             'Students with a blue card whose overall point card average is at least 90% in this date range.'
         );
 
@@ -23340,13 +23466,13 @@ function buildOverviewHeatmapRowsHtml(frenzySeverityByTimeByDay, byTimeByDay, hm
                 const closest = Math.max(1, Math.min(5, Math.round(safeAvg)));
                 const levelName = severityLabels[closest] || '';
                 const count = sevCell.frenzy_count || 0;
-                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) â€¢ ${count} frenz${count === 1 ? 'y' : 'ies'}`;
-                if (interactive) title += ' â€¢ Click to drill down';
+                title = `Avg severity ${safeAvg.toFixed(2)} (${levelName}) • ${count} frenz${count === 1 ? 'y' : 'ies'}`;
+                if (interactive) title += ' • Click to drill down';
             } else if (noData) {
                 title = 'No point card or frenzy data';
-                if (interactive) title += ' â€¢ Click to drill down';
+                if (interactive) title += ' • Click to drill down';
             } else {
-                title = interactive ? 'No frenzies recorded â€¢ Click to drill down' : 'No frenzies';
+                title = interactive ? 'No frenzies recorded • Click to drill down' : 'No frenzies';
             }
             const dataAttrs = interactive
                 ? ` data-trigger-day="${escapeHtml(day)}" data-trigger-time="${escapeHtml(tlabel)}" role="button" tabindex="0" aria-label="${escapeHtml(`Open ${day} ${tlabel} frenzy severity drilldown`)}"`
@@ -23572,13 +23698,13 @@ function overviewHeatColor(severityCell, hm) {
             // proportionally between them.
             t = Math.min(1, Math.max(0, (avg - minAvg) / (maxAvg - minAvg)));
         } else {
-            // Only one observed value (or none) â€” render at the cool end.
+            // Only one observed value (or none) — render at the cool end.
             t = 0;
         }
     }
     // Multi-stop palette sampled from the reference Trigger Time heatmap.
     // Coolest cells use the vibrant dark green, then warm up through grass
-    // green â†’ olive â†’ amber â†’ orange â†’ deep red.
+    // green → olive → amber → orange → deep red.
     const stops = [
         { p: 0.00, c: [54, 158, 44] },   // vibrant dark green (coolest)
         { p: 0.30, c: [126, 184, 81] },  // medium grass green
@@ -24052,7 +24178,7 @@ async function fetchSummaryTrendCheckpoints(rangeOverride) {
     return response.json();
 }
 
-/** Average STAR % line on Reports â†’ Trends; checkpoint fallback when no card color. */
+/** Average STAR % line on Reports → Trends; checkpoint fallback when no card color. */
 const SUMMARY_TREND_STAR_LINE = '#4a8eff';
 /** Area fill under Average STAR % line. */
 const SUMMARY_TREND_STAR_FILL = 'rgba(74, 142, 255, 0.16)';
@@ -24640,7 +24766,7 @@ function renderSummaryTrendChart(points, checkpoints) {
             const ptsS = metaS.data;
             const n = Math.min(ptsF.length, ptsS.length);
 
-            // Use meta pixel coords directly â€” these are the exact same coords Chart.js strokes,
+            // Use meta pixel coords directly — these are the exact same coords Chart.js strokes,
             // so fills and strokes are pixel-perfect and can never produce gaps between them.
             const ptF = (i) => {
                 const p = ptsF[i];
@@ -24680,7 +24806,7 @@ function renderSummaryTrendChart(points, checkpoints) {
             ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
             ctx.clip();
 
-            // --- Red: single closed polygon along frenzy line â†’ baseline ---
+            // --- Red: single closed polygon along frenzy line → baseline ---
             {
                 ctx.beginPath();
                 let started = false, firstX = null, lastX = null;
@@ -24707,8 +24833,8 @@ function renderSummaryTrendChart(points, checkpoints) {
             // there is exactly one ctx.fill() per region and zero internal shared edges.
             const gStar = vGrad(TREND_COLORS.star.fill);
 
-            // regTop/regBot accumulate STAR and frenzy vertices Lâ†’R for the active region.
-            // They are flushed as a single polygon (top Lâ†’R, bottom Râ†’L, close).
+            // regTop/regBot accumulate STAR and frenzy vertices L→R for the active region.
+            // They are flushed as a single polygon (top L→R, bottom R→L, close).
             let inReg = false;
             let regTop = [];
             let regBot = [];
@@ -24747,14 +24873,14 @@ function renderSummaryTrendChart(points, checkpoints) {
                         const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
                         if (ix) { regTop = [s0, ix]; regBot = [f0, ix]; inReg = true; flushRegion(); }
                     }
-                    // !above0 && !above1: fully below this segment â€” nothing to do
+                    // !above0 && !above1: fully below this segment — nothing to do
                 } else {
                     // In a region (above0 is true because the previous segment's above1 was true)
                     if (above1) {
                         // Continue: extend right endpoint
                         regTop.push(s1); regBot.push(f1);
                     } else {
-                        // Exit: STAR crosses below frenzy â€” close region at the intersection
+                        // Exit: STAR crosses below frenzy — close region at the intersection
                         const ix = segSegIx(s0.x, s0.y, s1.x, s1.y, f0.x, f0.y, f1.x, f1.y);
                         if (ix) { regTop.push(ix); regBot.push(ix); }
                         flushRegion();
@@ -24813,7 +24939,7 @@ function renderSummaryTrendChart(points, checkpoints) {
             labels,
             // Chart.js draws sorted metas from last index down to 0; lower `order` is sorted first
             // and drawn last (on top). STAR order 0 keeps the blue stroke above the red stroke.
-            // tension: 0 â€” straight segments so custom fills match the lines (smooth curves left gaps).
+            // tension: 0 — straight segments so custom fills match the lines (smooth curves left gaps).
             datasets: [
                 {
                     label: 'Number of Frenzies',
@@ -25391,9 +25517,9 @@ function buildOverviewDashboardCardHtml(data) {
     let attendanceSub = '';
     if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
         const abs = Math.abs(Number(presentDelta));
-        attendanceSub = abs < 0.05 ? 'â€”' : `${formatOverviewSignedInt(presentDelta)}%`;
+        attendanceSub = abs < 0.05 ? '—' : `${formatOverviewSignedInt(presentDelta)}%`;
     } else {
-        attendanceSub = totalDays > 0 ? '' : 'â€”';
+        attendanceSub = totalDays > 0 ? '' : '—';
     }
 
     let starSub = '';
@@ -25488,7 +25614,7 @@ function buildOverviewDashboardCardHtml(data) {
     const topOverviewDecrease = negativeOverviewDeltas.length ? negativeOverviewDeltas[0] : null;
 
     const formatOverviewDeltaParts = (metric) => {
-        if (!metric) return { metric: 'â€”', delta: '' };
+        if (!metric) return { metric: '—', delta: '' };
         const formatted = formatOverviewSignedInt(metric.delta);
         return {
             metric: metric.label,
@@ -25540,13 +25666,13 @@ function buildOverviewDashboardCardHtml(data) {
 
     const headlineRight = displayTriggerDay
         ? `${escapeHtml(displayTriggerTime)} on<br>${escapeHtml(displayTriggerDay)}`
-        : escapeHtml(displayTriggerTime || 'â€”');
+        : escapeHtml(displayTriggerTime || '—');
 
     const triggerMetaLines = (displayTriggerTime || displayTriggerDay) ? `
             <div class="overview-trigger-meta">
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerTime || 'â€”')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerTime || '—')}</span></div>
                 <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerDay || 'â€”')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(displayTriggerDay || '—')}</span></div>
             </div>` : '';
 
     const dashLen = 100;
@@ -25578,7 +25704,7 @@ function buildOverviewDashboardCardHtml(data) {
                         <circle class="overview-gauge-fill overview-gauge-fill--green overview-gauge-fill--attendance-donut" cx="50" cy="50" r="34" fill="none" stroke="#16a34a" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="${attOff}" />
                     </svg>
                     <div class="overview-gauge-center overview-gauge-center--attendance-donut">
-                        <div class="overview-gauge-big">${totalDays > 0 ? `${roundedPresentPct}%` : 'â€”'}</div>
+                        <div class="overview-gauge-big">${totalDays > 0 ? `${roundedPresentPct}%` : '—'}</div>
                         <div class="overview-gauge-small ${presentDelta != null && Number(presentDelta) < 0 ? 'is-neg' : presentDelta != null && Number(presentDelta) > 0 ? 'is-pos' : ''}">${escapeHtml(attendanceSub)}</div>
                     </div>
                 </div>
@@ -25684,10 +25810,10 @@ function buildOverviewDashboardCardHtml(data) {
             </div>
         </div>
         <div class="overview-rich-row overview-rich-secondary">
-            <div class="overview-beige-panel overview-stat overview-level-ups-panel" data-overview-key="level_ups" title="Level Upâ€™s">
-                <div class="overview-panel-kicker">Level Upâ€™s</div>
+            <div class="overview-beige-panel overview-stat overview-level-ups-panel" data-overview-key="level_ups" title="Level Up’s">
+                <div class="overview-panel-kicker">Level Up’s</div>
                 <div class="overview-level-ups-body">
-                    <div class="overview-level-ups-count" data-level-ups-eligible-count>â€”</div>
+                    <div class="overview-level-ups-count" data-level-ups-eligible-count>—</div>
                     <div class="overview-level-ups-sub" data-level-ups-sub>ready to level up</div>
                 </div>
             </div>
@@ -25713,8 +25839,8 @@ function renderSummarySingle(container, data) {
     wireSummaryBehaviorTrendCard();
 
     const overviewCardEl = container.querySelector('.overview-card');
-    // Kick off Level Upâ€™s fetch before restoring overview cards so a persisted
-    // Level Upâ€™s panel can reuse the same in-flight request instead of doubling it.
+    // Kick off Level Up’s fetch before restoring overview cards so a persisted
+    // Level Up’s panel can reuse the same in-flight request instead of doubling it.
     if (overviewCardEl) {
         refreshLevelUpsOverviewTeaser(overviewCardEl);
     }
@@ -26250,7 +26376,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
         severityTableHtml += `</tbody></table>`;
     }
 
-    // Build Time / Location / Purpose (horizontal stacked bars) â€” can hide "Not recorded"
+    // Build Time / Location / Purpose (horizontal stacked bars) — can hide "Not recorded"
     const allTimeKeys = new Set([...SCHEDULE_PERIODS, ...Object.keys(frenziesByTime)]);
     const allTimeSlots = Array.from(allTimeKeys).map(p => ({
         label: p,
@@ -26305,7 +26431,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
         purposeTableHtml,
     } = buildNrSensitivePanels(false);
 
-    // Build Day breakdown (horizontal stacked bars â€” same as Time / Location)
+    // Build Day breakdown (horizontal stacked bars — same as Time / Location)
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     const daySlots = dayOrder.map(d => ({ label: d, entry: frenziesByDay[d] || {} })).filter(s => (Number(s.entry.count) || 0) > 0);
     let dayGraphHtml = emptyMsg;
@@ -26490,7 +26616,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
             </div>
         </div>`;
 
-    // Wire interactions (always â€” chrome is always present)
+    // Wire interactions (always — chrome is always present)
     const tabsContainer = card.querySelector('.frenzies-tabs');
     const tabPanelsContainer = card.querySelector('.frenzies-tab-panels');
     const overviewHeaderToggle = card.querySelector('.frenzies-overview-header-view-toggle');
@@ -26748,7 +26874,7 @@ function buildFrenziesCard(data, masonryGrid = null) {
             return;
         }
 
-        const shortLabel = label.length > 28 ? `${label.slice(0, 25)}â€¦` : label;
+        const shortLabel = label.length > 28 ? `${label.slice(0, 25)}…` : label;
         const tab = document.createElement('button');
         tab.className = 'infractions-tab frenzies-tab';
         tab.dataset.tab = tabName;
@@ -26997,12 +27123,12 @@ function attachOverviewCardInteractions(container, data) {
         const presentCountDelta = data.overview_trends?.present_count_delta;
         const excusedDelta = data.overview_trends?.excused_delta;
         const unexcusedDelta = data.overview_trends?.unexcused_delta;
-        let deltaText = 'â€”';
+        let deltaText = '—';
         let deltaClass = 'delta-neutral';
         if (presentDelta != null && !Number.isNaN(Number(presentDelta))) {
             const roundedTenths = Math.round(Number(presentDelta) * 10) / 10;
             if (roundedTenths === 0) {
-                deltaText = 'â€”';
+                deltaText = '—';
             } else {
                 const sign = roundedTenths > 0 ? '+' : '';
                 deltaText = `${sign}${roundedTenths.toFixed(1)}%`;
@@ -27172,7 +27298,7 @@ function attachOverviewCardInteractions(container, data) {
             const legendDeltaForLabel = (label) => {
                 if (label === 'Present') {
                     if (presentCountDelta == null || Number.isNaN(Number(presentCountDelta))) {
-                        return { text: 'â€”', cls: 'delta-neutral' };
+                        return { text: '—', cls: 'delta-neutral' };
                     }
                     const n = Math.round(Number(presentCountDelta));
                     if (n === 0) return { text: '0', cls: 'delta-neutral' };
@@ -27184,7 +27310,7 @@ function attachOverviewCardInteractions(container, data) {
                 }
                 const raw = label === 'Excused' ? excusedDelta : unexcusedDelta;
                 if (raw == null || Number.isNaN(Number(raw))) {
-                    return { text: 'â€”', cls: 'delta-neutral' };
+                    return { text: '—', cls: 'delta-neutral' };
                 }
                 const n = Math.round(Number(raw));
                 if (n === 0) return { text: '0', cls: 'delta-neutral' };
@@ -27204,7 +27330,7 @@ function attachOverviewCardInteractions(container, data) {
                             <span>${escapeHtml(label)}</span>
                         </div>
                         <div class="days-present-legend-value">
-                            ${value} Â· <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
+                            ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
                         </div>
                     </div>
                 `;
@@ -27317,7 +27443,7 @@ function attachOverviewCardInteractions(container, data) {
                         const value = Number(drilldownValues[idx] || 0);
                         const rawDelta = normalizedDayOfWeekDeltas[String(label || '').toLowerCase()];
                         const hasDelta = Number.isFinite(rawDelta);
-                        let delta = { text: 'â€”', cls: 'delta-neutral' };
+                        let delta = { text: '—', cls: 'delta-neutral' };
                         if (hasDelta) {
                             if (rawDelta === 0) {
                                 delta = { text: '0', cls: 'delta-neutral' };
@@ -27335,7 +27461,7 @@ function attachOverviewCardInteractions(container, data) {
                                     <span>${escapeHtml(label)}</span>
                                 </div>
                                 <div class="days-present-legend-value">
-                                    ${value} Â· <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
+                                    ${value} · <span class="days-present-legend-delta ${delta.cls}">${delta.text}</span>
                                 </div>
                             </div>
                         `;
@@ -27509,7 +27635,7 @@ function attachOverviewCardInteractions(container, data) {
             <div class="infractions-drilldown-panels">
                 <div class="infractions-drill-tab-panel is-active" data-drill-tab-panel="overview">
                     <div class="infractions-details-section-header">
-                        <h4 style="margin:0;">${escapeHtml(canonicalType || type)} â€” When It Occurs</h4>
+                        <h4 style="margin:0;">${escapeHtml(canonicalType || type)} — When It Occurs</h4>
                         ${detailsTitleHintBlock}
                     </div>
                     ${detailsFirstTimeText}
@@ -27691,7 +27817,7 @@ function attachOverviewCardInteractions(container, data) {
                     : 'N/A';
 
                 const contentHtml = `
-                    <h4 style="margin:8px 0;">${escapeHtml(type)} â€” ${escapeHtml(timeLabel)} Focus</h4>
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — ${escapeHtml(timeLabel)} Focus</h4>
                     <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
                         Based on all data for this time period in the selected summary range.
                     </p>
@@ -27806,7 +27932,7 @@ function attachOverviewCardInteractions(container, data) {
                 }
 
                 const contentHtml = `
-                    <h4 style="margin:8px 0;">${escapeHtml(type)} â€” Time of Day on ${escapeHtml(dayLabel)}</h4>
+                    <h4 style="margin:8px 0;">${escapeHtml(type)} — Time of Day on ${escapeHtml(dayLabel)}</h4>
                     <p style="font-size:0.85rem;color:var(--text-secondary);margin:4px 0 8px 0;">
                         Time-of-day STAR performance for ${escapeHtml(dayLabel)} in this summary range.
                     </p>
@@ -27986,12 +28112,12 @@ function attachOverviewCardInteractions(container, data) {
         const infraGraphBlock = infraSlots.length
             ? buildRemResHstarGraph(
                 infraSlots,
-                (slot) => `${label}: ${slot.count} â€” ${slot.label}`,
+                (slot) => `${label}: ${slot.count} — ${slot.label}`,
                 (slot) => getAssocDelta(slot.label, slot.count)
             )
             : infraEmptyMsg;
 
-        const remResDeltaTh = '<th title="Change vs prior period">Î”</th>';
+        const remResDeltaTh = '<th title="Change vs prior period">Δ</th>';
         const timeTableBlock = timeRows
             ? `<table class="overview-remres-table"><thead><tr><th>Time</th><th>Count</th>${remResDeltaTh}</tr></thead><tbody>${timeRows}</tbody></table>`
             : timeEmptyMsg;
@@ -28010,7 +28136,7 @@ function attachOverviewCardInteractions(container, data) {
         card.innerHTML = `
             <div class="dashboard-card-header overview-remres-card-header">
                 <div class="overview-remres-card-header-left">
-                    <h3 class="dashboard-card-title">${label} â€” When & What</h3>
+                    <h3 class="dashboard-card-title">${label} — When & What</h3>
                 </div>
                 <div class="overview-remres-header-view-toggle">
                     <div class="view-mode-toggle" role="tablist" aria-label="${escapeHtml(label)} view mode">
@@ -28201,7 +28327,7 @@ function attachOverviewCardInteractions(container, data) {
         const formatDeltaPercent = (delta) => {
             const n = Number(delta);
             if (!Number.isFinite(n)) return 'No data';
-            if (Math.abs(n) < 0.05) return 'â€”';
+            if (Math.abs(n) < 0.05) return '—';
             return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
         };
         const deltaColor = (delta) => {
@@ -28495,7 +28621,7 @@ function attachOverviewCardInteractions(container, data) {
         const byTimeByDay = data.by_time_by_day || {};
         const formatTriggerTimeStack = (value) => {
             const raw = String(value || '').trim();
-            if (!raw || !raw.includes('-')) return escapeHtml(raw || 'â€”');
+            if (!raw || !raw.includes('-')) return escapeHtml(raw || '—');
             const parts = raw.split('-').map(p => p.trim()).filter(Boolean);
             if (parts.length !== 2) return escapeHtml(raw);
             return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
@@ -28570,13 +28696,13 @@ function attachOverviewCardInteractions(container, data) {
         );
         const headlineRight = headlineDay
             ? `${escapeHtml(headlineTime)} on<br>${escapeHtml(headlineDay)}`
-            : escapeHtml(headlineTime || 'â€”');
+            : escapeHtml(headlineTime || '—');
         const triggerMetaLines = headlineTime ? `
             <div class="overview-trigger-meta">
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || 'â€”')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Time:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerTime || '—')}</span></div>
                 <div class="overview-trigger-meta-row overview-trigger-meta-row--sub"><span class="overview-trigger-meta-k">Previously:</span><span class="overview-trigger-meta-v">${escapeHtml(previousTriggerTime)}</span></div>
                 <div class="overview-trigger-meta-divider" aria-hidden="true"></div>
-                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || 'â€”')}</span></div>
+                <div class="overview-trigger-meta-row"><span class="overview-trigger-meta-k">Trigger Day:</span><span class="overview-trigger-meta-v">${escapeHtml(metaTriggerDay || '—')}</span></div>
                 <div class="overview-trigger-meta-row overview-trigger-meta-row--sub"><span class="overview-trigger-meta-k">Previously:</span><span class="overview-trigger-meta-v">${escapeHtml(previousTriggerDay)}</span></div>
             </div>` : '';
         const triggerOverviewPanelHtml = `
@@ -28774,7 +28900,7 @@ function attachOverviewCardInteractions(container, data) {
             const tabName = `${isCell ? `cell-${day}-${timeLabel}` : isDay ? `day-${day}` : `time-${timeLabel}`}`.replace(/[^a-zA-Z0-9_-]/g, '-');
             let tab = drillTabsContainer.querySelector(`.trigger-times-drill-tab[data-drill-tab="${tabName}"]`);
             let panel = drillPanelsContainer.querySelector(`.trigger-times-drill-tab-panel[data-drill-tab-panel="${tabName}"]`);
-            let summaryLabel = `${day} â€¢ ${timeLabel}`;
+            let summaryLabel = `${day} • ${timeLabel}`;
             let count = 0;
             let severitySum = 0;
             let severityBreakdown = {};
@@ -28968,10 +29094,10 @@ function attachOverviewCardInteractions(container, data) {
         card.dataset.overviewCard = 'level_ups';
         card.innerHTML = `
             <div class="dashboard-card-header level-ups-card-header">
-                <h3 class="dashboard-card-title">Level Upâ€™s</h3>
+                <h3 class="dashboard-card-title">Level Up’s</h3>
             </div>
             <div class="dashboard-card-body level-ups-card-body">
-                <div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading Level Upâ€™s...</p></div>
+                <div class="dashboard-loading"><div class="dashboard-spinner"></div><p>Loading Level Up’s...</p></div>
             </div>
         `;
         grid.appendChild(card);
@@ -29002,7 +29128,7 @@ function attachOverviewCardInteractions(container, data) {
                     const daysLogged = Number(row.days_logged || 0);
                     const daysRequired = Number(row.days_required || 30);
                     const avg = row.average_percent;
-                    const avgText = (avg == null || Number.isNaN(Number(avg))) ? 'â€”' : `${Number(avg).toFixed(1)}%`;
+                    const avgText = (avg == null || Number.isNaN(Number(avg))) ? '—' : `${Number(avg).toFixed(1)}%`;
                     const needed = Number(row.days_at_90_needed || 0);
                     const minDayPct = row.min_day_percent;
                     const minDayPctText = (minDayPct == null || Number.isNaN(Number(minDayPct)))
@@ -29069,8 +29195,8 @@ function attachOverviewCardInteractions(container, data) {
                     Qualifying days are the longest stretch of consecutive school days with data whose average STAR % is 90% or higher.
                     Students level up at 30 qualifying days. Excused days are excluded; unexcused days count as 0%.
                 </p>
-                ${buildSection('Yellow â†’ Green', yellowRows, 'No yellow-card students in this selection.', 'yellow')}
-                ${buildSection('Green â†’ Blue', greenRows, 'No green-card students in this selection.', 'green')}
+                ${buildSection('Yellow → Green', yellowRows, 'No yellow-card students in this selection.', 'yellow')}
+                ${buildSection('Green → Blue', greenRows, 'No green-card students in this selection.', 'green')}
             `;
 
             if (showPromote) {
@@ -29085,7 +29211,7 @@ function attachOverviewCardInteractions(container, data) {
                             return;
                         }
                         btn.disabled = true;
-                        btn.textContent = 'Workingâ€¦';
+                        btn.textContent = 'Working…';
                         try {
                             const resp = await fetch(`/api/students/${sid}/level-up`, {
                                 method: 'POST',
@@ -29128,7 +29254,7 @@ function attachOverviewCardInteractions(container, data) {
                 renderTables(payload);
             } catch (err) {
                 console.error(err);
-                body.innerHTML = `<div class="dashboard-empty"><p>${escapeHtml(err.message || 'Error loading Level Upâ€™s')}</p></div>`;
+                body.innerHTML = `<div class="dashboard-empty"><p>${escapeHtml(err.message || 'Error loading Level Up’s')}</p></div>`;
             }
             if (typeof applySummaryMasonryLayout === 'function') {
                 applySummaryMasonryLayout(grid);
@@ -29325,7 +29451,7 @@ function attachOverviewCardInteractions(container, data) {
                         };
                         const formatInfractionCountDeltaHtml = (delta) => {
                             if (delta == null || !Number.isFinite(delta)) {
-                                return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">â€”</span>';
+                                return '<span class="infractions-count-delta infractions-count-delta--muted" title="No prior-period comparison">—</span>';
                             }
                             const dClass = delta > 0 ? 'is-neg' : delta < 0 ? 'is-pos' : 'is-muted';
                             const text = delta >= 0 ? `+${delta}` : `${delta}`;
@@ -29649,7 +29775,7 @@ function attachOverviewCardInteractions(container, data) {
                                     <tr>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;background:var(--bg-elevated);">Time</th>
                                         <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);">Count</th>
-                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);" title="Change in total infractions vs prior period">Î”</th>
+                                        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:var(--bg-elevated);" title="Change in total infractions vs prior period">Δ</th>
                                     </tr>
                                 </thead>
                                 <tbody>`;
@@ -29988,7 +30114,7 @@ function attachOverviewCardInteractions(container, data) {
                             const overviewTextEl = card.querySelector('.infractions-click-hint-text[data-hint-key="' + OVERVIEW_HINT_KEY + '"]');
                             if (overviewTextEl) overviewTextEl.remove();
                             const labelText = (row.querySelector('.dashboard-breakdown-name')?.textContent || type).trim();
-                            const shortLabel = labelText.length > 28 ? `${labelText.slice(0, 25)}â€¦` : labelText;
+                            const shortLabel = labelText.length > 28 ? `${labelText.slice(0, 25)}…` : labelText;
                             const tabName = `inf-${type}`;
 
                             // Look for an existing tab for this infraction
@@ -30246,7 +30372,7 @@ function renderSummaryComparison(container, data) {
     };
 
     let html = `<div class="dashboard-card-grid">`;
-    // Comparison chart card â€“ matches dashboard card style
+    // Comparison chart card – matches dashboard card style
     html += `<div class="dashboard-card full-width">
         <div class="dashboard-card-header">
             <div>
@@ -30270,7 +30396,7 @@ function renderSummaryComparison(container, data) {
         <div class="dashboard-chart-wrap summary-compare-chart-wrap" style="height:260px"><canvas id="summary-compare-chart"></canvas></div>
     </div>`;
 
-    // Comparison table card â€“ use dashboard card header + shared table styling
+    // Comparison table card – use dashboard card header + shared table styling
     html += `<div class="dashboard-card full-width">
         <div class="dashboard-card-header">
             <h3 class="dashboard-card-title">Comparison breakdown</h3>
@@ -30651,7 +30777,7 @@ function setupReportsNumberAlignment() {
         if (!root) return;
         const cells = root.querySelectorAll('table th, table td');
         cells.forEach(cell => {
-            // First column (times/labels) stays left-aligned â€” do not treat as numeric
+            // First column (times/labels) stays left-aligned — do not treat as numeric
             if (cell.cellIndex === 0) {
                 cell.classList.remove('numeric-cell');
                 return;

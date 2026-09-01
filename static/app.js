@@ -10513,6 +10513,185 @@ function renderInfoEditHistory(history) {
     container.innerHTML = buildEditHistoryHtml(history);
 }
 
+const DEFAULT_ALTERNATE_LOCATIONS = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
+
+function markAlternateLocationManual(manual = true) {
+    const input = document.getElementById('info-alternate-location');
+    if (input) input.dataset.manualOverride = manual ? 'true' : '';
+}
+
+function isAlternateLocationManual() {
+    const input = document.getElementById('info-alternate-location');
+    return input?.dataset?.manualOverride === 'true';
+}
+
+function populateAlternateLocationOptions(locations) {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    const datalist = document.getElementById('alternate-location-options');
+    if (!alternateLocationInput) return locations;
+
+    if (datalist) {
+        datalist.innerHTML = '';
+        locations.forEach((location) => {
+            const option = document.createElement('option');
+            option.value = location;
+            datalist.appendChild(option);
+        });
+    }
+
+    if (locationSelect) {
+        const currentValue = alternateLocationInput.value.trim();
+        locationSelect.innerHTML = '';
+        const blankOption = document.createElement('option');
+        blankOption.value = '';
+        blankOption.textContent = 'Select location...';
+        locationSelect.appendChild(blankOption);
+        locations.forEach((location) => {
+            const option = document.createElement('option');
+            option.value = location;
+            option.textContent = location;
+            locationSelect.appendChild(option);
+        });
+        const customOption = document.createElement('option');
+        customOption.value = '__custom__';
+        customOption.textContent = 'Other (type below)';
+        locationSelect.appendChild(customOption);
+        if (currentValue && locations.some((loc) => loc.toLowerCase() === currentValue.toLowerCase())) {
+            locationSelect.value = locations.find((loc) => loc.toLowerCase() === currentValue.toLowerCase());
+        } else if (currentValue) {
+            locationSelect.value = '__custom__';
+        } else {
+            locationSelect.value = '';
+        }
+    }
+
+    alternateLocationInput.dataset.locations = JSON.stringify(locations);
+    return locations;
+}
+
+async function loadAlternateLocationOptions() {
+    let allLocations = [...DEFAULT_ALTERNATE_LOCATIONS];
+    try {
+        const response = await fetch('/api/schedules/locations');
+        if (response.ok) {
+            const apiLocations = await response.json();
+            allLocations = [...new Set([...DEFAULT_ALTERNATE_LOCATIONS, ...apiLocations])].sort();
+        }
+    } catch (error) {
+        console.error('Error loading alternate locations:', error);
+    }
+    return populateAlternateLocationOptions(allLocations);
+}
+
+function syncAlternateLocationSelectFromInput() {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    if (!alternateLocationInput || !locationSelect) return;
+
+    const currentValue = alternateLocationInput.value.trim();
+    if (!currentValue) {
+        locationSelect.value = '';
+        return;
+    }
+
+    const locationsStr = alternateLocationInput.dataset.locations;
+    let locations = DEFAULT_ALTERNATE_LOCATIONS;
+    if (locationsStr) {
+        try {
+            const parsed = JSON.parse(locationsStr);
+            if (Array.isArray(parsed)) locations = parsed;
+        } catch (e) {
+            locations = DEFAULT_ALTERNATE_LOCATIONS;
+        }
+    }
+
+    const match = locations.find((loc) => loc.toLowerCase() === currentValue.toLowerCase());
+    locationSelect.value = match || '__custom__';
+}
+
+function bindAlternateLocationInput() {
+    const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
+    if (!alternateLocationInput || alternateLocationInput.dataset.bound === 'true') return;
+    alternateLocationInput.dataset.bound = 'true';
+
+    if (locationSelect && locationSelect.dataset.bound !== 'true') {
+        locationSelect.dataset.bound = 'true';
+        locationSelect.addEventListener('change', function() {
+            if (this.value === '__custom__') {
+                markAlternateLocationManual(true);
+                alternateLocationInput.focus();
+                alternateLocationInput.select();
+                return;
+            }
+            alternateLocationInput.value = this.value;
+            markAlternateLocationManual(true);
+            alternateLocationInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+
+    alternateLocationInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const inputValue = this.value.trim();
+            const locationsStr = this.dataset.locations;
+
+            if (locationsStr && inputValue) {
+                const locations = JSON.parse(locationsStr);
+                const match = locations.find((loc) => {
+                    const locLower = loc.toLowerCase();
+                    const inputLower = inputValue.toLowerCase();
+                    return locLower === inputLower || locLower.startsWith(inputLower);
+                });
+
+                if (match) {
+                    this.value = match;
+                    markAlternateLocationManual(true);
+                    syncAlternateLocationSelectFromInput();
+                    this.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+            this.blur();
+        }
+    });
+
+    let previousValueLength = alternateLocationInput.value.length;
+    alternateLocationInput.addEventListener('input', function(e) {
+        markAlternateLocationManual(true);
+        syncAlternateLocationSelectFromInput();
+
+        if (this.selectionStart !== this.selectionEnd) {
+            previousValueLength = this.value.length;
+            return;
+        }
+
+        const inputValue = this.value;
+        const isDeleting = inputValue.length < previousValueLength
+            || (e.inputType && String(e.inputType).startsWith('delete'));
+        previousValueLength = inputValue.length;
+
+        if (!inputValue || isDeleting) return;
+
+        const locationsStr = this.dataset.locations;
+        if (!locationsStr) return;
+
+        const locations = JSON.parse(locationsStr);
+        const match = locations.find((loc) =>
+            loc.toLowerCase().startsWith(inputValue.toLowerCase())
+        );
+
+        if (match && match.toLowerCase() !== inputValue.toLowerCase()) {
+            const cursorPos = this.selectionStart;
+            if (cursorPos === inputValue.length) {
+                this.value = match;
+                previousValueLength = match.length;
+                this.setSelectionRange(inputValue.length, match.length);
+            }
+        }
+    });
+}
+
 async function showInfoModal(event) {
     const button = event.target;
     const studentId = button.dataset.studentId;
@@ -10561,112 +10740,19 @@ async function showInfoModal(event) {
     
     // Alternate Location
     const alternateLocationInput = document.getElementById('info-alternate-location');
+    const locationSelect = document.getElementById('info-alternate-location-select');
     alternateLocationInput.value = infoData.alternate_location || '';
     alternateLocationInput.disabled = isReadOnly;
-    
-    // Load alternate locations from API and add default locations
+    alternateLocationInput.dataset.manualOverride = infoData.alternate_location_manual ? 'true' : '';
+    if (locationSelect) locationSelect.disabled = isReadOnly;
+
+    bindAlternateLocationInput();
     if (!isReadOnly) {
-        // Default locations that should always be available
-        const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
-        
-        try {
-            const response = await fetch('/api/schedules/locations');
-            if (response.ok) {
-                const apiLocations = await response.json();
-                // Combine default locations with API locations, removing duplicates
-                const allLocations = [...new Set([...defaultLocations, ...apiLocations])].sort();
-                const datalist = document.getElementById('alternate-location-options');
-                datalist.innerHTML = '';
-                allLocations.forEach(location => {
-                    const option = document.createElement('option');
-                    option.value = location;
-                    datalist.appendChild(option);
-                });
-                
-                // Store locations for autocomplete matching
-                alternateLocationInput.dataset.locations = JSON.stringify(allLocations);
-            } else {
-                // If API fails, at least use default locations
-                const datalist = document.getElementById('alternate-location-options');
-                datalist.innerHTML = '';
-                defaultLocations.forEach(location => {
-                    const option = document.createElement('option');
-                    option.value = location;
-                    datalist.appendChild(option);
-                });
-                alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
-            }
-        } catch (error) {
-            console.error('Error loading alternate locations:', error);
-            // If API fails, at least use default locations
-            const datalist = document.getElementById('alternate-location-options');
-            datalist.innerHTML = '';
-            defaultLocations.forEach(location => {
-                const option = document.createElement('option');
-                option.value = location;
-                datalist.appendChild(option);
-            });
-            alternateLocationInput.dataset.locations = JSON.stringify(defaultLocations);
-        }
-        
-        // Set up autocomplete behavior - auto-select top matching result on Enter
-        alternateLocationInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const inputValue = this.value.trim();
-                const locationsStr = this.dataset.locations;
-                
-                if (locationsStr && inputValue) {
-                    const locations = JSON.parse(locationsStr);
-                    // Find first matching location (case-insensitive, starts with or exact match)
-                    const match = locations.find(loc => {
-                        const locLower = loc.toLowerCase();
-                        const inputLower = inputValue.toLowerCase();
-                        return locLower === inputLower || locLower.startsWith(inputLower);
-                    });
-                    
-                    if (match) {
-                        this.value = match;
-                        // Trigger input event to ensure value is set
-                        this.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                }
-                // Blur to confirm selection
-                this.blur();
-            }
-        });
-        
-        // Auto-select top matching result as user types
-        alternateLocationInput.addEventListener('input', function(e) {
-            // Don't interfere if user is selecting text or using arrow keys
-            if (this.selectionStart !== this.selectionEnd) return;
-            
-            const inputValue = this.value;
-            if (!inputValue) return;
-            
-            const locationsStr = this.dataset.locations;
-            if (!locationsStr) return;
-            
-            const locations = JSON.parse(locationsStr);
-            
-            // Find first matching location (case-insensitive)
-            const match = locations.find(loc => 
-                loc.toLowerCase().startsWith(inputValue.toLowerCase())
-            );
-            
-            if (match && match.toLowerCase() !== inputValue.toLowerCase()) {
-                // Store cursor position before we modify the value
-                const cursorPos = this.selectionStart;
-                
-                // Only auto-complete if cursor is at the end
-                if (cursorPos === inputValue.length) {
-                    // Set the full match and highlight the completion part
-                    this.value = match;
-                    this.setSelectionRange(inputValue.length, match.length);
-                }
-            }
-        });
+        await loadAlternateLocationOptions();
+    } else {
+        populateAlternateLocationOptions(DEFAULT_ALTERNATE_LOCATIONS);
     }
+    syncAlternateLocationSelectFromInput();
     
     // Reminders
     const reminder1 = document.getElementById('info-reminder-1');
@@ -11055,7 +11141,11 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
         }
     });
     if (detectedLocation) {
-        if (!String(clone.alternate_location || '').trim()) {
+        if (clone.alternate_location_manual) {
+            if (String(clone.alternate_location || '').trim().toLowerCase() === detectedLocation.toLowerCase()) {
+                autoFromNotes.alternate_location = true;
+            }
+        } else if (!String(clone.alternate_location || '').trim()) {
             clone.alternate_location = detectedLocation;
             autoFromNotes.alternate_location = true;
         } else if (String(clone.alternate_location).trim().toLowerCase() === detectedLocation.toLowerCase()) {
@@ -11095,7 +11185,6 @@ function updateInfoModalAutoBadges(autoFromNotes) {
 
 function getKnownLocationsFromInfoModal() {
     const locationInput = document.getElementById('info-alternate-location');
-    const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
     let fromDataset = [];
     if (locationInput?.dataset?.locations) {
         try {
@@ -11105,7 +11194,7 @@ function getKnownLocationsFromInfoModal() {
             fromDataset = [];
         }
     }
-    return [...new Set([...defaults, ...fromDataset])];
+    return [...new Set([...DEFAULT_ALTERNATE_LOCATIONS, ...fromDataset])];
 }
 
 function collectInfoModalDraftData() {
@@ -11120,6 +11209,7 @@ function collectInfoModalDraftData() {
         reminder3: getChecked('info-reminder-3'),
         reset: getChecked('info-reset'),
         alternate_location: getValue('info-alternate-location'),
+        alternate_location_manual: isAlternateLocationManual(),
         frenzy: getChecked('info-frenzy'),
         severity: severityValue ? parseInt(severityValue, 10) : null,
         duration: getValue('info-duration'),
@@ -11246,6 +11336,7 @@ function saveInfoModal() {
         reminder3: document.getElementById('info-reminder-3').checked,
         reset: document.getElementById('info-reset').checked,
         alternate_location: document.getElementById('info-alternate-location').value || '',
+        alternate_location_manual: isAlternateLocationManual(),
         frenzy: document.getElementById('info-frenzy').checked,
         severity: (() => {
             const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
@@ -11283,12 +11374,7 @@ function saveInfoModal() {
     infoData.purposes = purposes;
 
     // Parse text fields for exact keyword matches and auto-fill related Info values.
-    const knownLocations = (() => {
-        const locationInput = document.getElementById('info-alternate-location');
-        const fromDataset = locationInput?.dataset?.locations ? JSON.parse(locationInput.dataset.locations) : [];
-        const defaults = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
-        return [...new Set([...(Array.isArray(fromDataset) ? fromDataset : []), ...defaults])];
-    })();
+    const knownLocations = getKnownLocationsFromInfoModal();
     infoData = normalizeInfoFromTextFields(infoData, knownLocations);
     updateInfoModalAutoBadges(infoData.auto_from_notes);
 
