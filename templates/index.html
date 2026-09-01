@@ -1806,6 +1806,17 @@
                         <span id="info-frenzy-warning" style="color: #dc3545; font-weight: bold; display: none; margin-left: 10px;">Frenzy?</span>
                     </div>
                 </div>
+                <div class="form-group" id="info-severity-group">
+                    <label for="info-severity">Highest Level of Staff Called:</label>
+                    <select id="info-severity">
+                        <option value="">Select severity</option>
+                        <option value="1">1 - Para</option>
+                        <option value="2">2 - Response Team</option>
+                        <option value="3">3 - Professional</option>
+                        <option value="4">4 - Administration</option>
+                        <option value="5">5 - SRO</option>
+                    </select>
+                </div>
                 <!-- Purposes -->
                 <div class="form-group">
                     <label>Purposes:</label>
@@ -1825,17 +1836,6 @@
                 <div class="form-group">
                     <label for="info-results">Frenzy Notes:</label>
                     <textarea id="info-results" rows="3" placeholder="Enter frenzy notes..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="info-severity">Highest Level of Staff Called:</label>
-                    <select id="info-severity">
-                        <option value="">Select severity</option>
-                        <option value="1">1 - Para</option>
-                        <option value="2">2 - Response Team</option>
-                        <option value="3">3 - Professional</option>
-                        <option value="4">4 - Administration</option>
-                        <option value="5">5 - SRO</option>
-                    </select>
                 </div>
             </div>
 
@@ -2318,7 +2318,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=notiflive1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=stafflevel1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

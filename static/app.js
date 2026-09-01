@@ -9117,6 +9117,23 @@ function parsePointCardInfoData(rawInfo) {
     }
 }
 
+function isInfoFrenzyChecked(infoData) {
+    if (!infoData) return false;
+    const value = infoData.frenzy;
+    if (value === true || value === 1) return true;
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
+function readFrenzySeverityValue(infoData) {
+    if (!isInfoFrenzyChecked(infoData)) return null;
+    if (infoData.severity === undefined || infoData.severity === null || String(infoData.severity).trim() === '') {
+        return null;
+    }
+    const severityNumber = Number(infoData.severity);
+    return Number.isFinite(severityNumber) ? severityNumber : null;
+}
+
 function incrementCount(bucket, key, amount = 1) {
     const normalizedKey = (key || '').toString().trim();
     if (!normalizedKey) return;
@@ -9290,11 +9307,9 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         const reminderCount = [info.reminder1, info.reminder2, info.reminder3].filter(Boolean).length;
         totals.reminders += reminderCount;
 
-        if (info.severity !== undefined && info.severity !== null && String(info.severity).trim() !== '') {
-            const severityNumber = Number(info.severity);
-            if (Number.isFinite(severityNumber)) {
-                severityValues.push(severityNumber);
-            }
+        const severityNumber = readFrenzySeverityValue(info);
+        if (severityNumber !== null) {
+            severityValues.push(severityNumber);
         }
 
         const infractions = Array.isArray(info.infractions)
@@ -9360,7 +9375,7 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
             ${renderAggregateMetricRow('Reminders', totals.reminders, previousTotals.reminders, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Resets', totals.reset, previousTotals.reset, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Frenzies', totals.frenzy, previousTotals.frenzy, { higherIsBetter: false })}
-            ${renderAggregateTextRow('Severity levels', formatSeverityAverage())}
+            ${totals.frenzy > 0 ? renderAggregateTextRow('Severity levels', formatSeverityAverage()) : ''}
             ${renderAggregateTextRow('Top purpose', formatTopSingle(purposeCounts))}
             ${renderAggregateTextRow('Top infraction', formatTopSingle(infractionCounts))}
             ${renderAggregateTextRow('Alt locations', formatAltLocations())}
@@ -12063,8 +12078,16 @@ async function showInfoModal(event) {
     frenzyCheckbox.disabled = isReadOnly;
     const severitySelect = ensureInfoSeverityControl();
     if (severitySelect) {
-        severitySelect.value = infoData.severity ? String(infoData.severity) : '';
+        const frenzyOn = isInfoFrenzyChecked(infoData);
+        severitySelect.value = (frenzyOn && infoData.severity) ? String(infoData.severity) : '';
         severitySelect.disabled = isReadOnly;
+    }
+    syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
+    if (frenzyCheckbox && frenzyCheckbox.dataset.severityVisibilityBound !== 'true') {
+        frenzyCheckbox.addEventListener('change', () => {
+            syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
+        });
+        frenzyCheckbox.dataset.severityVisibilityBound = 'true';
     }
     
     // Show/hide frenzy warnings (both in Frenzy line and Reset line) based on reset checkbox state
@@ -12109,14 +12132,16 @@ function ensureInfoSeverityControl() {
     let severitySelect = document.getElementById('info-severity');
     if (severitySelect) return severitySelect;
 
+    const frenzyInput = document.getElementById('info-frenzy');
+    const frenzyGroup = frenzyInput ? frenzyInput.closest('.form-group') : null;
     const resultsInput = document.getElementById('info-results');
-    if (!resultsInput) return null;
-
-    const resultsGroup = resultsInput.closest('.form-group');
-    if (!resultsGroup || !resultsGroup.parentNode) return null;
+    const resultsGroup = resultsInput ? resultsInput.closest('.form-group') : null;
+    const anchorGroup = frenzyGroup || resultsGroup;
+    if (!anchorGroup || !anchorGroup.parentNode) return null;
 
     const severityGroup = document.createElement('div');
     severityGroup.className = 'form-group';
+    severityGroup.id = 'info-severity-group';
     severityGroup.innerHTML = `
         <label for="info-severity">Highest Level of Staff Called:</label>
         <select id="info-severity">
@@ -12129,8 +12154,26 @@ function ensureInfoSeverityControl() {
         </select>
     `;
 
-    resultsGroup.parentNode.insertBefore(severityGroup, resultsGroup.nextSibling);
+    anchorGroup.parentNode.insertBefore(severityGroup, anchorGroup.nextSibling);
     return document.getElementById('info-severity');
+}
+
+function syncInfoSeverityVisibility(frenzyChecked) {
+    const severitySelect = document.getElementById('info-severity');
+    const severityGroup = document.getElementById('info-severity-group')
+        || severitySelect?.closest('.form-group');
+    if (severityGroup) {
+        severityGroup.style.display = frenzyChecked ? '' : 'none';
+    }
+}
+
+function readInfoModalSeverityValue(frenzyChecked) {
+    if (!frenzyChecked) return null;
+    const severityEl = document.getElementById('info-severity') || ensureInfoSeverityControl();
+    const severityValue = severityEl ? severityEl.value : '';
+    if (!severityValue) return null;
+    const parsed = parseInt(severityValue, 10);
+    return Number.isFinite(parsed) ? parsed : null;
 }
 
 function countExactPhraseMatches(haystack, phrase) {
@@ -12209,30 +12252,6 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
         [clone.reminder1, clone.reminder2, clone.reminder3] = slots;
     }
 
-    // Severity: labels only, conflict-safe (skip if existing severity differs).
-    const severityByLabel = {
-        para: 1,
-        'response team': 2,
-        professional: 3,
-        administration: 4,
-        sro: 5
-    };
-    let detectedSeverity = null;
-    Object.entries(severityByLabel).forEach(([label, value]) => {
-        if (detectedSeverity !== null) return;
-        if (countExactPhraseMatches(corpus, label)) {
-            detectedSeverity = value;
-        }
-    });
-    if (detectedSeverity !== null) {
-        if (!clone.severity) {
-            clone.severity = detectedSeverity;
-            autoFromNotes.severity = true;
-        } else if (Number(clone.severity) === detectedSeverity) {
-            autoFromNotes.severity = true;
-        }
-    }
-
     // Alternate location: known locations only, conflict-safe.
     const normalizedKnownLocations = (knownLocations || [])
         .map((loc) => String(loc || '').trim())
@@ -12255,6 +12274,11 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
         } else if (String(clone.alternate_location).trim().toLowerCase() === detectedLocation.toLowerCase()) {
             autoFromNotes.alternate_location = true;
         }
+    }
+
+    // Highest level of staff called is frenzy-only and is never inferred from notes or locations.
+    if (!clone.frenzy) {
+        clone.severity = null;
     }
 
     clone.auto_from_notes = autoFromNotes;
@@ -12281,7 +12305,6 @@ function updateInfoModalAutoBadges(autoFromNotes) {
     if (autoFromNotes.infractions) attachBadgeToLabel('infractions-container');
     if (autoFromNotes.purposes) attachBadgeToLabel('purposes-container');
     if (autoFromNotes.frenzy) attachBadgeToLabel('info-frenzy');
-    if (autoFromNotes.severity) attachBadgeToLabel('info-severity');
     if (autoFromNotes.reset) attachBadgeToLabel('info-reset');
     if (autoFromNotes.reminders) attachBadgeToLabel('info-reminder-1');
     if (autoFromNotes.alternate_location) attachBadgeToLabel('info-alternate-location');
@@ -12304,8 +12327,7 @@ function getKnownLocationsFromInfoModal() {
 function collectInfoModalDraftData() {
     const getChecked = (id) => !!document.getElementById(id)?.checked;
     const getValue = (id) => (document.getElementById(id)?.value || '').trim();
-    const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
-    const severityValue = severityEl ? severityEl.value : '';
+    const frenzyChecked = getChecked('info-frenzy');
     const draft = {
         notes: getValue('info-notes'),
         reminder1: getChecked('info-reminder-1'),
@@ -12314,8 +12336,8 @@ function collectInfoModalDraftData() {
         reset: getChecked('info-reset'),
         alternate_location: getValue('info-alternate-location'),
         alternate_location_manual: isAlternateLocationManual(),
-        frenzy: getChecked('info-frenzy'),
-        severity: severityValue ? parseInt(severityValue, 10) : null,
+        frenzy: frenzyChecked,
+        severity: readInfoModalSeverityValue(frenzyChecked),
         duration: getValue('info-duration'),
         results: getValue('info-results'),
         infractions: [],
@@ -12345,13 +12367,6 @@ function renderInfoModalAutoPreview(normalizedInfo) {
     if (!previewBox || !previewContent) return;
     const auto = normalizedInfo?.auto_from_notes || {};
     const lines = [];
-    const severityLabelMap = {
-        1: 'Para',
-        2: 'Response Team',
-        3: 'Professional',
-        4: 'Administration',
-        5: 'SRO'
-    };
 
     if (auto.infractions && Array.isArray(normalizedInfo.infractions) && normalizedInfo.infractions.length) {
         const items = normalizedInfo.infractions
@@ -12363,11 +12378,6 @@ function renderInfoModalAutoPreview(normalizedInfo) {
         lines.push(`<strong>Purposes:</strong> ${normalizedInfo.purposes.map((p) => escapeHtml(String(p))).join(', ')}`);
     }
     if (auto.frenzy && normalizedInfo.frenzy) lines.push('<strong>Frenzy:</strong> Yes');
-    if (auto.severity && normalizedInfo.severity) {
-        const sev = Number(normalizedInfo.severity);
-        const sevLabel = severityLabelMap[sev] ? `${sev} - ${severityLabelMap[sev]}` : String(normalizedInfo.severity);
-        lines.push(`<strong>Severity:</strong> ${escapeHtml(sevLabel)}`);
-    }
     if (auto.reset && normalizedInfo.reset) lines.push('<strong>Reset:</strong> Yes');
     if (auto.reminders) {
         const reminderCount = [normalizedInfo.reminder1, normalizedInfo.reminder2, normalizedInfo.reminder3].filter(Boolean).length;
@@ -12388,6 +12398,7 @@ function renderInfoModalAutoPreview(normalizedInfo) {
 
 function refreshInfoModalAutoPreview() {
     const draft = collectInfoModalDraftData();
+    syncInfoSeverityVisibility(!!draft.frenzy);
     const knownLocations = getKnownLocationsFromInfoModal();
     const normalized = normalizeInfoFromTextFields(draft, knownLocations);
     renderInfoModalAutoPreview(normalized);
@@ -12442,11 +12453,7 @@ function saveInfoModal() {
         alternate_location: document.getElementById('info-alternate-location').value || '',
         alternate_location_manual: isAlternateLocationManual(),
         frenzy: document.getElementById('info-frenzy').checked,
-        severity: (() => {
-            const severityEl = ensureInfoSeverityControl() || document.getElementById('info-severity');
-            const severityValue = severityEl ? severityEl.value : '';
-            return severityValue ? parseInt(severityValue, 10) : null;
-        })(),
+        severity: readInfoModalSeverityValue(!!document.getElementById('info-frenzy')?.checked),
         duration: document.getElementById('info-duration').value,
         results: document.getElementById('info-results').value
     };
@@ -12583,7 +12590,7 @@ function hasInfoData(infoData) {
            infoData.reset || 
            hasInfractions ||
            infoData.frenzy ||
-           infoData.severity ||
+           (isInfoFrenzyChecked(infoData) && readFrenzySeverityValue(infoData) !== null) ||
            hasPurposes ||
            infoData.duration ||
            infoData.results ||
@@ -12609,7 +12616,8 @@ function showInfoViewPopup(infoDataString, time, location) {
         4: 'Administration',
         5: 'SRO'
     };
-    const severityValue = Number(infoData.severity);
+    const frenzyOn = isInfoFrenzyChecked(infoData);
+    const severityValue = frenzyOn ? readFrenzySeverityValue(infoData) : null;
     const severityText = severityLabels[severityValue] ? `${severityValue} - ${severityLabels[severityValue]}` : 'None';
     
     // Create modal HTML
@@ -12697,10 +12705,12 @@ function showInfoViewPopup(infoDataString, time, location) {
                     <label>Frenzy:</label>
                     <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${infoData.frenzy ? '✓ Yes' : '✗ No'}</div>
                 </div>
+                ${frenzyOn ? `
                 <div class="form-group">
                     <label>Highest Level of Staff Called:</label>
                     <div style="padding: 10px; background: var(--bg-elevated); border-radius: 4px;">${severityText}</div>
                 </div>
+                ` : ''}
 
                 <!-- Purposes -->
                 <div class="form-group">
