@@ -1490,6 +1490,90 @@ def mark_daily_record_submitted_if_due(daily_record):
         daily_record.submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def backfill_point_card_locations_for_date(record_date, *, dry_run=False):
+    """Overwrite period locations from each student's current schedule for one date."""
+    daily_records = (
+        DailyRecord.query.filter_by(date=record_date)
+        .order_by(DailyRecord.student_id.asc())
+        .all()
+    )
+    if not daily_records:
+        return {
+            'date': record_date.isoformat(),
+            'daily_records': 0,
+            'students': 0,
+            'period_updates': 0,
+            'period_unchanged': 0,
+            'students_touched': 0,
+            'dry_run': dry_run,
+            'changes': [],
+        }
+
+    student_ids = sorted({record.student_id for record in daily_records if record.student_id})
+    students_by_id = {
+        student.id: student
+        for student in Student.query.filter(Student.id.in_(student_ids)).all()
+    }
+    schedules_by_student = _student_schedule_rows_by_student(student_ids)
+
+    period_updates = 0
+    period_unchanged = 0
+    students_touched = set()
+    changes = []
+
+    for daily_record in daily_records:
+        student_id = daily_record.student_id
+        schedule_rows = schedules_by_student.get(student_id, [])
+        periods = (
+            PeriodRecord.query.filter_by(daily_record_id=daily_record.id)
+            .order_by(PeriodRecord.id.asc())
+            .all()
+        )
+        for period in periods:
+            time_range = (period.time_range or '').strip()
+            if not time_range:
+                continue
+            new_location = _student_location_for_period(
+                student_id,
+                time_range,
+                schedule_rows=schedule_rows,
+            )
+            old_location = (period.location or '').strip()
+            if old_location == new_location:
+                period_unchanged += 1
+                continue
+            period_updates += 1
+            students_touched.add(student_id)
+            student = students_by_id.get(student_id)
+            student_name = student.name if student else f'student #{student_id}'
+            changes.append({
+                'student_id': student_id,
+                'student_name': student_name,
+                'time_range': time_range,
+                'old_location': old_location,
+                'new_location': new_location,
+            })
+            if not dry_run:
+                period.location = new_location
+
+    if dry_run:
+        db.session.rollback()
+    else:
+        db.session.commit()
+
+    return {
+        'date': record_date.isoformat(),
+        'daily_records': len(daily_records),
+        'students': len(student_ids),
+        'period_updates': period_updates,
+        'period_unchanged': period_unchanged,
+        'students_touched': len(students_touched),
+        'dry_run': dry_run,
+        'changes': changes[:200],
+        'changes_truncated': len(changes) > 200,
+    }
+
+
 _point_card_submit_thread_started = False
 _point_card_submit_thread_lock = threading.Lock()
 
@@ -16026,6 +16110,39 @@ def debug_accounts_search_check():
         'has_ahu': ahu is not None,
         'ahu_id': ahu.id if ahu else None,
     })
+
+@app.route('/admin/backfill-point-card-locations', methods=['POST'])
+def admin_backfill_point_card_locations():
+    """
+    One-off admin endpoint: backfill period locations from student schedules.
+    Requires SETUP_TOKEN (same as /setup).
+    """
+    setup_token = os.environ.get('SETUP_TOKEN')
+    if not setup_token:
+        return jsonify({'error': 'Setup not configured. SETUP_TOKEN environment variable required.'}), 403
+
+    payload = request.get_json(silent=True) or {}
+    provided_token = payload.get('token')
+    if provided_token != setup_token:
+        return jsonify({'error': 'Invalid setup token'}), 403
+
+    date_str = (payload.get('date') or '2026-08-31').strip()
+    try:
+        record_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date; use YYYY-MM-DD'}), 400
+
+    dry_run = payload.get('dry_run', True)
+    if isinstance(dry_run, str):
+        dry_run = dry_run.strip().lower() not in ('0', 'false', 'no')
+
+    try:
+        result = backfill_point_card_locations_for_date(record_date, dry_run=bool(dry_run))
+        return jsonify(result), 200
+    except Exception as e:
+        app.logger.exception('Backfill point card locations failed')
+        return jsonify({'error': f'Backfill failed: {str(e)}'}), 500
+
 
 @app.route('/setup', methods=['POST'])
 def setup():
