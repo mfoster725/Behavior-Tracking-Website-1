@@ -3427,15 +3427,21 @@ function renderStudentsGrid() {
         return;
     }
 
+    ensureStudentSchedulesLoadedForVisibleStudents(studentsToDisplay);
+
     // Reuse the same grid structure as daily grid
     const spacerWidth = '7px';
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            return 'repeat(4, 40px) 40px';
-        } else {
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
+    const studentScheduleColWidth = measurePointCardStudentScheduleColumnWidth(
+        studentsToDisplay,
+        [currentPeriod || '']
+    );
+    const studentColumns = buildPointCardStudentColumnsTemplate(
+        studentsToDisplay.length,
+        spacerWidth,
+        studentScheduleColWidth
+    );
+    const columnsPerStudent = getPointCardColumnsPerStudent();
+    const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
     const scheduleWidth = measureDailyScheduleColumnWidth([
         'Schedule',
@@ -3472,7 +3478,7 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.style.gridColumn = 'span 5';
+        studentHeader.style.gridColumn = `span ${columnsPerStudent}`;
         studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
@@ -3514,6 +3520,9 @@ function renderStudentsGrid() {
     
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
+        if (showStudentSchedules) {
+            appendStudentScheduleCategoryHeader(header);
+        }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
@@ -3552,6 +3561,10 @@ function renderStudentsGrid() {
             { full: 'accountability', short: 'a' },
             { full: 'relationships', short: 'r' }
         ];
+
+        if (showStudentSchedules) {
+            grid.appendChild(createStudentScheduleDataCell(student.id, currentPeriod || ''));
+        }
         
         categories.forEach(cat => {
             const cell = document.createElement('div');
@@ -3669,6 +3682,13 @@ function renderStudentsGrid() {
         
         let totalPoints = 0;
         let countedCategories = 0;
+
+        if (showStudentSchedules) {
+            grid.appendChild(createStudentScheduleDataCell(student.id, '', {
+                borderTop: true,
+                background: '#f8f9fa'
+            }));
+        }
         
         // Calculate percentages for each category
         categoryShort.forEach((catShort, catIndex) => {
@@ -4205,17 +4225,21 @@ function renderDailyGrid() {
         return;
     }
 
-    // Calculate grid columns: Period + spacer + (5 columns per student: S, T, A, R, I + 1 spacer between)
+    ensureStudentSchedulesLoadedForVisibleStudents(studentsToDisplay);
+
+    // Calculate grid columns: Period + spacer + (5 or 6 columns per student)
     const spacerWidth = '7px'; // 1/4 of original 27px
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            // Last student - no spacer after (4 STAR columns + 1 Info column)
-            return 'repeat(4, 40px) 40px';
-        } else {
-            // Add spacer after student (4 STAR columns + 1 Info column + spacer)
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
+    const studentScheduleColWidth = measurePointCardStudentScheduleColumnWidth(
+        studentsToDisplay,
+        STANDARD_PERIODS
+    );
+    const studentColumns = buildPointCardStudentColumnsTemplate(
+        studentsToDisplay.length,
+        spacerWidth,
+        studentScheduleColWidth
+    );
+    const columnsPerStudent = getPointCardColumnsPerStudent();
+    const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
     const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
     const scheduleWidth = measureDailyScheduleColumnWidth(['Schedule', ...scheduleTexts]);
@@ -4245,11 +4269,11 @@ function renderDailyGrid() {
         return colors[cardColor.toLowerCase()] || null;
     };
 
-    // Student headers (each spans 5 columns for S, T, A, R, I, plus spacer spans)
+    // Student headers (each spans S, T, A, R, I columns, plus optional schedule column)
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.style.gridColumn = 'span 5';
+        studentHeader.style.gridColumn = `span ${columnsPerStudent}`;
         studentHeader.dataset.studentIndex = index;
         studentHeader.style.display = 'flex';
         studentHeader.style.flexDirection = 'column';
@@ -4353,6 +4377,9 @@ function renderDailyGrid() {
     // S, T, A, R, I headers for each student
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
+        if (showStudentSchedules) {
+            appendStudentScheduleCategoryHeader(header);
+        }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
@@ -4392,9 +4419,16 @@ function renderDailyGrid() {
         periodRowSpacer.dataset.periodIndex = periodIndex;
         body.appendChild(periodRowSpacer);
 
-        // For each student, create 5 cells (S, T, A, R, I)
+        // For each student, create STAR cells (and optional schedule column)
         studentsToDisplay.forEach((student, studentIndex) => {
             const studentData = dailyData[student.id]?.[period.time] || { s: null, t: null, a: null, r: null, info: '' };
+
+            if (showStudentSchedules) {
+                body.appendChild(createStudentScheduleDataCell(student.id, period.time, {
+                    isOddRow,
+                    dataset: { studentIndex, periodIndex }
+                }));
+            }
             
             ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
                 const cell = document.createElement('div');
@@ -4502,6 +4536,13 @@ function renderDailyGrid() {
     // For each student, add percentage cells
     studentsToDisplay.forEach((student, studentIndex) => {
         const percentages = calculateStudentPercentages(student.id);
+
+        if (showStudentSchedules) {
+            body.appendChild(createStudentScheduleDataCell(student.id, '', {
+                borderTop: true,
+                background: '#f8f9fa'
+            }));
+        }
         
         // Add percentage cells for S, T, A, R
         ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
@@ -14359,6 +14400,13 @@ async function loadUserPreferences() {
         userPreferences = data || {};
         applyUserManagementSectionVisibility();
         syncClientTimezonePreference();
+        if (isShowStudentSchedulesInPointCards() && canEdit()) {
+            const studentIds = collectPointCardVisibleStudentIds();
+            if (studentIds.length) {
+                await loadStudentSchedulesForIds(studentIds);
+            }
+            refreshPointCardGridsAfterScheduleLoad();
+        }
     } catch (error) {
         console.error('Error loading user preferences:', error);
     }
