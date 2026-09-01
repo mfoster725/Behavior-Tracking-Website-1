@@ -1,11 +1,6 @@
 """
 One-off backfill: overwrite period_records.location from each student's current
-schedule for all daily records on 2026-08-31.
-
-Preferred on production (no local DATABASE_URL needed):
-  Invoke the deployed endpoint (uses Render/Aiven DATABASE_URL on the server):
-    .\\run_backfill_on_production.ps1 -DryRun
-    .\\run_backfill_on_production.ps1
+schedule for selected daily record dates.
 
 Local run (requires DATABASE_URL in this terminal):
     $env:USE_POSTGRES = "1"
@@ -23,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from migrate_frenzy_severity import default_sqlite_behavior_tracking_path
 
-TARGET_DATE = date(2026, 8, 31)
+DEFAULT_DATES = ("2026-08-31", "2026-09-01")
 
 
 def mask_database_target(uri):
@@ -59,11 +54,61 @@ def prepare_environment(args):
     return "local-sqlite", sqlite_path
 
 
+def parse_dates(raw):
+    if not raw:
+        return [date.fromisoformat(value) for value in DEFAULT_DATES]
+    parsed = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parsed.append(date.fromisoformat(chunk))
+    if not parsed:
+        raise ValueError("No valid dates provided")
+    return parsed
+
+
+def run_for_date(app, backfill_point_card_locations_for_date, target_date, dry_run):
+    with app.app_context():
+        result = backfill_point_card_locations_for_date(target_date, dry_run=dry_run)
+        print(f"\n=== {target_date.isoformat()} ===")
+        for change in result.get("changes", []):
+            print(
+                f"  {change['student_name']} | {change['time_range']}: "
+                f"{change['old_location'] or '(empty)'} -> {change['new_location'] or '(empty)'}"
+            )
+        if result.get("changes_truncated"):
+            print("  ... changes list truncated in output")
+
+        if dry_run:
+            print(
+                f"[DRY RUN] Would update {result['period_updates']} period row(s) "
+                f"across {result['students_touched']} student(s) "
+                f"({result['period_unchanged']} already matched)."
+            )
+        else:
+            print(
+                f"[OK] Updated {result['period_updates']} period row(s) "
+                f"across {result['students_touched']} student(s) "
+                f"({result['period_unchanged']} already matched)."
+            )
+        print(
+            f"Processed {result['daily_records']} daily record(s) "
+            f"for {result['students']} student(s)."
+        )
+        return result
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Backfill point card locations for 2026-08-31 from current student schedules."
+        description="Backfill point card locations from current student schedules."
     )
     parser.add_argument("--db", help="SQLite database path (optional)", default=None)
+    parser.add_argument(
+        "--dates",
+        help="Comma-separated dates YYYY-MM-DD (default: 2026-08-31,2026-09-01)",
+        default=None,
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -71,6 +116,7 @@ def main():
     )
     args = parser.parse_args()
 
+    target_dates = parse_dates(args.dates)
     mode, db_path = prepare_environment(args)
 
     from app import app, backfill_point_card_locations_for_date, db
@@ -84,33 +130,19 @@ def main():
     else:
         print(f"Using local SQLite: {db_path}")
 
-    with app.app_context():
-        result = backfill_point_card_locations_for_date(TARGET_DATE, dry_run=args.dry_run)
-        for change in result.get("changes", []):
-            print(
-                f"  {change['student_name']} | {change['time_range']}: "
-                f"{change['old_location'] or '(empty)'} -> {change['new_location'] or '(empty)'}"
-            )
-        if result.get("changes_truncated"):
-            print("  ... changes list truncated in output")
+    totals = {"period_updates": 0, "daily_records": 0, "students_touched": 0}
+    for target_date in target_dates:
+        result = run_for_date(app, backfill_point_card_locations_for_date, target_date, args.dry_run)
+        totals["period_updates"] += result["period_updates"]
+        totals["daily_records"] += result["daily_records"]
+        totals["students_touched"] += result["students_touched"]
 
-        if args.dry_run:
-            print(
-                f"\n[DRY RUN] Would update {result['period_updates']} period row(s) "
-                f"across {result['students_touched']} student(s) "
-                f"({result['period_unchanged']} already matched)."
-            )
-        else:
-            print(
-                f"\n[OK] Updated {result['period_updates']} period row(s) "
-                f"across {result['students_touched']} student(s) "
-                f"for {TARGET_DATE.isoformat()} "
-                f"({result['period_unchanged']} already matched)."
-            )
-        print(
-            f"Processed {result['daily_records']} daily record(s) "
-            f"for {result['students']} student(s)."
-        )
+    print(
+        f"\nTotal across {len(target_dates)} date(s): "
+        f"{totals['period_updates']} period update(s), "
+        f"{totals['daily_records']} daily record(s), "
+        f"{totals['students_touched']} student-day touch(es)."
+    )
 
 
 if __name__ == "__main__":
