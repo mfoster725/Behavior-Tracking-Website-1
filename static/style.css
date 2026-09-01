@@ -957,6 +957,33 @@ table tbody tr:hover {
     }
 }
 
+.btn-save-status {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.btn-save-status:empty {
+    display: none;
+}
+
+.btn-save-status--success {
+    color: var(--success);
+}
+
+.btn-save-status--error {
+    color: var(--danger);
+}
+
+.btn-save-status--info {
+    color: var(--text-secondary);
+}
+
 .star-entry-mode-toggle {
     display: inline-flex;
     align-items: stretch;

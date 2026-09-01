@@ -572,11 +572,19 @@
         const rows = collectRowsFromDom();
         try {
             await savePlan(planModalState.studentId, rows);
-            if (typeof showMessage === 'function') showMessage('Plan saved.', 'success');
+            if (typeof showButtonStatus === 'function') {
+                showButtonStatus('#plan-save-btn', 'Plan saved.', 'success');
+            } else if (typeof showMessage === 'function') {
+                showMessage('Plan saved.', 'success');
+            }
             closePlanModal();
             await refreshActiveMets([planModalState.studentId]);
         } catch (e) {
-            alert(e.message || 'Failed to save plan');
+            if (typeof showButtonStatus === 'function') {
+                showButtonStatus('#plan-save-btn', e.message || 'Failed to save plan', 'error');
+            } else {
+                alert(e.message || 'Failed to save plan');
+            }
         }
     }
 

@@ -2641,7 +2641,7 @@ function saveQuarterDatesConfig() {
         // Validate MM/DD/YYYY format
         const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
         if (!datePattern.test(start) || !datePattern.test(end)) {
-            showMessage(`Invalid date format for Quarter ${i}. Use MM/DD/YYYY format (e.g., 08/01/2025).`, 'error');
+            showButtonStatus('#save-quarter-dates-btn', `Invalid date format for Quarter ${i}. Use MM/DD/YYYY format (e.g., 08/01/2025).`, 'error');
             return;
         }
         
@@ -2649,7 +2649,7 @@ function saveQuarterDatesConfig() {
         const startDate = new Date(start);
         const endDate = new Date(end);
         if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-            showMessage(`Invalid dates for Quarter ${i}. Please check that the dates are valid.`, 'error');
+            showButtonStatus('#save-quarter-dates-btn', `Invalid dates for Quarter ${i}. Please check that the dates are valid.`, 'error');
             return;
         }
         
@@ -2677,18 +2677,18 @@ function saveQuarterDatesConfig() {
     }
 
     if (!schoolYearDates) {
-        showMessage('Could not derive school year dates from quarter configuration.', 'error');
+        showButtonStatus('#save-quarter-dates-btn', 'Could not derive school year dates from quarter configuration.', 'error');
         return;
     }
 
     saveSchoolCalendarConfigToServer(newQuarterDates, schoolYearDates)
         .then(() => {
             updateQuarterDisplay();
-            showMessage('Quarter dates saved successfully!', 'success');
+            showButtonStatus('#save-quarter-dates-btn', 'Quarter dates saved successfully!', 'success');
         })
         .catch((error) => {
             console.error('Error saving school calendar config:', error);
-            showMessage(error.message || 'Failed to save quarter dates to the server.', 'error');
+            showButtonStatus('#save-quarter-dates-btn', error.message || 'Failed to save quarter dates to the server.', 'error');
         });
 }
 
@@ -3506,10 +3506,7 @@ async function savePeriodData(options = {}) {
     });
 
     if (Object.keys(studentsMap).length === 0) {
-        updatePointCardSaveStatus('saved');
-        if (!silent) {
-            showMessage('All changes saved', 'success');
-        }
+        updatePointCardSaveStatus('saved', !silent ? 'All changes saved' : undefined);
         return true;
     }
 
@@ -3528,9 +3525,10 @@ async function savePeriodData(options = {}) {
         });
 
         if (response.ok) {
-            updatePointCardSaveStatus('saved');
             if (!silent) {
-                showMessage(`Saved data for ${Object.keys(studentsMap).length} student(s)!`, 'success');
+                updatePointCardSaveStatus('saved', `Saved ${Object.keys(studentsMap).length} student(s)`);
+            } else {
+                updatePointCardSaveStatus('saved');
             }
             if (!skipReload) {
                 loadPeriodData();
@@ -3546,10 +3544,7 @@ async function savePeriodData(options = {}) {
     } catch (error) {
         mergeDirtyMaps(dirtyPeriodFields, pendingDirty);
         console.error('Error saving period data:', error);
-        updatePointCardSaveStatus('error');
-        if (!silent) {
-            showMessage('Error saving data. Please try again.', 'error');
-        }
+        updatePointCardSaveStatus('error', !silent ? 'Save failed — click to retry' : undefined);
         throw error;
     }
 }
@@ -5157,7 +5152,7 @@ function updatePointCardSaveStatus(state, label) {
         el.setAttribute('aria-label', text);
         const labelEl = el.querySelector('.save-status-label');
         if (labelEl) {
-            labelEl.textContent = state === 'error' ? 'Save failed' : (state === 'saving' ? 'Saving…' : 'Saved');
+            labelEl.textContent = label || (state === 'error' ? 'Save failed' : (state === 'saving' ? 'Saving…' : 'Saved'));
         }
     });
 }
@@ -5288,10 +5283,7 @@ async function saveDailyAllData(options = {}) {
     });
 
     if (savePromises.length === 0) {
-        updatePointCardSaveStatus('saved');
-        if (!silent) {
-            showMessage('All changes saved', 'success');
-        }
+        updatePointCardSaveStatus('saved', !silent ? 'All changes saved' : undefined);
         return;
     }
 
@@ -5306,9 +5298,10 @@ async function saveDailyAllData(options = {}) {
             throw new Error(`Failed to save ${failed.length} student record(s)`);
         }
         if (!silent) {
-            showMessage(`Saved data for ${savedStudentIds.length} student(s)!`, 'success');
+            updatePointCardSaveStatus('saved', `Saved ${savedStudentIds.length} student(s)`);
+        } else {
+            updatePointCardSaveStatus('saved');
         }
-        updatePointCardSaveStatus('saved');
         invalidateDailyLoadCache(currentDate);
         if (!fromAutosave) {
             scheduleDailyDataLoad(0);
@@ -5318,10 +5311,7 @@ async function saveDailyAllData(options = {}) {
         mergeDirtyMaps(dirtyDailyFields, pendingDaily);
         mergeDirtyMaps(dirtyAttendanceIds, pendingAttendance);
         console.error('Error saving daily data:', error);
-        updatePointCardSaveStatus('error');
-        if (!silent) {
-            showMessage('Error saving data. Please try again.', 'error');
-        }
+        updatePointCardSaveStatus('error', !silent ? 'Save failed — click to retry' : undefined);
         throw error;
     }
 }
@@ -5792,7 +5782,7 @@ async function saveDailyRecord() {
         });
 
         if (response.ok) {
-            showMessage('Record saved successfully!', 'success');
+            showButtonStatus('#save-btn', 'Record saved successfully!', 'success');
             // Refresh summary if it's currently displayed
             refreshSummaryIfActive();
         } else {
@@ -5800,7 +5790,7 @@ async function saveDailyRecord() {
         }
     } catch (error) {
         console.error('Error saving record:', error);
-        showMessage('Error saving record. Please try again.', 'error');
+        showButtonStatus('#save-btn', 'Error saving record. Please try again.', 'error');
     }
 }
 
@@ -5865,8 +5855,6 @@ async function saveStudent() {
         const data = await response.json();
 
         if (response.ok) {
-            document.getElementById('student-modal').style.display = 'none';
-            
             // Clear all fields
             document.getElementById('student-name').value = '';
             document.getElementById('student-grade').value = '';
@@ -5881,7 +5869,10 @@ async function saveStudent() {
             document.getElementById('group-leader-container').innerHTML = '';
             
             await loadStudents();
-            showMessage('Student and user account created successfully!', 'success');
+            showButtonStatus('#save-student-btn', 'Student and user account created successfully!', 'success');
+            setTimeout(() => {
+                document.getElementById('student-modal').style.display = 'none';
+            }, 1200);
             
             // Reload users list if in users view
             const usersView = document.getElementById('users-view');
@@ -5903,7 +5894,7 @@ async function saveStudent() {
         }
     } catch (error) {
         console.error('Error saving student:', error);
-        showMessage(`Error: ${error.message}`, 'error');
+        showButtonStatus('#save-student-btn', `Error: ${error.message}`, 'error');
     }
 }
 
@@ -8744,8 +8735,12 @@ async function saveEditedPointCard(recordId, studentId, date) {
         });
         
         if (response.ok) {
-            modal.remove();
-            showMessage('Record saved successfully!', 'success');
+            saveButtons.forEach((btn) => {
+                showButtonStatus(btn, 'Record saved successfully!', 'success');
+            });
+            setTimeout(() => {
+                modal.remove();
+            }, 1200);
             
             // Reload point card data to show changes without blocking UI feedback.
             try {
@@ -8770,7 +8765,9 @@ async function saveEditedPointCard(recordId, studentId, date) {
         }
     } catch (error) {
         console.error('Error saving edited point card:', error);
-        showMessage(`Error saving changes: ${error.message || 'Please try again.'}`, 'error');
+        saveButtons.forEach((btn) => {
+            showButtonStatus(btn, `Error saving changes: ${error.message || 'Please try again.'}`, 'error');
+        });
         modal.dataset.saving = 'false';
         saveButtons.forEach((btn) => {
             btn.disabled = false;
@@ -9949,6 +9946,7 @@ async function importStudentCSV() {
 
 function showMessage(message, type) {
     const container = document.querySelector('.view.active');
+    if (!container) return;
     const msgDiv = document.createElement('div');
     msgDiv.className = type;
     msgDiv.textContent = message;
@@ -9956,6 +9954,49 @@ function showMessage(message, type) {
     
     setTimeout(() => msgDiv.remove(), 5000);
 }
+
+const buttonStatusTimers = new WeakMap();
+
+function showButtonStatus(buttonOrSelector, message, type) {
+    const button = typeof buttonOrSelector === 'string'
+        ? document.querySelector(buttonOrSelector)
+        : buttonOrSelector;
+    if (!button) {
+        if (message) showMessage(message, type);
+        return;
+    }
+
+    let statusEl = button.nextElementSibling;
+    if (!statusEl || !statusEl.classList.contains('btn-save-status')) {
+        if (!message) return;
+        statusEl = document.createElement('span');
+        statusEl.className = 'btn-save-status';
+        statusEl.setAttribute('aria-live', 'polite');
+        button.insertAdjacentElement('afterend', statusEl);
+    }
+
+    const prevTimer = buttonStatusTimers.get(statusEl);
+    if (prevTimer) clearTimeout(prevTimer);
+
+    if (!message) {
+        statusEl.textContent = '';
+        statusEl.className = 'btn-save-status';
+        return;
+    }
+
+    const statusType = type === 'error' ? 'error' : (type === 'info' ? 'info' : 'success');
+    statusEl.className = `btn-save-status btn-save-status--${statusType}`;
+    statusEl.textContent = message;
+
+    const timer = setTimeout(() => {
+        statusEl.textContent = '';
+        statusEl.className = 'btn-save-status';
+        buttonStatusTimers.delete(statusEl);
+    }, 5000);
+    buttonStatusTimers.set(statusEl, timer);
+}
+
+window.showButtonStatus = showButtonStatus;
 
 // Info Modal Functions
 const INFRACTION_OPTIONS = INFRACTION_OPTION_LIST.map((option) => option.value);
@@ -11325,8 +11366,10 @@ function saveInfoModal() {
     // Close without double-firing nav handoff; run handoff after save completes
     const modalEl = document.getElementById('info-modal');
     clearInfoModalStarHighlights();
-    if (modalEl) modalEl.style.display = 'none';
-    showMessage('Information saved!', 'success');
+    showButtonStatus('#info-modal .modal-buttons .btn-primary', 'Information saved!', 'success');
+    setTimeout(() => {
+        if (modalEl) modalEl.style.display = 'none';
+    }, 1200);
     if (modal.dataset.isEditPointCard === 'true') {
         // Edit-point-card info stays in the modal until Save Changes.
     } else if (document.getElementById('period-entry-view')?.classList.contains('active')) {
@@ -11785,10 +11828,13 @@ function initStarbucksManagement() {
     }
 
     function updateStarbucksSaveStatus(text) {
-        const statusEl = document.getElementById('starbucks-save-status');
-        if (statusEl) {
-            statusEl.textContent = text || '';
+        const normalized = (text || '').trim();
+        if (!normalized) {
+            showButtonStatus('#starbucks-submit-btn', '', 'success');
+            return;
         }
+        const type = /fail/i.test(normalized) ? 'error' : 'success';
+        showButtonStatus('#starbucks-submit-btn', normalized, type);
     }
 
     function scheduleStarbucksAutosave() {
@@ -11830,7 +11876,6 @@ function initStarbucksManagement() {
                 throw new Error('Failed to save Starbucks data');
             }
             if (!silent) {
-                showMessage('Starbucks table saved successfully!', 'success');
                 if (studentSearchInput) {
                     studentSearchInput.value = '';
                 }
@@ -11842,9 +11887,6 @@ function initStarbucksManagement() {
             updateStarbucksSaveStatus('All changes saved');
         } catch (err) {
             console.error('Error saving Starbucks data:', err);
-            if (!silent) {
-                showMessage('Error saving Starbucks data. Please try again.', 'error');
-            }
             updateStarbucksSaveStatus('Save failed');
         }
     }
@@ -13103,7 +13145,8 @@ async function saveSchedule(type) {
         });
         
         if (response.ok) {
-            showMessage(`${type === 'teacher' ? 'Teacher' : 'Student'} schedule saved successfully!`, 'success');
+            const btnId = type === 'teacher' ? '#save-teacher-schedule-btn' : '#save-student-schedule-btn';
+            showButtonStatus(btnId, `${type === 'teacher' ? 'Teacher' : 'Student'} schedule saved successfully!`, 'success');
             loadSchedules(type, currentScheduleStudentId);
         } else {
             // Try to get error message from response
@@ -13121,7 +13164,8 @@ async function saveSchedule(type) {
         }
     } catch (error) {
         console.error('Error saving schedule:', error);
-        showMessage(error.message || 'Error saving schedule. Please try again.', 'error');
+        const btnId = type === 'teacher' ? '#save-teacher-schedule-btn' : '#save-student-schedule-btn';
+        showButtonStatus(btnId, error.message || 'Error saving schedule. Please try again.', 'error');
     }
 }
 
@@ -15165,8 +15209,10 @@ async function saveEditUser() {
             }
         }
         
-        showMessage('User updated successfully', 'success');
-        document.getElementById('edit-user-modal').style.display = 'none';
+        showButtonStatus('#save-edit-user-btn', 'User updated successfully', 'success');
+        setTimeout(() => {
+            document.getElementById('edit-user-modal').style.display = 'none';
+        }, 1200);
         await loadUsers();
         // If a student user was updated, reload students to update all dropdowns
         if (systemRole === 'student') {
@@ -15174,7 +15220,7 @@ async function saveEditUser() {
         }
     } catch (error) {
         console.error('Error updating user:', error);
-        showMessage('Error: ' + error.message, 'error');
+        showButtonStatus('#save-edit-user-btn', 'Error: ' + error.message, 'error');
     }
 }
 
@@ -15360,8 +15406,10 @@ async function saveStaffUser() {
         });
         
         if (response.ok) {
-            showMessage('Staff user created successfully', 'success');
-            document.getElementById('staff-modal').style.display = 'none';
+            showButtonStatus('#save-staff-user-btn', 'Staff user created successfully', 'success');
+            setTimeout(() => {
+                document.getElementById('staff-modal').style.display = 'none';
+            }, 1200);
             hideModalError('staff-modal');
             document.getElementById('staff-name').value = '';
             document.getElementById('staff-username').value = '';
@@ -15432,8 +15480,10 @@ async function saveOutsideStaffUser() {
         });
         
         if (response.ok) {
-            showMessage('Outside Staff user created successfully', 'success');
-            document.getElementById('outside-staff-modal').style.display = 'none';
+            showButtonStatus('#save-outside-staff-user-btn', 'Outside Staff user created successfully', 'success');
+            setTimeout(() => {
+                document.getElementById('outside-staff-modal').style.display = 'none';
+            }, 1200);
             hideModalError('outside-staff-modal');
             document.getElementById('outside-staff-name').value = '';
             document.getElementById('outside-staff-username').value = '';
@@ -15490,8 +15540,10 @@ async function saveAdminUser() {
         });
         
         if (response.ok) {
-            showMessage('Admin user created successfully', 'success');
-            document.getElementById('admin-modal').style.display = 'none';
+            showButtonStatus('#save-admin-user-btn', 'Admin user created successfully', 'success');
+            setTimeout(() => {
+                document.getElementById('admin-modal').style.display = 'none';
+            }, 1200);
             document.getElementById('admin-name').value = '';
             document.getElementById('admin-username').value = '';
             document.getElementById('admin-password').value = '';
@@ -15508,7 +15560,7 @@ async function saveAdminUser() {
         }
     } catch (error) {
         console.error('Error creating admin user:', error);
-        showMessage('Error: ' + error.message, 'error');
+        showButtonStatus('#save-admin-user-btn', 'Error: ' + error.message, 'error');
     }
 }
 
@@ -19842,8 +19894,10 @@ function submitMarketplaceAddItem() {
         })
         .then(function (res) {
             if (res.ok) {
-                closeMarketplaceAddItemModal();
-                showMessage('Item added.', 'success');
+                showButtonStatus('#marketplace-add-item-submit', 'Item added.', 'success');
+                setTimeout(function () {
+                    closeMarketplaceAddItemModal();
+                }, 1200);
                 if (getMarketplaceStudentId()) loadMarketplaceCatalog();
             } else {
                 var msg = (res.data && res.data.error) ? res.data.error : (res.status === 500 ? 'Server error. Please try again or contact support.' : 'Failed to add item.');
@@ -20088,7 +20142,10 @@ function submitMarketplaceEditItem() {
         .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
         .then(function (res) {
             if (res.ok) {
-                closeMarketplaceEditModal();
+                showButtonStatus('#marketplace-edit-item-submit', 'Item updated.', 'success');
+                setTimeout(function () {
+                    closeMarketplaceEditModal();
+                }, 1200);
                 var idx = marketplaceCatalog.findIndex(function (x) { return x.id === itemId; });
                 if (idx >= 0 && res.data) marketplaceCatalog[idx] = Object.assign({}, marketplaceCatalog[idx], res.data);
                 loadMarketplaceCatalog();
@@ -21337,7 +21394,7 @@ async function saveMarketplaceItem() {
     const price = parseFloat(document.getElementById('item-price').value);
     
     if (!name || !price || price <= 0) {
-        showMessage('Please fill in all fields with valid values', 'error');
+        showButtonStatus('#create-item-modal .btn-primary', 'Please fill in all fields with valid values', 'error');
         return;
     }
     
@@ -21349,16 +21406,18 @@ async function saveMarketplaceItem() {
         });
         
         if (response.ok) {
-            showMessage('Item created successfully', 'success');
-            closeCreateItemModal();
+            showButtonStatus('#create-item-modal .btn-primary', 'Item created successfully', 'success');
+            setTimeout(() => {
+                closeCreateItemModal();
+            }, 1200);
             await loadMarketplaceItems();
         } else {
             const data = await response.json();
-            showMessage(data.error || 'Error creating item', 'error');
+            showButtonStatus('#create-item-modal .btn-primary', data.error || 'Error creating item', 'error');
         }
     } catch (error) {
         console.error('Error creating item:', error);
-        showMessage('Error creating item', 'error');
+        showButtonStatus('#create-item-modal .btn-primary', 'Error creating item', 'error');
     }
 }
 
@@ -25006,15 +25065,15 @@ async function saveSummaryCheckpointFromModal() {
     const label = (labelInput.value || '').trim();
     const description = (descriptionInput.value || '').trim();
     if (!label) {
-        showMessage('Please enter a checkpoint label.', 'error');
+        showButtonStatus('#summary-checkpoint-save-btn', 'Please enter a checkpoint label.', 'error');
         return;
     }
     if (!dateInput.value) {
-        showMessage('Please select a date.', 'error');
+        showButtonStatus('#summary-checkpoint-save-btn', 'Please select a date.', 'error');
         return;
     }
     if (!currentSummaryTrendStudentIds.length) {
-        showMessage('No students found in the current selection.', 'error');
+        showButtonStatus('#summary-checkpoint-save-btn', 'No students found in the current selection.', 'error');
         return;
     }
     if (currentSummaryTrendStudentIds.length > 1 && saveBtn.dataset.mode !== 'edit') {
@@ -25041,9 +25100,11 @@ async function saveSummaryCheckpointFromModal() {
     if (!response.ok) {
         throw new Error(data.error || 'Failed to save checkpoint');
     }
-    closeSummaryCheckpointModal();
-    await loadSummaryBehaviorTrendCard();
-    showMessage(isEdit ? 'Checkpoint updated.' : 'Checkpoint added.', 'success');
+    showButtonStatus('#summary-checkpoint-save-btn', isEdit ? 'Checkpoint updated.' : 'Checkpoint added.', 'success');
+    setTimeout(async () => {
+        closeSummaryCheckpointModal();
+        await loadSummaryBehaviorTrendCard();
+    }, 1200);
 }
 
 async function deleteSummaryCheckpoint(checkpointId) {
@@ -25085,7 +25146,7 @@ function wireSummaryBehaviorTrendCard() {
             try {
                 await saveSummaryCheckpointFromModal();
             } catch (err) {
-                showMessage(err.message || 'Unable to save checkpoint.', 'error');
+                showButtonStatus('#summary-checkpoint-save-btn', err.message || 'Unable to save checkpoint.', 'error');
             }
         });
     }
@@ -25101,7 +25162,7 @@ function wireSummaryBehaviorTrendCard() {
             try {
                 await saveSummaryCheckpointFromModal();
             } catch (err) {
-                showMessage(err.message || 'Unable to save checkpoint.', 'error');
+                showButtonStatus('#summary-checkpoint-save-btn', err.message || 'Unable to save checkpoint.', 'error');
             }
         });
     }
