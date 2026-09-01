@@ -2117,6 +2117,15 @@ class SiteSubscription(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SchoolCalendarConfig(db.Model):
+    """Singleton row for site-wide quarter and school-year dates (admin configured)."""
+    __tablename__ = 'school_calendar_config'
+    id = db.Column(db.Integer, primary_key=True)
+    quarters_json = db.Column(db.Text, nullable=True)
+    school_year_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def ensure_site_subscription_columns():
     """Add build-fee columns on existing site_subscription tables."""
     try:
@@ -9366,6 +9375,110 @@ def _build_quarters_from_boundaries(first_day: date, q1_end: date, q2_end: date,
         '3': {'start': q3_start.strftime('%m/%d/%Y'), 'end': q3_end.strftime('%m/%d/%Y'), 'label': 'Quarter 3'},
         '4': {'start': q4_start.strftime('%m/%d/%Y'), 'end': last_day.strftime('%m/%d/%Y'), 'label': 'Quarter 4'},
     }
+
+
+def get_school_calendar_config_row():
+    row = SchoolCalendarConfig.query.order_by(SchoolCalendarConfig.id.asc()).first()
+    if row is None:
+        row = SchoolCalendarConfig()
+        db.session.add(row)
+        db.session.commit()
+    return row
+
+
+def _school_calendar_config_payload():
+    row = get_school_calendar_config_row()
+    quarters = None
+    school_year = None
+    if row.quarters_json:
+        try:
+            quarters = json.loads(row.quarters_json)
+        except (TypeError, json.JSONDecodeError):
+            quarters = None
+    if row.school_year_json:
+        try:
+            school_year = json.loads(row.school_year_json)
+        except (TypeError, json.JSONDecodeError):
+            school_year = None
+    configured = bool(
+        quarters
+        and school_year
+        and school_year.get('start')
+        and school_year.get('end')
+    )
+    return {
+        'configured': configured,
+        'quarters': quarters,
+        'school_year': school_year,
+        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _validate_mmddyyyy(date_str):
+    if not date_str or not re.fullmatch(r'\d{2}/\d{2}/\d{4}', str(date_str).strip()):
+        return False
+    try:
+        datetime.strptime(str(date_str).strip(), '%m/%d/%Y')
+        return True
+    except ValueError:
+        return False
+
+
+@app.route('/api/school-calendar-config', methods=['GET'])
+@login_required
+def get_school_calendar_config():
+    return jsonify(_school_calendar_config_payload())
+
+
+@app.route('/api/admin/school-calendar-config', methods=['PUT'])
+@admin_required
+def save_school_calendar_config():
+    data = request.json or {}
+    quarters = data.get('quarters')
+    school_year = data.get('school_year')
+
+    if not isinstance(quarters, dict) or not isinstance(school_year, dict):
+        return jsonify({'error': 'quarters and school_year are required.'}), 400
+
+    normalized_quarters = {}
+    for quarter_num in ('1', '2', '3', '4'):
+        quarter_data = quarters.get(quarter_num) or quarters.get(int(quarter_num))
+        if not isinstance(quarter_data, dict):
+            return jsonify({'error': f'Quarter {quarter_num} is missing or invalid.'}), 400
+        start = str(quarter_data.get('start', '')).strip()
+        end = str(quarter_data.get('end', '')).strip()
+        if not _validate_mmddyyyy(start) or not _validate_mmddyyyy(end):
+            return jsonify({'error': f'Quarter {quarter_num} dates must use MM/DD/YYYY format.'}), 400
+        normalized_quarters[quarter_num] = {
+            'start': start,
+            'end': end,
+            'label': quarter_data.get('label') or f'Quarter {quarter_num}',
+        }
+
+    sy_start = str(school_year.get('start', '')).strip()
+    sy_end = str(school_year.get('end', '')).strip()
+    if not _validate_mmddyyyy(sy_start) or not _validate_mmddyyyy(sy_end):
+        return jsonify({'error': 'School year start and end must use MM/DD/YYYY format.'}), 400
+
+    normalized_school_year = {
+        'start': sy_start,
+        'end': sy_end,
+        'label': school_year.get('label') or f'{sy_start} - {sy_end}',
+    }
+
+    row = get_school_calendar_config_row()
+    row.quarters_json = json.dumps(normalized_quarters)
+    row.school_year_json = json.dumps(normalized_school_year)
+    row.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'configured': True,
+        'quarters': normalized_quarters,
+        'school_year': normalized_school_year,
+        'updated_at': row.updated_at.isoformat(),
+    })
 
 
 @app.route('/api/calendar/extract-school-year', methods=['POST'])

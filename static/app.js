@@ -1108,6 +1108,76 @@ function saveSchoolYearDates(schoolYearDates) {
     }
 }
 
+function applySchoolCalendarConfig(config) {
+    if (!config || !config.configured) {
+        return false;
+    }
+    if (config.quarters) {
+        saveQuarterDates(config.quarters);
+        quarterDates = config.quarters;
+    }
+    if (config.school_year && config.school_year.start && config.school_year.end) {
+        saveSchoolYearDates(config.school_year);
+    }
+    return true;
+}
+
+async function syncSchoolCalendarConfigFromServer(options = {}) {
+    try {
+        const response = await fetch('/api/school-calendar-config');
+        if (!response.ok) {
+            return false;
+        }
+        const data = await response.json();
+        if (data.configured) {
+            return applySchoolCalendarConfig(data);
+        }
+
+        // Existing installs may only have browser-local admin config; upload it once.
+        if (
+            options.uploadLocalIfMissing
+            && typeof isAdmin === 'function'
+            && isAdmin()
+            && localStorage.getItem('quarterDates')
+        ) {
+            const localSchoolYear = getConfiguredSchoolYearDates();
+            if (localSchoolYear) {
+                try {
+                    await saveSchoolCalendarConfigToServer(loadQuarterDates(), localSchoolYear);
+                    return true;
+                } catch (e) {
+                    console.error('Failed to upload local school calendar config:', e);
+                }
+            }
+        }
+        return false;
+    } catch (e) {
+        console.error('Error loading school calendar config from server:', e);
+        return false;
+    }
+}
+
+async function saveSchoolCalendarConfigToServer(quarters, schoolYear) {
+    const response = await fetch('/api/admin/school-calendar-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            quarters,
+            school_year: schoolYear
+        })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.error || 'Failed to save school calendar configuration.');
+    }
+    applySchoolCalendarConfig(data);
+    return data;
+}
+
+function loadSchoolYearConfig() {
+    // Quarter dates drive the school-year range; admin UI is refreshed via loadQuarterConfig().
+}
+
 // Helper function to convert MM/DD/YYYY to MM-DD format for backend
 function extractMMDD(dateStr) {
     if (!dateStr) return '';
@@ -1579,7 +1649,7 @@ if (document.readyState !== 'loading') {
     attachNavAndHamburger();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     try {
         attachNavAndHamburger();
         applyUnifiedChartTooltipStyle();
@@ -1623,6 +1693,9 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         // Load per-user UI preferences (e.g., which User Management sections are hidden)
         loadUserPreferences();
+
+        // Load site-wide quarter/school-year config before rendering the current quarter display.
+        await syncSchoolCalendarConfigFromServer();
         
         // Set up period selector
         setupPeriodSelector();
@@ -2351,6 +2424,7 @@ async function switchView(viewName) {
     
     // If switching to daily entry view, reload data
     if (viewName === 'entry') {
+        syncSchoolCalendarConfigFromServer().then(() => updateQuarterDisplay());
         loadPeriodEntrySchedule();
         // Sync "managed by me" checkbox to role (staff = checked, admin = unchecked)
         const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
@@ -2402,8 +2476,10 @@ async function switchView(viewName) {
     // If switching to admin view, load users and stats
     if (viewName === 'admin') {
         loadUsers();
-        loadQuarterConfig();
-        loadSchoolYearConfig();
+        syncSchoolCalendarConfigFromServer({ uploadLocalIfMissing: true }).then(() => {
+            loadQuarterConfig();
+            loadSchoolYearConfig();
+        });
         loadSchoolBilling();
     }
     
@@ -2591,18 +2667,29 @@ function saveQuarterDatesConfig() {
     // Keep school-year range aligned with admin quarter configuration.
     const q1Start = newQuarterDates['1']?.start || '';
     const q4End = newQuarterDates['4']?.end || '';
-    if (q1Start && q4End) {
-        saveSchoolYearDates({
-            label: `${q1Start} - ${q4End}`,
-            start: q1Start,
-            end: q4End
-        });
+    const schoolYearDates = (q1Start && q4End) ? {
+        label: `${q1Start} - ${q4End}`,
+        start: q1Start,
+        end: q4End
+    } : null;
+    if (schoolYearDates) {
+        saveSchoolYearDates(schoolYearDates);
     }
-    
-    // Update the quarter display if on daily entry view
-    updateQuarterDisplay();
-    
-    showMessage('Quarter dates saved successfully!', 'success');
+
+    if (!schoolYearDates) {
+        showMessage('Could not derive school year dates from quarter configuration.', 'error');
+        return;
+    }
+
+    saveSchoolCalendarConfigToServer(newQuarterDates, schoolYearDates)
+        .then(() => {
+            updateQuarterDisplay();
+            showMessage('Quarter dates saved successfully!', 'success');
+        })
+        .catch((error) => {
+            console.error('Error saving school calendar config:', error);
+            showMessage(error.message || 'Failed to save quarter dates to the server.', 'error');
+        });
 }
 
 function renderCalendarPdfResults(message, type = 'success') {
