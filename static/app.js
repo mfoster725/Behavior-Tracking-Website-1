@@ -1997,11 +1997,12 @@ async function handleScheduleHeaderMenuAction(action, context = {}) {
             await openPointCardScheduleEditModal({ type: 'teacher' });
             break;
         case 'change-schedule':
-            if (context.studentId) {
+            if (context.studentId != null) {
+                const studentId = parseInt(context.studentId, 10);
                 await openPointCardScheduleEditModal({
                     type: 'student',
-                    studentId: context.studentId,
-                    studentName: context.studentName || getStudentNameById(context.studentId),
+                    studentId,
+                    studentName: context.studentName || getStudentNameById(studentId),
                 });
             }
             break;
@@ -2033,13 +2034,18 @@ function buildScheduleHeaderKebabMenu(menuClass, ariaLabel, getItems, context = 
         menuBtn.dataset.action = item.action;
         menuBtn.textContent = item.checked ? `✓ ${item.label}` : item.label;
         menuBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
             event.stopPropagation();
             closeScheduleHeaderKebabMenus();
             await handleScheduleHeaderMenuAction(item.action, context);
         });
         menu.appendChild(menuBtn);
     });
+    btn.addEventListener('mousedown', (event) => {
+        event.stopPropagation();
+    });
     btn.addEventListener('click', (event) => {
+        event.preventDefault();
         event.stopPropagation();
         const wasOpen = menu.classList.contains('open');
         closeScheduleHeaderKebabMenus();
@@ -2070,7 +2076,7 @@ function appendStudentScheduleCategoryHeader(parent, student, options = {}) {
         cell.appendChild(buildScheduleHeaderKebabMenu(
             'student-schedule-header-kebab-menu',
             `Schedule menu for ${student.name || 'student'}`,
-            () => [{ action: 'change-schedule', label: 'Change schedule' }],
+            () => [{ action: 'change-schedule', label: 'Edit schedule' }],
             { studentId: student.id, studentName: student.name }
         ));
     }

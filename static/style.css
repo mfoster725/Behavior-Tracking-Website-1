@@ -1401,7 +1401,7 @@ table tbody tr:hover {
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .daily-student-schedule-header-label {
@@ -1414,6 +1414,12 @@ table tbody tr:hover {
     position: relative;
     flex: 0 0 auto;
     line-height: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+.daily-grid--freeze-cols .student-schedule-header-kebab-wrap {
+    pointer-events: auto;
 }
 
 .student-schedule-header-kebab-btn {
@@ -1666,6 +1672,23 @@ table tbody tr:hover {
 }
 
 .schedule-header-kebab-menu.open {
+    z-index: 100;
+}
+
+.daily-student-schedule-header:has(.student-schedule-header-kebab-menu.open) {
+    z-index: 20;
+    overflow: visible;
+}
+
+.daily-grid--freeze-cols .daily-student-schedule-header:has(.student-schedule-header-kebab-menu.open) {
+    z-index: 13;
+}
+
+.student-schedule-header-kebab-wrap:has(.student-schedule-header-kebab-menu.open) {
+    z-index: 1;
+}
+
+.student-schedule-header-kebab-menu.open {
     z-index: 100;
 }
 
