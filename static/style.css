@@ -1392,9 +1392,9 @@ table tbody tr:hover {
     letter-spacing: 0.2px;
     background: #f8f9fa !important;
     color: var(--text-secondary) !important;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: center;
     gap: 1px;
     padding: 4px 3px !important;
     position: relative;
@@ -1406,7 +1406,7 @@ table tbody tr:hover {
 
 .daily-student-schedule-header-label {
     flex: 0 0 auto;
-    text-align: left;
+    text-align: center;
     white-space: nowrap;
 }
 
@@ -1443,8 +1443,9 @@ table tbody tr:hover {
     display: none;
     position: absolute;
     top: 100%;
-    left: 0;
+    left: 50%;
     right: auto;
+    transform: translateX(-50%);
     z-index: 30;
     min-width: 160px;
     background: #fff;
