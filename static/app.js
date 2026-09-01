@@ -4036,7 +4036,7 @@ function updatePeriodPercentageRow() {
                 if (cell) cell.textContent = lockValue;
             });
             const overallCell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="overall"]`);
-            if (overallCell) overallCell.textContent = '0%';
+            if (overallCell) overallCell.textContent = lockValue === 'E' ? 'E' : '0%';
             return;
         }
 
@@ -4440,7 +4440,7 @@ function renderStudentsGrid() {
         overallCell.style.color = 'var(--accent)';
         
         if (lockValue) {
-            overallCell.textContent = '0%';
+            overallCell.textContent = lockValue === 'E' ? 'E' : '0%';
         } else if (countedCategories > 0) {
             const maxPossible = countedCategories * 2;
             const overallPercentage = ((totalPoints / maxPossible) * 100).toFixed(0);
@@ -4838,8 +4838,11 @@ async function loadDailyData() {
 
 function calculateStudentPercentages(studentId) {
     const lockValue = getAttendanceStarLockValue(studentId);
-    if (lockValue) {
-        return { s: lockValue, t: lockValue, a: lockValue, r: lockValue, overall: '0' };
+    if (lockValue === 'E') {
+        return { s: 'E', t: 'E', a: 'E', r: 'E', overall: 'E' };
+    }
+    if (lockValue === 'U') {
+        return { s: 'U', t: 'U', a: 'U', r: 'U', overall: '0' };
     }
     
     // Normal calculation for present
@@ -9225,7 +9228,7 @@ function renderPointCardGrid(record, studentId) {
     let overallPercent;
     if (attendance === 'excused') {
         sPercent = tPercent = aPercent = rPercent = 'E';
-        overallPercent = '0';
+        overallPercent = 'E';
     } else if (attendance === 'unexcused') {
         sPercent = tPercent = aPercent = rPercent = 'U';
         overallPercent = '0';
