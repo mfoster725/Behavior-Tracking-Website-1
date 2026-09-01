@@ -991,7 +991,9 @@ function bindStarSelectEntryGuards() {
     document.addEventListener('keydown', (e) => {
         if (isStarPointSelect(e.target)) {
             handleDailyInputKeydown(e);
+            return;
         }
+        handlePointCardTextInputKeydown(e);
     }, true);
     document.addEventListener('keyup', (e) => {
         if (isStarPointSelect(e.target)) {
@@ -4416,6 +4418,145 @@ function commitStarDigit(select, digit) {
     }
 }
 
+const STAR_GRID_CATEGORIES = ['s', 't', 'a', 'r'];
+const POINT_CARD_STAR_COLUMNS = ['safety', 'teamwork', 'accountability', 'relationships'];
+const POINT_CARD_TEXT_COLUMNS = ['time_range', 'location'];
+
+function getPointCardEditColumnsForRow(periodIndex) {
+    const grid = document.querySelector('.point-card-edit-grid');
+    if (!grid) return POINT_CARD_STAR_COLUMNS;
+    const hasTextInputs = POINT_CARD_TEXT_COLUMNS.some((category) => (
+        grid.querySelector(`input.edit-input[data-period-index="${periodIndex}"][data-category="${category}"]`)
+    ));
+    return hasTextInputs
+        ? [...POINT_CARD_TEXT_COLUMNS, ...POINT_CARD_STAR_COLUMNS]
+        : POINT_CARD_STAR_COLUMNS;
+}
+
+function findPointCardEditInput(periodIndex, category) {
+    const grid = document.querySelector('.point-card-edit-grid');
+    if (!grid || !Number.isInteger(periodIndex) || periodIndex < 0) return null;
+    const input = grid.querySelector(`.edit-input[data-period-index="${periodIndex}"][data-category="${category}"]`);
+    if (input && !input.disabled) return input;
+    return null;
+}
+
+function movePointCardEditInput(currentInput, direction) {
+    const periodIndex = Number(currentInput.dataset.periodIndex);
+    const category = currentInput.dataset.category;
+    const columns = getPointCardEditColumnsForRow(periodIndex);
+    const colIdx = columns.indexOf(category);
+    if (!Number.isInteger(periodIndex) || colIdx < 0) return false;
+
+    const rowCount = window.editingPointCardRecord?.periods?.length || 0;
+    let nextPeriod = periodIndex;
+    let nextCol = colIdx;
+
+    if (direction === 'right') {
+        if (colIdx >= columns.length - 1) return false;
+        nextCol += 1;
+    } else if (direction === 'left') {
+        if (colIdx <= 0) return false;
+        nextCol -= 1;
+    } else if (direction === 'down') {
+        if (periodIndex >= rowCount - 1) return false;
+        nextPeriod += 1;
+    } else if (direction === 'up') {
+        if (periodIndex <= 0) return false;
+        nextPeriod -= 1;
+    } else {
+        return false;
+    }
+
+    const targetColumns = getPointCardEditColumnsForRow(nextPeriod);
+    const targetCategory = direction === 'right' || direction === 'left'
+        ? targetColumns[nextCol]
+        : targetColumns[Math.min(colIdx, targetColumns.length - 1)];
+    const target = findPointCardEditInput(nextPeriod, targetCategory);
+    if (!target) return false;
+    target.focus();
+    return true;
+}
+
+function moveDailyStarInput(currentInput, direction) {
+    const students = getStudentsForStarNav();
+    const studentId = parseInt(currentInput.dataset.studentId, 10);
+    const period = getPeriodForStarInput(currentInput);
+    const category = currentInput.dataset.category;
+    const studentIdx = students.findIndex((s) => String(s.id) === String(studentId));
+    const catIdx = STAR_GRID_CATEGORIES.indexOf(category);
+    const periodIdx = isPeriodEntryViewActive()
+        ? 0
+        : STANDARD_PERIODS.findIndex((p) => p.time === period);
+
+    if (studentIdx < 0 || catIdx < 0) return false;
+    if (!isPeriodEntryViewActive() && periodIdx < 0) return false;
+
+    let nextStudentIdx = studentIdx;
+    let nextPeriodIdx = periodIdx;
+    let nextCatIdx = catIdx;
+
+    if (direction === 'right') {
+        if (catIdx < STAR_GRID_CATEGORIES.length - 1) {
+            nextCatIdx += 1;
+        } else if (studentIdx < students.length - 1) {
+            nextStudentIdx += 1;
+            nextCatIdx = 0;
+        } else {
+            return false;
+        }
+    } else if (direction === 'left') {
+        if (catIdx > 0) {
+            nextCatIdx -= 1;
+        } else if (studentIdx > 0) {
+            nextStudentIdx -= 1;
+            nextCatIdx = STAR_GRID_CATEGORIES.length - 1;
+        } else {
+            return false;
+        }
+    } else if (direction === 'down') {
+        if (isPeriodEntryViewActive() || periodIdx >= STANDARD_PERIODS.length - 1) return false;
+        nextPeriodIdx += 1;
+    } else if (direction === 'up') {
+        if (isPeriodEntryViewActive() || periodIdx <= 0) return false;
+        nextPeriodIdx -= 1;
+    } else {
+        return false;
+    }
+
+    const nextStudent = students[nextStudentIdx];
+    const nextPeriod = isPeriodEntryViewActive() ? period : STANDARD_PERIODS[nextPeriodIdx].time;
+    return focusStarInput(nextStudent.id, nextPeriod, STAR_GRID_CATEGORIES[nextCatIdx]);
+}
+
+function moveStarInputByDirection(currentInput, direction) {
+    if (!currentInput) return false;
+    if (currentInput.closest('.point-card-edit-grid')) {
+        return movePointCardEditInput(currentInput, direction);
+    }
+    if (currentInput.classList.contains('daily-input')) {
+        return moveDailyStarInput(currentInput, direction);
+    }
+    return false;
+}
+
+function handlePointCardTextInputKeydown(e) {
+    const input = e.target;
+    if (!input || !input.classList || !input.classList.contains('pc-text-input')) return;
+    if (!input.closest('.point-card-edit-grid')) return;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const direction = {
+            ArrowRight: 'right',
+            ArrowLeft: 'left',
+            ArrowDown: 'down',
+            ArrowUp: 'up'
+        }[e.key];
+        moveStarInputByDirection(input, direction);
+    }
+}
+
 function handleDailyInputKeydown(e) {
     const select = e.target;
     if (!isStarPointSelect(select) || select.disabled) return;
@@ -4448,16 +4589,19 @@ function handleDailyInputKeydown(e) {
         select.dataset.starKeyHandled = '1';
         commitStarDigit(select, e.key);
     }
-    // Handle arrow keys for navigation
-    else if (e.key === 'ArrowRight' || e.key === 'Tab') {
-        if (e.key === 'ArrowRight') {
-            e.preventDefault();
-        }
-        moveToNextInput(select);
-    }
-    else if (e.key === 'ArrowLeft') {
+    // Arrow keys move between grid cells; prevent native select option cycling.
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        moveToPreviousInput(select);
+        const direction = {
+            ArrowRight: 'right',
+            ArrowLeft: 'left',
+            ArrowDown: 'down',
+            ArrowUp: 'up'
+        }[e.key];
+        moveStarInputByDirection(select, direction);
+    }
+    else if (e.key === 'Tab') {
+        moveToNextInput(select);
     }
 }
 
