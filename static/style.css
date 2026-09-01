@@ -1149,6 +1149,9 @@ table tbody tr:hover {
     font-weight: 600;
     text-align: left;
     padding-left: 8px;
+    display: flex;
+    align-items: flex-end;
+    align-self: stretch;
 }
 
 .daily-header-location {
@@ -1158,6 +1161,9 @@ table tbody tr:hover {
     min-width: 0;
     overflow-wrap: break-word;
     word-break: break-word;
+    display: flex;
+    align-items: flex-end;
+    align-self: stretch;
 }
 
 .daily-header-student {
