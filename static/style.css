@@ -279,6 +279,77 @@ nav {
     max-width: calc(100vw - 24px);
 }
 
+.notification-toasts {
+    position: fixed;
+    top: 76px;
+    right: 16px;
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(360px, calc(100vw - 24px));
+    pointer-events: none;
+}
+
+.notification-toast {
+    pointer-events: auto;
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.16);
+    padding: 12px 14px;
+    cursor: pointer;
+    font: inherit;
+    animation: notification-toast-in 0.22s ease;
+}
+
+.notification-toast-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+
+.notification-toast-body {
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+
+.notification-toast-out {
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@keyframes notification-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes notifications-bell-pulse {
+    0%, 100% { transform: rotate(0deg); }
+    20% { transform: rotate(14deg); }
+    40% { transform: rotate(-12deg); }
+    60% { transform: rotate(8deg); }
+    80% { transform: rotate(-4deg); }
+}
+
+#notifications-bell-btn.notifications-bell-attention svg {
+    transform-origin: top center;
+    animation: notifications-bell-pulse 0.7s ease;
+}
+
 /* ============================================================
    RESPONSIVE HEADER
    ============================================================ */

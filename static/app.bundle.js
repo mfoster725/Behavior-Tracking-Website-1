@@ -20670,10 +20670,66 @@ window.closeMarketplaceAddItemModal = closeMarketplaceAddItemModal;
 
 var notificationsCache = [];
 var showReadNotifications = false;
+var notificationsKnownIds = null;
+var notificationsPollTimer = null;
+var NOTIFICATIONS_POLL_MS = 8000;
 
 function updateShowReadButtonLabel() {
     var btn = document.getElementById('notifications-show-read');
     if (btn) btn.textContent = showReadNotifications ? 'Hide read notifications' : 'Show read notifications';
+}
+
+function escapeNotificationText(value) {
+    return String(value || '').replace(/</g, '&lt;');
+}
+
+function openNotificationsDropdown() {
+    var dropdown = document.getElementById('notifications-dropdown');
+    if (dropdown) dropdown.style.display = 'block';
+}
+
+function handleNotificationItemClick(id, assignmentId) {
+    fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications({ silent: true }); });
+    if (assignmentId && typeof isAdmin === 'function' && isAdmin()) {
+        window.curriculumFocusAssignmentId = assignmentId;
+        if (typeof switchView === 'function') switchView('curriculum');
+        var dropdownEl = document.getElementById('notifications-dropdown');
+        if (dropdownEl) dropdownEl.style.display = 'none';
+    }
+}
+
+function pulseNotificationsBell() {
+    var bell = document.getElementById('notifications-bell-btn');
+    if (!bell) return;
+    bell.classList.remove('notifications-bell-attention');
+    void bell.offsetWidth;
+    bell.classList.add('notifications-bell-attention');
+    setTimeout(function () { bell.classList.remove('notifications-bell-attention'); }, 1200);
+}
+
+function showIncomingNotificationToasts(items) {
+    var host = document.getElementById('notification-toasts');
+    if (!host || !items.length) return;
+    items.slice(0, 3).forEach(function (n) {
+        var toast = document.createElement('button');
+        toast.type = 'button';
+        toast.className = 'notification-toast';
+        toast.innerHTML =
+            '<div class="notification-toast-title">' + escapeNotificationText(n.title) + '</div>' +
+            (n.body ? '<div class="notification-toast-body">' + escapeNotificationText(n.body) + '</div>' : '');
+        toast.addEventListener('click', function (e) {
+            e.stopPropagation();
+            toast.remove();
+            openNotificationsDropdown();
+            handleNotificationItemClick(n.id, parseInt(n.curriculum_assignment_id, 10));
+        });
+        host.appendChild(toast);
+        setTimeout(function () {
+            if (!toast.parentNode) return;
+            toast.classList.add('notification-toast-out');
+            setTimeout(function () { toast.remove(); }, 280);
+        }, 8000);
+    });
 }
 
 function renderNotificationsList() {
@@ -20691,35 +20747,65 @@ function renderNotificationsList() {
     }
     listEl.innerHTML = visible.slice(0, 30).map(function (n) {
         return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '" data-curriculum-assignment-id="' + (n.curriculum_assignment_id || '') + '">' +
-            '<div style="font-weight:600;">' + (n.title || '').replace(/</g, '&lt;') + '</div>' +
-            '<div style="color:#64748b; white-space:pre-wrap;">' + (n.body || '').replace(/</g, '&lt;') + '</div>' +
+            '<div style="font-weight:600;">' + escapeNotificationText(n.title) + '</div>' +
+            '<div style="color:#64748b; white-space:pre-wrap;">' + escapeNotificationText(n.body) + '</div>' +
             '</div>';
     }).join('');
     listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
         el.addEventListener('click', function () {
             var id = parseInt(el.getAttribute('data-notification-id'), 10);
             var assignmentId = parseInt(el.getAttribute('data-curriculum-assignment-id'), 10);
-            fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () { loadNotifications(); });
-            if (assignmentId && isAdmin()) {
-                window.curriculumFocusAssignmentId = assignmentId;
-                if (typeof switchView === 'function') switchView('curriculum');
-                var dropdownEl = document.getElementById('notifications-dropdown');
-                if (dropdownEl) dropdownEl.style.display = 'none';
-            }
+            handleNotificationItemClick(id, assignmentId);
         });
     });
 }
 
-function loadNotifications() {
-    fetch('/api/notifications').then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
-        notificationsCache = list;
-        var unread = list.filter(function (n) { return !n.read_at; });
-        var badge = document.getElementById('notifications-badge');
-        if (badge) {
-            badge.style.display = unread.length ? 'inline-flex' : 'none';
-            badge.textContent = unread.length > 99 ? '99+' : unread.length;
-        }
-        renderNotificationsList();
+function applyNotifications(list, options) {
+    options = options || {};
+    var previousIds = notificationsKnownIds;
+    notificationsCache = list || [];
+    var unread = notificationsCache.filter(function (n) { return !n.read_at; });
+    var badge = document.getElementById('notifications-badge');
+    if (badge) {
+        badge.style.display = unread.length ? 'inline-flex' : 'none';
+        badge.textContent = unread.length > 99 ? '99+' : unread.length;
+    }
+    renderNotificationsList();
+
+    var currentIds = {};
+    notificationsCache.forEach(function (n) { currentIds[n.id] = true; });
+    if (previousIds === null) {
+        notificationsKnownIds = currentIds;
+        return;
+    }
+    var newlyArrived = notificationsCache.filter(function (n) {
+        return !previousIds[n.id] && !n.read_at;
+    });
+    notificationsKnownIds = currentIds;
+    if (newlyArrived.length && !options.silent) {
+        showIncomingNotificationToasts(newlyArrived);
+        pulseNotificationsBell();
+    }
+}
+
+function loadNotifications(options) {
+    fetch('/api/notifications').then(function (r) {
+        if (!r.ok) throw new Error('notifications fetch failed');
+        return r.json();
+    }).then(function (list) {
+        applyNotifications(list, options);
+    }).catch(function () {});
+}
+
+function startNotificationsPolling() {
+    if (notificationsPollTimer) return;
+    loadNotifications({ silent: true });
+    notificationsPollTimer = setInterval(function () {
+        if (document.hidden) return;
+        loadNotifications();
+    }, NOTIFICATIONS_POLL_MS);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) loadNotifications();
     });
 }
 
@@ -20735,18 +20821,20 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!show) {
                 showReadNotifications = false;
                 updateShowReadButtonLabel();
-                loadNotifications();
+                loadNotifications({ silent: true });
             }
         });
     }
     document.addEventListener('click', function (e) {
         var d = document.getElementById('notifications-dropdown');
         var w = document.getElementById('notifications-bell-wrap');
-        if (d && w && !w.contains(e.target)) d.style.display = 'none';
+        if (d && w && !w.contains(e.target) && !(e.target && e.target.closest && e.target.closest('.notification-toast'))) {
+            d.style.display = 'none';
+        }
     });
     var markAll = document.getElementById('notifications-mark-all-read');
     if (markAll) markAll.addEventListener('click', function () {
-        fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications(); });
+        fetch('/api/notifications/read-all', { method: 'PATCH' }).then(function () { loadNotifications({ silent: true }); });
     });
     var showRead = document.getElementById('notifications-show-read');
     if (showRead) showRead.addEventListener('click', function (e) {
@@ -20755,6 +20843,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateShowReadButtonLabel();
         renderNotificationsList();
     });
+    startNotificationsPolling();
 });
 
 // ==================== BANK ACCOUNT FUNCTIONALITY ====================
