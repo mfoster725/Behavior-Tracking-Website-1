@@ -744,6 +744,7 @@ table tbody tr:hover {
 
 .grid-controls {
     display: flex;
+    align-items: center;
     gap: 0.75rem;
     margin-bottom: 1.5rem;
 }
@@ -881,6 +882,75 @@ table tbody tr:hover {
     min-height: 34px;
     padding: 0.4rem 0.75rem;
     font-size: 0.8125rem;
+}
+
+.save-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+    padding: 0.25rem 0.4rem;
+    min-height: 34px;
+    border-radius: var(--radius-sm);
+    cursor: default;
+    white-space: nowrap;
+}
+
+.save-status-icon {
+    display: none;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.save-status-icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.save-status[data-state="saved"] .save-status-icon-saved {
+    display: block;
+    color: var(--success);
+}
+
+.save-status[data-state="saving"] .save-status-icon-saving {
+    display: block;
+    color: var(--text-secondary);
+}
+
+.save-status[data-state="saving"] .save-status-icon-saving svg {
+    animation: save-status-spin 0.8s linear infinite;
+}
+
+.save-status[data-state="error"] {
+    color: var(--danger);
+    cursor: pointer;
+}
+
+.save-status[data-state="error"]:hover {
+    background: rgba(220, 38, 38, 0.08);
+}
+
+.save-status[data-state="error"] .save-status-icon-error {
+    display: block;
+    color: var(--danger);
+}
+
+@keyframes save-status-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px) {
+    .save-status-label {
+        display: none;
+    }
 }
 
 .star-entry-mode-toggle {
@@ -1223,6 +1293,25 @@ table tbody tr:hover {
 
 .daily-grid--freeze-cols .plan-kebab-menu {
     z-index: 1;
+}
+
+/* Raise the student header while its card menu is open so the dropdown
+   stacks above info buttons and STAR controls in the rows below. */
+.daily-header-student:has(.plan-kebab-menu.open) {
+    z-index: 20;
+    overflow: visible;
+}
+
+.daily-grid--freeze-cols .daily-header-student:has(.plan-kebab-menu.open) {
+    z-index: 9;
+}
+
+.plan-kebab-wrap:has(.plan-kebab-menu.open) {
+    z-index: 1;
+}
+
+.plan-kebab-menu.open {
+    z-index: 100;
 }
 
 .daily-data-cell {

@@ -395,6 +395,10 @@ let dailyAutosaveTimer = null; // Debounce timer for daily-entry autosave
 let periodAutosaveTimer = null; // Debounce timer for period-entry autosave
 let dailyWriteChain = Promise.resolve(); // Serialize daily saves/clears so a clear cannot be overwritten
 let dailyWriteGeneration = 0; // Bumped on Clear All so in-flight saves are ignored
+let periodWriteChain = Promise.resolve(); // Serialize period-entry saves
+let dirtyDailyFields = {}; // { studentId: { period: { s, t, a, r, info } } }
+let dirtyPeriodFields = {}; // { studentId: { safety_points, teamwork_points, ..., info } }
+let dirtyAttendanceIds = {}; // { studentId: true }
 let dailyEntrySearchQuery = ''; // Current search text for daily entry
 let dailyEntrySearchCommitted = false; // Whether the current daily search query has been submitted
 let dailyEntryManagedByMe = false; // Checkbox state for "managed by me" filter
@@ -660,8 +664,30 @@ function studentDailyDataHasInput(studentId) {
     }
     return Object.keys(studentData).some(periodTime => {
         const data = studentData[periodTime];
-        return data && (data.s !== null || data.t !== null || data.a !== null || data.r !== null);
+        if (!data) return false;
+        if (data.s !== null || data.t !== null || data.a !== null || data.r !== null) {
+            return true;
+        }
+        return periodLocalHasInfo(data);
     });
+}
+
+function periodLocalHasInfo(data) {
+    if (!data || data.info == null || data.info === '') {
+        return false;
+    }
+    if (typeof data.info === 'object') {
+        return typeof hasInfoData === 'function' && hasInfoData(data.info);
+    }
+    try {
+        const parsed = JSON.parse(data.info);
+        if (parsed && typeof parsed === 'object') {
+            return typeof hasInfoData === 'function' && hasInfoData(parsed);
+        }
+    } catch (e) {
+        return String(data.info).trim().length > 0;
+    }
+    return String(data.info).trim().length > 0;
 }
 
 function studentPeriodDataHasInput(studentId) {
@@ -672,7 +698,85 @@ function studentPeriodDataHasInput(studentId) {
     return (data.safety_points !== null && data.safety_points !== undefined) ||
         (data.teamwork_points !== null && data.teamwork_points !== undefined) ||
         (data.accountability_points !== null && data.accountability_points !== undefined) ||
-        (data.relationships_points !== null && data.relationships_points !== undefined);
+        (data.relationships_points !== null && data.relationships_points !== undefined) ||
+        periodLocalHasInfo(data);
+}
+
+function markDailyFieldDirty(studentId, period, field) {
+    if (studentId == null || !period || !field) return;
+    const id = String(studentId);
+    if (!dirtyDailyFields[id]) dirtyDailyFields[id] = {};
+    if (!dirtyDailyFields[id][period]) dirtyDailyFields[id][period] = {};
+    dirtyDailyFields[id][period][field] = true;
+}
+
+function markPeriodFieldDirty(studentId, field) {
+    if (studentId == null || !field) return;
+    const id = String(studentId);
+    if (!dirtyPeriodFields[id]) dirtyPeriodFields[id] = {};
+    dirtyPeriodFields[id][field] = true;
+}
+
+function markAttendanceDirty(studentId) {
+    if (studentId == null) return;
+    dirtyAttendanceIds[String(studentId)] = true;
+}
+
+function hasDirtyDailyEdits() {
+    return Object.keys(dirtyDailyFields).length > 0 || Object.keys(dirtyAttendanceIds).length > 0;
+}
+
+function hasDirtyPeriodEdits() {
+    return Object.keys(dirtyPeriodFields).length > 0;
+}
+
+function mergeDirtyMaps(target, source) {
+    Object.keys(source || {}).forEach((key) => {
+        const value = source[key];
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            if (!target[key] || typeof target[key] !== 'object') {
+                target[key] = {};
+            }
+            mergeDirtyMaps(target[key], value);
+        } else {
+            target[key] = value;
+        }
+    });
+    return target;
+}
+
+function enqueuePeriodWrite(task) {
+    const run = periodWriteChain.then(task, task);
+    periodWriteChain = run.catch(function () { /* keep the write queue alive after errors */ });
+    return run;
+}
+
+async function flushPendingPointCardSaves() {
+    if (dailyAutosaveTimer) {
+        clearTimeout(dailyAutosaveTimer);
+        dailyAutosaveTimer = null;
+    }
+    if (periodAutosaveTimer) {
+        clearTimeout(periodAutosaveTimer);
+        periodAutosaveTimer = null;
+    }
+    const tasks = [];
+    if (hasDirtyDailyEdits()) {
+        tasks.push(enqueueDailyWrite(() => saveDailyAllData({ silent: true, fromAutosave: true })));
+    }
+    if (hasDirtyPeriodEdits()) {
+        tasks.push(enqueuePeriodWrite(() => savePeriodData({ silent: true, skipReload: true })));
+    }
+    if (!tasks.length) {
+        return true;
+    }
+    try {
+        await Promise.all(tasks);
+        return true;
+    } catch (error) {
+        console.error('Error flushing pending point-card saves:', error);
+        return false;
+    }
 }
 
 function periodRecordHasInput(period) {
@@ -728,9 +832,14 @@ function startPointCardNightlySubmitScheduler() {
     }
 
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'hidden') {
+            flushPendingPointCardSaves();
+        } else if (document.visibilityState === 'visible') {
             autoSubmitPointCardsIfDue();
         }
+    });
+    window.addEventListener('pagehide', () => {
+        flushPendingPointCardSaves();
     });
     window.addEventListener('focus', () => {
         autoSubmitPointCardsIfDue();
@@ -774,6 +883,7 @@ function handleDailyAttendanceChange(e) {
     if (!studentId) return;
 
     attendanceData[currentDate][studentId] = newStatus;
+    markAttendanceDirty(studentId);
 
     if (newStatus === 'unexcused') {
         if (!dailyData[studentId]) {
@@ -788,6 +898,10 @@ function handleDailyAttendanceChange(e) {
             dailyData[studentId][period.time].t = 0;
             dailyData[studentId][period.time].a = 0;
             dailyData[studentId][period.time].r = 0;
+            markDailyFieldDirty(studentId, period.time, 's');
+            markDailyFieldDirty(studentId, period.time, 't');
+            markDailyFieldDirty(studentId, period.time, 'a');
+            markDailyFieldDirty(studentId, period.time, 'r');
         });
 
         document.querySelectorAll(`.daily-input[data-student-id="${studentId}"]`).forEach(inputEl => {
@@ -1188,6 +1302,120 @@ function getPeriodEntryScheduleItems() {
     return [];
 }
 
+const DAILY_PERIOD_COL_WIDTH = '120px';
+const DAILY_SCHEDULE_COL_MIN = 90;
+const DAILY_SCHEDULE_COL_MAX = 200;
+
+function measureDailyScheduleColumnWidth(texts) {
+    const measureEl = document.createElement('div');
+    measureEl.className = 'daily-location-cell';
+    measureEl.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(measureEl);
+
+    let maxWidth = DAILY_SCHEDULE_COL_MIN;
+    (texts || []).forEach((text) => {
+        if (!text) return;
+        measureEl.textContent = text;
+        maxWidth = Math.max(maxWidth, measureEl.offsetWidth);
+    });
+    document.body.removeChild(measureEl);
+
+    return Math.min(Math.ceil(maxWidth), DAILY_SCHEDULE_COL_MAX);
+}
+
+function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx) {
+    const scheduleCol = `${scheduleWidthPx}px`;
+    const template = `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol} ${spacerWidth} ${studentColumns}`;
+    header.style.gridTemplateColumns = template;
+    body.style.gridTemplateColumns = template;
+    const grid = header.closest('#daily-grid, #students-grid');
+    if (grid) {
+        grid.style.setProperty('--daily-schedule-col-width', scheduleCol);
+    }
+}
+
+function getDailyFrozenColumnsWidth(grid) {
+    if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) return 0;
+    const periodCell = grid.querySelector('.daily-frozen-col-1');
+    const scheduleCell = grid.querySelector('.daily-frozen-col-2');
+    if (!periodCell || !scheduleCell) return 0;
+    return periodCell.offsetWidth + scheduleCell.offsetWidth;
+}
+
+function focusDailyStarInput(input) {
+    if (!input || input.disabled) return false;
+    const grid = input.closest('#daily-grid, #students-grid');
+    if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) {
+        input.focus();
+        return true;
+    }
+    input.focus({ preventScroll: true });
+    const frozenWidth = getDailyFrozenColumnsWidth(grid);
+    if (!frozenWidth) return true;
+    const gridRect = grid.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    const padding = 4;
+    const minVisibleLeft = gridRect.left + frozenWidth + padding;
+    const maxVisibleRight = gridRect.right - padding;
+    if (inputRect.right > maxVisibleRight) {
+        grid.scrollLeft += inputRect.right - maxVisibleRight;
+    } else if (inputRect.left < minVisibleLeft) {
+        grid.scrollLeft = Math.max(0, grid.scrollLeft - (minVisibleLeft - inputRect.left));
+    }
+    return true;
+}
+
+function formatPointCardScheduleForPeriod(timePeriod) {
+    const items = getPeriodEntryScheduleItems().filter((s) => s && s.time_period === timePeriod);
+    if (!items.length) return '';
+    const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
+    const staffNames = [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))];
+    const classText = classNames.join(', ');
+    const staffText = staffNames.join(', ');
+    if (isStudent()) {
+        if (classText && staffText) return `${classText} / ${staffText}`;
+        return classText || staffText || '';
+    }
+    return classText || '';
+}
+
+function createDailyScheduleHeaderCell() {
+    const scheduleHeader = document.createElement('div');
+    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2';
+    scheduleHeader.textContent = 'Schedule';
+    return scheduleHeader;
+}
+
+function createDailyScheduleCategoryHeaderCell() {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-frozen-col-2';
+    cell.style.background = '#f8f9fa';
+    return cell;
+}
+
+function createDailyScheduleCell(timePeriod, options = {}) {
+    const cell = document.createElement('div');
+    cell.className = 'daily-location-cell daily-frozen-col-2';
+    cell.textContent = formatPointCardScheduleForPeriod(timePeriod);
+    if (options.isOddRow) {
+        cell.style.background = 'var(--bg-page)';
+    }
+    if (options.borderTop) {
+        cell.style.borderTop = '2px solid #000';
+        cell.style.background = options.background || '#f8f9fa';
+    }
+    return cell;
+}
+
+function refreshPointCardGridsAfterScheduleLoad() {
+    if (document.getElementById('entry-view')?.classList.contains('active')) {
+        renderDailyGrid();
+    }
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        renderStudentsGrid();
+    }
+}
+
 function loadPeriodEntrySchedule() {
     if (canEdit()) {
         return loadSchedules('teacher');
@@ -1456,7 +1684,8 @@ function setupEventListeners() {
         // Period-based entry
         const periodSelect = document.getElementById('period-select');
         if (periodSelect) {
-            periodSelect.addEventListener('change', (e) => {
+            periodSelect.addEventListener('change', async (e) => {
+                await flushPendingPointCardSaves();
                 currentPeriod = e.target.value;
                 console.log('Period selected:', currentPeriod);
                 applyPeriodEntrySelection();
@@ -1466,7 +1695,8 @@ function setupEventListeners() {
         // Class selector for period entry
         const classSelect = document.getElementById('class-select');
         if (classSelect) {
-            classSelect.addEventListener('change', (e) => {
+            classSelect.addEventListener('change', async (e) => {
+                await flushPendingPointCardSaves();
                 currentClass = e.target.value;
                 console.log('Class selected:', currentClass);
                 
@@ -1484,7 +1714,8 @@ function setupEventListeners() {
 
         const entryDateInput = document.getElementById('entry-date-input');
         if (entryDateInput) {
-            entryDateInput.addEventListener('change', (e) => {
+            entryDateInput.addEventListener('change', async (e) => {
+                await flushPendingPointCardSaves();
                 currentDate = e.target.value;
                 console.log('Entry date changed:', currentDate);
                 if (currentPeriod) {
@@ -1508,7 +1739,8 @@ function setupEventListeners() {
         // Daily overview entry
         const dailyDateInput = document.getElementById('daily-date-input');
         if (dailyDateInput) {
-            dailyDateInput.addEventListener('change', (e) => {
+            dailyDateInput.addEventListener('change', async (e) => {
+                await flushPendingPointCardSaves();
                 currentDate = e.target.value;
                 console.log('Daily date changed:', currentDate);
                 
@@ -2066,6 +2298,8 @@ async function switchView(viewName) {
         return;
     }
 
+    await flushPendingPointCardSaves();
+
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     
@@ -2106,6 +2340,7 @@ async function switchView(viewName) {
     
     // If switching to daily entry view, reload data
     if (viewName === 'entry') {
+        loadPeriodEntrySchedule();
         // Sync "managed by me" checkbox to role (staff = checked, admin = unchecked)
         const dailyManagedByMeCheckbox = document.getElementById('daily-managed-by-me-checkbox');
         if (dailyManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
@@ -2789,14 +3024,20 @@ function renderStudentsGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    grid.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    const scheduleWidth = measureDailyScheduleColumnWidth([
+        'Schedule',
+        formatPointCardScheduleForPeriod(currentPeriod || ''),
+    ]);
+    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth);
+    const studentsGridEl = document.getElementById('students-grid');
+    if (studentsGridEl) studentsGridEl.classList.add('daily-grid--freeze-cols');
 
-    // 1. Period/Location Header
+    // 1. Period/Schedule Header
     const periodHeader = document.createElement('div');
-    periodHeader.className = 'daily-header-cell daily-header-period';
+    periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = currentPeriod || 'Period';
     header.appendChild(periodHeader);
+    header.appendChild(createDailyScheduleHeaderCell());
 
     const periodSpacer = document.createElement('div');
     // Gutter between period and first student: keep space but make it visually transparent
@@ -2848,9 +3089,10 @@ function renderStudentsGrid() {
     // 3. Category Labels (S, T, A, R, I)
     const categoryLabels = ['S', 'T', 'A', 'R', 'I'];
     const emptyCell = document.createElement('div');
-    emptyCell.className = 'star-category-header';
+    emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
+    header.appendChild(createDailyScheduleCategoryHeaderCell());
     
     const emptySpacerCell = document.createElement('div');
     // Gutter column under the period header
@@ -2878,9 +3120,10 @@ function renderStudentsGrid() {
     // 4. Data Row
     // Period Name cell
     const periodCell = document.createElement('div');
-    periodCell.className = 'daily-period-cell';
+    periodCell.className = 'daily-period-cell daily-frozen-col-1';
     periodCell.textContent = currentPeriod || '';
     grid.appendChild(periodCell);
+    grid.appendChild(createDailyScheduleCell(currentPeriod || ''));
 
     const rowSpacer = document.createElement('div');
     // Gutter column next to period in this compact grid
@@ -2933,6 +3176,7 @@ function renderStudentsGrid() {
                     periodData[student.id] = { student_id: student.id };
                 }
                 periodData[student.id][`${cat.full}_points`] = val;
+                markPeriodFieldDirty(student.id, `${cat.full}_points`);
                 recordPeriodEditHistory(student.id, currentPeriod);
                 
                 // Update percentage row in real-time
@@ -3001,12 +3245,13 @@ function renderStudentsGrid() {
     
     // Add percentage row
     const percentLabel = document.createElement('div');
-    percentLabel.className = 'daily-period-cell';
+    percentLabel.className = 'daily-period-cell daily-frozen-col-1';
     percentLabel.textContent = 'Percent';
     percentLabel.style.fontWeight = '600';
     percentLabel.style.borderTop = '2px solid #000';
     percentLabel.style.background = '#f8f9fa';
     grid.appendChild(percentLabel);
+    grid.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     const percentSpacer = document.createElement('div');
     // Gutter at the start of the percentage row
@@ -3112,7 +3357,7 @@ function schedulePeriodAutosave() {
     periodAutosaveTimer = setTimeout(async () => {
         periodAutosaveTimer = null;
         try {
-            await savePeriodData({ silent: true, skipReload: true });
+            await enqueuePeriodWrite(() => savePeriodData({ silent: true, skipReload: true }));
         } catch (error) {
             console.error('Auto-save error for period data:', error);
         }
@@ -3136,40 +3381,35 @@ async function savePeriodData(options = {}) {
         : allStudents;
     const allowedStudentIds = new Set(studentsToSave.map(s => s.id));
 
-    const studentsData = [];
-    Object.keys(periodData).forEach(studentId => {
-        const studentIdInt = parseInt(studentId);
-        if (!allowedStudentIds.has(studentIdInt)) {
-            return;
-        }
-        const data = periodData[studentIdInt];
-        if (data.safety_points !== undefined || data.teamwork_points !== undefined || 
-            data.accountability_points !== undefined || data.relationships_points !== undefined) {
-            studentsData.push({
-                student_id: studentIdInt,
-                date: currentDate,
-                period: currentPeriod,
-                location: location,
-                safety_points: data.safety_points ?? null,
-                teamwork_points: data.teamwork_points ?? null,
-                accountability_points: data.accountability_points ?? null,
-                relationships_points: data.relationships_points ?? null,
-                info: data.info || ''
-            });
-        }
-    });
-
-    if (studentsData.length === 0) {
-        if (!silent) {
-            alert('No data to save');
-        }
-        return false;
-    }
+    const pendingDirty = dirtyPeriodFields;
+    dirtyPeriodFields = {};
 
     const studentsMap = {};
-    studentsData.forEach(student => {
-        studentsMap[student.student_id] = student;
+    Object.keys(pendingDirty).forEach(studentId => {
+        const studentIdInt = parseInt(studentId, 10);
+        if (!allowedStudentIds.has(studentIdInt)) {
+            mergeDirtyMaps(dirtyPeriodFields, { [studentId]: pendingDirty[studentId] });
+            return;
+        }
+        const fields = pendingDirty[studentId] || {};
+        const data = periodData[studentIdInt] || {};
+        const payload = { student_id: studentIdInt };
+        if (fields.safety_points) payload.safety_points = data.safety_points ?? null;
+        if (fields.teamwork_points) payload.teamwork_points = data.teamwork_points ?? null;
+        if (fields.accountability_points) payload.accountability_points = data.accountability_points ?? null;
+        if (fields.relationships_points) payload.relationships_points = data.relationships_points ?? null;
+        if (fields.info) payload.info = data.info || '';
+        if (Object.keys(payload).length > 1) {
+            studentsMap[studentIdInt] = payload;
+        }
     });
+
+    if (Object.keys(studentsMap).length === 0) {
+        if (!silent) {
+            showMessage('All changes saved', 'success');
+        }
+        return true;
+    }
 
     try {
         const response = await fetch('/api/period-data', {
@@ -3179,26 +3419,28 @@ async function savePeriodData(options = {}) {
                 date: currentDate,
                 period: currentPeriod,
                 location: location,
+                merge: true,
                 students: studentsMap
             })
         });
 
         if (response.ok) {
             if (!silent) {
-                showMessage(`Saved data for ${studentsData.length} student(s)!`, 'success');
+                showMessage(`Saved data for ${Object.keys(studentsMap).length} student(s)!`, 'success');
             }
             if (!skipReload) {
                 loadPeriodData();
             }
             refreshSummaryIfActive();
             if (window.StudentPlans && typeof window.StudentPlans.refreshActiveMets === 'function') {
-                window.StudentPlans.refreshActiveMets(studentsData.map(s => s.student_id), currentDate);
+                window.StudentPlans.refreshActiveMets(Object.keys(studentsMap).map(id => parseInt(id, 10)), currentDate);
             }
             return true;
         } else {
             throw new Error('Failed to save');
         }
     } catch (error) {
+        mergeDirtyMaps(dirtyPeriodFields, pendingDirty);
         console.error('Error saving period data:', error);
         if (!silent) {
             showMessage('Error saving data. Please try again.', 'error');
@@ -3570,14 +3812,17 @@ function renderDailyGrid() {
         }
     }).join(' ');
     
-    header.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
-    body.style.gridTemplateColumns = `120px ${spacerWidth} ${studentColumns}`;
+    const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
+    const scheduleWidth = measureDailyScheduleColumnWidth(['Schedule', ...scheduleTexts]);
+    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth);
+    if (dailyGridEl) dailyGridEl.classList.add('daily-grid--freeze-cols');
 
     // Create header row
     const periodHeader = document.createElement('div');
-    periodHeader.className = 'daily-header-cell daily-header-period';
+    periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = 'Period';
     header.appendChild(periodHeader);
+    header.appendChild(createDailyScheduleHeaderCell());
 
     // Add spacer after period column (gutter, but visually transparent)
     const periodSpacer = document.createElement('div');
@@ -3689,9 +3934,10 @@ function renderDailyGrid() {
     
     // Empty cell for Period column
     const emptyCell = document.createElement('div');
-    emptyCell.className = 'star-category-header';
+    emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
+    header.appendChild(createDailyScheduleCategoryHeaderCell());
     
     // Empty spacer cell after period column
     const emptySpacerCell = document.createElement('div');
@@ -3726,13 +3972,14 @@ function renderDailyGrid() {
         const isOddRow = periodIndex % 2 === 1;
         // Period cell
         const periodCell = document.createElement('div');
-        periodCell.className = 'daily-period-cell';
+        periodCell.className = 'daily-period-cell daily-frozen-col-1';
         periodCell.textContent = period.time;
         periodCell.dataset.periodIndex = periodIndex;
         if (isOddRow) {
             periodCell.style.background = 'var(--bg-page)';
         }
         body.appendChild(periodCell);
+        body.appendChild(createDailyScheduleCell(period.time, { isOddRow }));
 
         // Add spacer after period column (gutter, but visually transparent)
         const periodRowSpacer = document.createElement('div');
@@ -3848,12 +4095,13 @@ function renderDailyGrid() {
     // Add percentage row for each student
     // Empty cell for period column
     const percentPeriodCell = document.createElement('div');
-    percentPeriodCell.className = 'daily-period-cell';
+    percentPeriodCell.className = 'daily-period-cell daily-frozen-col-1';
     percentPeriodCell.textContent = 'Percent';
     percentPeriodCell.style.fontWeight = '600';
     percentPeriodCell.style.borderTop = '2px solid #000';
     percentPeriodCell.style.background = '#f8f9fa';
     body.appendChild(percentPeriodCell);
+    body.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     // Add spacer after period column (gutter, but visually transparent)
     const percentSpacer = document.createElement('div');
@@ -4020,6 +4268,7 @@ function handleDailyInputChange(e) {
         dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
     }
     dailyData[studentId][period][category] = value;
+    markDailyFieldDirty(studentId, period, category);
     recordPeriodEditHistory(studentId, period);
     
     // Update percentage row in real-time
@@ -4118,17 +4367,56 @@ function moveToNextInput(currentInput) {
     
     if (currentIndex >= 0 && currentIndex < allInputs.length - 1) {
         const nextInput = allInputs[currentIndex + 1];
-        nextInput.focus();
+        focusDailyStarInput(nextInput);
     }
 }
 
 function moveToPreviousInput(currentInput) {
+    const category = currentInput.dataset.category;
+    const studentId = parseInt(currentInput.dataset.studentId, 10);
+    const period = getPeriodForStarInput(currentInput);
+    const starCategories = ['s', 't', 'a', 'r'];
+    const catIdx = starCategories.indexOf(category);
+
+    if (catIdx > 0) {
+        focusStarInput(studentId, period, starCategories[catIdx - 1]);
+        return;
+    }
+
+    if (category !== 's') return;
+
+    const mode = getStarEntryMode();
+    if (mode === 'student' && !isPeriodEntryViewActive()) {
+        const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+        if (periodIdx > 0) {
+            focusStarInput(studentId, STANDARD_PERIODS[periodIdx - 1].time, 'r');
+        }
+        return;
+    }
+
+    if (mode === 'period' || isPeriodEntryViewActive()) {
+        const students = getStudentsForStarNav();
+        const studentIdx = students.findIndex((s) => String(s.id) === String(studentId));
+        if (studentIdx > 0) {
+            focusStarInput(students[studentIdx - 1].id, period, 'r');
+            return;
+        }
+        if (!isPeriodEntryViewActive()) {
+            const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+            if (periodIdx > 0) {
+                const prevPeriod = STANDARD_PERIODS[periodIdx - 1].time;
+                const lastStudent = students[students.length - 1];
+                focusStarInput(lastStudent.id, prevPeriod, 'r');
+            }
+        }
+        return;
+    }
+
+    // No mode chosen yet: flat DOM order (legacy behavior)
     const allInputs = getStarInputsInSameGrid(currentInput);
     const currentIndex = allInputs.indexOf(currentInput);
-    
     if (currentIndex > 0) {
-        const prevInput = allInputs[currentIndex - 1];
-        prevInput.focus();
+        focusDailyStarInput(allInputs[currentIndex - 1]);
     }
 }
 
@@ -4475,8 +4763,7 @@ function focusStarInput(studentId, period, category = 's') {
         : (isPeriodEntryViewActive() ? document.getElementById('students-grid') : document);
     const input = (root || document).querySelector(selector);
     if (input && !input.disabled) {
-        input.focus();
-        return true;
+        return focusDailyStarInput(input);
     }
     return false;
 }
@@ -4807,68 +5094,93 @@ async function saveDailyAllData(options = {}) {
         return;
     }
 
-    if (Object.keys(dailyData).length === 0) {
-        if (!silent) {
-            alert('No data to save');
-        }
-        return;
-    }
+    const pendingDaily = dirtyDailyFields;
+    const pendingAttendance = dirtyAttendanceIds;
+    dirtyDailyFields = {};
+    dirtyAttendanceIds = {};
 
-    // Prepare data for API
-    const savePromises = [];
-    
-    Object.keys(dailyData).forEach(studentId => {
-        const periods = [];
-        if (studentDailyDataHasInput(studentId)) {
-            periods.push(...buildCompleteDailyPeriodsForStudent(studentId));
-        }
-
-        if (periods.length > 0) {
-            // Get attendance status for this student
-            const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-            
-            const promise = fetch('/api/daily-records', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    student_id: parseInt(studentId),
-                    date: currentDate,
-                    attendance_status: attendance,
-                    periods: periods,
-                    frenzies: []
-                })
-            });
-            savePromises.push(promise);
-        }
-    });
+    const studentIds = new Set([
+        ...Object.keys(pendingDaily),
+        ...Object.keys(pendingAttendance)
+    ]);
 
     if (generation !== dailyWriteGeneration) {
+        mergeDirtyMaps(dirtyDailyFields, pendingDaily);
+        mergeDirtyMaps(dirtyAttendanceIds, pendingAttendance);
         return;
     }
+
+    const savePromises = [];
+    const savedStudentIds = [];
+
+    studentIds.forEach((studentId) => {
+        const studentIdInt = parseInt(studentId, 10);
+        const fieldMap = pendingDaily[studentId] || {};
+        const studentData = dailyData[studentIdInt] || dailyData[studentId] || {};
+        const periods = [];
+
+        Object.keys(fieldMap).forEach((periodTime) => {
+            const fields = fieldMap[periodTime] || {};
+            const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
+            const standard = (typeof STANDARD_PERIODS !== 'undefined' ? STANDARD_PERIODS : []).find(p => p.time === periodTime);
+            const payload = {
+                time_range: periodTime,
+                location: standard ? standard.location : periodTime
+            };
+            if (fields.s) payload.safety_points = data.s ?? null;
+            if (fields.t) payload.teamwork_points = data.t ?? null;
+            if (fields.a) payload.accountability_points = data.a ?? null;
+            if (fields.r) payload.relationships_points = data.r ?? null;
+            if (fields.info) payload.info = data.info || '';
+            periods.push(payload);
+        });
+
+        if (periods.length === 0 && !pendingAttendance[studentId]) {
+            return;
+        }
+
+        const attendance = attendanceData[currentDate]?.[studentId] || attendanceData[currentDate]?.[studentIdInt] || 'present';
+        savedStudentIds.push(studentIdInt);
+        savePromises.push(fetch('/api/daily-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: studentIdInt,
+                date: currentDate,
+                attendance_status: attendance,
+                merge: true,
+                periods: periods
+            })
+        }));
+    });
 
     if (savePromises.length === 0) {
         if (!silent) {
-            showMessage('No data to save', 'info');
+            showMessage('All changes saved', 'success');
         }
         return;
     }
 
     try {
-        await Promise.all(savePromises);
+        const responses = await Promise.all(savePromises);
         if (generation !== dailyWriteGeneration) {
             return;
         }
+        const failed = responses.filter((response) => !response.ok);
+        if (failed.length) {
+            throw new Error(`Failed to save ${failed.length} student record(s)`);
+        }
         if (!silent) {
-            showMessage(`Saved data for ${savePromises.length} student(s)!`, 'success');
+            showMessage(`Saved data for ${savedStudentIds.length} student(s)!`, 'success');
         }
         invalidateDailyLoadCache(currentDate);
-        // For manual saves, reload the grid to confirm. For autosaves, avoid disrupting focus.
         if (!fromAutosave) {
             scheduleDailyDataLoad(0);
         }
-        // Refresh summary if it's currently displayed
         refreshSummaryIfActive();
     } catch (error) {
+        mergeDirtyMaps(dirtyDailyFields, pendingDaily);
+        mergeDirtyMaps(dirtyAttendanceIds, pendingAttendance);
         console.error('Error saving daily data:', error);
         if (!silent) {
             showMessage('Error saving data. Please try again.', 'error');
@@ -4919,8 +5231,8 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
                 student_id: studentId,
                 date: currentDate,
                 attendance_status: attendance,
-                periods: periods,
-                frenzies: []
+                merge: true,
+                periods: periods
             }),
             signal: abortController.signal
         });
@@ -9855,9 +10167,11 @@ function persistPeriodInfoObject(studentId, period, infoData, periodIndex) {
     } else {
         if (studentId != null && period && dailyData[studentId]?.[period]) {
             dailyData[studentId][period].info = infoString;
+            markDailyFieldDirty(studentId, period, 'info');
         }
         if (studentId != null && periodData[studentId] && (!currentPeriod || !period || String(period) === String(currentPeriod))) {
             periodData[studentId].info = infoString;
+            markPeriodFieldDirty(studentId, 'info');
         }
         document.querySelectorAll(`button.info-btn[data-student-id="${studentId}"][data-period="${period}"]`).forEach((button) => {
             button.dataset.info = infoString;
@@ -9940,22 +10254,11 @@ function recordPeriodEditHistory(studentId, period, infoChanges = [], periodInde
 }
 
 function buildEditHistoryHtml(history) {
-    const entries = Array.isArray(history) ? history.filter(Boolean) : [];
-    const header = `
-        <div class="info-edit-history-grid">
-            <div class="info-edit-history-who"></div>
-            <div class="info-edit-history-head info-edit-history-star">S</div>
-            <div class="info-edit-history-head info-edit-history-star">T</div>
-            <div class="info-edit-history-head info-edit-history-star">A</div>
-            <div class="info-edit-history-head info-edit-history-star">R</div>
-            <div class="info-edit-history-head info-edit-history-star">I</div>
-    `;
+    const entries = (Array.isArray(history) ? history : []).filter((entry) =>
+        entry && typeof entry === 'object' && (entry.name || entry.time || entry.at)
+    );
     if (!entries.length) {
-        return `
-            ${header}
-            </div>
-            <div class="info-edit-history-empty">No edits recorded for this period yet.</div>
-        `;
+        return `<div class="info-edit-history-empty">No edits recorded for this period yet.</div>`;
     }
     const rows = entries.map((entry, index) => {
         const previous = entries[index + 1];
@@ -9969,7 +10272,7 @@ function buildEditHistoryHtml(history) {
         const infoText = infoLabels.join(', ');
         const starCell = (key) => {
             const cls = changed[key] ? 'info-edit-history-star info-edit-history-changed' : 'info-edit-history-star';
-            return `<div class="${cls}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</div>`;
+            return `<div class="${cls}" data-category="${key}">${escapeEditHistoryHtml(formatStarHistoryDisplay(entry[key]))}</div>`;
         };
         const infoCls = infoText ? 'info-edit-history-info info-edit-history-changed' : 'info-edit-history-info';
         const who = [entry.time, entry.name || 'Staff'].filter(Boolean).join(' - ');
@@ -9979,17 +10282,24 @@ function buildEditHistoryHtml(history) {
             ${starCell('t')}
             ${starCell('a')}
             ${starCell('r')}
-            <div class="${infoCls}">${escapeEditHistoryHtml(infoText)}</div>
+            <div class="${infoCls}" data-category="i">${escapeEditHistoryHtml(infoText)}</div>
         `;
     }).join('');
     return `
-        ${header}
+        <div class="info-edit-history-grid">
+            <div class="info-edit-history-who"></div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="s">S</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="t">T</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="a">A</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="r">R</div>
+            <div class="info-edit-history-head info-edit-history-star" data-category="i">I</div>
             ${rows}
         </div>
     `;
 }
 
 function ensureInfoEditHistoryContainer() {
+    if (isStudent()) return null;
     let container = document.getElementById('info-edit-history');
     if (container) return container;
     const notesGroup = document.getElementById('info-notes')?.closest('.form-group');
@@ -10013,8 +10323,17 @@ function ensureInfoEditHistoryContainer() {
 }
 
 function renderInfoEditHistory(history) {
+    if (isStudent()) {
+        document.querySelectorAll('.info-edit-history-group').forEach((group) => {
+            group.style.display = 'none';
+        });
+        return;
+    }
     const container = ensureInfoEditHistoryContainer();
     if (!container) return;
+    const group = container.closest('.info-edit-history-group');
+    if (group) group.style.display = '';
+    container.replaceChildren();
     container.innerHTML = buildEditHistoryHtml(history);
 }
 
@@ -10819,6 +11138,7 @@ function saveInfoModal() {
         dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
     }
     dailyData[studentId][period].info = infoString;
+    markDailyFieldDirty(studentId, period, 'info');
 
     // Update periodData if current view is period-entry
     if (periodData[studentId] !== undefined || document.getElementById('period-entry-view').classList.contains('active')) {
@@ -10826,6 +11146,7 @@ function saveInfoModal() {
             periodData[studentId] = { student_id: studentId };
         }
         periodData[studentId].info = infoString;
+        markPeriodFieldDirty(studentId, 'info');
     }
     
     // Update the button's data attribute
@@ -10869,10 +11190,14 @@ function saveInfoModal() {
     clearInfoModalStarHighlights();
     if (modalEl) modalEl.style.display = 'none';
     showMessage('Information saved!', 'success');
-    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
-        schedulePeriodAutosave();
+    if (modal.dataset.isEditPointCard === 'true') {
+        // Edit-point-card info stays in the modal until Save Changes.
+    } else if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        enqueuePeriodWrite(() => savePeriodData({ silent: true, skipReload: true }))
+            .catch((error) => console.error('Error saving info popup:', error));
     } else {
-        scheduleDailyAutosave();
+        enqueueDailyWrite(() => saveDailyAllData({ silent: true, fromAutosave: true }))
+            .catch((error) => console.error('Error saving info popup:', error));
     }
     onInfoModalClosedForNav();
 }
@@ -10939,10 +11264,12 @@ function showInfoViewPopup(infoDataString, time, location) {
                     <div style="background: var(--bg-elevated); padding: 10px; border-radius: 4px; min-height: 60px; white-space: pre-wrap;">${(infoData.notes || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
                 </div>
 
+                ${!isStudent() ? `
                 <div class="form-group info-edit-history-group">
                     <label>Edit History:</label>
                     <div class="info-edit-history">${buildEditHistoryHtml(infoData.edit_history)}</div>
                 </div>
+                ` : ''}
 
                 <!-- Reminders -->
                 <div class="form-group">
@@ -11501,6 +11828,7 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                     autoSelectCurrentPeriod();
                 }, 100);
             }
+            refreshPointCardGridsAfterScheduleLoad();
             return data;
         })
         .catch(error => {

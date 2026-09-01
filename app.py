@@ -1054,7 +1054,11 @@ def _expand_serialized_point_card_periods(periods, include_details=True):
 
 
 def _ensure_full_point_card_periods(daily_record):
-    """Persist every standard point-card row, including empty STAR cells."""
+    """Persist every standard point-card row, including empty STAR cells.
+
+    Uses a direct table query instead of the ORM collection so concurrent
+    period saves cannot trigger delete-orphan on rows another user just added.
+    """
     if not daily_record:
         return
     if not getattr(daily_record, 'id', None):
@@ -1062,14 +1066,17 @@ def _ensure_full_point_card_periods(daily_record):
     if not getattr(daily_record, 'id', None):
         return
     existing = {
-        (period.time_range or '').strip()
-        for period in list(daily_record.periods or [])
-        if (period.time_range or '').strip()
+        (time_range or '').strip()
+        for (time_range,) in db.session.query(PeriodRecord.time_range)
+            .filter_by(daily_record_id=daily_record.id)
+            .all()
+        if (time_range or '').strip()
     }
     for time_range, location in POINT_CARD_PERIODS:
         if time_range in existing:
             continue
-        daily_record.periods.append(PeriodRecord(
+        db.session.add(PeriodRecord(
+            daily_record_id=daily_record.id,
             time_range=time_range,
             location=location,
             safety_points=None,
@@ -1079,6 +1086,94 @@ def _ensure_full_point_card_periods(daily_record):
             points_possible=0,
         ))
         existing.add(time_range)
+
+
+def _find_period_record(daily_record_id, time_range):
+    time_range = (time_range or '').strip()
+    if not daily_record_id or not time_range:
+        return None
+    return (
+        PeriodRecord.query
+        .filter_by(daily_record_id=daily_record_id, time_range=time_range)
+        .order_by(PeriodRecord.id.asc())
+        .first()
+    )
+
+
+def _sync_period_flags_from_info(period_record, info_value):
+    if not info_value or not isinstance(info_value, str):
+        return
+    try:
+        info_obj = json.loads(info_value)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(info_obj, dict):
+        return
+    if 'reset' in info_obj:
+        period_record.reset = bool(info_obj.get('reset'))
+    if 'frenzy' in info_obj:
+        period_record.frenzy = bool(info_obj.get('frenzy'))
+
+
+def _apply_period_payload(period_record, period_data, *, merge=False):
+    """Copy client fields onto a PeriodRecord. Merge mode updates only present keys."""
+    if not isinstance(period_data, dict):
+        return
+
+    def has(key):
+        return True if not merge else key in period_data
+
+    if has('location'):
+        location = period_data.get('location')
+        if location or not merge:
+            period_record.location = location or period_record.location
+    if has('safety_points'):
+        period_record.safety_points = _nullable_star_points(period_data.get('safety_points'))
+    if has('teamwork_points'):
+        period_record.teamwork_points = _nullable_star_points(period_data.get('teamwork_points'))
+    if has('accountability_points'):
+        period_record.accountability_points = _nullable_star_points(period_data.get('accountability_points'))
+    if has('relationships_points'):
+        period_record.relationships_points = _nullable_star_points(period_data.get('relationships_points'))
+    if has('info'):
+        period_record.info = period_data.get('info')
+        _sync_period_flags_from_info(period_record, period_record.info)
+    if has('reset'):
+        period_record.reset = bool(period_data.get('reset', False))
+    if has('frenzy'):
+        period_record.frenzy = bool(period_data.get('frenzy', False))
+    if has('notes'):
+        period_record.notes = period_data.get('notes')
+    if has('reminders'):
+        period_record.reminders = period_data.get('reminders')
+    period_record.points_possible = _points_possible_for_star_values(period_record)
+
+
+def _upsert_period_record(daily_record, period_data, *, merge=False, default_location=''):
+    """Create or update one period row without loading DailyRecord.periods."""
+    if not daily_record or not getattr(daily_record, 'id', None):
+        return None
+    if not isinstance(period_data, dict):
+        return None
+    time_range = (period_data.get('time_range') or '').strip()
+    if not time_range:
+        return None
+    period_record = _find_period_record(daily_record.id, time_range)
+    if not period_record:
+        location = period_data.get('location') or default_location or POINT_CARD_DEFAULT_LOCATIONS.get(time_range, '')
+        period_record = PeriodRecord(
+            daily_record_id=daily_record.id,
+            time_range=time_range,
+            location=location,
+            points_possible=0,
+        )
+        db.session.add(period_record)
+        db.session.flush()
+    _apply_period_payload(period_record, period_data, merge=merge)
+    if default_location and not (period_record.location or '').strip():
+        period_record.location = default_location
+    db.session.flush()
+    return period_record
 
 
 def _format_school_date(record_date):
@@ -4312,7 +4407,9 @@ def period_data():
         saved_count = 0
         saved_daily_ids = []
         
-        # Process each student's data
+        # Process each student's data. Merge-only: never overwrite STAR/info
+        # fields the client did not send, so concurrent staff cannot clobber
+        # each other's cells.
         for student_id_str, student_data in students_data.items():
             student_id = int(student_id_str)
             
@@ -4320,12 +4417,20 @@ def period_data():
             if current_user.role == 'staff' and current_user.is_outside_staff:
                 if not has_student_access(current_user, student_id):
                     continue  # Skip this student if no access
+
+            if not isinstance(student_data, dict):
+                student_data = {}
+            period_payload = dict(student_data)
+            period_payload['time_range'] = period
+            if location and 'location' not in period_payload:
+                period_payload['location'] = location
             
-            # Get or create daily record
-            daily_record = DailyRecord.query.filter_by(
-                student_id=student_id,
-                date=record_date
-            ).first()
+            daily_record = (
+                DailyRecord.query
+                .filter_by(student_id=student_id, date=record_date)
+                .with_for_update()
+                .first()
+            )
             
             if not daily_record:
                 daily_record = DailyRecord(
@@ -4338,37 +4443,12 @@ def period_data():
                 db.session.add(daily_record)
                 db.session.flush()
             
-            # Check if period record exists
-            period_record = PeriodRecord.query.filter_by(
-                daily_record_id=daily_record.id,
-                time_range=period
-            ).first()
-            
-            if period_record:
-                # Update existing
-                period_record.location = location
-                period_record.safety_points = _nullable_star_points(student_data.get('safety_points'))
-                period_record.teamwork_points = _nullable_star_points(student_data.get('teamwork_points'))
-                period_record.accountability_points = _nullable_star_points(student_data.get('accountability_points'))
-                period_record.relationships_points = _nullable_star_points(student_data.get('relationships_points'))
-                period_record.points_possible = _points_possible_for_star_values(period_record)
-                period_record.info = student_data.get('info')
-            else:
-                # Create new
-                period_record = PeriodRecord(
-                    time_range=period,
-                    location=location,
-                    safety_points=_nullable_star_points(student_data.get('safety_points')),
-                    teamwork_points=_nullable_star_points(student_data.get('teamwork_points')),
-                    accountability_points=_nullable_star_points(student_data.get('accountability_points')),
-                    relationships_points=_nullable_star_points(student_data.get('relationships_points')),
-                    points_possible=_points_possible_for_star_values(student_data),
-                    info=student_data.get('info')
-                )
-                daily_record.periods.append(period_record)
-
-            db.session.flush()
-            db.session.expire(daily_record, ['periods'])
+            _upsert_period_record(
+                daily_record,
+                period_payload,
+                merge=True,
+                default_location=location,
+            )
             _ensure_full_point_card_periods(daily_record)
             
             saved_count += 1
@@ -4474,14 +4554,17 @@ def daily_records():
             present = data.get('present', True)
             attendance_status = 'present' if present else 'unexcused'
         
-        # Check if daily record already exists
-        existing = DailyRecord.query.filter_by(
-            student_id=student_id,
-            date=record_date
-        ).first()
+        merge = bool(data.get('merge'))
+
+        daily_record = (
+            DailyRecord.query
+            .filter_by(student_id=student_id, date=record_date)
+            .with_for_update()
+            .first()
+        )
+        existing = daily_record
         
         if existing:
-            daily_record = existing
             # Update attendance_status
             daily_record.attendance_status = attendance_status
             # Keep present field updated for backward compatibility
@@ -4497,73 +4580,77 @@ def daily_records():
             db.session.add(daily_record)
         
         db.session.flush()
-        db.session.expire(daily_record, ['periods'])
 
-        # Clear existing periods safely: delete dependent infractions first to satisfy FK constraints.
-        existing_period_ids = [
-            period_id for (period_id,) in db.session.query(PeriodRecord.id)
-            .filter_by(daily_record_id=daily_record.id)
-            .all()
-        ]
-        if existing_period_ids:
-            Infraction.query.filter(Infraction.period_record_id.in_(existing_period_ids)).delete(synchronize_session=False)
-            PeriodRecord.query.filter(PeriodRecord.id.in_(existing_period_ids)).delete(synchronize_session=False)
-            db.session.flush()
-            db.session.expire(daily_record, ['periods'])
-        
-        # Add periods
-        for period_data in data.get('periods', []):
-            period = PeriodRecord(
-                time_range=period_data.get('time_range'),
-                location=period_data.get('location'),
-                safety_points=_nullable_star_points(period_data.get('safety_points')),
-                teamwork_points=_nullable_star_points(period_data.get('teamwork_points')),
-                accountability_points=_nullable_star_points(period_data.get('accountability_points')),
-                relationships_points=_nullable_star_points(period_data.get('relationships_points')),
-                points_possible=_points_possible_for_star_values(period_data),
-                reset=period_data.get('reset', False),
-                frenzy=period_data.get('frenzy', False),
-                notes=period_data.get('notes'),
-                reminders=period_data.get('reminders'),
-                info=period_data.get('info')
-            )
-            daily_record.periods.append(period)
-            db.session.flush()
-            
-            # Add infractions
-            for infraction_data in period_data.get('infractions', []):
-                infraction = Infraction(
-                    period_record_id=period.id,
-                    infraction_type=infraction_data['type'],
-                    count=infraction_data.get('count', 1),
-                    is_general=infraction_data.get('is_general', True),
-                    is_harmful=infraction_data.get('is_harmful', False)
+        if merge:
+            # Concurrent grid/period saves: update only the periods and fields
+            # in this payload. Never delete sibling periods, infractions, or
+            # frenzy events belonging to other staff.
+            for period_data in data.get('periods', []):
+                _upsert_period_record(daily_record, period_data, merge=True)
+        else:
+            # Full replace used by the dedicated point-card editors that send
+            # a complete day snapshot for one student.
+            existing_period_ids = [
+                period_id for (period_id,) in db.session.query(PeriodRecord.id)
+                .filter_by(daily_record_id=daily_record.id)
+                .all()
+            ]
+            if existing_period_ids:
+                Infraction.query.filter(Infraction.period_record_id.in_(existing_period_ids)).delete(synchronize_session=False)
+                PeriodRecord.query.filter(PeriodRecord.id.in_(existing_period_ids)).delete(synchronize_session=False)
+                db.session.flush()
+
+            for period_data in data.get('periods', []):
+                period = PeriodRecord(
+                    daily_record_id=daily_record.id,
+                    time_range=period_data.get('time_range'),
+                    location=period_data.get('location'),
+                    safety_points=_nullable_star_points(period_data.get('safety_points')),
+                    teamwork_points=_nullable_star_points(period_data.get('teamwork_points')),
+                    accountability_points=_nullable_star_points(period_data.get('accountability_points')),
+                    relationships_points=_nullable_star_points(period_data.get('relationships_points')),
+                    points_possible=_points_possible_for_star_values(period_data),
+                    reset=period_data.get('reset', False),
+                    frenzy=period_data.get('frenzy', False),
+                    notes=period_data.get('notes'),
+                    reminders=period_data.get('reminders'),
+                    info=period_data.get('info')
                 )
-                db.session.add(infraction)
-        
-        # Add frenzy events
-        FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete(synchronize_session=False)
-        db.session.expire(daily_record, ['frenzies'])
-        for frenzy_data in data.get('frenzies', []):
-            sev_raw = frenzy_data.get('severity')
-            sev_int = None
-            if sev_raw is not None and sev_raw != '':
-                try:
-                    sev_int = int(sev_raw)
-                except (TypeError, ValueError):
-                    sev_int = None
-            if sev_int is not None:
-                sev_int = max(1, min(5, sev_int))
-            frenzy = FrenzyEvent(
-                time_range=frenzy_data.get('time_range'),
-                location=frenzy_data.get('location'),
-                purpose=frenzy_data.get('purpose'),
-                purpose2=frenzy_data.get('purpose2'),
-                duration_minutes=frenzy_data.get('duration_minutes'),
-                result=frenzy_data.get('result'),
-                severity=sev_int if sev_int is not None else 1,
-            )
-            daily_record.frenzies.append(frenzy)
+                db.session.add(period)
+                db.session.flush()
+
+                for infraction_data in period_data.get('infractions', []):
+                    infraction = Infraction(
+                        period_record_id=period.id,
+                        infraction_type=infraction_data['type'],
+                        count=infraction_data.get('count', 1),
+                        is_general=infraction_data.get('is_general', True),
+                        is_harmful=infraction_data.get('is_harmful', False)
+                    )
+                    db.session.add(infraction)
+
+            FrenzyEvent.query.filter_by(daily_record_id=daily_record.id).delete(synchronize_session=False)
+            for frenzy_data in data.get('frenzies', []):
+                sev_raw = frenzy_data.get('severity')
+                sev_int = None
+                if sev_raw is not None and sev_raw != '':
+                    try:
+                        sev_int = int(sev_raw)
+                    except (TypeError, ValueError):
+                        sev_int = None
+                if sev_int is not None:
+                    sev_int = max(1, min(5, sev_int))
+                frenzy = FrenzyEvent(
+                    daily_record_id=daily_record.id,
+                    time_range=frenzy_data.get('time_range'),
+                    location=frenzy_data.get('location'),
+                    purpose=frenzy_data.get('purpose'),
+                    purpose2=frenzy_data.get('purpose2'),
+                    duration_minutes=frenzy_data.get('duration_minutes'),
+                    result=frenzy_data.get('result'),
+                    severity=sev_int if sev_int is not None else 1,
+                )
+                db.session.add(frenzy)
         
         db.session.flush()
         _ensure_full_point_card_periods(daily_record)
@@ -4571,11 +4658,8 @@ def daily_records():
         mark_daily_record_submitted_if_due(daily_record)
         db.session.commit()
 
-        # Cascade/delete-orphan can drop rows that were not in the loaded collection.
-        # Re-load and persist any missing standard point-card rows.
         daily_record = DailyRecord.query.get(daily_record.id)
         if daily_record:
-            db.session.expire(daily_record, ['periods'])
             _ensure_full_point_card_periods(daily_record)
             db.session.commit()
         
