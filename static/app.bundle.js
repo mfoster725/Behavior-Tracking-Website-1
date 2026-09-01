@@ -1815,6 +1815,18 @@ function setupEventListeners() {
             saveDailyAllBtn.addEventListener('click', () => saveDailyAllData());
         }
 
+        if (!window.__pointCardSaveStatusRetryBound) {
+            window.__pointCardSaveStatusRetryBound = true;
+            document.addEventListener('click', (e) => {
+                const statusBtn = e.target && e.target.closest ? e.target.closest('.point-card-save-status') : null;
+                if (!statusBtn || statusBtn.dataset.state !== 'error') return;
+                updatePointCardSaveStatus('saving');
+                flushPendingPointCardSaves().then((ok) => {
+                    updatePointCardSaveStatus(ok ? 'saved' : 'error');
+                });
+            });
+        }
+
         ensureDailyGridDelegatedListeners();
         
         const clearDailyAllBtn = document.getElementById('clear-daily-all-btn');
@@ -3351,6 +3363,7 @@ function schedulePeriodAutosave() {
     if (!currentDate || !currentPeriod) {
         return;
     }
+    updatePointCardSaveStatus('saving');
     if (periodAutosaveTimer) {
         clearTimeout(periodAutosaveTimer);
     }
@@ -3358,8 +3371,10 @@ function schedulePeriodAutosave() {
         periodAutosaveTimer = null;
         try {
             await enqueuePeriodWrite(() => savePeriodData({ silent: true, skipReload: true }));
+            updatePointCardSaveStatus('saved');
         } catch (error) {
             console.error('Auto-save error for period data:', error);
+            updatePointCardSaveStatus('error');
         }
     }, 1500);
 }
@@ -3405,12 +3420,14 @@ async function savePeriodData(options = {}) {
     });
 
     if (Object.keys(studentsMap).length === 0) {
+        updatePointCardSaveStatus('saved');
         if (!silent) {
             showMessage('All changes saved', 'success');
         }
         return true;
     }
 
+    updatePointCardSaveStatus('saving');
     try {
         const response = await fetch('/api/period-data', {
             method: 'POST',
@@ -3425,6 +3442,7 @@ async function savePeriodData(options = {}) {
         });
 
         if (response.ok) {
+            updatePointCardSaveStatus('saved');
             if (!silent) {
                 showMessage(`Saved data for ${Object.keys(studentsMap).length} student(s)!`, 'success');
             }
@@ -3442,6 +3460,7 @@ async function savePeriodData(options = {}) {
     } catch (error) {
         mergeDirtyMaps(dirtyPeriodFields, pendingDirty);
         console.error('Error saving period data:', error);
+        updatePointCardSaveStatus('error');
         if (!silent) {
             showMessage('Error saving data. Please try again.', 'error');
         }
@@ -5039,11 +5058,39 @@ function onInfoModalClosedForNav() {
     continueAfterStarREntry(nextContext);
 }
 
+function updatePointCardSaveStatus(state, label) {
+    const labels = {
+        saved: 'Saved',
+        saving: 'Saving…',
+        error: 'Save failed — click to retry'
+    };
+    const text = label || labels[state] || 'Saved';
+    document.querySelectorAll('.point-card-save-status').forEach((el) => {
+        el.dataset.state = state || 'saved';
+        el.setAttribute('title', text);
+        el.setAttribute('aria-label', text);
+        const labelEl = el.querySelector('.save-status-label');
+        if (labelEl) {
+            labelEl.textContent = state === 'error' ? 'Save failed' : (state === 'saving' ? 'Saving…' : 'Saved');
+        }
+    });
+}
+
 function updateDailyAutosaveStatus(text) {
-    const statusEl = document.getElementById('save-daily-status');
-    if (statusEl) {
-        statusEl.textContent = text || '';
+    const normalized = (text || '').trim();
+    if (!normalized) {
+        updatePointCardSaveStatus('saved');
+        return;
     }
+    if (/fail/i.test(normalized)) {
+        updatePointCardSaveStatus('error');
+        return;
+    }
+    if (/sav/i.test(normalized) && !/saved/i.test(normalized)) {
+        updatePointCardSaveStatus('saving');
+        return;
+    }
+    updatePointCardSaveStatus('saved');
 }
 
 function enqueueDailyWrite(task) {
@@ -5155,12 +5202,14 @@ async function saveDailyAllData(options = {}) {
     });
 
     if (savePromises.length === 0) {
+        updatePointCardSaveStatus('saved');
         if (!silent) {
             showMessage('All changes saved', 'success');
         }
         return;
     }
 
+    updatePointCardSaveStatus('saving');
     try {
         const responses = await Promise.all(savePromises);
         if (generation !== dailyWriteGeneration) {
@@ -5173,6 +5222,7 @@ async function saveDailyAllData(options = {}) {
         if (!silent) {
             showMessage(`Saved data for ${savedStudentIds.length} student(s)!`, 'success');
         }
+        updatePointCardSaveStatus('saved');
         invalidateDailyLoadCache(currentDate);
         if (!fromAutosave) {
             scheduleDailyDataLoad(0);
@@ -5182,6 +5232,7 @@ async function saveDailyAllData(options = {}) {
         mergeDirtyMaps(dirtyDailyFields, pendingDaily);
         mergeDirtyMaps(dirtyAttendanceIds, pendingAttendance);
         console.error('Error saving daily data:', error);
+        updatePointCardSaveStatus('error');
         if (!silent) {
             showMessage('Error saving data. Please try again.', 'error');
         }
