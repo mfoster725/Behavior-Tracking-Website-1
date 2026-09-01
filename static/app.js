@@ -1671,7 +1671,7 @@ function measureDailyScheduleColumnWidth(texts, options = {}) {
     }
     document.body.appendChild(measureEl);
 
-    let maxWidth = options.minWidth || DAILY_SCHEDULE_COL_MIN;
+    let maxWidth = options.minWidth != null ? options.minWidth : DAILY_SCHEDULE_COL_MIN;
     (texts || []).forEach((text) => {
         if (!text) return;
         measureEl.textContent = text;
@@ -1784,18 +1784,50 @@ function getPointCardColumnsPerStudent() {
     return isShowStudentSchedulesInPointCards() && canEdit() ? 6 : 5;
 }
 
-function buildPointCardStudentColumnsTemplate(studentCount, spacerWidth, studentScheduleColWidth) {
+function buildPointCardStudentColumnsTemplate(students, spacerWidth, timePeriods) {
     const showStudentSched = isShowStudentSchedulesInPointCards() && canEdit();
-    const schedulePart = showStudentSched ? `${studentScheduleColWidth}px ` : '';
-    const studentBlock = `${schedulePart}repeat(4, 40px) 40px`;
     const parts = [];
-    for (let i = 0; i < studentCount; i++) {
-        parts.push(studentBlock);
-        if (i < studentCount - 1) {
+    const studentList = students || [];
+    for (let i = 0; i < studentList.length; i++) {
+        const schedulePart = showStudentSched
+            ? `minmax(0, ${measurePointCardStudentScheduleColumnWidthForStudent(studentList[i], timePeriods)}px) `
+            : '';
+        parts.push(`${schedulePart}repeat(4, 40px) 40px`);
+        if (i < studentList.length - 1) {
             parts.push(spacerWidth);
         }
     }
     return parts.join(' ');
+}
+
+function measurePointCardStudentScheduleColumnWidthForStudent(student, timePeriods) {
+    const headerWidth = measureStudentScheduleHeaderWidth();
+    const texts = [];
+    (timePeriods || []).forEach((period) => {
+        const time = typeof period === 'string' ? period : period.time;
+        const text = getStudentScheduleLocationForPeriod(student.id, time);
+        if (text) texts.push(text);
+    });
+    const dataWidth = texts.length
+        ? measureDailyScheduleColumnWidth(texts, {
+            measureClass: 'daily-student-schedule-cell',
+            minWidth: 0,
+            extend: false,
+            wrap: false,
+        })
+        : 0;
+    const width = Math.max(headerWidth, dataWidth);
+    return Number.isFinite(width) && width > 0 ? Math.ceil(width) : headerWidth;
+}
+
+function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
+    const studentList = students || [];
+    if (!studentList.length) {
+        return measureStudentScheduleHeaderWidth();
+    }
+    return Math.max(
+        ...studentList.map((student) => measurePointCardStudentScheduleColumnWidthForStudent(student, timePeriods))
+    );
 }
 
 function measureStudentScheduleHeaderWidth() {
@@ -1820,26 +1852,6 @@ function measureStudentScheduleHeaderWidth() {
     const width = cell.offsetWidth;
     document.body.removeChild(cell);
     return Math.ceil(width);
-}
-
-function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
-    const texts = [];
-    (students || []).forEach((student) => {
-        (timePeriods || []).forEach((period) => {
-            const time = typeof period === 'string' ? period : period.time;
-            const text = getStudentScheduleLocationForPeriod(student.id, time);
-            if (text) texts.push(text);
-        });
-    });
-    const headerWidth = measureStudentScheduleHeaderWidth();
-    const dataWidth = texts.length
-        ? measureDailyScheduleColumnWidth(texts, {
-            ...getScheduleMeasureOptions(),
-            measureClass: 'daily-student-schedule-cell',
-            minWidth: 0,
-        })
-        : 0;
-    return Math.max(headerWidth, dataWidth);
 }
 
 function measurePointCardOwnScheduleColumnWidth(texts) {
@@ -4070,14 +4082,10 @@ function renderStudentsGrid() {
 
     // Reuse the same grid structure as daily grid
     const spacerWidth = '7px';
-    const studentScheduleColWidth = measurePointCardStudentScheduleColumnWidth(
-        studentsToDisplay,
-        [currentPeriod || '']
-    );
     const studentColumns = buildPointCardStudentColumnsTemplate(
-        studentsToDisplay.length,
+        studentsToDisplay,
         spacerWidth,
-        studentScheduleColWidth
+        [currentPeriod || '']
     );
     const columnsPerStudent = getPointCardColumnsPerStudent();
     const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
@@ -4888,14 +4896,10 @@ function renderDailyGrid() {
 
     // Calculate grid columns: Period + spacer + (5 or 6 columns per student)
     const spacerWidth = '7px'; // 1/4 of original 27px
-    const studentScheduleColWidth = measurePointCardStudentScheduleColumnWidth(
-        studentsToDisplay,
-        STANDARD_PERIODS
-    );
     const studentColumns = buildPointCardStudentColumnsTemplate(
-        studentsToDisplay.length,
+        studentsToDisplay,
         spacerWidth,
-        studentScheduleColWidth
+        STANDARD_PERIODS
     );
     const columnsPerStudent = getPointCardColumnsPerStudent();
     const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();

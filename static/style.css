@@ -1367,10 +1367,13 @@ table tbody tr:hover {
     align-items: center;
     justify-content: flex-start;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     overflow-wrap: break-word;
     word-break: break-word;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
+    box-sizing: border-box;
 }
 
 .daily-grid--wrap-schedule .daily-location-cell,
@@ -1396,8 +1399,9 @@ table tbody tr:hover {
     padding: 4px 3px !important;
     position: relative;
     min-width: 0;
-    width: 100%;
+    max-width: 100%;
     box-sizing: border-box;
+    overflow: hidden;
 }
 
 .daily-student-schedule-header-label {
