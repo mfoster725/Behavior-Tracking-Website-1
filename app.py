@@ -3540,7 +3540,12 @@ def students_by_staff_period():
         
         # Filter out students who opted out of directory information
         students = filter_directory_info(students, include_opted_out=False)
-        return jsonify([{'id': s.id, 'name': s.name, 'email': s.email} for s in students])
+        return jsonify([{
+            'id': s.id,
+            'name': s.name,
+            'email': s.email,
+            'card_color': s.card_color,
+        } for s in students])
     else:
         return jsonify([])
 
