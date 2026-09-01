@@ -3178,14 +3178,18 @@ table tbody tr:hover {
 .daily-data-cell.other-school-period,
 .daily-period-cell.other-school-period,
 .daily-student-schedule-cell.other-school-period,
-.pc-cell.other-school-period {
+.pc-cell.other-school-period,
+.daily-data-cell.attendance-locked-period,
+.pc-cell.attendance-locked-period {
     background: #d6d3d1 !important;
     opacity: 0.92;
     user-select: none;
 }
 
 .other-school-period .daily-input:disabled,
-.other-school-period .pc-edit-input:disabled {
+.other-school-period .pc-edit-input:disabled,
+.attendance-locked-period .daily-input:disabled,
+.attendance-locked-period .pc-edit-input:disabled {
     cursor: default;
     pointer-events: none;
     user-select: none;

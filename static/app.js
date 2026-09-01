@@ -652,27 +652,57 @@ function getAttendanceStarLockValue(studentId) {
     return null;
 }
 
+function isAttendanceStarLocked(studentId) {
+    return getAttendanceStarLockValue(studentId) != null;
+}
+
+function formatPercentCellText(value) {
+    if (value === 'E' || value === 'U') return value;
+    if (value === '-' || value == null || value === '') return '-';
+    return `${value}%`;
+}
+
+function isNumericPercentDisplay(value) {
+    return value !== '-' && value !== 'E' && value !== 'U' && value != null && value !== '';
+}
+
+function getStoredStarValueForInput(inputEl, studentId) {
+    const category = inputEl && inputEl.dataset ? inputEl.dataset.category : null;
+    const period = inputEl && inputEl.dataset ? inputEl.dataset.period : null;
+    if (!category || !['s', 't', 'a', 'r'].includes(category)) {
+        return null;
+    }
+    const isPeriodEntry = document.getElementById('period-entry-view')?.classList.contains('active');
+    if (isPeriodEntry) {
+        const fieldMap = {
+            s: 'safety_points',
+            t: 'teamwork_points',
+            a: 'accountability_points',
+            r: 'relationships_points'
+        };
+        return periodData[studentId]?.[fieldMap[category]] ?? null;
+    }
+    return dailyData[studentId]?.[period]?.[category] ?? null;
+}
+
 function applyAttendanceStarCellState(studentId) {
-    const lockValue = getAttendanceStarLockValue(studentId);
+    const locked = isAttendanceStarLocked(studentId);
     const studentIdStr = String(studentId);
     document.querySelectorAll(`.daily-input[data-student-id="${studentIdStr}"]`).forEach((inputEl) => {
         const category = inputEl.dataset.category;
         if (!category || !['s', 't', 'a', 'r'].includes(category)) {
             return;
         }
-        if (lockValue) {
-            inputEl.value = lockValue;
+        const cell = inputEl.closest('.daily-data-cell, .pc-cell');
+        if (cell) {
+            cell.classList.toggle('attendance-locked-period', locked);
+        }
+        if (locked) {
+            populateStarPointSelectOptions(inputEl, null);
             inputEl.disabled = true;
-            const period = inputEl.dataset.period;
-            if (!dailyData[studentId]) {
-                dailyData[studentId] = {};
-            }
-            if (!dailyData[studentId][period]) {
-                dailyData[studentId][period] = { s: null, t: null, a: null, r: null, info: '' };
-            }
-            dailyData[studentId][period][category] = lockValue;
         } else {
-            inputEl.disabled = !canEditStarPeriod(studentId, inputEl.dataset.period);
+            populateStarPointSelectOptions(inputEl, getStoredStarValueForInput(inputEl, studentId));
+            inputEl.disabled = isStudent() || !canEditStarPeriod(studentId, inputEl.dataset.period);
         }
     });
 }
@@ -1124,31 +1154,7 @@ function handleDailyAttendanceChange(e) {
     attendanceData[currentDate][studentId] = newStatus;
     markAttendanceDirty(studentId);
 
-    if (newStatus === 'excused' || newStatus === 'unexcused') {
-        const lockValue = newStatus === 'excused' ? 'E' : 'U';
-        if (!dailyData[studentId]) {
-            dailyData[studentId] = {};
-        }
-
-        STANDARD_PERIODS.forEach(period => {
-            if (!dailyData[studentId][period.time]) {
-                dailyData[studentId][period.time] = { s: null, t: null, a: null, r: null, info: '' };
-            }
-            dailyData[studentId][period.time].s = lockValue;
-            dailyData[studentId][period.time].t = lockValue;
-            dailyData[studentId][period.time].a = lockValue;
-            dailyData[studentId][period.time].r = lockValue;
-            markDailyFieldDirty(studentId, period.time, 's');
-            markDailyFieldDirty(studentId, period.time, 't');
-            markDailyFieldDirty(studentId, period.time, 'a');
-            markDailyFieldDirty(studentId, period.time, 'r');
-        });
-
-        applyAttendanceStarCellState(studentId);
-    } else {
-        applyAttendanceStarCellState(studentId);
-    }
-
+    applyAttendanceStarCellState(studentId);
     updateDailyPercentageRow();
 
     // Schedule an autosave of the current daily grid state
@@ -4023,6 +4029,17 @@ function updatePeriodPercentageRow() {
         ? filteredStudentsForPeriod 
         : allStudents;
     studentsToUpdate.forEach((student) => {
+        const lockValue = getAttendanceStarLockValue(student.id);
+        if (lockValue) {
+            ['s', 't', 'a', 'r'].forEach((catShort) => {
+                const cell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="${catShort}"]`);
+                if (cell) cell.textContent = lockValue;
+            });
+            const overallCell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="overall"]`);
+            if (overallCell) overallCell.textContent = '0%';
+            return;
+        }
+
         const data = periodData[student.id] || {};
         const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
         const categoryShort = ['s', 't', 'a', 'r'];
@@ -4246,6 +4263,9 @@ function renderStudentsGrid() {
             if (isOtherSchoolPeriod(student.id, currentPeriod || '')) {
                 cell.classList.add('other-school-period');
             }
+            if (isAttendanceStarLocked(student.id)) {
+                cell.classList.add('attendance-locked-period');
+            }
             
             const select = document.createElement('select');
             select.className = 'daily-input';
@@ -4254,9 +4274,9 @@ function renderStudentsGrid() {
             select.dataset.category = cat.short;
             select.dataset.studentName = student.name || '';
             
-            if (isStudent() || !canEditStarPeriod(student.id, currentPeriod || '')) select.disabled = true;
+            if (isStudent() || isAttendanceStarLocked(student.id) || !canEditStarPeriod(student.id, currentPeriod || '')) select.disabled = true;
             
-            populateStarPointSelectOptions(select, data[`${cat.full}_points`]);
+            populateStarPointSelectOptions(select, isAttendanceStarLocked(student.id) ? null : data[`${cat.full}_points`]);
             
             select.addEventListener('change', (e) => {
                 const val = parseStarInputValue(e.target.value);
@@ -4349,6 +4369,7 @@ function renderStudentsGrid() {
     
     // Calculate and display percentage for each student
     studentsToDisplay.forEach((student, studentIndex) => {
+        const lockValue = getAttendanceStarLockValue(student.id);
         const data = periodData[student.id] || {};
         const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
         const categoryShort = ['s', 't', 'a', 'r'];
@@ -4379,21 +4400,25 @@ function renderStudentsGrid() {
             cell.style.fontSize = '11px';
             cell.style.background = '#f8f9fa';
             
-            const value = data[catFull];
-            const points = starValueForPercentage(value);
-            if (points !== null) {
-                const percentage = ((points / 2) * 100).toFixed(0);
-                cell.textContent = `${percentage}%`;
-                totalPoints += points;
-                countedCategories++;
-                
-                // Color code based on category
-                if (catShort === 's') cell.style.color = '#B91C1C';
-                else if (catShort === 't') cell.style.color = '#1E40AF';
-                else if (catShort === 'a') cell.style.color = '#047857';
-                else if (catShort === 'r') cell.style.color = '#B45309';
+            if (lockValue) {
+                cell.textContent = lockValue;
             } else {
-                cell.textContent = '-';
+                const value = data[catFull];
+                const points = starValueForPercentage(value);
+                if (points !== null) {
+                    const percentage = ((points / 2) * 100).toFixed(0);
+                    cell.textContent = `${percentage}%`;
+                    totalPoints += points;
+                    countedCategories++;
+                    
+                    // Color code based on category
+                    if (catShort === 's') cell.style.color = '#B91C1C';
+                    else if (catShort === 't') cell.style.color = '#1E40AF';
+                    else if (catShort === 'a') cell.style.color = '#047857';
+                    else if (catShort === 'r') cell.style.color = '#B45309';
+                } else {
+                    cell.textContent = '-';
+                }
             }
             
             grid.appendChild(cell);
@@ -4414,7 +4439,9 @@ function renderStudentsGrid() {
         overallCell.style.background = 'var(--bg-elevated)';
         overallCell.style.color = 'var(--accent)';
         
-        if (countedCategories > 0) {
+        if (lockValue) {
+            overallCell.textContent = '0%';
+        } else if (countedCategories > 0) {
             const maxPossible = countedCategories * 2;
             const overallPercentage = ((totalPoints / maxPossible) * 100).toFixed(0);
             overallCell.textContent = `${overallPercentage}%`;
@@ -4435,6 +4462,7 @@ function renderStudentsGrid() {
     
     // Update "I" box highlights for all students on initial load
     studentsToDisplay.forEach(student => {
+        applyAttendanceStarCellState(student.id);
         updateInfoButtonHighlight(student.id, currentPeriod);
     });
 
@@ -4809,17 +4837,9 @@ async function loadDailyData() {
 }
 
 function calculateStudentPercentages(studentId) {
-    // Check attendance status
-    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-    
-    // If excused, exclude from calculations (return '-')
-    if (attendance === 'excused') {
-        return { s: '-', t: '-', a: '-', r: '-', overall: '-' };
-    }
-    
-    // If unexcused, return 0% for all
-    if (attendance === 'unexcused') {
-        return { s: '0', t: '0', a: '0', r: '0', overall: '0' };
+    const lockValue = getAttendanceStarLockValue(studentId);
+    if (lockValue) {
+        return { s: lockValue, t: lockValue, a: lockValue, r: lockValue, overall: '0' };
     }
     
     // Normal calculation for present
@@ -5131,6 +5151,9 @@ function renderDailyGrid() {
                 if (isOtherSchoolPeriod(student.id, period.time)) {
                     cell.classList.add('other-school-period');
                 }
+                if (isAttendanceStarLocked(student.id)) {
+                    cell.classList.add('attendance-locked-period');
+                }
                 
                 const select = document.createElement('select');
                 select.className = 'daily-input';
@@ -5140,11 +5163,11 @@ function renderDailyGrid() {
                 select.dataset.studentName = student.name || '';
                 
                 // Disable for students, attendance lock, or unowned transition periods
-                if (isStudent() || getAttendanceStarLockValue(student.id) || !canEditStarPeriod(student.id, period.time)) {
+                if (isStudent() || isAttendanceStarLocked(student.id) || !canEditStarPeriod(student.id, period.time)) {
                     select.disabled = true;
                 }
                 
-                populateStarPointSelectOptions(select, studentData[category]);
+                populateStarPointSelectOptions(select, isAttendanceStarLocked(student.id) ? null : studentData[category]);
                 
                 cell.appendChild(select);
                 body.appendChild(cell);
@@ -5248,11 +5271,11 @@ function renderDailyGrid() {
             percentCell.style.fontSize = '11px';
             percentCell.style.background = '#f8f9fa';
             
-            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
+            const percentText = formatPercentCellText(percentages[category]);
             percentCell.textContent = percentText;
             
             // Color code based on category
-            if (percentages[category] !== '-') {
+            if (isNumericPercentDisplay(percentages[category])) {
                 if (category === 's') percentCell.style.color = '#B91C1C';
                 else if (category === 't') percentCell.style.color = '#1E40AF';
                 else if (category === 'a') percentCell.style.color = '#047857';
@@ -5277,8 +5300,7 @@ function renderDailyGrid() {
         overallPercentCell.style.background = 'var(--bg-elevated)';
         overallPercentCell.style.color = 'var(--accent)';
         
-        const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
-        overallPercentCell.textContent = overallText;
+        overallPercentCell.textContent = formatPercentCellText(percentages.overall);
         
         body.appendChild(overallPercentCell);
         
@@ -5328,11 +5350,9 @@ function updateDailyPercentageRow() {
         
         // Update the cell text
         if (category === 'overall') {
-            const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
-            cell.textContent = overallText;
+            cell.textContent = formatPercentCellText(percentages.overall);
         } else {
-            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
-            cell.textContent = percentText;
+            cell.textContent = formatPercentCellText(percentages[category]);
         }
     });
 }
@@ -5344,7 +5364,9 @@ function updateInfoButtonHighlight(studentId, period) {
     
     let hasZero = false;
     
-    if (isDailyEntry) {
+    if (isAttendanceStarLocked(studentId)) {
+        hasZero = false;
+    } else if (isDailyEntry) {
         // Check dailyData structure: dailyData[studentId][period] with s, t, a, r
         const studentData = dailyData[studentId];
         if (studentData && studentData[period]) {
@@ -9162,8 +9184,9 @@ function renderPointCardAttendanceBadge(record) {
 
 function formatPointCardStarCell(record, value) {
     const attendance = getPointCardAttendanceStatus(record);
-    if (attendance === 'excused') return 'E';
-    if (attendance === 'unexcused') return 'U';
+    if (attendance === 'excused' || attendance === 'unexcused') {
+        return '-';
+    }
     const normalized = normalizeStarValue(value);
     return normalized === null ? '-' : normalized;
 }
@@ -9201,9 +9224,11 @@ function renderPointCardGrid(record, studentId) {
     let rPercent;
     let overallPercent;
     if (attendance === 'excused') {
-        sPercent = tPercent = aPercent = rPercent = overallPercent = '-';
+        sPercent = tPercent = aPercent = rPercent = 'E';
+        overallPercent = '0';
     } else if (attendance === 'unexcused') {
-        sPercent = tPercent = aPercent = rPercent = overallPercent = '0';
+        sPercent = tPercent = aPercent = rPercent = 'U';
+        overallPercent = '0';
     } else {
         sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
         tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
@@ -9242,26 +9267,27 @@ function renderPointCardGrid(record, studentId) {
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
 
         const otherClass = (sid && isOtherSchoolPeriod(sid, period.time_range)) ? ' other-school-period' : '';
+        const attendanceLockedClass = (attendance === 'excused' || attendance === 'unexcused') ? ' attendance-locked-period' : '';
         const locationText = period.location || (otherClass ? 'Other school' : '');
 
         html += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
             <div class="pc-cell pc-location-cell${otherClass}">${locationText}</div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
             <div class="${infoCellClass}${otherClass}">${infoHtml}</div>
         `;
     });
 
     html += `
             <div class="pc-cell pc-percent-label" style="grid-column: span 2;">Percent:</div>
-            <div class="pc-cell pc-percent-cell" style="color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-overall">${overallPercent !== '-' ? overallPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B91C1C;">${formatPercentCellText(sPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #1E40AF;">${formatPercentCellText(tPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #047857;">${formatPercentCellText(aPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B45309;">${formatPercentCellText(rPercent)}</div>
+            <div class="pc-cell pc-percent-overall">${formatPercentCellText(overallPercent)}</div>
         </div>
     `;
 
@@ -9596,10 +9622,9 @@ function showEditPointCardModal(record, studentId, studentName, date) {
 
     const attendance = getPointCardAttendanceStatus(record);
     const starDisabled = attendance === 'excused' || attendance === 'unexcused';
-    const lockedStarValue = attendance === 'excused' ? 'E' : (attendance === 'unexcused' ? 'U' : null);
 
     const buildSelectHtml = (index, category, currentValue, timeRange) => {
-        const displayValue = lockedStarValue || currentValue;
+        const displayValue = starDisabled ? null : currentValue;
         const normalized = normalizeStarValue(displayValue);
         const opts = ['', ...STAR_POINT_OPTION_VALUES].map(v => {
             const label = v === '' ? '-' : v;
@@ -9616,21 +9641,22 @@ function showEditPointCardModal(record, studentId, studentName, date) {
         const parsedInfo = parsePointCardInfoData(period.info || '');
         const hasInfo = !!(parsedInfo && hasInfoData(parsedInfo));
         const otherClass = isOtherSchoolPeriod(studentId, period.time_range) ? ' other-school-period' : '';
+        const attendanceLockedClass = starDisabled ? ' attendance-locked-period' : '';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
         const infoLabel = canEditStarPeriod(studentId, period.time_range) ? (hasInfo ? 'Edit' : 'Add') : (hasInfo ? 'View' : 'Info');
         gridRows += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
             <div class="pc-cell pc-location-cell${otherClass}">${period.location || (otherClass ? 'Other school' : '')}</div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="s" style="padding: 2px; justify-content: center;">
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'safety', period.safety_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="t" style="padding: 2px; justify-content: center;">
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="t" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'teamwork', period.teamwork_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="a" style="padding: 2px; justify-content: center;">
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="a" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'accountability', period.accountability_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell${otherClass}" data-category="r" style="padding: 2px; justify-content: center;">
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="r" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'relationships', period.relationships_points, period.time_range)}
             </div>
             <div class="${infoCellClass}${otherClass}" style="padding: 2px; justify-content: center;">
