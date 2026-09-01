@@ -3126,7 +3126,9 @@ table tbody tr:hover {
 .schedule-table tr.schedule-row-other-school input {
     background: #d6d3d1;
     color: #57534e;
-    cursor: not-allowed;
+    cursor: default;
+    pointer-events: none;
+    user-select: none;
 }
 
 .schedule-table tr.schedule-row-split-marker td {
@@ -3155,11 +3157,18 @@ table tbody tr:hover {
 .pc-cell.other-school-period {
     background: #d6d3d1 !important;
     opacity: 0.92;
+    user-select: none;
+}
+
+.other-school-period .daily-input:disabled,
+.other-school-period .pc-edit-input:disabled {
+    cursor: default;
+    pointer-events: none;
+    user-select: none;
 }
 
 .daily-input:disabled,
 .pc-edit-input:disabled {
-    cursor: not-allowed;
     opacity: 0.85;
 }
 
