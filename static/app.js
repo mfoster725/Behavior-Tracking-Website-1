@@ -7587,10 +7587,14 @@ async function loadPointCardData(studentIdOverride) {
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             const formattedDate = date.toLocaleDateString('en-US', options);
 
+            const attendanceStatus = getPointCardAttendanceStatus(record);
             html += `
-                <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}">
+                <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}" data-attendance-status="${attendanceStatus}">
                     <div class="point-card-day-header">
-                        <h4>${formattedDate}</h4>
+                        <div class="point-card-day-header-title">
+                            <h4>${formattedDate}</h4>
+                            ${renderPointCardAttendanceBadge(record)}
+                        </div>
                         ${canEdit() ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
                     </div>
                     <div class="point-card-day-content">
@@ -7841,7 +7845,11 @@ function applyPointCardFilters() {
             });
         }
 
-        const matchesSearch = !query || dateMatches || periodMatches;
+        const attendanceStatus = getPointCardAttendanceStatus(record);
+        const attendanceLabel = formatPointCardAttendanceLabel(attendanceStatus).toLowerCase();
+        const attendanceMatches = query && (attendanceStatus.includes(query) || attendanceLabel.includes(query));
+
+        const matchesSearch = !query || dateMatches || periodMatches || attendanceMatches;
         const visible = matchesDateFilters && matchesSearch;
 
         if (visible) {
@@ -7942,8 +7950,39 @@ function clearHighlights(dayElement) {
     });
 }
 
+function getPointCardAttendanceStatus(record) {
+    if (!record) return 'present';
+    const status = record.attendance_status;
+    if (status === 'excused' || status === 'unexcused' || status === 'present') {
+        return status;
+    }
+    if (record.present === false) return 'unexcused';
+    return 'present';
+}
+
+function formatPointCardAttendanceLabel(status) {
+    const labels = { present: 'Present', excused: 'Excused', unexcused: 'Unexcused' };
+    return labels[status] || 'Present';
+}
+
+function renderPointCardAttendanceBadge(record) {
+    const status = getPointCardAttendanceStatus(record);
+    if (status === 'present') return '';
+    const label = formatPointCardAttendanceLabel(status);
+    return `<span class="point-card-attendance-badge point-card-attendance-badge--${status}">${label}</span>`;
+}
+
+function formatPointCardStarCell(record, value) {
+    const attendance = getPointCardAttendanceStatus(record);
+    if (attendance === 'excused') return '-';
+    if (value !== null && value !== undefined) return value;
+    if (attendance === 'unexcused') return '0';
+    return '-';
+}
+
 function renderPointCardGrid(record) {
     const periods = expandPointCardPeriods(record && record.periods);
+    const attendance = getPointCardAttendanceStatus(record);
 
     let totals = { s: 0, t: 0, a: 0, r: 0 };
     let counts = { s: 0, t: 0, a: 0, r: 0 };
@@ -7963,13 +8002,24 @@ function renderPointCardGrid(record) {
         }
     });
 
-    const sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
-    const tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
-    const aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
-    const rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
-    const totalPoints = totals.s + totals.t + totals.a + totals.r;
-    const totalCounts = counts.s + counts.t + counts.a + counts.r;
-    const overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
+    let sPercent;
+    let tPercent;
+    let aPercent;
+    let rPercent;
+    let overallPercent;
+    if (attendance === 'excused') {
+        sPercent = tPercent = aPercent = rPercent = overallPercent = '-';
+    } else if (attendance === 'unexcused') {
+        sPercent = tPercent = aPercent = rPercent = overallPercent = '0';
+    } else {
+        sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
+        tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
+        aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
+        rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
+        const totalPoints = totals.s + totals.t + totals.a + totals.r;
+        const totalCounts = counts.s + counts.t + counts.a + counts.r;
+        overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
+    }
 
     let html = `
         <div class="pc-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 44px 44px 44px 44px 56px;">
@@ -8001,10 +8051,10 @@ function renderPointCardGrid(record) {
         html += `
             <div class="pc-cell pc-time-cell">${period.time_range}</div>
             <div class="pc-cell pc-location-cell">${period.location}</div>
-            <div class="pc-cell pc-data-cell" data-category="s">${period.safety_points !== null && period.safety_points !== undefined ? period.safety_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="t">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="a">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="r">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</div>
+            <div class="pc-cell pc-data-cell" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
+            <div class="pc-cell pc-data-cell" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
+            <div class="pc-cell pc-data-cell" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
+            <div class="pc-cell pc-data-cell" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
             <div class="${infoCellClass}">${infoHtml}</div>
         `;
     });
@@ -8102,6 +8152,10 @@ function renderAggregateMetricRow(label, currentValue, previousValue, options = 
 }
 
 function getPointCardAveragePercent(record) {
+    const attendance = getPointCardAttendanceStatus(record);
+    if (attendance === 'excused') return null;
+    if (attendance === 'unexcused') return 0;
+
     const periods = Array.isArray(record?.periods) ? record.periods : [];
     let totalPoints = 0;
     let totalPossiblePoints = 0;
@@ -8143,10 +8197,16 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         ? formatPercentDelta(currentPercent, previousPercent)
         : '';
 
+    const attendance = getPointCardAttendanceStatus(record);
+    const attendanceNote = attendance !== 'present'
+        ? `<p class="point-card-aggregate-attendance point-card-aggregate-attendance--${attendance}">Attendance: ${formatPointCardAttendanceLabel(attendance)}</p>`
+        : '';
+
     if (!infoRows.length) {
         return `
             <div class="point-card-aggregate-card">
                 <h5>Info Insights</h5>
+                ${attendanceNote}
                 ${averagePercentRow}
                 <p class="point-card-aggregate-empty">No info data for this day.</p>
             </div>
@@ -8258,6 +8318,7 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
     return `
         <div class="point-card-aggregate-card">
             <h5>Info Insights</h5>
+            ${attendanceNote}
             ${averagePercentRow}
             ${renderAggregateMetricRow('Reminders', totals.reminders, previousTotals.reminders, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Resets', totals.reset, previousTotals.reset, { higherIsBetter: false })}

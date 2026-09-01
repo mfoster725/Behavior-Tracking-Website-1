@@ -3918,6 +3918,49 @@ table tbody tr:hover {
     border-bottom: 1px solid var(--border);
 }
 
+.point-card-day-header-title {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.point-card-attendance-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.point-card-attendance-badge--excused {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.point-card-attendance-badge--unexcused {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.point-card-aggregate-attendance {
+    margin: 0 0 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.point-card-aggregate-attendance--excused {
+    color: #1d4ed8;
+}
+
+.point-card-aggregate-attendance--unexcused {
+    color: #b91c1c;
+}
+
 .point-card-day-header h4 {
     margin: 0;
     color: var(--text-primary);
