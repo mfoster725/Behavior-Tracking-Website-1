@@ -2228,24 +2228,25 @@ def ensure_curriculum_schema():
             print(f"Failed to ensure curriculum schema: {e}")
 
 
-# Delete point cards and paychecks dated before this day (Aug 30 and earlier when cutoff is Aug 31).
-SCHOOL_YEAR_DATA_CUTOFF = date(2026, 8, 31)
-
-
 def _chunked_ids(ids, size=500):
     for index in range(0, len(ids), size):
         yield ids[index:index + size]
 
 
-def run_pre_cutoff_data_cleanup(cutoff_date=None, dry_run=False):
+def run_pre_cutoff_data_cleanup(cutoff_date, dry_run=False):
     """
-    Remove point cards (daily records) and paychecks before the school-year cutoff.
+    One-off admin utility: remove point cards (daily records) and paychecks before a cutoff date.
     Also clears related infractions, frenzy events, missing-point notices,
     curriculum assignments, and reverses deposited paycheck balances.
+
+    cutoff_date is required (date or YYYY-MM-DD string). Records on the cutoff date are kept.
     """
-    cutoff = cutoff_date or SCHOOL_YEAR_DATA_CUTOFF
-    if isinstance(cutoff, str):
-        cutoff = datetime.strptime(cutoff, '%Y-%m-%d').date()
+    if cutoff_date is None:
+        raise ValueError('cutoff_date is required')
+    if isinstance(cutoff_date, str):
+        cutoff = datetime.strptime(cutoff_date, '%Y-%m-%d').date()
+    else:
+        cutoff = cutoff_date
 
     stats = {
         'cutoff': cutoff.isoformat(),
@@ -2333,24 +2334,6 @@ def run_pre_cutoff_data_cleanup(cutoff_date=None, dry_run=False):
     return stats
 
 
-def ensure_pre_cutoff_data_cleaned():
-    """One-time idempotent cleanup invoked during app startup."""
-    cutoff = SCHOOL_YEAR_DATA_CUTOFF
-    has_old_records = (
-        DailyRecord.query.filter(DailyRecord.date < cutoff).with_entities(DailyRecord.id).limit(1).first()
-        is not None
-    )
-    has_old_paychecks = (
-        Paycheck.query.filter(Paycheck.pay_period_end < cutoff).with_entities(Paycheck.id).limit(1).first()
-        is not None
-    )
-    if not has_old_records and not has_old_paychecks:
-        return None
-    stats = run_pre_cutoff_data_cleanup(cutoff)
-    print(f"Removed pre-{cutoff.isoformat()} point cards and paychecks: {stats}", flush=True)
-    return stats
-
-
 # Initialize database tables after all models are defined
 def init_db():
     """Initialize database tables if they don't exist"""
@@ -2382,11 +2365,6 @@ def init_db():
             except Exception as seed_err:
                 print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
             print("Database tables created/verified", flush=True)
-
-            try:
-                ensure_pre_cutoff_data_cleaned()
-            except Exception as cleanup_err:
-                print(f"Note: pre-cutoff data cleanup skipped/failed: {cleanup_err}", flush=True)
             
             # Ensure OutsideStaffStudent table exists and run migrations
             try:
@@ -13071,11 +13049,11 @@ def auto_submit_point_cards_cron():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/admin/delete-pre-aug31-data-cron', methods=['GET', 'POST'])
-def delete_pre_aug31_data_cron():
+@app.route('/api/admin/delete-pre-date-data-cron', methods=['GET', 'POST'])
+def delete_pre_date_data_cron():
     """
-    Delete point cards and paychecks dated before the school-year cutoff.
-    Secured by CRON_SECRET. Optional ?date=YYYY-MM-DD and ?dry_run=1.
+    One-off admin utility: delete point cards and paychecks before an explicit cutoff date.
+    Secured by CRON_SECRET. Requires ?date=YYYY-MM-DD (or JSON date). Optional ?dry_run=1.
     """
     secret = os.environ.get('CRON_SECRET')
     if not secret:
@@ -13095,6 +13073,9 @@ def delete_pre_aug31_data_cron():
     elif request.method == 'GET':
         cutoff_date = request.args.get('date')
         dry_run = (request.args.get('dry_run') or '').lower() in ('1', 'true', 'yes')
+
+    if not cutoff_date:
+        return jsonify({'error': 'date is required (YYYY-MM-DD cutoff; records before this date are deleted)'}), 400
 
     try:
         stats = run_pre_cutoff_data_cleanup(cutoff_date=cutoff_date, dry_run=dry_run)
