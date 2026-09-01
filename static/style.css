@@ -1307,7 +1307,8 @@ table tbody tr:hover {
     display: none;
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
+    right: auto;
     z-index: 30;
     min-width: 190px;
     background: #fff;
@@ -1432,7 +1433,8 @@ table tbody tr:hover {
     display: none;
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
+    right: auto;
     z-index: 30;
     min-width: 160px;
     background: #fff;
@@ -1640,6 +1642,26 @@ table tbody tr:hover {
 }
 
 .plan-kebab-menu.open {
+    z-index: 100;
+}
+
+/* Keep schedule column menus visible above frozen columns and grid overflow. */
+.daily-header-location.daily-schedule-header-with-menu:has(.schedule-header-kebab-menu.open),
+.daily-header-period.daily-period-header-with-menu:has(.schedule-header-kebab-menu.open) {
+    z-index: 20;
+    overflow: visible;
+}
+
+.daily-grid--freeze-cols .daily-header-location.daily-schedule-header-with-menu:has(.schedule-header-kebab-menu.open),
+.daily-grid--freeze-cols .daily-header-period.daily-period-header-with-menu:has(.schedule-header-kebab-menu.open) {
+    z-index: 13;
+}
+
+.schedule-header-kebab-wrap:has(.schedule-header-kebab-menu.open) {
+    z-index: 1;
+}
+
+.schedule-header-kebab-menu.open {
     z-index: 100;
 }
 
