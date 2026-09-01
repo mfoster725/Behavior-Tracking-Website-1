@@ -1683,13 +1683,32 @@ function buildPointCardStudentColumnsTemplate(studentCount, spacerWidth, student
     return parts.join(' ');
 }
 
+function measureStudentScheduleHeaderWidth() {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-student-schedule-header';
+    const label = document.createElement('span');
+    label.className = 'daily-student-schedule-header-label';
+    label.textContent = 'SCHEDULE';
+    cell.appendChild(label);
+    if (canEdit()) {
+        const kebabWrap = document.createElement('div');
+        kebabWrap.className = 'student-schedule-header-kebab-wrap';
+        const kebabBtn = document.createElement('button');
+        kebabBtn.type = 'button';
+        kebabBtn.className = 'student-schedule-header-kebab-btn';
+        kebabBtn.textContent = '⋮';
+        kebabWrap.appendChild(kebabBtn);
+        cell.appendChild(kebabWrap);
+    }
+    cell.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(cell);
+    const width = cell.offsetWidth;
+    document.body.removeChild(cell);
+    return Math.ceil(width);
+}
+
 function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
-    const measureOpts = {
-        ...getScheduleMeasureOptions(),
-        measureClass: 'daily-student-schedule-cell star-category-header',
-        minWidth: 78,
-    };
-    const texts = ['SCHEDULE'];
+    const texts = [];
     (students || []).forEach((student) => {
         (timePeriods || []).forEach((period) => {
             const time = typeof period === 'string' ? period : period.time;
@@ -1697,7 +1716,15 @@ function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
             if (text) texts.push(text);
         });
     });
-    return measureDailyScheduleColumnWidth(texts, measureOpts);
+    const headerWidth = measureStudentScheduleHeaderWidth();
+    const dataWidth = texts.length
+        ? measureDailyScheduleColumnWidth(texts, {
+            ...getScheduleMeasureOptions(),
+            measureClass: 'daily-student-schedule-cell',
+            minWidth: 0,
+        })
+        : 0;
+    return Math.max(headerWidth, dataWidth);
 }
 
 function measurePointCardOwnScheduleColumnWidth(texts) {

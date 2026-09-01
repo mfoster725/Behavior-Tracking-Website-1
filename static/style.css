@@ -1357,7 +1357,7 @@ table tbody tr:hover {
 }
 
 .daily-student-schedule-cell {
-    padding: 5px 8px;
+    padding: 5px 4px;
     background: transparent;
     color: var(--text-primary);
     font-size: 10px;
@@ -1388,25 +1388,27 @@ table tbody tr:hover {
     letter-spacing: 0.2px;
     background: #f8f9fa !important;
     color: var(--text-secondary) !important;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 2px;
-    padding: 4px 14px 4px 4px !important;
+    justify-content: flex-start;
+    gap: 1px;
+    padding: 4px 3px !important;
     position: relative;
     min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .daily-student-schedule-header-label {
-    flex: 1;
-    min-width: 0;
-    text-align: center;
+    flex: 0 0 auto;
+    text-align: left;
+    white-space: nowrap;
 }
 
 .student-schedule-header-kebab-wrap {
-    position: absolute;
-    top: 2px;
-    right: 0;
+    position: relative;
+    flex: 0 0 auto;
+    line-height: 1;
 }
 
 .student-schedule-header-kebab-btn {
