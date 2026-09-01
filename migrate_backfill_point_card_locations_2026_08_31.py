@@ -5,11 +5,15 @@ schedule for all daily records on 2026-08-31.
 Uses the same location resolution as the app (_student_location_for_period).
 
 Run from project root:
-  python migrate_backfill_point_card_locations_2026_08_31.py [--dry-run]
-  python migrate_backfill_point_card_locations_2026_08_31.py --db PATH [--dry-run]
 
-PostgreSQL (production): set DATABASE_URL, then:
-  python migrate_backfill_point_card_locations_2026_08_31.py [--dry-run]
+  Production (Render / Aiven Postgres) — set DATABASE_URL in this terminal first:
+    $env:USE_POSTGRES = "1"
+    $env:DATABASE_URL = "postgresql://USER:PASSWORD@HOST:PORT/DB?sslmode=require"
+    python migrate_backfill_point_card_locations_2026_08_31.py --dry-run
+    python migrate_backfill_point_card_locations_2026_08_31.py
+
+  Local SQLite only (optional):
+    python migrate_backfill_point_card_locations_2026_08_31.py --db PATH [--dry-run]
 
 Remove --dry-run to apply changes.
 """
@@ -17,41 +21,56 @@ import argparse
 import os
 import sys
 from datetime import date
+from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from migrate_frenzy_severity import default_sqlite_behavior_tracking_path
-from migrate_add_student_id_index import normalize_database_url
 
 TARGET_DATE = date(2026, 8, 31)
 
 
-def configure_database(app, db_path=None):
-    if db_path:
-        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path.replace(os.sep, '/')}"
-        print(f"Using SQLite: {db_path}")
-        return
+def mask_database_target(uri):
+    if not uri:
+        return "(unknown)"
+    try:
+        parsed = urlparse(uri.replace("postgresql+psycopg://", "postgresql://"))
+        host = parsed.hostname or "unknown-host"
+        port = f":{parsed.port}" if parsed.port else ""
+        db_name = (parsed.path or "/").lstrip("/") or "defaultdb"
+        return f"{host}{port}/{db_name}"
+    except Exception:
+        return "(postgres)"
 
-    database_url = os.environ.get("DATABASE_URL")
-    if database_url:
-        app.config["SQLALCHEMY_DATABASE_URI"] = normalize_database_url(database_url)
-        print("Using DATABASE_URL (PostgreSQL)")
-        return
+
+def prepare_environment(args):
+    if args.db:
+        os.environ["USE_LOCAL_DB"] = "1"
+        os.environ.pop("USE_POSTGRES", None)
+        return "sqlite-file", os.path.abspath(args.db)
+
+    if os.environ.get("DATABASE_URL"):
+        os.environ["USE_POSTGRES"] = "1"
+        return "postgres", None
 
     sqlite_path = default_sqlite_behavior_tracking_path()
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path.replace(os.sep, '/')}"
-    print(f"Using SQLite: {sqlite_path}")
+    print(
+        "WARNING: DATABASE_URL is not set in this terminal.\n"
+        "The script will use LOCAL SQLite only (not your Render website):\n"
+        f"  {sqlite_path}\n"
+        "To run against production, copy DATABASE_URL from Render/Aiven into this\n"
+        "terminal, set USE_POSTGRES=1, then run again.\n"
+    )
+    return "local-sqlite", sqlite_path
 
 
-def run_backfill(*, dry_run=False):
+def run_backfill(app, db, *, dry_run=False):
     from app import (
         DailyRecord,
         PeriodRecord,
         Student,
         _student_location_for_period,
         _student_schedule_rows_by_student,
-        app,
-        db,
     )
 
     with app.app_context():
@@ -98,8 +117,8 @@ def run_backfill(*, dry_run=False):
                     continue
                 period_updates += 1
                 students_touched.add(student_id)
-                student_name = (students_by_id.get(student_id).name
-                                if students_by_id.get(student_id) else f"student #{student_id}")
+                student = students_by_id.get(student_id)
+                student_name = student.name if student else f"student #{student_id}"
                 print(
                     f"  {student_name} | {time_range}: "
                     f"{old_location or '(empty)'} -> {new_location or '(empty)'}"
@@ -142,10 +161,20 @@ def main():
     )
     args = parser.parse_args()
 
-    from app import app
+    mode, db_path = prepare_environment(args)
 
-    configure_database(app, args.db)
-    run_backfill(dry_run=args.dry_run)
+    from app import app, db
+
+    if mode == "sqlite-file":
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path.replace(os.sep, '/')}"
+        db.engine.dispose()
+        print(f"Using SQLite file: {db_path}")
+    elif mode == "postgres":
+        print(f"Using PostgreSQL: {mask_database_target(app.config.get('SQLALCHEMY_DATABASE_URI', ''))}")
+    else:
+        print(f"Using local SQLite: {db_path}")
+
+    run_backfill(app, db, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
