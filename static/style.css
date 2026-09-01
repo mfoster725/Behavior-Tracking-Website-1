@@ -884,6 +884,10 @@ table tbody tr:hover {
     font-size: 0.8125rem;
 }
 
+.daily-search-actions #save-daily-status {
+    margin-left: -0.35rem;
+}
+
 .save-status {
     display: inline-flex;
     align-items: center;

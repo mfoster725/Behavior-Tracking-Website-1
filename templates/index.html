@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=kebabmenu1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=saveicon2">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <!-- jsPDF library for PDF generation -->
@@ -206,6 +206,7 @@
                                     <button type="button" class="star-entry-mode-btn" data-mode="student" id="star-entry-mode-student" data-tooltip="After finishing a STAR row, stay on this student and move to their next period.">Student Entry</button>
                                     <button type="button" class="star-entry-mode-btn" data-mode="period" id="star-entry-mode-period" data-tooltip="After finishing a STAR row, stay on this period and move to the next student.">Period Entry</button>
                                 </div>
+                                <button type="button" id="save-daily-all-btn" class="btn-primary">Save All Data</button>
                                 <button type="button" class="point-card-save-status save-status" id="save-daily-status" data-state="saved" aria-live="polite" aria-label="Saved" title="Saved">
                                     <span class="save-status-icon save-status-icon-saved" aria-hidden="true">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 18a4.5 4.5 0 0 1-.4-9 6.5 6.5 0 0 1 12.6 1.8A4 4 0 0 1 19.5 18H7.5z"/><path d="m9.8 13.2 1.7 1.7 3.5-3.6"/></svg>
@@ -218,7 +219,6 @@
                                     </span>
                                     <span class="save-status-label">Saved</span>
                                 </button>
-                                <button type="button" id="save-daily-all-btn" class="btn-primary">Save All Data</button>
                             </div>
                         </div>
                     </div>
