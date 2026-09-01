@@ -499,8 +499,7 @@ function starValueForPercentage(value) {
 }
 
 function isStarValueZero(value) {
-    const normalized = normalizeStarValue(value);
-    return normalized === '0' || normalized === 'U';
+    return normalizeStarValue(value) === '0';
 }
 
 function starValuesEquivalent(a, b) {
