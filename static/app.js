@@ -918,15 +918,17 @@ function handleDailyAttendanceChange(e) {
 }
 
 function isStarPointSelect(el) {
-    return !!(el && el.tagName === 'SELECT' && el.classList && el.classList.contains('daily-input'));
+    return !!(el && el.tagName === 'SELECT' && el.classList && (
+        el.classList.contains('daily-input') || el.classList.contains('pc-edit-input')
+    ));
 }
 
 function getStarInputsInSameGrid(currentInput) {
     const grid = currentInput && currentInput.closest
-        ? currentInput.closest('#daily-grid, #students-grid')
+        ? currentInput.closest('#daily-grid, #students-grid, .point-card-edit-grid')
         : null;
     const root = grid || document;
-    return Array.from(root.querySelectorAll('select.daily-input'));
+    return Array.from(root.querySelectorAll('select.daily-input, select.pc-edit-input'));
 }
 
 function isCoarseTouchUi() {
@@ -949,7 +951,9 @@ function shouldKeepStarPicker(e) {
 }
 
 function suppressStarSelectPicker(e) {
-    const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+    const select = e.target && e.target.closest
+        ? e.target.closest('select.daily-input, select.pc-edit-input')
+        : null;
     if (!isStarPointSelect(select) || select.disabled) return;
     if (e.type === 'pointerdown') {
         window.__starLastPointerWasTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
@@ -969,7 +973,9 @@ function bindStarSelectEntryGuards() {
     document.addEventListener('pointerdown', suppressStarSelectPicker, true);
     document.addEventListener('mousedown', suppressStarSelectPicker, true);
     document.addEventListener('touchstart', (e) => {
-        const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+        const select = e.target && e.target.closest
+            ? e.target.closest('select.daily-input, select.pc-edit-input')
+            : null;
         if (isStarPointSelect(select)) {
             window.__starLastPointerWasTouch = true;
             setTimeout(() => {
@@ -980,6 +986,11 @@ function bindStarSelectEntryGuards() {
     document.addEventListener('pointerup', (e) => {
         if (e.pointerType === 'mouse') {
             window.__starLastPointerWasTouch = false;
+        }
+    }, true);
+    document.addEventListener('keydown', (e) => {
+        if (isStarPointSelect(e.target)) {
+            handleDailyInputKeydown(e);
         }
     }, true);
     document.addEventListener('keyup', (e) => {
@@ -1413,6 +1424,10 @@ function getDailyFrozenColumnsWidth(grid) {
 
 function focusDailyStarInput(input) {
     if (!input || input.disabled) return false;
+    if (input.closest('.point-card-edit-grid')) {
+        input.focus();
+        return true;
+    }
     const grid = input.closest('#daily-grid, #students-grid');
     if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) {
         input.focus();
@@ -4470,6 +4485,15 @@ function moveToNextInput(currentInput) {
 }
 
 function moveToPreviousInput(currentInput) {
+    if (currentInput.classList.contains('pc-edit-input')) {
+        const allInputs = getStarInputsInSameGrid(currentInput);
+        const currentIndex = allInputs.indexOf(currentInput);
+        if (currentIndex > 0) {
+            focusDailyStarInput(allInputs[currentIndex - 1]);
+        }
+        return;
+    }
+
     const category = currentInput.dataset.category;
     const studentId = parseInt(currentInput.dataset.studentId, 10);
     const period = getPeriodForStarInput(currentInput);
@@ -8506,6 +8530,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
         });
     }
 
+    bindStarSelectEntryGuards();
     initializeEditPointCardDirtyTracking(modal);
 }
 
@@ -8641,6 +8666,11 @@ function initializeEditPointCardDirtyTracking(modal) {
             updateEditPointCardInputDirtyState(input);
             syncEditingPointCardRecordField(input);
             refreshEditPointCardInfoAggregate();
+            if (input.tagName === 'SELECT' && input.classList.contains('pc-edit-input')) {
+                if (!e.isBackspaceClear && !e.fromStarKey) {
+                    moveToNextInput(input);
+                }
+            }
         };
         modal.addEventListener('input', onDirtyChange);
         modal.addEventListener('change', onDirtyChange);
