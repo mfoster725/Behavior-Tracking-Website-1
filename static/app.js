@@ -588,7 +588,7 @@ function expandPointCardPeriods(periods) {
             ...defaultPointCardPeriod(sp),
             ...existing,
             time_range: sp.time,
-            location: existing.location || sp.location
+            location: existing.location || ''
         };
     });
     extras.forEach((period) => {
@@ -620,7 +620,7 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
         const data = studentData[sp.time] || { s: null, t: null, a: null, r: null, info: '' };
         return {
             time_range: sp.time,
-            location: sp.location,
+            location: getStudentScheduleLocationForPeriod(studentId, sp.time),
             safety_points: data.s,
             teamwork_points: data.t,
             accountability_points: data.a,
@@ -639,7 +639,7 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
         const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
         periods.push({
             time_range: periodTime,
-            location: periodTime,
+            location: getStudentScheduleLocationForPeriod(studentId, periodTime),
             safety_points: data.s,
             teamwork_points: data.t,
             accountability_points: data.a,
@@ -3475,7 +3475,6 @@ async function savePeriodData(options = {}) {
     }
 
     const locationInput = document.getElementById('location-input');
-    const location = locationInput ? locationInput.value || currentPeriod : currentPeriod;
 
     const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
         ? filteredStudentsForPeriod 
@@ -3518,7 +3517,6 @@ async function savePeriodData(options = {}) {
             body: JSON.stringify({
                 date: currentDate,
                 period: currentPeriod,
-                location: location,
                 merge: true,
                 students: studentsMap
             })
@@ -5250,10 +5248,8 @@ async function saveDailyAllData(options = {}) {
         Object.keys(fieldMap).forEach((periodTime) => {
             const fields = fieldMap[periodTime] || {};
             const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
-            const standard = (typeof STANDARD_PERIODS !== 'undefined' ? STANDARD_PERIODS : []).find(p => p.time === periodTime);
             const payload = {
-                time_range: periodTime,
-                location: standard ? standard.location : periodTime
+                time_range: periodTime
             };
             if (fields.s) payload.safety_points = data.s ?? null;
             if (fields.t) payload.teamwork_points = data.t ?? null;
@@ -5335,6 +5331,7 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
         return false;
     }
 
+    await loadStudentSchedulesForIds([studentId]);
     const periods = buildCompleteDailyPeriodsForStudent(studentId);
 
     if (periods.length === 0) {
@@ -5443,6 +5440,7 @@ async function autoSubmitPointCardsIfDue() {
         }
 
         for (const studentId of dailyIds) {
+            await loadStudentSchedulesForIds([studentId]);
             const ok = await submitStudentPointCard(studentId, getStudentNameById(studentId), { silent: true });
             if (ok) {
                 submittedCount += 1;
@@ -11937,6 +11935,7 @@ window.closePastPointCardsModal = closePastPointCardsModal;
 // Schedule Management Functions
 let teacherScheduleData = [];
 let studentScheduleData = [];
+let studentSchedulesByStudentId = {};
 let currentScheduleStudentId = null;
 let currentTeacherScheduleUserId = null; // User ID whose teacher schedule is being viewed (null = current user)
 let allTeacherClassNames = []; // Store all class names from all teacher schedules
@@ -11969,6 +11968,44 @@ function updateAllClassAutocompletes() {
     // when they are focused or typed in, so no manual update needed
 }
 
+function formatStudentScheduleLocation(scheduleItems, timePeriod) {
+    const items = (scheduleItems || []).filter((item) => item && item.time_period === timePeriod);
+    if (!items.length) return '';
+    const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
+    return classNames.join(', ');
+}
+
+function getStudentScheduleLocationForPeriod(studentId, timePeriod) {
+    const items = studentSchedulesByStudentId[studentId]
+        || studentSchedulesByStudentId[String(studentId)]
+        || [];
+    const location = formatStudentScheduleLocation(items, timePeriod);
+    if (location) return location;
+    const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
+    return standard ? standard.location : timePeriod;
+}
+
+async function loadStudentSchedulesForIds(studentIds) {
+    const ids = [...new Set((studentIds || []).filter((id) => id != null))];
+    if (!ids.length) return;
+    const missing = ids.filter((id) => {
+        return !studentSchedulesByStudentId[id] && !studentSchedulesByStudentId[String(id)];
+    });
+    if (!missing.length) return;
+    try {
+        const response = await fetch(`/api/schedules/bulk?student_ids=${encodeURIComponent(missing.join(','))}`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        (payload.items || []).forEach((item) => {
+            if (item && item.student_id != null) {
+                studentSchedulesByStudentId[item.student_id] = item.periods || [];
+            }
+        });
+    } catch (error) {
+        console.error('Error loading student schedules:', error);
+    }
+}
+
 function loadSchedules(type, studentId = null, teacherUserId = null) {
     let url = `/api/schedules?schedule_type=${type}`;
     if (studentId) {
@@ -11994,6 +12031,9 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                 updateTeacherScheduleEditability();
             } else {
                 studentScheduleData = Array.isArray(data) ? data : [];
+                if (studentId) {
+                    studentSchedulesByStudentId[studentId] = studentScheduleData;
+                }
                 if (document.getElementById('student-schedule-body')) {
                     renderStudentSchedule();
                 }

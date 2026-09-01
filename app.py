@@ -939,6 +939,68 @@ POINT_CARD_PERIODS = (
 POINT_CARD_TIME_RANGES = tuple(time_range for time_range, _location in POINT_CARD_PERIODS)
 POINT_CARD_DEFAULT_LOCATIONS = dict(POINT_CARD_PERIODS)
 
+
+def _format_student_schedule_location(schedule_rows, time_period):
+    """Format a student's schedule rows for one point-card period."""
+    time_period = (time_period or '').strip()
+    class_names = []
+    seen = set()
+    for row in schedule_rows or []:
+        if isinstance(row, dict):
+            row_period = (row.get('time_period') or '').strip()
+            class_name = (row.get('class_name') or '').strip()
+        else:
+            row_period = (getattr(row, 'time_period', None) or '').strip()
+            class_name = (getattr(row, 'class_name', None) or '').strip()
+        if row_period != time_period or not class_name or class_name in seen:
+            continue
+        seen.add(class_name)
+        class_names.append(class_name)
+    return ', '.join(class_names)
+
+
+def _student_schedule_rows(student_id):
+    if not student_id:
+        return []
+    return (
+        Schedule.query
+        .filter_by(schedule_type='student', student_id=student_id)
+        .order_by(Schedule.sort_order, Schedule.id)
+        .all()
+    )
+
+
+def _student_schedule_rows_by_student(student_ids):
+    student_ids = [sid for sid in (student_ids or []) if sid]
+    if not student_ids:
+        return {}
+    rows = (
+        Schedule.query
+        .filter(
+            Schedule.schedule_type == 'student',
+            Schedule.student_id.in_(student_ids),
+        )
+        .order_by(Schedule.sort_order, Schedule.id)
+        .all()
+    )
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row.student_id, []).append(row)
+    return grouped
+
+
+def _student_location_for_period(student_id, time_period, schedule_rows=None, fallback=''):
+    """Resolve location text from a student's schedule, with optional fallback."""
+    rows = schedule_rows if schedule_rows is not None else _student_schedule_rows(student_id)
+    location = _format_student_schedule_location(rows, time_period)
+    if location:
+        return location
+    fallback = (fallback or '').strip()
+    if fallback:
+        return fallback
+    return POINT_CARD_DEFAULT_LOCATIONS.get((time_period or '').strip(), '')
+
+
 STAR_POINT_FIELDS = (
     ('safety_points', 'Safety'),
     ('teamwork_points', 'Teamwork'),
@@ -1039,12 +1101,9 @@ def _expand_serialized_point_card_periods(periods, include_details=True):
     for time_range, location in POINT_CARD_PERIODS:
         existing = by_time.get(time_range)
         if existing:
-            if not (existing.get('location') or '').strip():
-                existing = dict(existing)
-                existing['location'] = location
             expanded.append(existing)
         else:
-            expanded.append(_empty_serialized_point_card_period(time_range, location, include_details))
+            expanded.append(_empty_serialized_point_card_period(time_range, '', include_details))
     for period in extras:
         time_range = (period.get('time_range') or '').strip()
         location = (period.get('location') or '').strip()
@@ -1072,9 +1131,16 @@ def _ensure_full_point_card_periods(daily_record):
             .all()
         if (time_range or '').strip()
     }
-    for time_range, location in POINT_CARD_PERIODS:
+    schedule_rows = _student_schedule_rows(daily_record.student_id)
+    for time_range, default_location in POINT_CARD_PERIODS:
         if time_range in existing:
             continue
+        location = _student_location_for_period(
+            daily_record.student_id,
+            time_range,
+            schedule_rows=schedule_rows,
+            fallback=default_location,
+        )
         db.session.add(PeriodRecord(
             daily_record_id=daily_record.id,
             time_range=time_range,
@@ -1125,7 +1191,10 @@ def _apply_period_payload(period_record, period_data, *, merge=False):
 
     if has('location'):
         location = period_data.get('location')
-        if location or not merge:
+        if merge:
+            if location and not (period_record.location or '').strip():
+                period_record.location = location
+        elif location or not (period_record.location or '').strip():
             period_record.location = location or period_record.location
     if has('safety_points'):
         period_record.safety_points = _nullable_star_points(period_data.get('safety_points'))
@@ -1160,7 +1229,13 @@ def _upsert_period_record(daily_record, period_data, *, merge=False, default_loc
         return None
     period_record = _find_period_record(daily_record.id, time_range)
     if not period_record:
-        location = period_data.get('location') or default_location or POINT_CARD_DEFAULT_LOCATIONS.get(time_range, '')
+        location = period_data.get('location')
+        if not (location or '').strip():
+            location = _student_location_for_period(
+                daily_record.student_id,
+                time_range,
+                fallback=default_location or POINT_CARD_DEFAULT_LOCATIONS.get(time_range, ''),
+            )
         period_record = PeriodRecord(
             daily_record_id=daily_record.id,
             time_range=time_range,
@@ -4515,7 +4590,6 @@ def period_data():
         data = request.json
         record_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
         period = data.get('period')
-        location = data.get('location', '')
         students_data = data.get('students', {})
         if isinstance(students_data, list):
             students_data = {
@@ -4526,6 +4600,13 @@ def period_data():
         
         saved_count = 0
         saved_daily_ids = []
+        student_ids = []
+        for student_id_str in students_data.keys():
+            try:
+                student_ids.append(int(student_id_str))
+            except (TypeError, ValueError):
+                continue
+        schedules_by_student = _student_schedule_rows_by_student(student_ids)
         
         # Process each student's data. Merge-only: never overwrite STAR/info
         # fields the client did not send, so concurrent staff cannot clobber
@@ -4542,8 +4623,14 @@ def period_data():
                 student_data = {}
             period_payload = dict(student_data)
             period_payload['time_range'] = period
-            if location and 'location' not in period_payload:
-                period_payload['location'] = location
+            student_schedule_rows = schedules_by_student.get(student_id, [])
+            student_location = _student_location_for_period(
+                student_id,
+                period,
+                schedule_rows=student_schedule_rows,
+            )
+            if student_location and 'location' not in period_payload:
+                period_payload['location'] = student_location
             
             daily_record = (
                 DailyRecord.query
@@ -4567,7 +4654,7 @@ def period_data():
                 daily_record,
                 period_payload,
                 merge=True,
-                default_location=location,
+                default_location=student_location,
             )
             _ensure_full_point_card_periods(daily_record)
             
