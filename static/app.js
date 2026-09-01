@@ -1511,13 +1511,17 @@ const DAILY_PERIOD_COL_WIDTH = '120px';
 const DAILY_SCHEDULE_COL_MIN = 90;
 const DAILY_SCHEDULE_COL_MAX = 200;
 
-function measureDailyScheduleColumnWidth(texts) {
+function measureDailyScheduleColumnWidth(texts, options = {}) {
     const measureEl = document.createElement('div');
-    measureEl.className = 'daily-location-cell';
-    measureEl.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    measureEl.className = options.measureClass || 'daily-location-cell';
+    const wrap = !!options.wrap;
+    measureEl.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;white-space:${wrap ? 'normal' : 'nowrap'};`;
+    if (wrap) {
+        measureEl.style.width = `${options.wrapWidth || DAILY_SCHEDULE_COL_MIN}px`;
+    }
     document.body.appendChild(measureEl);
 
-    let maxWidth = DAILY_SCHEDULE_COL_MIN;
+    let maxWidth = options.minWidth || DAILY_SCHEDULE_COL_MIN;
     (texts || []).forEach((text) => {
         if (!text) return;
         measureEl.textContent = text;
@@ -1525,26 +1529,38 @@ function measureDailyScheduleColumnWidth(texts) {
     });
     document.body.removeChild(measureEl);
 
-    return Math.min(Math.ceil(maxWidth), DAILY_SCHEDULE_COL_MAX);
+    const cap = options.extend ? 2000 : DAILY_SCHEDULE_COL_MAX;
+    return Math.min(Math.ceil(maxWidth), cap);
 }
 
-function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx) {
-    const scheduleCol = `${scheduleWidthPx}px`;
-    const template = `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol} ${spacerWidth} ${studentColumns}`;
+function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx, options = {}) {
+    const hideOwnSchedule = !!options.hideOwnSchedule;
+    const scheduleCol = hideOwnSchedule ? '' : `${scheduleWidthPx}px `;
+    const template = hideOwnSchedule
+        ? `${DAILY_PERIOD_COL_WIDTH} ${spacerWidth} ${studentColumns}`
+        : `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol}${spacerWidth} ${studentColumns}`;
     header.style.gridTemplateColumns = template;
     body.style.gridTemplateColumns = template;
     const grid = header.closest('#daily-grid, #students-grid');
     if (grid) {
-        grid.style.setProperty('--daily-schedule-col-width', scheduleCol);
+        if (hideOwnSchedule) {
+            grid.style.removeProperty('--daily-schedule-col-width');
+        } else {
+            grid.style.setProperty('--daily-schedule-col-width', `${scheduleWidthPx}px`);
+        }
     }
 }
 
 function getDailyFrozenColumnsWidth(grid) {
     if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) return 0;
     const periodCell = grid.querySelector('.daily-frozen-col-1');
-    const scheduleCell = grid.querySelector('.daily-frozen-col-2');
-    if (!periodCell || !scheduleCell) return 0;
-    return periodCell.offsetWidth + scheduleCell.offsetWidth;
+    if (!periodCell) return 0;
+    let width = periodCell.offsetWidth;
+    if (!grid.classList.contains('daily-grid--hide-own-schedule')) {
+        const scheduleCell = grid.querySelector('.daily-frozen-col-2');
+        if (scheduleCell) width += scheduleCell.offsetWidth;
+    }
+    return width;
 }
 
 function focusDailyStarInput(input) {
@@ -1592,6 +1608,25 @@ function isShowStudentSchedulesInPointCards() {
     return !!(userPreferences && userPreferences.showStudentSchedulesInPointCards);
 }
 
+function isHideOwnScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.hideOwnScheduleInPointCards);
+}
+
+function isWrapScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.wrapScheduleInPointCards);
+}
+
+function isExtendScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.extendScheduleInPointCards);
+}
+
+function getScheduleMeasureOptions() {
+    return {
+        extend: isExtendScheduleInPointCards(),
+        wrap: isWrapScheduleInPointCards(),
+    };
+}
+
 function getPointCardColumnsPerStudent() {
     return isShowStudentSchedulesInPointCards() && canEdit() ? 6 : 5;
 }
@@ -1611,7 +1646,12 @@ function buildPointCardStudentColumnsTemplate(studentCount, spacerWidth, student
 }
 
 function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
-    const texts = ['Sched'];
+    const measureOpts = {
+        ...getScheduleMeasureOptions(),
+        measureClass: 'daily-student-schedule-cell star-category-header',
+        minWidth: 78,
+    };
+    const texts = ['SCHEDULE'];
     (students || []).forEach((student) => {
         (timePeriods || []).forEach((period) => {
             const time = typeof period === 'string' ? period : period.time;
@@ -1619,7 +1659,14 @@ function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
             if (text) texts.push(text);
         });
     });
-    return measureDailyScheduleColumnWidth(texts);
+    return measureDailyScheduleColumnWidth(texts, measureOpts);
+}
+
+function measurePointCardOwnScheduleColumnWidth(texts) {
+    return measureDailyScheduleColumnWidth(texts, {
+        ...getScheduleMeasureOptions(),
+        minWidth: DAILY_SCHEDULE_COL_MIN,
+    });
 }
 
 function collectPointCardVisibleStudentIds() {
@@ -1642,9 +1689,9 @@ function ensureStudentSchedulesLoadedForVisibleStudents(students) {
     loadStudentSchedulesForIds(missing).then(() => refreshPointCardGridsAfterScheduleLoad());
 }
 
-async function setShowStudentSchedulesInPointCards(enabled) {
+async function updatePointCardSchedulePreference(key, value) {
     const existing = userPreferences || {};
-    userPreferences = { ...existing, showStudentSchedulesInPointCards: !!enabled };
+    userPreferences = { ...existing, [key]: value };
     try {
         await fetch('/api/user/preferences', {
             method: 'POST',
@@ -1652,9 +1699,9 @@ async function setShowStudentSchedulesInPointCards(enabled) {
             body: JSON.stringify(userPreferences)
         });
     } catch (error) {
-        console.warn('Failed to save show student schedules preference:', error);
+        console.warn('Failed to save point card schedule preference:', error);
     }
-    if (enabled && canEdit()) {
+    if (key === 'showStudentSchedulesInPointCards' && value && canEdit()) {
         const studentIds = collectPointCardVisibleStudentIds();
         if (studentIds.length) {
             await loadStudentSchedulesForIds(studentIds);
@@ -1663,14 +1710,29 @@ async function setShowStudentSchedulesInPointCards(enabled) {
     refreshPointCardGridsAfterScheduleLoad();
 }
 
+async function setShowStudentSchedulesInPointCards(enabled) {
+    await updatePointCardSchedulePreference('showStudentSchedulesInPointCards', !!enabled);
+}
+
 async function toggleShowStudentSchedulesInPointCards() {
     await setShowStudentSchedulesInPointCards(!isShowStudentSchedulesInPointCards());
 }
 
+function applyPointCardGridScheduleClasses(gridEl, showStudentSchedules) {
+    if (!gridEl) return;
+    gridEl.classList.toggle('daily-grid--student-schedules-visible', !!showStudentSchedules);
+    gridEl.classList.toggle('daily-grid--hide-own-schedule', isHideOwnScheduleInPointCards());
+    gridEl.classList.toggle('daily-grid--wrap-schedule', isWrapScheduleInPointCards());
+    gridEl.classList.toggle('daily-grid--extend-schedule', isExtendScheduleInPointCards());
+}
+
 let scheduleHeaderKebabOpen = null;
+let pointCardScheduleEditContext = null;
 
 function closeScheduleHeaderKebabMenus() {
-    document.querySelectorAll('.schedule-header-kebab-menu.open').forEach((menu) => menu.classList.remove('open'));
+    document.querySelectorAll('.schedule-header-kebab-menu.open, .student-schedule-header-kebab-menu.open').forEach((menu) => {
+        menu.classList.remove('open');
+    });
     scheduleHeaderKebabOpen = null;
 }
 
@@ -1678,7 +1740,7 @@ function bindScheduleHeaderKebabHandlers() {
     if (window.__scheduleHeaderKebabBound) return;
     window.__scheduleHeaderKebabBound = true;
     document.addEventListener('click', (event) => {
-        if (!event.target.closest('.schedule-header-kebab-wrap')) {
+        if (!event.target.closest('.schedule-header-kebab-wrap, .student-schedule-header-kebab-wrap')) {
             closeScheduleHeaderKebabMenus();
         }
     });
@@ -1687,12 +1749,139 @@ function bindScheduleHeaderKebabHandlers() {
     });
 }
 
-function appendStudentScheduleCategoryHeader(parent) {
+function getScheduleHeaderMenuItems() {
+    return [
+        {
+            action: 'toggle-student-schedules',
+            label: 'Show student schedules',
+            checked: isShowStudentSchedulesInPointCards(),
+        },
+        {
+            action: 'toggle-hide-own',
+            label: 'Hide own schedule',
+            checked: isHideOwnScheduleInPointCards(),
+        },
+        {
+            action: 'toggle-wrap',
+            label: 'Wrap schedule',
+            checked: isWrapScheduleInPointCards(),
+        },
+        {
+            action: 'toggle-extend',
+            label: 'Extend schedule',
+            checked: isExtendScheduleInPointCards(),
+        },
+        { divider: true },
+        { action: 'edit-schedule', label: 'Edit schedule' },
+    ];
+}
+
+function refreshScheduleHeaderMenuLabels(menu) {
+    if (!menu) return;
+    getScheduleHeaderMenuItems().forEach((item) => {
+        if (item.divider) return;
+        const btn = menu.querySelector(`[data-action="${item.action}"]`);
+        if (btn) {
+            btn.textContent = item.checked ? `✓ ${item.label}` : item.label;
+        }
+    });
+}
+
+async function handleScheduleHeaderMenuAction(action, context = {}) {
+    switch (action) {
+        case 'toggle-student-schedules':
+            await toggleShowStudentSchedulesInPointCards();
+            break;
+        case 'toggle-hide-own':
+            await updatePointCardSchedulePreference('hideOwnScheduleInPointCards', !isHideOwnScheduleInPointCards());
+            break;
+        case 'toggle-wrap':
+            await updatePointCardSchedulePreference('wrapScheduleInPointCards', !isWrapScheduleInPointCards());
+            break;
+        case 'toggle-extend':
+            await updatePointCardSchedulePreference('extendScheduleInPointCards', !isExtendScheduleInPointCards());
+            break;
+        case 'edit-schedule':
+            await openPointCardScheduleEditModal({ type: 'teacher' });
+            break;
+        case 'change-schedule':
+            if (context.studentId) {
+                await openPointCardScheduleEditModal({
+                    type: 'student',
+                    studentId: context.studentId,
+                    studentName: context.studentName || getStudentNameById(context.studentId),
+                });
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+function buildScheduleHeaderKebabMenu(menuClass, ariaLabel, getItems, context = {}) {
+    bindScheduleHeaderKebabHandlers();
+    const kebabWrap = document.createElement('div');
+    kebabWrap.className = menuClass.includes('student-') ? 'student-schedule-header-kebab-wrap' : 'schedule-header-kebab-wrap';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = menuClass.includes('student-') ? 'student-schedule-header-kebab-btn' : 'schedule-header-kebab-btn';
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.textContent = '⋮';
+    const menu = document.createElement('div');
+    menu.className = menuClass;
+    (getItems() || []).forEach((item) => {
+        if (item.divider) {
+            const divider = document.createElement('div');
+            divider.className = 'schedule-header-kebab-divider';
+            menu.appendChild(divider);
+            return;
+        }
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.dataset.action = item.action;
+        menuBtn.textContent = item.checked ? `✓ ${item.label}` : item.label;
+        menuBtn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            closeScheduleHeaderKebabMenus();
+            await handleScheduleHeaderMenuAction(item.action, context);
+        });
+        menu.appendChild(menuBtn);
+    });
+    btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const wasOpen = menu.classList.contains('open');
+        closeScheduleHeaderKebabMenus();
+        if (!wasOpen) {
+            if (typeof getItems === 'function' && menuClass === 'schedule-header-kebab-menu') {
+                refreshScheduleHeaderMenuLabels(menu);
+            }
+            menu.classList.add('open');
+            scheduleHeaderKebabOpen = menu;
+        }
+    });
+    kebabWrap.appendChild(btn);
+    kebabWrap.appendChild(menu);
+    return kebabWrap;
+}
+
+function appendStudentScheduleCategoryHeader(parent, student, options = {}) {
     const cell = document.createElement('div');
     cell.className = 'star-category-header daily-student-schedule-header';
-    cell.textContent = 'Sched';
-    cell.style.background = '#f8f9fa';
-    cell.style.fontSize = '9px';
+    if (options.isFirstStudent) {
+        cell.classList.add('daily-student-schedule-header--first');
+    }
+    const label = document.createElement('span');
+    label.className = 'daily-student-schedule-header-label';
+    label.textContent = 'SCHEDULE';
+    cell.appendChild(label);
+    if (canEdit() && student) {
+        cell.appendChild(buildScheduleHeaderKebabMenu(
+            'student-schedule-header-kebab-menu',
+            `Schedule menu for ${student.name || 'student'}`,
+            () => [{ action: 'change-schedule', label: 'Change schedule' }],
+            { studentId: student.id, studentName: student.name }
+        ));
+    }
     parent.appendChild(cell);
     return cell;
 }
@@ -1716,8 +1905,26 @@ function createStudentScheduleDataCell(studentId, timePeriod, options = {}) {
     return cell;
 }
 
+function appendScheduleHeaderKebabToPeriodHeader(periodHeader) {
+    if (!canEdit() || !periodHeader) return;
+    const labelText = periodHeader.textContent;
+    periodHeader.textContent = '';
+    periodHeader.classList.add('daily-period-header-with-menu');
+    const label = document.createElement('span');
+    label.className = 'daily-period-header-label';
+    label.textContent = labelText;
+    periodHeader.appendChild(label);
+    periodHeader.appendChild(buildScheduleHeaderKebabMenu(
+        'schedule-header-kebab-menu',
+        'Schedule column menu',
+        getScheduleHeaderMenuItems
+    ));
+}
+
 function createDailyScheduleHeaderCell() {
-    bindScheduleHeaderKebabHandlers();
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const scheduleHeader = document.createElement('div');
     scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2 daily-schedule-header-with-menu';
 
@@ -1727,48 +1934,20 @@ function createDailyScheduleHeaderCell() {
     scheduleHeader.appendChild(label);
 
     if (canEdit()) {
-        const kebabWrap = document.createElement('div');
-        kebabWrap.className = 'schedule-header-kebab-wrap';
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'schedule-header-kebab-btn';
-        btn.setAttribute('aria-label', 'Schedule column menu');
-        btn.textContent = '⋮';
-        const menu = document.createElement('div');
-        menu.className = 'schedule-header-kebab-menu';
-        const menuBtn = document.createElement('button');
-        menuBtn.type = 'button';
-        menuBtn.dataset.action = 'toggle-student-schedules';
-        menuBtn.textContent = isShowStudentSchedulesInPointCards()
-            ? '✓ Show student schedules'
-            : 'Show student schedules';
-        menu.appendChild(menuBtn);
-        btn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            const wasOpen = menu.classList.contains('open');
-            closeScheduleHeaderKebabMenus();
-            if (!wasOpen) {
-                menuBtn.textContent = isShowStudentSchedulesInPointCards()
-                    ? '✓ Show student schedules'
-                    : 'Show student schedules';
-                menu.classList.add('open');
-                scheduleHeaderKebabOpen = menu;
-            }
-        });
-        menuBtn.addEventListener('click', async (event) => {
-            event.stopPropagation();
-            closeScheduleHeaderKebabMenus();
-            await toggleShowStudentSchedulesInPointCards();
-        });
-        kebabWrap.appendChild(btn);
-        kebabWrap.appendChild(menu);
-        scheduleHeader.appendChild(kebabWrap);
+        scheduleHeader.appendChild(buildScheduleHeaderKebabMenu(
+            'schedule-header-kebab-menu',
+            'Schedule column menu',
+            getScheduleHeaderMenuItems
+        ));
     }
 
     return scheduleHeader;
 }
 
 function createDailyScheduleCategoryHeaderCell() {
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const cell = document.createElement('div');
     cell.className = 'star-category-header daily-frozen-col-2';
     cell.style.background = '#f8f9fa';
@@ -1776,6 +1955,9 @@ function createDailyScheduleCategoryHeaderCell() {
 }
 
 function createDailyScheduleCell(timePeriod, options = {}) {
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const cell = document.createElement('div');
     cell.className = 'daily-location-cell daily-frozen-col-2';
     cell.textContent = formatPointCardScheduleForPeriod(timePeriod);
@@ -1787,6 +1969,259 @@ function createDailyScheduleCell(timePeriod, options = {}) {
         cell.style.background = options.background || '#f8f9fa';
     }
     return cell;
+}
+
+function appendPointCardGridCell(parent, cell) {
+    if (parent && cell) {
+        parent.appendChild(cell);
+    }
+}
+
+function ensurePointCardScheduleEditModal() {
+    let modal = document.getElementById('point-card-schedule-edit-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'point-card-schedule-edit-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content point-card-schedule-edit-modal-content" onclick="event.stopPropagation()">
+            <span class="close" id="point-card-schedule-edit-close">&times;</span>
+            <h2 id="point-card-schedule-edit-title">Edit schedule</h2>
+            <div class="point-card-schedule-edit-table-wrap">
+                <table class="schedule-table point-card-schedule-edit-table">
+                    <thead id="point-card-schedule-edit-head"></thead>
+                    <tbody id="point-card-schedule-edit-body"></tbody>
+                </table>
+            </div>
+            <div class="point-card-schedule-edit-actions">
+                <button type="button" id="point-card-schedule-edit-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="point-card-schedule-edit-save" class="btn-primary">Save schedule</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closePointCardScheduleEditModal();
+        }
+    });
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#point-card-schedule-edit-close');
+    const cancelBtn = modal.querySelector('#point-card-schedule-edit-cancel');
+    const saveBtn = modal.querySelector('#point-card-schedule-edit-save');
+    if (closeBtn) closeBtn.addEventListener('click', closePointCardScheduleEditModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closePointCardScheduleEditModal);
+    if (saveBtn) saveBtn.addEventListener('click', savePointCardScheduleEditModal);
+
+    return modal;
+}
+
+function closePointCardScheduleEditModal() {
+    const modal = document.getElementById('point-card-schedule-edit-modal');
+    if (modal) modal.style.display = 'none';
+    pointCardScheduleEditContext = null;
+}
+
+function populateTeacherScheduleTbody(tbody, scheduleData) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const schedulesByTime = {};
+    (scheduleData || []).forEach((schedule) => {
+        const time = schedule.time_period;
+        if (!schedulesByTime[time]) {
+            schedulesByTime[time] = [];
+        }
+        schedulesByTime[time].push(schedule);
+    });
+    SCHEDULE_PERIODS.forEach((time) => {
+        const savedSchedules = schedulesByTime[time] || [];
+        if (savedSchedules.length > 0) {
+            const row = document.createElement('tr');
+            const firstSchedule = savedSchedules[0];
+            row.innerHTML = `
+                <td class="time-cell">
+                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+                </td>
+                <td class="classes-cell">
+                    <div class="classes-container"></div>
+                </td>
+                <td class="actions-cell">
+                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+                </td>
+            `;
+            const classesContainer = row.querySelector('.classes-container');
+            savedSchedules.forEach((schedule) => {
+                if (schedule.class_name) {
+                    addClassInputGroup(classesContainer, schedule.class_name);
+                }
+            });
+            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(classesContainer);
+            }
+            row.dataset.timePeriod = time;
+            setupScheduleRowButtons(row, time, tbody);
+            tbody.appendChild(row);
+        } else {
+            addScheduleRow('teacher', time, null, tbody);
+        }
+    });
+}
+
+function populateStudentScheduleTbody(tbody, scheduleData) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    SCHEDULE_PERIODS.forEach((time) => {
+        const savedSchedule = (scheduleData || []).find((item) => item && item.time_period === time);
+        addScheduleRow('student', time, savedSchedule || null, tbody);
+    });
+}
+
+async function openPointCardScheduleEditModal({ type, studentId = null, studentName = '' } = {}) {
+    if (!canEdit()) return;
+    const modal = ensurePointCardScheduleEditModal();
+    const title = modal.querySelector('#point-card-schedule-edit-title');
+    const thead = modal.querySelector('#point-card-schedule-edit-head');
+    const tbody = modal.querySelector('#point-card-schedule-edit-body');
+    if (!title || !thead || !tbody) return;
+
+    pointCardScheduleEditContext = { type, studentId, studentName };
+
+    if (type === 'teacher') {
+        title.textContent = 'Edit My Schedule';
+        thead.innerHTML = `
+            <tr>
+                <th>Time</th>
+                <th>Class</th>
+                <th></th>
+            </tr>
+        `;
+        await loadSchedules('teacher');
+        populateTeacherScheduleTbody(tbody, teacherScheduleData);
+    } else if (type === 'student' && studentId) {
+        title.textContent = `Change Schedule — ${studentName || getStudentNameById(studentId)}`;
+        thead.innerHTML = `
+            <tr>
+                <th>Time</th>
+                <th>Class</th>
+                <th>Staff</th>
+            </tr>
+        `;
+        await loadSchedules('student', studentId);
+        populateStudentScheduleTbody(tbody, studentScheduleData);
+    } else {
+        return;
+    }
+
+    modal.style.display = 'block';
+}
+
+function collectSchedulePeriodsFromTbody(tbody, type) {
+    const periods = [];
+    if (!tbody) return periods;
+    const rows = tbody.querySelectorAll('tr');
+    rows.forEach((row) => {
+        const timeInput = row.querySelector('.time-input');
+        const staffInput = row.querySelector('.staff-input');
+        const timePeriod = timeInput ? timeInput.value.trim() : '';
+        if (!timePeriod) return;
+
+        const classesContainer = row.querySelector('.classes-container');
+        if (classesContainer && type === 'teacher') {
+            const classInputs = classesContainer.querySelectorAll('.class-input');
+            classInputs.forEach((classInput) => {
+                const classValue = classInput.value.trim();
+                if (classValue) {
+                    periods.push({
+                        time_period: timePeriod,
+                        class_name: classValue,
+                        staff_name: '',
+                    });
+                }
+            });
+        } else {
+            const classInput = row.querySelector('.class-input');
+            if (classInput) {
+                periods.push({
+                    time_period: timePeriod,
+                    class_name: classInput.value.trim(),
+                    staff_name: staffInput ? staffInput.value.trim() : '',
+                });
+            }
+        }
+    });
+    return periods;
+}
+
+async function savePointCardScheduleEditModal() {
+    const modal = document.getElementById('point-card-schedule-edit-modal');
+    const tbody = modal ? modal.querySelector('#point-card-schedule-edit-body') : null;
+    const context = pointCardScheduleEditContext;
+    if (!tbody || !context) return;
+
+    const { type, studentId } = context;
+    const periods = collectSchedulePeriodsFromTbody(tbody, type);
+    const payload = {
+        schedule_type: type,
+        periods,
+    };
+    if (type === 'student' && studentId) {
+        payload.student_id = studentId;
+    }
+    if (type === 'teacher' && currentTeacherScheduleUserId != null
+        && currentTeacherScheduleUserId !== (window.currentUser && window.currentUser.id)
+        && window.currentUser && window.currentUser.role === 'admin') {
+        payload.user_id = currentTeacherScheduleUserId;
+    }
+
+    const saveBtn = modal.querySelector('#point-card-schedule-edit-save');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+    }
+
+    try {
+        const response = await fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            let errorMessage = 'Error saving schedule. Please try again.';
+            try {
+                const errorData = await response.json();
+                if (errorData.error) errorMessage = errorData.error;
+            } catch (e) {
+                errorMessage = `Error saving schedule: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+        }
+
+        if (type === 'teacher') {
+            await loadSchedules('teacher');
+            if (document.getElementById('teacher-schedule-body')) {
+                renderTeacherSchedule();
+            }
+        } else if (type === 'student' && studentId) {
+            await loadSchedules('student', studentId);
+            studentSchedulesByStudentId[studentId] = studentScheduleData;
+            if (currentScheduleStudentId === studentId && document.getElementById('student-schedule-body')) {
+                renderStudentSchedule();
+            }
+        }
+
+        closePointCardScheduleEditModal();
+        refreshPointCardGridsAfterScheduleLoad();
+        showMessage('Schedule saved successfully!', 'success');
+    } catch (error) {
+        console.error('Error saving schedule from point card modal:', error);
+        showMessage(error.message || 'Error saving schedule. Please try again.', 'error');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save schedule';
+        }
+    }
 }
 
 function refreshPointCardGridsAfterScheduleLoad() {
@@ -3443,20 +3878,27 @@ function renderStudentsGrid() {
     const columnsPerStudent = getPointCardColumnsPerStudent();
     const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
-    const scheduleWidth = measureDailyScheduleColumnWidth([
+    const scheduleWidth = measurePointCardOwnScheduleColumnWidth([
         'Schedule',
         formatPointCardScheduleForPeriod(currentPeriod || ''),
     ]);
-    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth);
+    const hideOwnSchedule = isHideOwnScheduleInPointCards();
+    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth, { hideOwnSchedule });
     const studentsGridEl = document.getElementById('students-grid');
-    if (studentsGridEl) studentsGridEl.classList.add('daily-grid--freeze-cols');
+    if (studentsGridEl) {
+        studentsGridEl.classList.add('daily-grid--freeze-cols');
+        applyPointCardGridScheduleClasses(studentsGridEl, showStudentSchedules);
+    }
 
     // 1. Period/Schedule Header
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = currentPeriod || 'Period';
+    if (hideOwnSchedule && canEdit()) {
+        appendScheduleHeaderKebabToPeriodHeader(periodHeader);
+    }
     header.appendChild(periodHeader);
-    header.appendChild(createDailyScheduleHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleHeaderCell());
 
     const periodSpacer = document.createElement('div');
     // Gutter between period and first student: keep space but make it visually transparent
@@ -3511,7 +3953,7 @@ function renderStudentsGrid() {
     emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
-    header.appendChild(createDailyScheduleCategoryHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleCategoryHeaderCell());
     
     const emptySpacerCell = document.createElement('div');
     // Gutter column under the period header
@@ -3521,11 +3963,14 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
         if (showStudentSchedules) {
-            appendStudentScheduleCategoryHeader(header);
+            appendStudentScheduleCategoryHeader(header, student, { isFirstStudent: index === 0 });
         }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
+            if (showStudentSchedules && labelIndex === 0) {
+                catHeader.classList.add('star-category-header--after-schedule');
+            }
             catHeader.textContent = label;
             catHeader.dataset.category = categoryKeys[labelIndex];
             header.appendChild(catHeader);
@@ -3545,7 +3990,7 @@ function renderStudentsGrid() {
     periodCell.className = 'daily-period-cell daily-frozen-col-1';
     periodCell.textContent = currentPeriod || '';
     grid.appendChild(periodCell);
-    grid.appendChild(createDailyScheduleCell(currentPeriod || ''));
+    appendPointCardGridCell(grid, createDailyScheduleCell(currentPeriod || ''));
 
     const rowSpacer = document.createElement('div');
     // Gutter column next to period in this compact grid
@@ -3666,7 +4111,7 @@ function renderStudentsGrid() {
     percentLabel.style.borderTop = '2px solid #000';
     percentLabel.style.background = '#f8f9fa';
     grid.appendChild(percentLabel);
-    grid.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
+    appendPointCardGridCell(grid, createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     const percentSpacer = document.createElement('div');
     // Gutter at the start of the percentage row
@@ -4242,16 +4687,23 @@ function renderDailyGrid() {
     const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
     const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
-    const scheduleWidth = measureDailyScheduleColumnWidth(['Schedule', ...scheduleTexts]);
-    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth);
-    if (dailyGridEl) dailyGridEl.classList.add('daily-grid--freeze-cols');
+    const scheduleWidth = measurePointCardOwnScheduleColumnWidth(['Schedule', ...scheduleTexts]);
+    const hideOwnSchedule = isHideOwnScheduleInPointCards();
+    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth, { hideOwnSchedule });
+    if (dailyGridEl) {
+        dailyGridEl.classList.add('daily-grid--freeze-cols');
+        applyPointCardGridScheduleClasses(dailyGridEl, showStudentSchedules);
+    }
 
     // Create header row
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = 'Period';
+    if (hideOwnSchedule && canEdit()) {
+        appendScheduleHeaderKebabToPeriodHeader(periodHeader);
+    }
     header.appendChild(periodHeader);
-    header.appendChild(createDailyScheduleHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleHeaderCell());
 
     // Add spacer after period column (gutter, but visually transparent)
     const periodSpacer = document.createElement('div');
@@ -4366,7 +4818,7 @@ function renderDailyGrid() {
     emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
-    header.appendChild(createDailyScheduleCategoryHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleCategoryHeaderCell());
     
     // Empty spacer cell after period column
     const emptySpacerCell = document.createElement('div');
@@ -4378,11 +4830,14 @@ function renderDailyGrid() {
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
         if (showStudentSchedules) {
-            appendStudentScheduleCategoryHeader(header);
+            appendStudentScheduleCategoryHeader(header, student, { isFirstStudent: index === 0 });
         }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
+            if (showStudentSchedules && labelIndex === 0) {
+                catHeader.classList.add('star-category-header--after-schedule');
+            }
             catHeader.textContent = label;
             catHeader.dataset.studentIndex = index;
             catHeader.dataset.category = categoryKeys[labelIndex];
@@ -4411,7 +4866,7 @@ function renderDailyGrid() {
             periodCell.style.background = 'var(--bg-page)';
         }
         body.appendChild(periodCell);
-        body.appendChild(createDailyScheduleCell(period.time, { isOddRow }));
+        appendPointCardGridCell(body, createDailyScheduleCell(period.time, { isOddRow }));
 
         // Add spacer after period column (gutter, but visually transparent)
         const periodRowSpacer = document.createElement('div');
@@ -4525,7 +4980,7 @@ function renderDailyGrid() {
     percentPeriodCell.style.borderTop = '2px solid #000';
     percentPeriodCell.style.background = '#f8f9fa';
     body.appendChild(percentPeriodCell);
-    body.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
+    appendPointCardGridCell(body, createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     // Add spacer after period column (gutter, but visually transparent)
     const percentSpacer = document.createElement('div');
@@ -12803,69 +13258,11 @@ function renderTeacherSchedule() {
         return;
     }
 
-    // Ensure teacherScheduleData is an array
     if (!Array.isArray(teacherScheduleData)) {
         teacherScheduleData = [];
     }
 
-    tbody.innerHTML = '';
-
-    // Group schedules by time_period to handle multiple classes per time
-    const schedulesByTime = {};
-    teacherScheduleData.forEach(schedule => {
-        const time = schedule.time_period;
-        if (!schedulesByTime[time]) {
-            schedulesByTime[time] = [];
-        }
-        schedulesByTime[time].push(schedule);
-    });
-
-    // Always show all periods from SCHEDULE_PERIODS
-    // For each time period, create one row with all classes in the same cell
-    SCHEDULE_PERIODS.forEach(time => {
-        const savedSchedules = schedulesByTime[time] || [];
-        
-        if (savedSchedules.length > 0) {
-            // Create one row with the first schedule data (will load all classes into same cell)
-            const row = document.createElement('tr');
-            const firstSchedule = savedSchedules[0];
-            row.innerHTML = `
-                <td class="time-cell">
-                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-                </td>
-                <td class="classes-cell">
-                    <div class="classes-container">
-                    </div>
-                </td>
-                <td class="actions-cell">
-                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
-                </td>
-            `;
-            
-            // Add all classes to the container
-            const classesContainer = row.querySelector('.classes-container');
-            savedSchedules.forEach(schedule => {
-                if (schedule.class_name) {
-                    addClassInputGroup(classesContainer, schedule.class_name);
-                }
-            });
-            
-            // If no classes, add one empty input
-            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(classesContainer);
-            }
-            
-            // Store reference and setup buttons
-            row.dataset.timePeriod = time;
-            setupScheduleRowButtons(row, time, tbody);
-            
-            tbody.appendChild(row);
-        } else {
-            // Show one empty row for this time period
-            addScheduleRow('teacher', time, null);
-        }
-    });
-
+    populateTeacherScheduleTbody(tbody, teacherScheduleData);
     requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
@@ -13626,21 +14023,12 @@ function renderStudentSchedule() {
         return;
     }
 
-    // Ensure studentScheduleData is an array
     if (!Array.isArray(studentScheduleData)) {
         studentScheduleData = [];
     }
 
     container.style.display = 'block';
-    tbody.innerHTML = '';
-
-    // Always show all periods from SCHEDULE_PERIODS
-    // If saved data exists for a period, use it; otherwise show empty row
-    SCHEDULE_PERIODS.forEach(time => {
-        const savedSchedule = studentScheduleData.find(s => s && s.time_period === time);
-        addScheduleRow('student', time, savedSchedule || null);
-    });
-
+    populateStudentScheduleTbody(tbody, studentScheduleData);
     requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
@@ -13708,8 +14096,8 @@ function setupScheduleRowButtons(row, timePeriod, tbody) {
     });
 }
 
-function addScheduleRow(type, timePeriod = '', data = null) {
-    const tbody = document.getElementById(`${type}-schedule-body`);
+function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null) {
+    const tbody = targetTbody || document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
     
     const row = document.createElement('tr');
@@ -13783,44 +14171,8 @@ function addScheduleRow(type, timePeriod = '', data = null) {
 async function saveSchedule(type) {
     const tbody = document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
-    
-    const rows = tbody.querySelectorAll('tr');
-    const periods = [];
-    
-    rows.forEach(row => {
-        const timeInput = row.querySelector('.time-input');
-        const staffInput = row.querySelector('.staff-input');
-        
-        const timePeriod = timeInput.value.trim();
-        
-        if (timePeriod) {
-            // For teacher schedules, get all class inputs from the classes container
-            const classesContainer = row.querySelector('.classes-container');
-            if (classesContainer && type === 'teacher') {
-                const classInputs = classesContainer.querySelectorAll('.class-input');
-                classInputs.forEach(classInput => {
-                    const classValue = classInput.value.trim();
-                    if (classValue) { // Only save non-empty classes
-                        periods.push({
-                            time_period: timePeriod,
-                            class_name: classValue,
-                            staff_name: ''
-                        });
-                    }
-                });
-            } else {
-                // For student schedules, use single class input (existing behavior)
-                const classInput = row.querySelector('.class-input');
-                if (classInput) {
-                    periods.push({
-                        time_period: timePeriod,
-                        class_name: classInput.value.trim(),
-                        staff_name: staffInput ? staffInput.value.trim() : ''
-                    });
-                }
-            }
-        }
-    });
+
+    const periods = collectSchedulePeriodsFromTbody(tbody, type);
     
     const payload = {
         schedule_type: type,

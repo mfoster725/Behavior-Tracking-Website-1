@@ -1338,6 +1338,24 @@ table tbody tr:hover {
     background: #f1f5f9;
 }
 
+.schedule-header-kebab-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border);
+}
+
+.daily-period-header-with-menu {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 4px;
+    padding-right: 4px;
+}
+
+.daily-period-header-label {
+    min-width: 0;
+}
+
 .daily-student-schedule-cell {
     padding: 5px 8px;
     background: transparent;
@@ -1351,11 +1369,122 @@ table tbody tr:hover {
     overflow-wrap: break-word;
     word-break: break-word;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.daily-grid--wrap-schedule .daily-location-cell,
+.daily-grid--wrap-schedule .daily-student-schedule-cell {
+    white-space: normal;
+    align-items: flex-start;
+}
+
+.daily-grid--extend-schedule .daily-location-cell,
+.daily-grid--extend-schedule .daily-student-schedule-cell {
+    white-space: nowrap;
 }
 
 .daily-student-schedule-header {
     font-size: 9px !important;
     letter-spacing: 0.2px;
+    background: #f8f9fa !important;
+    color: var(--text-secondary) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 14px 4px 4px !important;
+    position: relative;
+    min-width: 0;
+}
+
+.daily-student-schedule-header-label {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}
+
+.student-schedule-header-kebab-wrap {
+    position: absolute;
+    top: 2px;
+    right: 0;
+}
+
+.student-schedule-header-kebab-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 4px;
+}
+
+.student-schedule-header-kebab-btn:hover,
+.student-schedule-header-kebab-btn:focus {
+    background: #f1f5f9;
+    outline: none;
+}
+
+.student-schedule-header-kebab-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 30;
+    min-width: 160px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+}
+
+.student-schedule-header-kebab-menu.open {
+    display: block;
+}
+
+.student-schedule-header-kebab-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.student-schedule-header-kebab-menu button:hover {
+    background: #f1f5f9;
+}
+
+.daily-grid--student-schedules-visible .star-category-header[data-category="s"],
+.daily-grid--student-schedules-visible .star-category-header--after-schedule[data-category="s"] {
+    border-bottom-left-radius: 0;
+}
+
+.daily-grid--student-schedules-visible .daily-student-schedule-header {
+    border-bottom-left-radius: var(--radius-md);
+}
+
+.point-card-schedule-edit-modal-content {
+    max-width: 720px;
+    width: 95%;
+}
+
+.point-card-schedule-edit-table-wrap {
+    max-height: 60vh;
+    overflow: auto;
+    margin: 12px 0 16px;
+}
+
+.point-card-schedule-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }
 
 .daily-header-student {
