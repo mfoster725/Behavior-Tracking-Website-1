@@ -2045,6 +2045,7 @@ function setupEventListeners() {
         const userSectionToggleConfigs = [
             { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
             { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+            { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
             { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
             { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
             { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -14098,6 +14099,7 @@ function applyUserManagementSectionVisibility() {
     const sectionConfigs = [
         { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
         { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+        { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
         { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
         { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
         { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -14287,6 +14289,7 @@ async function loadUsers() {
         const staffTbody = document.getElementById('staff-users-table-body');
         const studentTbody = document.getElementById('student-users-table-body');
         const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
+        const parentTbody = document.getElementById('parent-users-table-body');
         const archivedStudentsTbody = document.getElementById('archived-students-table-body');
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
@@ -14295,10 +14298,11 @@ async function loadUsers() {
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
         if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
+        if (parentTbody) parentTbody.innerHTML = '';
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
                 archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
@@ -14306,10 +14310,11 @@ async function loadUsers() {
             return;
         }
         
-        // Separate users by role (excluding parent role)
+        // Separate users by role
         const adminUsers = users.filter(u => u.role === 'admin' && !u.hidden_from_management && u.username !== 'cursor');
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
+        const parentUsers = users.filter(u => u.role === 'parent');
         const studentUsers = users.filter(u => u.role === 'student');
         allStudentUsers = studentUsers;
         
@@ -14395,10 +14400,19 @@ async function loadUsers() {
             if (nameA > nameB) return 1;
             return 0;
         });
+
+        // Parents: by email, then username
+        parentUsers.sort((a, b) => {
+            const emailA = sortKey(a.email || a.username);
+            const emailB = sortKey(b.email || b.username);
+            if (emailA < emailB) return -1;
+            if (emailA > emailB) return 1;
+            return 0;
+        });
         
         // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
-            adminTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
+            adminTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
         } else {
             const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
@@ -14409,7 +14423,7 @@ async function loadUsers() {
         
         // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
-            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="7" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
             const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
@@ -14421,7 +14435,7 @@ async function loadUsers() {
         // Populate Outside Staff table (DocumentFragment for single reflow)
         if (outsideStaffTbody) {
             if (outsideStaffUsers.length === 0) {
-                outsideStaffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
+                outsideStaffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="7" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
             } else {
                 const outsideFrag = document.createDocumentFragment();
                 outsideStaffUsers.forEach(user => {
@@ -14430,10 +14444,23 @@ async function loadUsers() {
                 outsideStaffTbody.appendChild(outsideFrag);
             }
         }
+
+        // Populate Parent/Guardian table
+        if (parentTbody) {
+            if (parentUsers.length === 0) {
+                parentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No parent/guardian users</td></tr>';
+            } else {
+                const parentFrag = document.createDocumentFragment();
+                parentUsers.forEach(user => {
+                    parentFrag.appendChild(createParentRow(user));
+                });
+                parentTbody.appendChild(parentFrag);
+            }
+        }
         
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -14539,6 +14566,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     const gradesTaught = user.grades_taught ? `'${String(user.grades_taught).replace(/'/g, "\\'")}'` : 'null';
     const cardColorVal = user.card_color ? `'${user.card_color}'` : 'null';
     const linkedCaseManagerId = user.linked_case_manager_id != null ? user.linked_case_manager_id : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     const isTeacherOrCaseManager = user.role === 'staff' && (user.designation === 'Case Manager' || user.designation === 'Teacher');
     const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
         ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
@@ -14554,6 +14582,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     row.innerHTML = `
         <td><strong>${name}</strong></td>
         <td style="font-weight: 500; color: ${user.role === 'admin' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         ${isStaffTable ? `
         <td>
@@ -14568,7 +14597,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId})">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId}, ${userEmail})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -14724,6 +14753,7 @@ function createStudentRow(user) {
     const userDesignation = user.designation ? `'${user.designation}'` : 'null';
     const gradeValue = user.grade ? `'${user.grade}'` : 'null';
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     
     const cardColor = user.card_color || '-';
     const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
@@ -14736,6 +14766,7 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${practitioner}</td>
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}" class="users-table-password-col">
             ${canSeePassword ? `
@@ -14746,7 +14777,7 @@ function createStudentRow(user) {
             ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null, null, ${userEmail})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -14819,6 +14850,7 @@ function createOutsideStaffRow(user) {
     
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
     const userDistrict = user.district ? `'${user.district.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     
     row.innerHTML = `
         <td><strong>${name}</strong></td>
@@ -14826,6 +14858,7 @@ function createOutsideStaffRow(user) {
         <td style="cursor: pointer; color: var(--accent); text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
             ${studentsAssignedDisplay}
         </td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
@@ -14841,6 +14874,39 @@ function createOutsideStaffRow(user) {
     return row;
 }
 
+function createParentRow(user) {
+    const row = document.createElement('tr');
+    row.dataset.userId = user.id;
+
+    const email = user.email || '—';
+    const linkedDisplay = (user.linked_students && user.linked_students.length > 0)
+        ? user.linked_students.map(s => s.student_name || 'Unknown').join(', ')
+        : 'No students linked';
+
+    const canDelete = isAdmin();
+    const canEdit = isAdmin();
+    const canSeePassword = isAdmin();
+    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
+
+    row.innerHTML = `
+        <td><strong>${escapeHtml(email)}</strong></td>
+        <td>Parent/Guardian</td>
+        <td>${escapeHtml(linkedDisplay)}</td>
+        <td>${user.username}</td>
+        <td id="password-cell-${user.id}">
+            ${canSeePassword ? `
+                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+            ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="actions-cell">
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', 'parent', null, 'Parent/Guardian', null, null, null, null, ${userEmail})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
+        </td>
+    `;
+
+    return row;
+}
 
 async function resetAndViewPassword(userId, username) {
     // Confirm before resetting
@@ -14902,7 +14968,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId, email) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -14917,6 +14983,8 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         displayRole = designation;
     } else if (role === 'student') {
         displayRole = 'Student';
+    } else if (role === 'parent') {
+        displayRole = 'Parent/Guardian';
     } else {
         displayRole = role;
     }
@@ -14926,6 +14994,10 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     document.getElementById('edit-user-student-id').value = studentId || '';
     document.getElementById('edit-user-name').value = name || '';
     document.getElementById('edit-user-username').value = username;
+    const emailInput = document.getElementById('edit-user-email');
+    if (emailInput) {
+        emailInput.value = (email && email !== 'null') ? email : '';
+    }
     document.getElementById('edit-user-role').value = displayRole;
     document.getElementById('edit-user-original-role').value = role;
     document.getElementById('edit-user-password').value = '';
@@ -15030,7 +15102,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     // Show/hide role field
     const roleGroup = document.getElementById('edit-user-role-group');
     {
-        if (roleGroup) roleGroup.style.display = 'block';
+        if (roleGroup) roleGroup.style.display = role === 'parent' ? 'none' : 'block';
     }
     
     // Hide district field for parent users
@@ -15042,7 +15114,15 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     
     // Show/hide team member section based on role
     const teamSection = document.getElementById('edit-user-team-section');
-    if (role === 'student' && studentId) {
+    const parentSection = document.getElementById('edit-user-parent-students-section');
+    if (role === 'parent') {
+        teamSection.style.display = 'none';
+        if (parentSection) {
+            parentSection.style.display = 'block';
+            await loadParentStudentsForEdit(userId);
+        }
+    } else if (role === 'student' && studentId) {
+        if (parentSection) parentSection.style.display = 'none';
         teamSection.style.display = 'block';
         
         // Populate staff member dropdowns
@@ -15064,6 +15144,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         }
     } else {
         teamSection.style.display = 'none';
+        if (parentSection) parentSection.style.display = 'none';
     }
     
     
@@ -15074,9 +15155,9 @@ async function editUser(userId, name, username, role, studentId, designation, gr
 // Load parent's linked students for edit modal
 async function loadParentStudentsForEdit(parentId) {
     try {
-        const response = await fetch('/api/parents');
-        const parents = await response.json();
-        const parent = parents.find(p => p.id === parentId);
+        const response = await fetch('/api/users');
+        const users = await response.json();
+        const parent = users.find(p => p.id === parentId);
         
         const studentsList = document.getElementById('edit-parent-students-list');
         const claimedDiv = document.getElementById('edit-parent-claimed-name');
@@ -15089,20 +15170,17 @@ async function loadParentStudentsForEdit(parentId) {
             return;
         }
         
-        const linkedStudentIds = parent.students ? parent.students.map(s => s.student_id) : [];
+        const linkedStudents = parent.linked_students || [];
+        const linkedStudentIds = linkedStudents.map(s => s.student_id);
         editParentLinkedStudentIds = linkedStudentIds;
         
-        if (parent.students && parent.students.length > 0) {
-            studentsList.innerHTML = parent.students.map(student => `
+        if (linkedStudents.length > 0) {
+            studentsList.innerHTML = linkedStudents.map(student => `
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 8px; background: #f5f5f5; border-radius: 4px;">
                     <div>
-                        <strong>${student.student_name || 'Unknown'}</strong>
-                        <span style="color: var(--text-secondary); margin-left: 10px;">(${student.relationship})</span>
+                        <strong>${escapeHtml(student.student_name || 'Unknown')}</strong>
+                        <span style="color: var(--text-secondary); margin-left: 10px;">(${escapeHtml(student.relationship || 'parent/guardian')})</span>
                         ${student.verified ? '<span style="color: green; margin-left: 10px;">✓ Verified</span>' : '<span style="color: orange; margin-left: 10px;">Pending Verification</span>'}
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        ${!student.verified ? `<button type="button" class="btn-primary" style="padding: 4px 12px; font-size: 12px;" onclick="verifyParentStudent(${parentId}, ${student.student_id})">Verify</button>` : ''}
-                        <button type="button" class="btn-danger" style="padding: 4px 12px; font-size: 12px;" onclick="removeParentStudent(${parentId}, ${student.student_id})">Remove</button>
                     </div>
                 </div>
             `).join('');
@@ -15111,36 +15189,16 @@ async function loadParentStudentsForEdit(parentId) {
         }
         
         if (claimedDiv) {
-            if (parent.claimed_student_name) {
-                claimedDiv.style.display = 'block';
-                claimedDiv.textContent = 'Parent indicated: ' + parent.claimed_student_name;
-            } else {
-                claimedDiv.style.display = 'none';
-                claimedDiv.textContent = '';
-            }
+            claimedDiv.style.display = 'none';
+            claimedDiv.textContent = '';
         }
         
         if (relSelect) {
-            relSelect.value = parent.claimed_relationship || 'parent';
-        }
-        
-        await loadStudents();
-        const pool = (allStudents || []).filter(s => !linkedStudentIds.includes(s.id));
-        const claimed = (parent.claimed_student_name || '').trim().toLowerCase();
-        let preselected = null;
-        if (claimed) {
-            preselected = pool.find(s => {
-                const n = (s.name || '').toLowerCase();
-                return n.includes(claimed) || claimed.includes(n);
-            });
+            relSelect.value = 'parent';
         }
         
         if (addInput) { addInput.value = ''; addInput.placeholder = 'Type to search students...'; }
         if (addHidden) addHidden.value = '';
-        if (preselected) {
-            if (addInput) addInput.value = preselected.name || `Student ${preselected.id}`;
-            if (addHidden) addHidden.value = preselected.id;
-        }
     } catch (error) {
         console.error('Error loading parent students:', error);
         const el = document.getElementById('edit-parent-students-list');
@@ -15422,6 +15480,7 @@ async function saveEditUser() {
     const passwordConfirm = document.getElementById('edit-user-password-confirm').value;
     const grade = document.getElementById('edit-user-grade').value;
     const cardColor = document.getElementById('edit-user-card-color')?.value || '';
+    const emailValue = document.getElementById('edit-user-email')?.value.trim() || '';
     
     // Map display role to system role and designation
     // Skip role mapping for parent users (role field is hidden)
@@ -15477,7 +15536,8 @@ async function saveEditUser() {
     const updateData = {
         id: userId,
         name: name || null,
-        username: username
+        username: username,
+        email: emailValue || null
     };
     
     // Check if this is an Outside Staff user (district field visible means it's Outside Staff)
@@ -16700,13 +16760,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (outsideStaffSearch) {
         outsideStaffSearch.addEventListener('input', (e) => filterUserTable('outside-staff', e.target.value));
     }
+
+    const parentSearch = document.getElementById('parent-search');
+    if (parentSearch) {
+        parentSearch.addEventListener('input', (e) => filterUserTable('parent', e.target.value));
+    }
     
 });
 
 function filterUserTable(tableType, searchQuery) {
-    // Skip parent table as it no longer exists
-    if (tableType === 'parent') return;
-    
     const query = searchQuery.toLowerCase().trim();
     const tbody = document.getElementById(`${tableType}-users-table-body`);
     
@@ -16725,19 +16787,8 @@ function filterUserTable(tableType, searchQuery) {
         if (query === '') {
             shouldShow = true;
         } else {
-            // Get text content from all cells except password and actions columns
-            const cells = Array.from(row.cells);
-            const searchableText = cells
-                .filter((cell, index) => {
-                    // Exclude password column and actions column
-                    if (tableType === 'student') {
-                        // For students: exclude password (index 7) and actions (index 8)
-                        return index !== 7 && index !== 8;
-                    } else {
-                        // For admin/staff: exclude password (index 3) and actions (index 4)
-                        return index !== 3 && index !== 4;
-                    }
-                })
+            const searchableText = Array.from(row.cells)
+                .filter(cell => !cell.classList.contains('actions-cell') && !cell.id.startsWith('password-cell-'))
                 .map(cell => cell.textContent.toLowerCase())
                 .join(' ');
             

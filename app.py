@@ -690,6 +690,8 @@ class User(UserMixin, db.Model):
     must_change_password = db.Column(db.Boolean, default=False, nullable=False)
     # Hidden from User Management tables; still a real DB user and can log in
     hidden_from_management = db.Column(db.Boolean, default=False, nullable=False)
+    # Contact email for user management and future notifications
+    email = db.Column(db.String(200), nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -758,6 +760,9 @@ def ensure_ui_preferences_column():
                 conn.execute(text(
                     "ALTER TABLE students ADD COLUMN IF NOT EXISTS lunch_number VARCHAR(50)"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)"
+                ))
                 conn.commit()
     except Exception as e:
         # Log but don't crash the app if migration fails
@@ -798,6 +803,38 @@ def ensure_hidden_from_management_column():
 
 
 ensure_hidden_from_management_column()
+
+
+def ensure_user_email_column():
+    """Add users.email on SQLite and Postgres if it is missing."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'users' not in inspector.get_table_names():
+                return
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'email' in columns:
+                return
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            with db.engine.connect() as conn:
+                if is_postgres:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)"
+                    ))
+                else:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN email VARCHAR(200)"
+                    ))
+                conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure users.email column exists: {e}")
+        except Exception:
+            print(f"Failed to ensure users.email column exists: {e}")
+
+
+ensure_user_email_column()
 
 
 def ensure_frenzy_severity_column():
@@ -10237,6 +10274,105 @@ STUDENT_TEAM_COLUMNS = (
     ('Professional', 8),
     ('Group Leader', 9),
 )
+STAFF_EMAIL_COL = 5  # column F
+OUTSIDE_STAFF_EMAIL_COL = 4  # column E
+STUDENT_EMAIL_COL = 11  # column L
+STUDENT_PARENT1_EMAIL_COL = 12  # column M
+STUDENT_PARENT2_EMAIL_COL = 13  # column N
+PARENT_GUARDIAN_DESIGNATION = 'Parent/Guardian'
+
+
+def _normalize_import_email(value):
+    if value is None:
+        return ''
+    email = str(value).strip().lower()
+    if not email or '@' not in email:
+        return ''
+    return email[:200]
+
+
+def _generate_parent_username_from_email(email, used_usernames):
+    local = (email.split('@')[0] if email else '') or 'parent'
+    base = re.sub(r'[^a-z0-9]', '', local.lower()) or 'parent'
+    return _unique_import_username(base, used_usernames)
+
+
+def _upsert_parent_from_import(email, student, slot, used_usernames, warnings, student_label):
+    """Create or update a parent/guardian user linked to a student. Returns True if anything changed."""
+    email = _normalize_import_email(email)
+    if not email:
+        return False
+
+    changed = False
+    existing_non_parent = User.query.filter(
+        func.lower(User.email) == email,
+        User.role != 'parent',
+    ).first()
+    if existing_non_parent:
+        warnings.append(
+            f"{student_label}: parent email {email} is already used by {existing_non_parent.username}."
+        )
+        return False
+
+    parent = User.query.filter(
+        func.lower(User.email) == email,
+        User.role == 'parent',
+    ).first()
+
+    if parent:
+        if parent.designation != PARENT_GUARDIAN_DESIGNATION:
+            parent.designation = PARENT_GUARDIAN_DESIGNATION
+            changed = True
+        if not _import_str_eq(parent.email, email):
+            parent.email = email
+            changed = True
+    else:
+        username = _generate_parent_username_from_email(email, used_usernames)
+        password = f"{username}123"
+        parent = User(
+            name=f"{PARENT_GUARDIAN_DESIGNATION} ({email})",
+            username=username,
+            role='parent',
+            designation=PARENT_GUARDIAN_DESIGNATION,
+            email=email,
+            must_change_password=True,
+            hidden_from_management=False,
+        )
+        _set_imported_password(parent, password)
+        db.session.add(parent)
+        db.session.flush()
+        changed = True
+
+    relationship = 'parent' if slot == 1 else 'guardian'
+    link = ParentStudent.query.filter_by(parent_user_id=parent.id, student_id=student.id).first()
+    if not link:
+        db.session.add(ParentStudent(
+            parent_user_id=parent.id,
+            student_id=student.id,
+            relationship=relationship,
+            verified=True,
+            verified_by_user_id=current_user.id if current_user.is_authenticated else None,
+            verified_at=datetime.utcnow(),
+        ))
+        changed = True
+    elif link.relationship != relationship and slot == 1:
+        link.relationship = relationship
+        changed = True
+
+    return changed
+
+
+def _sync_parents_from_student_import(student, parent_emails, used_usernames, warnings, student_label):
+    changed = False
+    seen_emails = set()
+    for slot, raw_email in enumerate(parent_emails, start=1):
+        email = _normalize_import_email(raw_email)
+        if not email or email in seen_emails:
+            continue
+        seen_emails.add(email)
+        if _upsert_parent_from_import(email, student, slot, used_usernames, warnings, student_label):
+            changed = True
+    return changed
 
 
 def _parse_student_team_members(row):
@@ -10306,7 +10442,7 @@ def _resolve_case_manager_id(case_manager_name, staff_users=None):
     return user
 
 
-def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, warnings):
+def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, email, warnings):
     """Update an existing staff user from CSV. Returns True if any field changed."""
     changed = False
     if not _import_str_eq(user.user_number, user_number):
@@ -10318,6 +10454,10 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
         changed = True
     if not _import_str_eq(user.designation, role):
         user.designation = role
+        changed = True
+    normalized_email = _normalize_import_email(email) or None
+    if not _import_str_eq(user.email, normalized_email):
+        user.email = normalized_email
         changed = True
 
     desired_grades = None
@@ -10348,7 +10488,7 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     return changed
 
 
-def _apply_outside_staff_import_updates(user, *, user_number, name, district):
+def _apply_outside_staff_import_updates(user, *, user_number, name, district, email):
     changed = False
     if not _import_str_eq(user.user_number, user_number):
         user.user_number = user_number
@@ -10359,6 +10499,10 @@ def _apply_outside_staff_import_updates(user, *, user_number, name, district):
         changed = True
     if not _import_str_eq(user.district, district):
         user.district = district or None
+        changed = True
+    normalized_email = _normalize_import_email(email) or None
+    if not _import_str_eq(user.email, normalized_email):
+        user.email = normalized_email
         changed = True
     return changed
 
@@ -10388,7 +10532,21 @@ def _student_user_for(student):
     return User.query.filter_by(student_id=student.id, role='student').first()
 
 
-def _apply_student_import_updates(student, *, lunch_number, initials, grade, card_color, team_members, user=None, existing_team=None):
+def _apply_student_import_updates(
+    student,
+    *,
+    lunch_number,
+    initials,
+    grade,
+    card_color,
+    team_members,
+    student_email=None,
+    parent_emails=None,
+    used_usernames=None,
+    warnings=None,
+    user=None,
+    existing_team=None,
+):
     changed = False
     if not _import_str_eq(student.lunch_number, lunch_number):
         student.lunch_number = lunch_number
@@ -10403,13 +10561,30 @@ def _apply_student_import_updates(student, *, lunch_number, initials, grade, car
     if not _import_str_eq(student.card_color, desired_color):
         student.card_color = desired_color
         changed = True
+    normalized_email = _normalize_import_email(student_email) or None
+    if not _import_str_eq(student.email, normalized_email):
+        student.email = normalized_email
+        changed = True
     if user is None:
         user = _student_user_for(student)
-    if user and not _import_str_eq(user.name, initials):
-        user.name = initials
-        changed = True
+    if user:
+        if not _import_str_eq(user.name, initials):
+            user.name = initials
+            changed = True
+        if not _import_str_eq(user.email, normalized_email):
+            user.email = normalized_email
+            changed = True
     if team_members and _sync_student_team_members(student.id, team_members, existing=existing_team):
         changed = True
+    if parent_emails and used_usernames is not None:
+        if _sync_parents_from_student_import(
+            student,
+            parent_emails,
+            used_usernames,
+            warnings or [],
+            initials or lunch_number,
+        ):
+            changed = True
     return changed
 
 
@@ -10476,6 +10651,7 @@ def import_users():
             role = (row[2] or '').strip() if len(row) > 2 else ''
             grades_taught = (row[3] or '').strip() if len(row) > 3 else ''
             case_manager_name = (row[4] or '').strip() if len(row) > 4 else ''
+            email = _clip_import_field(row[STAFF_EMAIL_COL] if len(row) > STAFF_EMAIL_COL else '', 200)
 
             if not user_number or not name:
                 if not user_number and not name:
@@ -10516,6 +10692,7 @@ def import_users():
                     role=role,
                     grades_taught=grades_taught,
                     case_manager_name=case_manager_name,
+                    email=email,
                     warnings=warnings,
                 )
                 if changed:
@@ -10536,6 +10713,7 @@ def import_users():
                 user_number=user_number,
                 must_change_password=True,
                 grades_taught=normalized_grades if normalized_grades else None,
+                email=_normalize_import_email(email) or None,
             )
 
             if role == 'Paraprofessional' and case_manager_name:
@@ -10586,7 +10764,7 @@ def import_users():
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'outside_staff':
-        # CSV columns: A=User Number, B=Name, C=District
+        # CSV columns: A=User Number, B=Name, C=District, E=Email
         outside_staff_rows = rows[header_offset:]
         for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
             if not row or all(not (c or '').strip() for c in row):
@@ -10594,6 +10772,7 @@ def import_users():
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
             district = (row[2] or '').strip() if len(row) > 2 else ''
+            email = _clip_import_field(row[OUTSIDE_STAFF_EMAIL_COL] if len(row) > OUTSIDE_STAFF_EMAIL_COL else '', 200)
 
             if not user_number or not name:
                 if not user_number and not name:
@@ -10623,6 +10802,7 @@ def import_users():
                     user_number=user_number,
                     name=name,
                     district=district,
+                    email=email,
                 )
                 if changed:
                     updated_names.append(name)
@@ -10641,6 +10821,7 @@ def import_users():
                 is_outside_staff=True,
                 district=district or None,
                 must_change_password=True,
+                email=_normalize_import_email(email) or None,
             )
             _set_imported_password(user, password)
             db.session.add(user)
@@ -10700,6 +10881,11 @@ def import_users():
                 initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
                 grade = _clip_import_field(row[2] if len(row) > 2 else '', 20)
                 card_color = _clip_import_field((row[3] or '').lower() if len(row) > 3 else '', 20)
+                student_email = _clip_import_field(row[STUDENT_EMAIL_COL] if len(row) > STUDENT_EMAIL_COL else '', 200)
+                parent_emails = [
+                    _clip_import_field(row[STUDENT_PARENT1_EMAIL_COL] if len(row) > STUDENT_PARENT1_EMAIL_COL else '', 200),
+                    _clip_import_field(row[STUDENT_PARENT2_EMAIL_COL] if len(row) > STUDENT_PARENT2_EMAIL_COL else '', 200),
+                ]
 
                 if not lunch_number:
                     errors.append(_import_missing_required_message(idx, initials, 'lunch number'))
@@ -10735,6 +10921,10 @@ def import_users():
                             grade=grade,
                             card_color=card_color,
                             team_members=team_members,
+                            student_email=student_email,
+                            parent_emails=parent_emails,
+                            used_usernames=used_usernames,
+                            warnings=warnings,
                             user=users_by_student_id.get(existing_student.id),
                             existing_team=team_by_student_id.get(existing_student.id, []),
                         )
@@ -10758,6 +10948,7 @@ def import_users():
                     card_color=card_color or None,
                     lunch_number=lunch_number,
                     directory_info_opt_out=False,
+                    email=_normalize_import_email(student_email) or None,
                 )
                 db.session.add(student)
                 new_student_items.append(
@@ -10769,6 +10960,8 @@ def import_users():
                         'lunch_number': lunch_number,
                         'grade': grade,
                         'team_members': team_members,
+                        'student_email': student_email,
+                        'parent_emails': parent_emails,
                     }
                 )
                 by_lunch[lunch_number] = student
@@ -10784,11 +10977,19 @@ def import_users():
                         student_id=student.id,
                         is_outside_staff=False,
                         must_change_password=False,
+                        email=_normalize_import_email(item.get('student_email')) or None,
                     )
                     _set_imported_password(user, item['password'])
                     db.session.add(user)
                     for role_name, member_name in item['team_members']:
                         db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
+                    _sync_parents_from_student_import(
+                        student,
+                        item.get('parent_emails') or [],
+                        used_usernames,
+                        warnings,
+                        item['initials'] or item['lunch_number'],
+                    )
                     success.append(
                         {
                             'initials': item['initials'],
@@ -11835,6 +12036,17 @@ def manage_users():
         if assigned_student_ids:
             for s in Student.query.filter(Student.id.in_(assigned_student_ids)).all():
                 assigned_students_by_id[s.id] = {'id': s.id, 'name': s.name}
+        parent_user_ids = [u.id for u in users if getattr(u, 'role', None) == 'parent']
+        parent_links_by_user = {}
+        parent_student_ids = set()
+        if parent_user_ids:
+            for ps in ParentStudent.query.filter(ParentStudent.parent_user_id.in_(parent_user_ids)).all():
+                parent_links_by_user.setdefault(ps.parent_user_id, []).append(ps)
+                parent_student_ids.add(ps.student_id)
+        parent_students_by_id = {}
+        if parent_student_ids:
+            for s in Student.query.filter(Student.id.in_(parent_student_ids)).all():
+                parent_students_by_id[s.id] = s
         
         result = []
         for user in users:
@@ -11842,6 +12054,7 @@ def manage_users():
                 'id': user.id,
                 'name': user.name,
                 'username': user.username,
+                'email': getattr(user, 'email', None),
                 'role': user.role,
                 'designation': user.designation,
                 'student_id': user.student_id,
@@ -11863,6 +12076,8 @@ def manage_users():
                 user_data['student_name'] = student.name
                 user_data['grade'] = student.grade
                 user_data['card_color'] = student.card_color
+                if not user_data['email'] and student.email:
+                    user_data['email'] = student.email
                 user_data['team_members'] = {
                     'case_manager': [], 'practitioner': [], 'professional': [],
                     'group_leader': [], 'paraprofessional': []
@@ -11871,6 +12086,17 @@ def manage_users():
                     role_key = (tm.role or '').lower().replace(' ', '_')
                     if role_key in user_data['team_members']:
                         user_data['team_members'][role_key].append(tm.name)
+            if user.role == 'parent':
+                linked_students = []
+                for ps in parent_links_by_user.get(user.id, []):
+                    student = parent_students_by_id.get(ps.student_id)
+                    linked_students.append({
+                        'student_id': ps.student_id,
+                        'student_name': student.name if student else 'Unknown',
+                        'relationship': ps.relationship,
+                        'verified': ps.verified,
+                    })
+                user_data['linked_students'] = linked_students
             result.append(user_data)
         
         return jsonify(result)
@@ -11994,6 +12220,13 @@ def manage_users():
                 user.district = data['district'] if data['district'] else None
             if 'linked_case_manager_id' in data:
                 user.linked_case_manager_id = data['linked_case_manager_id'] if data['linked_case_manager_id'] else None
+            if 'email' in data:
+                email = (data.get('email') or '').strip() or None
+                user.email = email
+                if user.student_id:
+                    student = Student.query.get(user.student_id)
+                    if student:
+                        student.email = email
             
             # Update student grade if provided and user is a student
             if 'grade' in data and user.student_id:

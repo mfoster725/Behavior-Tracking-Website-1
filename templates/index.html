@@ -485,6 +485,7 @@
                                     <th>Practitioner</th>
                                     <th>Professional</th>
                                     <th>Group Leader</th>
+                                    <th>Email</th>
                                     <th>Username</th>
                                     <th class="users-table-password-col">Password</th>
                                     <th>Plan</th>
@@ -538,6 +539,39 @@
                 </div>
                 {% endif %}
                 
+                <!-- Parent/Guardian Users Table -->
+                <div class="user-role-section" id="user-section-parents" style="margin-bottom: 30px;">
+                    <h3 style="display: flex; align-items: center; justify-content: space-between;">
+                        <span>Parent/Guardian Users</span>
+                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="toggle-section-parents" style="cursor: pointer;">
+                            <span>Hide section</span>
+                        </label>
+                    </h3>
+                    <div class="user-role-section-body" id="user-section-parents-body">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <input type="text" id="parent-search" placeholder="🔍 Search parents by email, linked student, or username..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                        </div>
+                        <div class="user-table-scroll">
+                        <table class="users-table">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Linked Students</th>
+                                    <th>Username</th>
+                                    <th>Password</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="parent-users-table-body">
+                                <!-- Parent user rows will be loaded dynamically -->
+                            </tbody>
+                        </table>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Staff Users Table -->
                 <div class="user-role-section" id="user-section-staff" style="margin-bottom: 30px;">
                     <h3 style="display: flex; align-items: center; justify-content: space-between;">
@@ -557,6 +591,7 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>Role</th>
+                                    <th>Email</th>
                                     <th>Username</th>
                                     <th>Caseload</th>
                                     <th>Password</th>
@@ -591,6 +626,7 @@
                                     <th>Name</th>
                                     <th>District</th>
                                     <th>Students Assigned</th>
+                                    <th>Email</th>
                                     <th>Username</th>
                                     <th>Password</th>
                                     <th>Actions</th>
@@ -623,6 +659,7 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>Role</th>
+                                    <th>Email</th>
                                     <th>Username</th>
                                     <th>Password</th>
                                     <th>Actions</th>
@@ -705,7 +742,7 @@
                         </div>
                         <div id="import-staff-section">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-                                CSV columns: <strong>User Number | Name | Role | Grades Taught | Case Manager</strong>
+                                CSV columns: <strong>User Number (A) | Name (B) | Role (C) | Grades Taught (D) | Case Manager (E) | Email (F)</strong>
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional.
@@ -716,7 +753,7 @@
                         </div>
                         <div id="import-outside-staff-section" style="display: none;">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-                                CSV columns: <strong>User Number (A) | Name (B) | District (C)</strong>
+                                CSV columns: <strong>User Number (A) | Name (B) | District (C) | Email (E)</strong>
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Username and password are generated the same way as staff (e.g. username from name, password username123). Users are added as Outside Staff.
@@ -725,10 +762,11 @@
                         </div>
                         <div id="import-student-section" style="display: none;">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-                                CSV columns: <strong>Lunch Number | Initials | Grade | Card Color | Case Manager | Case Manager | Practitioner | Practitioner | Professional | Group Leader</strong>
+                                CSV columns: <strong>Lunch Number (A) | Initials (B) | Grade (C) | Card Color (D) | Case Manager (E-F) | Practitioner (G-H) | Professional (I) | Group Leader (J) | Student Email (L) | Parent 1 Email (M) | Parent 2 Email (N)</strong>
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Card Color: yellow, green, or blue. Team member columns are optional.
+                                Parent emails create Parent/Guardian user accounts linked to the student.
                                 Team names can be a first name or a partial match of at least 4 letters, matched to staff in that role
                                 (e.g. Professional <strong>Britt</strong> assigns the student to <strong>Brittany Roers</strong> if she is the unique Professional match).
                             </p>
@@ -1536,6 +1574,10 @@
                     <div class="form-group">
                         <label for="edit-user-username">Username: *</label>
                         <input type="text" id="edit-user-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                    </div>
+                    <div class="form-group" id="edit-user-email-group">
+                        <label for="edit-user-email">Email:</label>
+                        <input type="email" id="edit-user-email" placeholder="Enter email address" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div class="form-group" id="edit-user-role-group">
                         <label for="edit-user-role">Role: *</label>
