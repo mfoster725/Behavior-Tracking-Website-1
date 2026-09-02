@@ -38,6 +38,342 @@ const SCHEDULE_PERIODS = [
     'PM Bus'
 ];
 
+const SCHEDULE_WEEKDAY_OPTIONS = [
+    { key: 'mon', label: 'Mon', short: 'M' },
+    { key: 'tue', label: 'Tue', short: 'T' },
+    { key: 'wed', label: 'Wed', short: 'W' },
+    { key: 'thu', label: 'Thu', short: 'Th' },
+    { key: 'fri', label: 'Fri', short: 'F' },
+];
+const SCHEDULE_WEEKDAY_FROM_JS = { 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri' };
+const SCHEDULE_WEEKDAY_LABELS = Object.fromEntries(
+    SCHEDULE_WEEKDAY_OPTIONS.map((d) => [d.key, d.label])
+);
+
+function parseScheduleDateValue(value) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    const text = String(value).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+    const [y, m, d] = text.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt;
+}
+
+function toScheduleDateInputValue(value) {
+    const dt = parseScheduleDateValue(value);
+    if (!dt) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function schoolLocalToday() {
+    // Prefer America/Chicago-aligned calendar day when available
+    try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Chicago',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(new Date());
+        const y = parts.find((p) => p.type === 'year')?.value;
+        const m = parts.find((p) => p.type === 'month')?.value;
+        const d = parts.find((p) => p.type === 'day')?.value;
+        if (y && m && d) return parseScheduleDateValue(`${y}-${m}-${d}`);
+    } catch (e) { /* fall through */ }
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function normalizeScheduleWeekdays(value) {
+    if (value == null || value === '') return [];
+    let raw = value;
+    if (typeof value === 'string') {
+        const text = value.trim();
+        if (!text) return [];
+        try {
+            raw = JSON.parse(text);
+        } catch (e) {
+            raw = text.split(',').map((p) => p.trim()).filter(Boolean);
+        }
+    }
+    if (!Array.isArray(raw)) return [];
+    const aliases = {
+        monday: 'mon', mon: 'mon', m: 'mon', 0: 'mon',
+        tuesday: 'tue', tue: 'tue', tues: 'tue', 1: 'tue',
+        wednesday: 'wed', wed: 'wed', w: 'wed', 2: 'wed',
+        thursday: 'thu', thu: 'thu', thur: 'thu', thurs: 'thu', 3: 'thu',
+        friday: 'fri', fri: 'fri', f: 'fri', 4: 'fri',
+    };
+    const out = [];
+    const seen = new Set();
+    raw.forEach((item) => {
+        const key = aliases[String(item).trim().toLowerCase()];
+        if (key && !seen.has(key)) {
+            seen.add(key);
+            out.push(key);
+        }
+    });
+    return out;
+}
+
+function mondayOfWeek(dt) {
+    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    const day = d.getDay(); // 0 Sun
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d;
+}
+
+function nthWeekdayOfMonth(year, monthIndex, weekdayKey, ordinal) {
+    const pyMap = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5 }; // JS getDay()
+    const targetDow = pyMap[weekdayKey];
+    if (targetDow == null) return null;
+    if (ordinal === 'last') {
+        const cursor = new Date(year, monthIndex + 1, 0);
+        while (cursor.getDay() !== targetDow) cursor.setDate(cursor.getDate() - 1);
+        return cursor;
+    }
+    const n = parseInt(ordinal, 10);
+    if (!n || n < 1 || n > 4) return null;
+    const cursor = new Date(year, monthIndex, 1);
+    while (cursor.getDay() !== targetDow) cursor.setDate(cursor.getDate() + 1);
+    cursor.setDate(cursor.getDate() + (n - 1) * 7);
+    if (cursor.getMonth() !== monthIndex) return null;
+    return cursor;
+}
+
+function defaultScheduleRecurrence() {
+    return {
+        recurrence_type: 'daily',
+        weekdays: [],
+        month_ordinal: null,
+        biweekly_anchor: null,
+        effective_start: null,
+        effective_end: null,
+    };
+}
+
+function normalizeScheduleRecurrence(data) {
+    const src = data || {};
+    let recurrenceType = String(src.recurrence_type || 'daily').trim().toLowerCase() || 'daily';
+    if (!['daily', 'weekly', 'biweekly', 'nth_weekday'].includes(recurrenceType)) {
+        recurrenceType = 'daily';
+    }
+    let weekdays = normalizeScheduleWeekdays(src.weekdays);
+    let monthOrdinal = src.month_ordinal != null && src.month_ordinal !== ''
+        ? String(src.month_ordinal).trim().toLowerCase()
+        : null;
+    if (monthOrdinal === 'first') monthOrdinal = '1';
+    if (monthOrdinal === 'second') monthOrdinal = '2';
+    if (monthOrdinal === 'third') monthOrdinal = '3';
+    if (monthOrdinal === 'fourth') monthOrdinal = '4';
+    if (monthOrdinal === 'fifth' || monthOrdinal === '5th') monthOrdinal = 'last';
+    if (monthOrdinal && !['1', '2', '3', '4', 'last'].includes(monthOrdinal)) monthOrdinal = null;
+    let biweeklyAnchor = toScheduleDateInputValue(src.biweekly_anchor) || null;
+    const effectiveStart = toScheduleDateInputValue(src.effective_start) || null;
+    const effectiveEnd = toScheduleDateInputValue(src.effective_end) || null;
+
+    if (recurrenceType === 'daily') {
+        weekdays = [];
+        monthOrdinal = null;
+        biweeklyAnchor = null;
+    } else if (recurrenceType === 'weekly') {
+        monthOrdinal = null;
+        biweeklyAnchor = null;
+    } else if (recurrenceType === 'biweekly') {
+        monthOrdinal = null;
+        if (!biweeklyAnchor) biweeklyAnchor = effectiveStart || toScheduleDateInputValue(schoolLocalToday());
+    } else if (recurrenceType === 'nth_weekday') {
+        biweeklyAnchor = null;
+        if (weekdays.length) weekdays = weekdays.slice(0, 1);
+        if (!monthOrdinal) monthOrdinal = '1';
+    }
+
+    return {
+        recurrence_type: recurrenceType,
+        weekdays,
+        month_ordinal: monthOrdinal,
+        biweekly_anchor: biweeklyAnchor,
+        effective_start: effectiveStart,
+        effective_end: effectiveEnd,
+    };
+}
+
+function scheduleEntryAppliesOnDate(entry, onDate = null) {
+    const target = parseScheduleDateValue(onDate) || schoolLocalToday();
+    const rec = normalizeScheduleRecurrence(entry);
+    const start = parseScheduleDateValue(rec.effective_start);
+    const end = parseScheduleDateValue(rec.effective_end);
+    if (start && target < start) return false;
+    if (end && target > end) return false;
+
+    const jsDay = target.getDay();
+    if (jsDay === 0 || jsDay === 6) {
+        return rec.recurrence_type === 'daily';
+    }
+    const dayKey = SCHEDULE_WEEKDAY_FROM_JS[jsDay];
+
+    if (rec.recurrence_type === 'daily') return true;
+    if (rec.recurrence_type === 'weekly' || rec.recurrence_type === 'biweekly') {
+        if (!rec.weekdays.length) return true;
+        if (!rec.weekdays.includes(dayKey)) return false;
+        if (rec.recurrence_type === 'weekly') return true;
+        const anchor = parseScheduleDateValue(rec.biweekly_anchor) || parseScheduleDateValue(rec.effective_start);
+        if (!anchor) return true;
+        const weeks = Math.floor((mondayOfWeek(target) - mondayOfWeek(anchor)) / (7 * 24 * 60 * 60 * 1000));
+        return weeks % 2 === 0;
+    }
+    if (rec.recurrence_type === 'nth_weekday') {
+        if (!rec.weekdays.length) return false;
+        const hit = nthWeekdayOfMonth(target.getFullYear(), target.getMonth(), rec.weekdays[0], rec.month_ordinal || '1');
+        return !!(hit && hit.getTime() === target.getTime());
+    }
+    return true;
+}
+
+function formatScheduleRecurrenceSummary(data) {
+    const rec = normalizeScheduleRecurrence(data);
+    const dayLabels = rec.weekdays.map((k) => SCHEDULE_WEEKDAY_LABELS[k] || k).join(', ');
+    let core = 'Every school day';
+    if (rec.recurrence_type === 'weekly') {
+        core = dayLabels ? `Every ${dayLabels}` : 'Weekly';
+    } else if (rec.recurrence_type === 'biweekly') {
+        core = dayLabels ? `Every other ${dayLabels}` : 'Every other week';
+    } else if (rec.recurrence_type === 'nth_weekday') {
+        const ordMap = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', last: 'Last' };
+        const ord = ordMap[rec.month_ordinal || '1'] || rec.month_ordinal;
+        const day = dayLabels || 'weekday';
+        core = `${ord} ${day} of month`;
+    }
+    const rangeBits = [];
+    if (rec.effective_start) rangeBits.push(`from ${rec.effective_start}`);
+    if (rec.effective_end) rangeBits.push(`until ${rec.effective_end}`);
+    return rangeBits.length ? `${core} (${rangeBits.join(' ')})` : core;
+}
+
+function collectRecurrenceFromGroup(group) {
+    if (!group) return defaultScheduleRecurrence();
+    const typeSelect = group.querySelector('.recurrence-type');
+    const weekdays = Array.from(group.querySelectorAll('.recurrence-weekday:checked')).map((el) => el.value);
+    const monthOrdinal = group.querySelector('.recurrence-month-ordinal')?.value || null;
+    const biweeklyAnchor = group.querySelector('.recurrence-biweekly-anchor')?.value || null;
+    const effectiveStart = group.querySelector('.recurrence-effective-start')?.value || null;
+    const effectiveEnd = group.querySelector('.recurrence-effective-end')?.value || null;
+    return normalizeScheduleRecurrence({
+        recurrence_type: typeSelect ? typeSelect.value : 'daily',
+        weekdays,
+        month_ordinal: monthOrdinal,
+        biweekly_anchor: biweeklyAnchor,
+        effective_start: effectiveStart,
+        effective_end: effectiveEnd,
+    });
+}
+
+function updateRecurrenceControlsVisibility(group) {
+    if (!group) return;
+    const rec = collectRecurrenceFromGroup(group);
+    const weekdaysEl = group.querySelector('.schedule-recurrence-weekdays');
+    const nthEl = group.querySelector('.schedule-recurrence-nth');
+    const biweeklyEl = group.querySelector('.schedule-recurrence-biweekly');
+    const summaryEl = group.querySelector('.schedule-recurrence-summary');
+    if (weekdaysEl) {
+        weekdaysEl.hidden = !(rec.recurrence_type === 'weekly' || rec.recurrence_type === 'biweekly' || rec.recurrence_type === 'nth_weekday');
+        if (rec.recurrence_type === 'nth_weekday') {
+            // single-select behavior for nth
+            const checked = weekdaysEl.querySelectorAll('.recurrence-weekday:checked');
+            if (checked.length > 1) {
+                checked.forEach((el, idx) => { if (idx > 0) el.checked = false; });
+            }
+            weekdaysEl.querySelectorAll('label').forEach((label) => {
+                const input = label.querySelector('input');
+                label.classList.toggle('is-selected', !!(input && input.checked));
+            });
+        } else {
+            weekdaysEl.querySelectorAll('label').forEach((label) => {
+                const input = label.querySelector('input');
+                label.classList.toggle('is-selected', !!(input && input.checked));
+            });
+        }
+    }
+    if (nthEl) nthEl.hidden = rec.recurrence_type !== 'nth_weekday';
+    if (biweeklyEl) biweeklyEl.hidden = rec.recurrence_type !== 'biweekly';
+    if (summaryEl) summaryEl.textContent = formatScheduleRecurrenceSummary(rec);
+}
+
+function buildRecurrenceControlsHtml(recurrence = null) {
+    const rec = normalizeScheduleRecurrence(recurrence);
+    const weekdayHtml = SCHEDULE_WEEKDAY_OPTIONS.map((d) => {
+        const checked = rec.weekdays.includes(d.key) ? 'checked' : '';
+        const selected = checked ? ' is-selected' : '';
+        return `<label class="${selected}"><input type="checkbox" class="recurrence-weekday" value="${d.key}" ${checked}>${d.label}</label>`;
+    }).join('');
+    const ordOptions = [
+        ['1', '1st'],
+        ['2', '2nd'],
+        ['3', '3rd'],
+        ['4', '4th'],
+        ['last', 'Last'],
+    ].map(([v, label]) => `<option value="${v}" ${(rec.month_ordinal || '1') === v ? 'selected' : ''}>${label}</option>`).join('');
+    return `
+        <div class="schedule-recurrence">
+            <label>Repeats
+                <select class="recurrence-type">
+                    <option value="daily" ${rec.recurrence_type === 'daily' ? 'selected' : ''}>Every school day</option>
+                    <option value="weekly" ${rec.recurrence_type === 'weekly' ? 'selected' : ''}>Weekly</option>
+                    <option value="biweekly" ${rec.recurrence_type === 'biweekly' ? 'selected' : ''}>Every other week</option>
+                    <option value="nth_weekday" ${rec.recurrence_type === 'nth_weekday' ? 'selected' : ''}>Monthly (nth weekday)</option>
+                </select>
+            </label>
+            <div class="schedule-recurrence-weekdays" ${['weekly', 'biweekly', 'nth_weekday'].includes(rec.recurrence_type) ? '' : 'hidden'}>
+                ${weekdayHtml}
+            </div>
+            <div class="schedule-recurrence-nth" ${rec.recurrence_type === 'nth_weekday' ? '' : 'hidden'}>
+                <select class="recurrence-month-ordinal">${ordOptions}</select>
+            </div>
+            <div class="schedule-recurrence-biweekly" ${rec.recurrence_type === 'biweekly' ? '' : 'hidden'}>
+                <label>Week of <input type="date" class="recurrence-biweekly-anchor" value="${rec.biweekly_anchor || ''}"></label>
+            </div>
+            <div class="schedule-recurrence-range">
+                <label>From <input type="date" class="recurrence-effective-start" value="${rec.effective_start || ''}"></label>
+                <label>Until <input type="date" class="recurrence-effective-end" value="${rec.effective_end || ''}"></label>
+            </div>
+            <span class="schedule-recurrence-summary">${formatScheduleRecurrenceSummary(rec)}</span>
+        </div>
+    `;
+}
+
+function wireRecurrenceControls(group) {
+    if (!group) return;
+    const root = group.querySelector('.schedule-recurrence');
+    if (!root || root.dataset.wired === '1') {
+        updateRecurrenceControlsVisibility(group);
+        return;
+    }
+    root.dataset.wired = '1';
+    root.addEventListener('change', (e) => {
+        if (e.target.classList.contains('recurrence-weekday')) {
+            const type = group.querySelector('.recurrence-type')?.value;
+            if (type === 'nth_weekday' && e.target.checked) {
+                group.querySelectorAll('.recurrence-weekday').forEach((el) => {
+                    if (el !== e.target) el.checked = false;
+                });
+            }
+        }
+        updateRecurrenceControlsVisibility(group);
+    });
+    updateRecurrenceControlsVisibility(group);
+}
+
+function filterScheduleItemsForDate(items, onDate = null) {
+    return (items || []).filter((item) => scheduleEntryAppliesOnDate(item, onDate));
+}
+
 const TRANSITION_FIRST_BELL_MINUTES = 7 * 60 + 45;
 const TRANSITION_LAST_BELL_MINUTES = 14 * 60 + 45;
 const studentTransitionsByStudentId = {};
@@ -1751,7 +2087,7 @@ function focusDailyStarInput(input) {
 }
 
 function formatPointCardScheduleForPeriod(timePeriod) {
-    const items = getPeriodEntryScheduleItems().filter((s) => s && s.time_period === timePeriod);
+    const items = filterScheduleItemsForDate(getPeriodEntryScheduleItems()).filter((s) => s && s.time_period === timePeriod);
     if (!items.length) return '';
     const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
     const staffNames = [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))];
@@ -2246,7 +2582,6 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
         const savedSchedules = schedulesByTime[time] || [];
         if (savedSchedules.length > 0) {
             const row = document.createElement('tr');
-            const firstSchedule = savedSchedules[0];
             row.innerHTML = `
                 <td class="time-cell">
                     <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
@@ -2260,15 +2595,19 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
             `;
             const classesContainer = row.querySelector('.classes-container');
             savedSchedules.forEach((schedule) => {
-                if (schedule.class_name) {
-                    addClassInputGroup(classesContainer, schedule.class_name);
+                if (schedule.class_name || schedule.recurrence_type) {
+                    addClassInputGroup(classesContainer, {
+                        className: schedule.class_name || '',
+                        recurrence: schedule,
+                        includeStaff: false,
+                    });
                 }
             });
             if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(classesContainer);
+                addClassInputGroup(classesContainer, { includeStaff: false });
             }
             row.dataset.timePeriod = time;
-            setupScheduleRowButtons(row, time, tbody);
+            setupScheduleRowButtons(row, time, tbody, 'teacher');
             tbody.appendChild(row);
         } else {
             addScheduleRow('teacher', time, null, tbody);
@@ -2283,14 +2622,52 @@ function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentSc
     const markerLabel = formatTransitionMarkerLabel(transition);
     let insertedMarker = false;
     let prevHome = null;
+    const schedulesByTime = {};
+    (scheduleData || []).forEach((schedule) => {
+        const time = schedule && schedule.time_period;
+        if (!time) return;
+        if (!schedulesByTime[time]) schedulesByTime[time] = [];
+        schedulesByTime[time].push(schedule);
+    });
     SCHEDULE_PERIODS.forEach((time) => {
-        const savedSchedule = (scheduleData || []).find((item) => item && item.time_period === time);
+        const savedSchedules = schedulesByTime[time] || [];
         const home = isHomePeriod(transition, time);
         if (transition && prevHome !== null && home !== prevHome && !insertedMarker) {
             appendTransitionMarkerRow(tbody, markerLabel);
             insertedMarker = true;
         }
-        addScheduleRow('student', time, savedSchedule || null, tbody, studentId);
+        if (savedSchedules.length > 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="time-cell">
+                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+                </td>
+                <td class="classes-cell">
+                    <div class="classes-container"></div>
+                </td>
+                <td class="actions-cell">
+                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+                </td>
+            `;
+            const classesContainer = row.querySelector('.classes-container');
+            savedSchedules.forEach((schedule) => {
+                addClassInputGroup(classesContainer, {
+                    className: schedule.class_name || '',
+                    staffName: schedule.staff_name || '',
+                    recurrence: schedule,
+                    includeStaff: true,
+                });
+            });
+            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(classesContainer, { includeStaff: true });
+            }
+            row.dataset.timePeriod = time;
+            setupScheduleRowButtons(row, time, tbody, 'student');
+            applyStudentScheduleRowOwnership(row, time, studentId);
+            tbody.appendChild(row);
+        } else {
+            addScheduleRow('student', time, null, tbody, studentId);
+        }
         prevHome = home;
     });
 }
@@ -2332,8 +2709,8 @@ async function openPointCardScheduleEditModal({ type, studentId = null, studentN
         thead.innerHTML = `
             <tr>
                 <th>Time</th>
-                <th>Class</th>
-                <th>Staff</th>
+                <th>Class / Staff</th>
+                <th></th>
             </tr>
         `;
         await loadSchedules('student', studentId);
@@ -2350,31 +2727,48 @@ function collectSchedulePeriodsFromTbody(tbody, type) {
     if (!tbody) return periods;
     const rows = tbody.querySelectorAll('tr');
     rows.forEach((row) => {
+        if (row.classList.contains('schedule-row-split-marker')) return;
         const timeInput = row.querySelector('.time-input');
-        const staffInput = row.querySelector('.staff-input');
         const timePeriod = timeInput ? timeInput.value.trim() : '';
         if (!timePeriod) return;
 
         const classesContainer = row.querySelector('.classes-container');
-        if (classesContainer && type === 'teacher') {
-            const classInputs = classesContainer.querySelectorAll('.class-input');
-            classInputs.forEach((classInput) => {
-                const classValue = classInput.value.trim();
-                if (classValue) {
+        if (classesContainer) {
+            const groups = classesContainer.querySelectorAll('.class-input-group');
+            let pushed = false;
+            groups.forEach((group) => {
+                const classInput = group.querySelector('.class-input');
+                const staffInput = group.querySelector('.staff-input');
+                const classValue = classInput ? classInput.value.trim() : '';
+                const staffValue = staffInput ? staffInput.value.trim() : '';
+                const recurrence = collectRecurrenceFromGroup(group);
+                if (classValue || staffValue || recurrence.recurrence_type !== 'daily') {
                     periods.push({
                         time_period: timePeriod,
                         class_name: classValue,
-                        staff_name: '',
+                        staff_name: type === 'student' ? staffValue : '',
+                        ...recurrence,
                     });
+                    pushed = true;
                 }
             });
+            if (!pushed && type === 'student') {
+                periods.push({
+                    time_period: timePeriod,
+                    class_name: '',
+                    staff_name: '',
+                    ...defaultScheduleRecurrence(),
+                });
+            }
         } else {
             const classInput = row.querySelector('.class-input');
+            const staffInput = row.querySelector('.staff-input');
             if (classInput) {
                 periods.push({
                     time_period: timePeriod,
                     class_name: classInput.value.trim(),
                     staff_name: staffInput ? staffInput.value.trim() : '',
+                    ...defaultScheduleRecurrence(),
                 });
             }
         }
@@ -2504,7 +2898,7 @@ function applyPeriodEntrySelection() {
     currentClass = '';
     const classSelectorGroup = document.getElementById('class-selector-group');
     const classSelect = document.getElementById('class-select');
-    const scheduleItems = getPeriodEntryScheduleItems();
+    const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems(), currentDate || null);
     const classesForPeriod = scheduleItems
         .filter(s => s && s.time_period === currentPeriod && s.class_name)
         .map(s => s.class_name)
@@ -2765,7 +3159,7 @@ function setupEventListeners() {
                 currentClass = e.target.value;
                 console.log('Class selected:', currentClass);
 
-                const scheduleItems = getPeriodEntryScheduleItems();
+                const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems(), currentDate || null);
                 const classesForPeriod = scheduleItems
                     .filter(s => s && s.time_period === currentPeriod && s.class_name)
                     .map(s => s.class_name)
@@ -3813,7 +4207,7 @@ function parseTimeRange(timeStr) {
 
 // Function to get current period based on current time and user's schedule
 function getCurrentPeriodFromSchedule() {
-    const scheduleItems = getPeriodEntryScheduleItems();
+    const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems());
     if (!scheduleItems.length) {
         console.log('getCurrentPeriodFromSchedule: no schedule data');
         return null;
@@ -3995,6 +4389,9 @@ async function loadPeriodData() {
     if (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) {
         try {
             let url = `/api/students/by-staff-period?period=${encodeURIComponent(currentPeriod)}`;
+            if (currentDate) {
+                url += `&date=${encodeURIComponent(currentDate)}`;
+            }
             // Combined multi-class selection omits class_name so all students for the period are returned
             if (currentClass && currentClass !== PERIOD_ENTRY_ALL_CLASSES) {
                 url += `&class_name=${encodeURIComponent(currentClass)}`;
@@ -13505,18 +13902,18 @@ function updateAllClassAutocompletes() {
     // when they are focused or typed in, so no manual update needed
 }
 
-function formatStudentScheduleLocation(scheduleItems, timePeriod) {
-    const items = (scheduleItems || []).filter((item) => item && item.time_period === timePeriod);
+function formatStudentScheduleLocation(scheduleItems, timePeriod, onDate = null) {
+    const items = filterScheduleItemsForDate(scheduleItems, onDate).filter((item) => item && item.time_period === timePeriod);
     if (!items.length) return '';
     const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
     return classNames.join(', ');
 }
 
-function getStudentScheduleLocationForPeriod(studentId, timePeriod) {
+function getStudentScheduleLocationForPeriod(studentId, timePeriod, onDate = null) {
     const items = studentSchedulesByStudentId[studentId]
         || studentSchedulesByStudentId[String(studentId)]
         || [];
-    const location = formatStudentScheduleLocation(items, timePeriod);
+    const location = formatStudentScheduleLocation(items, timePeriod, onDate || currentDate || null);
     if (location) return location;
     if (isOtherSchoolPeriod(studentId, timePeriod)) return 'Other school';
     const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
@@ -13630,14 +14027,15 @@ function updateTeacherScheduleEditability() {
     if (addBtn) addBtn.style.display = canEdit ? '' : 'none';
     if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
     if (tbody) {
-        tbody.querySelectorAll('.time-input, .class-input, .btn-add-class, .btn-remove-class').forEach(el => {
-            if (el.classList && (el.classList.contains('time-input') || el.classList.contains('class-input'))) {
-                el.readOnly = !canEdit;
-                el.disabled = !canEdit;
-            }
-            if (el.classList && (el.classList.contains('btn-add-class') || el.classList.contains('btn-remove-class'))) {
+        tbody.querySelectorAll('input, select, button').forEach((el) => {
+            if (el.classList.contains('btn-add-class') || el.classList.contains('btn-delete-class')) {
                 el.style.display = canEdit ? '' : 'none';
                 el.disabled = !canEdit;
+                return;
+            }
+            el.disabled = !canEdit;
+            if (el.tagName === 'INPUT' && (el.type === 'text' || !el.type)) {
+                el.readOnly = !canEdit;
             }
         });
     }
@@ -14473,140 +14871,130 @@ function renderStudentSchedule() {
     requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
-// Helper function to add a class input group to the classes container
-function addClassInputGroup(container, value = '') {
+// Helper function to add a class/entry input group to the classes container
+function addClassInputGroup(container, options = {}) {
+    // Back-compat: addClassInputGroup(container, 'Math')
+    if (typeof options === 'string') {
+        options = { className: options, includeStaff: false };
+    }
+    const includeStaff = !!options.includeStaff;
+    const className = options.className || '';
+    const staffName = options.staffName || '';
+    const recurrence = normalizeScheduleRecurrence(options.recurrence);
+    const escapeAttr = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
     const group = document.createElement('div');
     group.className = 'class-input-group';
-    group.innerHTML = `
-        <input type="text" value="${value}" class="class-input" placeholder="Enter class/activity">
-        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
+    const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const staffUniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const staffHtml = includeStaff ? `
+        <div class="staff-autocomplete-wrapper">
+            <input type="text" value="${escapeAttr(staffName)}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${staffUniqueId}">
+            <div class="staff-autocomplete-dropdown" id="dropdown-${staffUniqueId}"></div>
+        </div>
+    ` : '';
+
+    const classInputHtml = includeStaff ? `
+        <div class="class-autocomplete-wrapper">
+            <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
+            <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
+        </div>
+    ` : `
+        <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity">
     `;
-    
-    // Add delete button event listener
+
+    group.innerHTML = `
+        <div class="schedule-entry-main">
+            ${classInputHtml}
+            ${staffHtml}
+            <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
+        </div>
+        ${buildRecurrenceControlsHtml(recurrence)}
+    `;
+
     const deleteBtn = group.querySelector('.btn-delete-class');
     if (deleteBtn) {
         deleteBtn.addEventListener('click', () => {
-            const container = group.parentElement;
+            const parent = group.parentElement;
             group.remove();
-            // If this was the last class input, ensure at least one remains
-            if (container && container.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(container);
+            if (parent && parent.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(parent, { includeStaff });
             }
             syncScheduleRowHeights();
         });
     }
-    
+
+    if (includeStaff) {
+        const classInput = group.querySelector('.class-input');
+        const staffInput = group.querySelector('.staff-input');
+        if (classInput) setupClassAutocomplete(classInput);
+        if (staffInput) setupStaffAutocomplete(staffInput);
+    }
+
+    wireRecurrenceControls(group);
     container.appendChild(group);
     return group;
 }
 
-// Helper function to setup button event listeners for a teacher schedule row
-function setupScheduleRowButtons(row, timePeriod, tbody) {
-    // Add event listener for "Add Class" button
+// Helper function to setup button event listeners for a schedule row
+function setupScheduleRowButtons(row, timePeriod, tbody, type = 'teacher') {
+    const includeStaff = type === 'student';
     const addClassBtn = row.querySelector('.btn-add-class');
     if (addClassBtn) {
-        // Remove existing listener if any, then add new one
         const newAddClassBtn = addClassBtn.cloneNode(true);
         addClassBtn.parentNode.replaceChild(newAddClassBtn, addClassBtn);
         newAddClassBtn.addEventListener('click', () => {
-            // Add a new class input group within the same cell
             const classesContainer = row.querySelector('.classes-container');
             if (classesContainer) {
-                addClassInputGroup(classesContainer);
+                addClassInputGroup(classesContainer, { includeStaff });
                 syncScheduleRowHeights();
             }
         });
     }
-    
-    // Setup delete button listeners for existing class input groups
-    const deleteButtons = row.querySelectorAll('.btn-delete-class');
-    deleteButtons.forEach(deleteBtn => {
-        deleteBtn.addEventListener('click', () => {
-            const group = deleteBtn.closest('.class-input-group');
-            const container = group?.parentElement;
-            if (group && container) {
-                group.remove();
-                // If this was the last class input, ensure at least one remains
-                if (container.querySelectorAll('.class-input-group').length === 0) {
-                    addClassInputGroup(container);
-                } else {
-                    syncScheduleRowHeights();
-                }
-            }
-        });
-    });
 }
 
 function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, studentId = currentScheduleStudentId) {
     const tbody = targetTbody || document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
-    
+
     const row = document.createElement('tr');
-    
-    if (type === 'teacher') {
-        // Teacher schedule - Class cell contains container for multiple class inputs
-        const initialClassValue = data?.class_name || '';
-        row.innerHTML = `
-            <td class="time-cell">
-                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-            </td>
-            <td class="classes-cell">
-                <div class="classes-container">
-                    ${initialClassValue ? `<div class="class-input-group">
-                        <input type="text" value="${initialClassValue}" class="class-input" placeholder="Enter class/activity">
-                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
-                    </div>` : ''}
-                </div>
-            </td>
-            <td class="actions-cell">
-                <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
-            </td>
-        `;
-        
-        // If no initial class, add one empty class input group
-        if (!initialClassValue) {
-            const classesContainer = row.querySelector('.classes-container');
-            if (classesContainer) {
-                addClassInputGroup(classesContainer);
-            }
-        }
-        
-        // Store reference to row for button setup
-        row.dataset.timePeriod = timePeriod;
-        
-        // Setup button event listeners for this row
-        setupScheduleRowButtons(row, timePeriod, tbody);
+    const includeStaff = type === 'student';
+
+    row.innerHTML = `
+        <td class="time-cell">
+            <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+        </td>
+        <td class="classes-cell">
+            <div class="classes-container"></div>
+        </td>
+        <td class="actions-cell">
+            <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+        </td>
+    `;
+
+    const classesContainer = row.querySelector('.classes-container');
+    if (data && (data.class_name || data.staff_name || data.recurrence_type)) {
+        addClassInputGroup(classesContainer, {
+            className: data.class_name || '',
+            staffName: data.staff_name || '',
+            recurrence: data,
+            includeStaff,
+        });
     } else {
-        // Student schedule - includes staff column with custom autocomplete dropdown
-        const staffValue = data?.staff_name || '';
-        const uniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        row.innerHTML = `
-            <td class="time-cell">
-                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-            </td>
-            <td>
-                <div class="class-autocomplete-wrapper">
-                    <input type="text" value="${data?.class_name || ''}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
-                    <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
-                </div>
-            </td>
-            <td>
-                <div class="staff-autocomplete-wrapper">
-                    <input type="text" value="${staffValue}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${uniqueId}">
-                    <div class="staff-autocomplete-dropdown" id="dropdown-${uniqueId}"></div>
-                </div>
-            </td>
-        `;
-        
-        // Setup autocomplete for staff input
-        setupStaffAutocomplete(row.querySelector('.staff-input'));
-        
-        // Setup autocomplete for class input
-        setupClassAutocomplete(row.querySelector('.class-input'));
+        addClassInputGroup(classesContainer, { includeStaff });
+    }
+
+    row.dataset.timePeriod = timePeriod;
+    setupScheduleRowButtons(row, timePeriod, tbody, type);
+    if (type === 'student') {
         applyStudentScheduleRowOwnership(row, timePeriod, studentId);
     }
-    
+
     tbody.appendChild(row);
 }
 
@@ -14615,9 +15003,14 @@ function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
     const other = isOtherSchoolPeriod(studentId, timePeriod);
     const canEditPeriod = canEditSchedulePeriod(studentId, timePeriod);
     row.classList.toggle('schedule-row-other-school', other);
-    row.querySelectorAll('input').forEach((input) => {
-        input.disabled = !canEditPeriod;
-        if (!canEditPeriod) input.tabIndex = -1;
+    row.querySelectorAll('input, select, button').forEach((el) => {
+        if (el.classList.contains('time-input')) {
+            el.disabled = !canEditPeriod;
+            if (!canEditPeriod) el.tabIndex = -1;
+            return;
+        }
+        el.disabled = !canEditPeriod;
+        if (!canEditPeriod && el.tagName === 'INPUT') el.tabIndex = -1;
     });
     const timeCell = row.querySelector('.time-cell');
     if (timeCell) {
@@ -14876,34 +15269,7 @@ function getSelectedStudentScheduleName() {
 
 function collectSchedulePeriodsFromTable(type) {
     const tbody = document.getElementById(`${type}-schedule-body`);
-    if (!tbody) return [];
-    const periods = [];
-    tbody.querySelectorAll('tr').forEach((row) => {
-        const timeInput = row.querySelector('.time-input');
-        const timePeriod = (timeInput ? timeInput.value : row.dataset.timePeriod || '').trim();
-        if (!timePeriod) return;
-        if (type === 'teacher') {
-            const classValues = Array.from(row.querySelectorAll('.class-input'))
-                .map((input) => input.value.trim())
-                .filter(Boolean);
-            if (classValues.length) {
-                classValues.forEach((className) => {
-                    periods.push({ time_period: timePeriod, class_name: className, staff_name: '' });
-                });
-            } else {
-                periods.push({ time_period: timePeriod, class_name: '', staff_name: '' });
-            }
-        } else {
-            const classInput = row.querySelector('.class-input');
-            const staffInput = row.querySelector('.staff-input');
-            periods.push({
-                time_period: timePeriod,
-                class_name: classInput ? classInput.value.trim() : '',
-                staff_name: staffInput ? staffInput.value.trim() : ''
-            });
-        }
-    });
-    return periods;
+    return collectSchedulePeriodsFromTbody(tbody, type);
 }
 
 function groupSchedulePeriodsForPrint(periods, includeStaff) {
@@ -14920,13 +15286,24 @@ function groupSchedulePeriodsForPrint(periods, includeStaff) {
     });
     return times.map((time) => {
         const items = byTime[time] || [];
-        const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
-        const staffNames = includeStaff
-            ? [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))]
-            : [];
+        const classParts = [];
+        const staffNames = [];
+        items.forEach((item) => {
+            const className = (item.class_name || '').trim();
+            if (!className) return;
+            const summary = formatScheduleRecurrenceSummary(item);
+            const label = (!item.recurrence_type || item.recurrence_type === 'daily')
+                ? className
+                : `${className} (${summary})`;
+            if (!classParts.includes(label)) classParts.push(label);
+            const staffName = (item.staff_name || '').trim();
+            if (includeStaff && staffName && !staffNames.includes(staffName)) {
+                staffNames.push(staffName);
+            }
+        });
         return {
             time,
-            className: classNames.join(', '),
+            className: classParts.join(', '),
             staffName: staffNames.join(', ')
         };
     });

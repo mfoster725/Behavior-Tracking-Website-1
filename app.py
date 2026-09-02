@@ -805,6 +805,58 @@ def ensure_hidden_from_management_column():
 ensure_hidden_from_management_column()
 
 
+def ensure_schedule_recurrence_columns():
+    """Add schedule recurrence columns on SQLite and Postgres if missing."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'schedules' not in inspector.get_table_names():
+                return
+            columns = {col['name'] for col in inspector.get_columns('schedules')}
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            additions = []
+            if 'recurrence_type' not in columns:
+                additions.append(
+                    "recurrence_type VARCHAR(20) DEFAULT 'daily'"
+                    if is_postgres
+                    else "recurrence_type VARCHAR(20) DEFAULT 'daily'"
+                )
+            if 'weekdays' not in columns:
+                additions.append('weekdays TEXT')
+            if 'month_ordinal' not in columns:
+                additions.append('month_ordinal VARCHAR(10)')
+            if 'biweekly_anchor' not in columns:
+                additions.append('biweekly_anchor DATE')
+            if 'effective_start' not in columns:
+                additions.append('effective_start DATE')
+            if 'effective_end' not in columns:
+                additions.append('effective_end DATE')
+            if not additions:
+                return
+            with db.engine.connect() as conn:
+                for ddl in additions:
+                    col_name = ddl.split()[0]
+                    if is_postgres:
+                        conn.execute(text(
+                            f"ALTER TABLE schedules ADD COLUMN IF NOT EXISTS {ddl}"
+                        ))
+                    else:
+                        # SQLite has no IF NOT EXISTS for ADD COLUMN; skip if present
+                        if col_name in columns:
+                            continue
+                        conn.execute(text(f"ALTER TABLE schedules ADD COLUMN {ddl}"))
+                conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure schedule recurrence columns exist: {e}")
+        except Exception:
+            print(f"Failed to ensure schedule recurrence columns exist: {e}")
+
+
+ensure_schedule_recurrence_columns()
+
+
 def ensure_user_email_column():
     """Add users.email on SQLite and Postgres if it is missing."""
     try:
@@ -1110,12 +1162,307 @@ def user_can_write_student_period(user, student_id, time_period):
     return not is_home
 
 
-def _format_student_schedule_location(schedule_rows, time_period):
+SCHEDULE_WEEKDAY_KEYS = ('mon', 'tue', 'wed', 'thu', 'fri')
+SCHEDULE_WEEKDAY_FROM_PYTHON = {
+    0: 'mon',
+    1: 'tue',
+    2: 'wed',
+    3: 'thu',
+    4: 'fri',
+}
+SCHEDULE_RECURRENCE_TYPES = frozenset({'daily', 'weekly', 'biweekly', 'nth_weekday'})
+SCHEDULE_MONTH_ORDINALS = frozenset({'1', '2', '3', '4', 'last'})
+
+
+def _parse_schedule_date(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _normalize_schedule_weekdays(value):
+    if value is None or value == '':
+        return []
+    raw = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            raw = json.loads(text)
+        except (TypeError, ValueError):
+            raw = [part.strip() for part in text.split(',') if part.strip()]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    aliases = {
+        'monday': 'mon', 'mon': 'mon', 'm': 'mon', '0': 'mon',
+        'tuesday': 'tue', 'tue': 'tue', 'tues': 'tue', '1': 'tue',
+        'wednesday': 'wed', 'wed': 'wed', 'w': 'wed', '2': 'wed',
+        'thursday': 'thu', 'thu': 'thu', 'thur': 'thu', 'thurs': 'thu', '3': 'thu',
+        'friday': 'fri', 'fri': 'fri', 'f': 'fri', '4': 'fri',
+    }
+    out = []
+    seen = set()
+    for item in raw:
+        key = aliases.get(str(item).strip().lower())
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _serialize_schedule_weekdays(value):
+    days = _normalize_schedule_weekdays(value)
+    return days
+
+
+def _weekdays_storage(value):
+    days = _normalize_schedule_weekdays(value)
+    if not days:
+        return None
+    return json.dumps(days)
+
+
+def _normalize_month_ordinal(value):
+    if value is None or value == '':
+        return None
+    text = str(value).strip().lower()
+    if text in SCHEDULE_MONTH_ORDINALS:
+        return text
+    aliases = {
+        'first': '1', '1st': '1',
+        'second': '2', '2nd': '2',
+        'third': '3', '3rd': '3',
+        'fourth': '4', '4th': '4',
+        'fifth': 'last', '5th': 'last',
+    }
+    return aliases.get(text)
+
+
+def _monday_of_week(d):
+    return d - timedelta(days=d.weekday())
+
+
+def _nth_weekday_of_month(year, month, weekday_key, ordinal):
+    """Return the date of the nth (or last) Mon–Fri weekday in a month, or None."""
+    py_weekday = {v: k for k, v in SCHEDULE_WEEKDAY_FROM_PYTHON.items()}.get(weekday_key)
+    if py_weekday is None:
+        return None
+    if ordinal == 'last':
+        if month == 12:
+            cursor = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            cursor = date(year, month + 1, 1) - timedelta(days=1)
+        while cursor.weekday() != py_weekday:
+            cursor -= timedelta(days=1)
+        return cursor
+    try:
+        n = int(ordinal)
+    except (TypeError, ValueError):
+        return None
+    if n < 1 or n > 4:
+        return None
+    cursor = date(year, month, 1)
+    while cursor.weekday() != py_weekday:
+        cursor += timedelta(days=1)
+    target = cursor + timedelta(weeks=n - 1)
+    if target.month != month:
+        return None
+    return target
+
+
+def schedule_entry_applies_on_date(entry, on_date=None):
+    """Return True if a schedule entry applies on the given school date."""
+    if on_date is None:
+        on_date = school_now().date()
+    elif isinstance(on_date, datetime):
+        on_date = on_date.date()
+
+    if isinstance(entry, dict):
+        recurrence_type = (entry.get('recurrence_type') or 'daily').strip().lower() or 'daily'
+        weekdays = _normalize_schedule_weekdays(entry.get('weekdays'))
+        month_ordinal = _normalize_month_ordinal(entry.get('month_ordinal'))
+        biweekly_anchor = _parse_schedule_date(entry.get('biweekly_anchor'))
+        effective_start = _parse_schedule_date(entry.get('effective_start'))
+        effective_end = _parse_schedule_date(entry.get('effective_end'))
+    else:
+        recurrence_type = (getattr(entry, 'recurrence_type', None) or 'daily').strip().lower() or 'daily'
+        weekdays = _normalize_schedule_weekdays(getattr(entry, 'weekdays', None))
+        month_ordinal = _normalize_month_ordinal(getattr(entry, 'month_ordinal', None))
+        biweekly_anchor = _parse_schedule_date(getattr(entry, 'biweekly_anchor', None))
+        effective_start = _parse_schedule_date(getattr(entry, 'effective_start', None))
+        effective_end = _parse_schedule_date(getattr(entry, 'effective_end', None))
+
+    if effective_start and on_date < effective_start:
+        return False
+    if effective_end and on_date > effective_end:
+        return False
+
+    if recurrence_type not in SCHEDULE_RECURRENCE_TYPES:
+        recurrence_type = 'daily'
+
+    # Weekends never match weekday-based school schedule rules
+    if on_date.weekday() > 4:
+        return recurrence_type == 'daily'
+
+    day_key = SCHEDULE_WEEKDAY_FROM_PYTHON.get(on_date.weekday())
+
+    if recurrence_type == 'daily':
+        return True
+
+    if recurrence_type in ('weekly', 'biweekly'):
+        if not weekdays:
+            return True
+        if day_key not in weekdays:
+            return False
+        if recurrence_type == 'weekly':
+            return True
+        anchor = biweekly_anchor or effective_start
+        if not anchor:
+            return True
+        weeks = (_monday_of_week(on_date) - _monday_of_week(anchor)).days // 7
+        return weeks % 2 == 0
+
+    if recurrence_type == 'nth_weekday':
+        if not weekdays:
+            return False
+        weekday_key = weekdays[0]
+        ordinal = month_ordinal or '1'
+        target = _nth_weekday_of_month(on_date.year, on_date.month, weekday_key, ordinal)
+        return bool(target and target == on_date)
+
+    return True
+
+
+def _filter_schedule_rows_for_date(rows, on_date=None):
+    return [row for row in (rows or []) if schedule_entry_applies_on_date(row, on_date)]
+
+
+def _normalize_period_recurrence(period):
+    """Normalize recurrence fields from an API period payload."""
+    period = period or {}
+    recurrence_type = (period.get('recurrence_type') or 'daily').strip().lower() or 'daily'
+    if recurrence_type not in SCHEDULE_RECURRENCE_TYPES:
+        recurrence_type = 'daily'
+    weekdays = _normalize_schedule_weekdays(period.get('weekdays'))
+    month_ordinal = _normalize_month_ordinal(period.get('month_ordinal'))
+    biweekly_anchor = _parse_schedule_date(period.get('biweekly_anchor'))
+    effective_start = _parse_schedule_date(period.get('effective_start'))
+    effective_end = _parse_schedule_date(period.get('effective_end'))
+
+    if recurrence_type == 'daily':
+        weekdays = []
+        month_ordinal = None
+        biweekly_anchor = None
+    elif recurrence_type == 'weekly':
+        month_ordinal = None
+        biweekly_anchor = None
+    elif recurrence_type == 'biweekly':
+        month_ordinal = None
+        if not biweekly_anchor:
+            biweekly_anchor = effective_start or school_now().date()
+    elif recurrence_type == 'nth_weekday':
+        biweekly_anchor = None
+        if weekdays:
+            weekdays = weekdays[:1]
+        if not month_ordinal:
+            month_ordinal = '1'
+
+    return {
+        'recurrence_type': recurrence_type,
+        'weekdays': weekdays,
+        'month_ordinal': month_ordinal,
+        'biweekly_anchor': biweekly_anchor,
+        'effective_start': effective_start,
+        'effective_end': effective_end,
+    }
+
+
+def _period_payload_from_request(period):
+    time_period = (period.get('time_period') or '').strip()
+    recurrence = _normalize_period_recurrence(period)
+    return {
+        'time_period': time_period,
+        'class_name': (period.get('class_name') or '').strip() or None,
+        'staff_name': (period.get('staff_name') or '').strip() or None,
+        'recurrence_type': recurrence['recurrence_type'],
+        'weekdays': recurrence['weekdays'],
+        'month_ordinal': recurrence['month_ordinal'],
+        'biweekly_anchor': recurrence['biweekly_anchor'],
+        'effective_start': recurrence['effective_start'],
+        'effective_end': recurrence['effective_end'],
+    }
+
+
+def _period_payload_from_row(row):
+    return {
+        'time_period': row.time_period,
+        'class_name': row.class_name,
+        'staff_name': row.staff_name,
+        'recurrence_type': (row.recurrence_type or 'daily'),
+        'weekdays': _serialize_schedule_weekdays(row.weekdays),
+        'month_ordinal': row.month_ordinal,
+        'biweekly_anchor': row.biweekly_anchor,
+        'effective_start': row.effective_start,
+        'effective_end': row.effective_end,
+    }
+
+
+def _create_schedule_row(schedule_type, *, user_id=None, student_id=None, period=None, sort_order=0):
+    period = period or {}
+    recurrence = _normalize_period_recurrence(period)
+    return Schedule(
+        schedule_type=schedule_type,
+        user_id=user_id,
+        student_id=student_id,
+        time_period=(period.get('time_period') or '').strip(),
+        class_name=(period.get('class_name') or '').strip() or None,
+        staff_name=(period.get('staff_name') or '').strip() or None,
+        sort_order=sort_order,
+        recurrence_type=recurrence['recurrence_type'],
+        weekdays=_weekdays_storage(recurrence['weekdays']),
+        month_ordinal=recurrence['month_ordinal'],
+        biweekly_anchor=recurrence['biweekly_anchor'],
+        effective_start=recurrence['effective_start'],
+        effective_end=recurrence['effective_end'],
+    )
+
+
+def _serialize_schedule_row(s):
+    return {
+        'id': s.id,
+        'schedule_type': s.schedule_type,
+        'user_id': s.user_id,
+        'student_id': s.student_id,
+        'time_period': s.time_period,
+        'class_name': s.class_name,
+        'staff_name': s.staff_name,
+        'sort_order': s.sort_order,
+        'recurrence_type': (s.recurrence_type or 'daily'),
+        'weekdays': _serialize_schedule_weekdays(s.weekdays),
+        'month_ordinal': s.month_ordinal,
+        'biweekly_anchor': s.biweekly_anchor.isoformat() if s.biweekly_anchor else None,
+        'effective_start': s.effective_start.isoformat() if s.effective_start else None,
+        'effective_end': s.effective_end.isoformat() if s.effective_end else None,
+    }
+
+
+def _format_student_schedule_location(schedule_rows, time_period, on_date=None):
     """Format a student's schedule rows for one point-card period."""
     time_period = (time_period or '').strip()
     class_names = []
     seen = set()
-    for row in schedule_rows or []:
+    for row in _filter_schedule_rows_for_date(schedule_rows, on_date):
         if isinstance(row, dict):
             row_period = (row.get('time_period') or '').strip()
             class_name = (row.get('class_name') or '').strip()
@@ -1159,10 +1506,10 @@ def _student_schedule_rows_by_student(student_ids):
     return grouped
 
 
-def _student_location_for_period(student_id, time_period, schedule_rows=None, fallback=''):
+def _student_location_for_period(student_id, time_period, schedule_rows=None, fallback='', on_date=None):
     """Resolve location text from a student's schedule, with optional fallback."""
     rows = schedule_rows if schedule_rows is not None else _student_schedule_rows(student_id)
-    location = _format_student_schedule_location(rows, time_period)
+    location = _format_student_schedule_location(rows, time_period, on_date=on_date)
     if location:
         return location
     fallback = (fallback or '').strip()
@@ -1353,6 +1700,7 @@ def _ensure_full_point_card_periods(daily_record):
             time_range,
             schedule_rows=schedule_rows,
             fallback=default_location,
+            on_date=getattr(daily_record, 'date', None),
         )
         db.session.add(PeriodRecord(
             daily_record_id=daily_record.id,
@@ -1448,6 +1796,7 @@ def _upsert_period_record(daily_record, period_data, *, merge=False, default_loc
                 daily_record.student_id,
                 time_range,
                 fallback=default_location or POINT_CARD_DEFAULT_LOCATIONS.get(time_range, ''),
+                on_date=getattr(daily_record, 'date', None),
             )
         period_record = PeriodRecord(
             daily_record_id=daily_record.id,
@@ -1553,11 +1902,10 @@ def notify_missing_point_card_entries(dates):
         Schedule.schedule_type == 'student',
         Schedule.student_id.in_(active_student_ids),
     ).all()
-    staff_name_by_student_period = {}
+    schedules_by_student = {}
     for row in schedules:
-        if not row.student_id or not row.time_period:
-            continue
-        staff_name_by_student_period.setdefault(row.student_id, {})[row.time_period] = row.staff_name
+        if row.student_id:
+            schedules_by_student.setdefault(row.student_id, []).append(row)
 
     notified_students = 0
     for record_date in dates:
@@ -1610,7 +1958,12 @@ def notify_missing_point_card_entries(dates):
                 skip_staff_ids.add(case_manager.id)
 
             gaps_by_staff = {}
-            period_staff = staff_name_by_student_period.get(student_id, {})
+            student_rows = schedules_by_student.get(student_id, [])
+            period_staff = {}
+            for row in sorted(student_rows, key=lambda r: (r.sort_order or 0, r.id or 0)):
+                if not row.time_period or not schedule_entry_applies_on_date(row, record_date):
+                    continue
+                period_staff.setdefault(row.time_period, row.staff_name)
             for gap in gaps:
                 staff_name = (period_staff.get(gap['time_range']) or '').strip()
                 if not staff_name:
@@ -1750,6 +2103,7 @@ def backfill_point_card_locations_for_date(record_date, *, dry_run=False):
                 student_id,
                 time_range,
                 schedule_rows=schedule_rows,
+                on_date=getattr(daily_record, 'date', None),
             )
             old_location = (period.location or '').strip()
             if old_location == new_location:
@@ -2065,6 +2419,13 @@ class Schedule(db.Model):
     class_name = db.Column(db.String(100))  # Class/Activity name
     staff_name = db.Column(db.String(100))  # Staff member name
     sort_order = db.Column(db.Integer, default=0)  # Explicit sort order to maintain position
+    # Recurrence: daily (default), weekly, biweekly, nth_weekday
+    recurrence_type = db.Column(db.String(20), default='daily')
+    weekdays = db.Column(db.Text)  # JSON list e.g. ["mon","wed"] for weekly/biweekly/nth
+    month_ordinal = db.Column(db.String(10))  # "1"|"2"|"3"|"4"|"last" for nth_weekday
+    biweekly_anchor = db.Column(db.Date)  # week-0 marker for biweekly
+    effective_start = db.Column(db.Date)
+    effective_end = db.Column(db.Date)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -4061,6 +4422,7 @@ def students_by_staff_period():
     
     period = request.args.get('period')
     class_name = request.args.get('class_name', '').strip()  # Optional class name filter
+    on_date = _parse_schedule_date(request.args.get('date')) or school_now().date()
     if not period:
         return jsonify({'error': 'Period parameter is required'}), 400
     
@@ -4078,7 +4440,10 @@ def students_by_staff_period():
     if class_name:
         query = query.filter_by(class_name=class_name)
     
-    matching_schedules = query.all()
+    matching_schedules = [
+        s for s in query.all()
+        if schedule_entry_applies_on_date(s, on_date)
+    ]
     
     # Get unique student IDs
     student_ids = list(set([s.student_id for s in matching_schedules if s.student_id]))
@@ -5011,6 +5376,7 @@ def period_data():
                 student_id,
                 period,
                 schedule_rows=student_schedule_rows,
+                on_date=record_date,
             )
             if student_location and 'location' not in period_payload:
                 period_payload['location'] = student_location
@@ -12078,10 +12444,12 @@ def schedules():
                 return jsonify({'error': 'Invalid schedule_type. Must be "teacher" or "student"'}), 400
             
             # Validate periods data
+            normalized_periods = []
             for index, period in enumerate(periods):
                 time_period = period.get('time_period', '').strip()
                 if not time_period:
                     return jsonify({'error': f'Time period is required for period {index + 1}'}), 400
+                normalized_periods.append(_period_payload_from_request(period))
             
             # Delete existing schedules
             target_user_id = current_user.id  # for teacher schedule
@@ -12095,17 +12463,14 @@ def schedules():
                         return jsonify({'error': 'Only admin can save another user\'s teacher schedule'}), 403
                     target_user_id = int(teacher_user_id)
                 Schedule.query.filter_by(schedule_type='teacher', user_id=target_user_id).delete()
-                for index, period in enumerate(periods):
-                    schedule = Schedule(
-                        schedule_type=schedule_type,
+                for index, period in enumerate(normalized_periods):
+                    db.session.add(_create_schedule_row(
+                        'teacher',
                         user_id=target_user_id,
                         student_id=None,
-                        time_period=period.get('time_period', '').strip(),
-                        class_name=period.get('class_name', '').strip() or None,
-                        staff_name=period.get('staff_name', '').strip() or None,
-                        sort_order=index
-                    )
-                    db.session.add(schedule)
+                        period=period,
+                        sort_order=index,
+                    ))
             else:
                 if not student_id:
                     return jsonify({'error': 'student_id is required for student schedules'}), 400
@@ -12121,24 +12486,23 @@ def schedules():
                 if is_outside and not transition:
                     return jsonify({'error': 'Set a transition before editing the other-school schedule'}), 403
 
+                # Group payload entries by time_period (preserve multi-entry + order)
                 payload_by_period = {}
                 payload_order = []
-                for period in periods:
-                    time_period = period.get('time_period', '').strip()
+                for period in normalized_periods:
+                    time_period = period['time_period']
                     if time_period not in payload_by_period:
                         payload_order.append(time_period)
-                    payload_by_period[time_period] = {
-                        'time_period': time_period,
-                        'class_name': (period.get('class_name') or '').strip() or None,
-                        'staff_name': (period.get('staff_name') or '').strip() or None,
-                    }
+                        payload_by_period[time_period] = []
+                    payload_by_period[time_period].append(period)
 
                 existing_by_period = {}
                 existing_order = []
                 for row in existing_rows:
                     if row.time_period not in existing_by_period:
                         existing_order.append(row.time_period)
-                    existing_by_period[row.time_period] = row
+                        existing_by_period[row.time_period] = []
+                    existing_by_period[row.time_period].append(_period_payload_from_row(row))
 
                 if transition:
                     merged = []
@@ -12150,44 +12514,43 @@ def schedules():
                         owns = user_can_write_student_period(current_user, student_id, time_period)
                         if owns:
                             incoming = payload_by_period.get(time_period)
-                            if incoming:
-                                merged.append(incoming)
-                            else:
-                                merged.append({
-                                    'time_period': time_period,
-                                    'class_name': None,
-                                    'staff_name': None,
-                                })
+                            if incoming is not None:
+                                if incoming:
+                                    merged.extend(incoming)
+                                else:
+                                    merged.append({
+                                        'time_period': time_period,
+                                        'class_name': None,
+                                        'staff_name': None,
+                                        'recurrence_type': 'daily',
+                                        'weekdays': [],
+                                        'month_ordinal': None,
+                                        'biweekly_anchor': None,
+                                        'effective_start': None,
+                                        'effective_end': None,
+                                    })
+                            # If period omitted from payload, clear owned entries
                         else:
-                            existing = existing_by_period.get(time_period)
-                            if existing:
-                                merged.append({
-                                    'time_period': existing.time_period,
-                                    'class_name': existing.class_name,
-                                    'staff_name': existing.staff_name,
-                                })
+                            for existing in existing_by_period.get(time_period, []):
+                                merged.append(existing)
                     Schedule.query.filter_by(schedule_type='student', student_id=student_id).delete()
                     for index, period in enumerate(merged):
-                        db.session.add(Schedule(
-                            schedule_type='student',
+                        db.session.add(_create_schedule_row(
+                            'student',
                             user_id=None,
                             student_id=student_id,
-                            time_period=period['time_period'],
-                            class_name=period.get('class_name'),
-                            staff_name=period.get('staff_name'),
-                            sort_order=index
+                            period=period,
+                            sort_order=index,
                         ))
                 else:
                     Schedule.query.filter_by(schedule_type='student', student_id=student_id).delete()
-                    for index, period in enumerate(periods):
-                        db.session.add(Schedule(
-                            schedule_type='student',
+                    for index, period in enumerate(normalized_periods):
+                        db.session.add(_create_schedule_row(
+                            'student',
                             user_id=None,
                             student_id=student_id,
-                            time_period=period.get('time_period', '').strip(),
-                            class_name=period.get('class_name', '').strip() or None,
-                            staff_name=period.get('staff_name', '').strip() or None,
-                            sort_order=index
+                            period=period,
+                            sort_order=index,
                         ))
             
             db.session.commit()
@@ -12233,16 +12596,7 @@ def schedules():
         # Order by sort_order to maintain the saved order
         schedules = query.order_by(Schedule.sort_order).all()
         
-        result = [{
-            'id': s.id,
-            'schedule_type': s.schedule_type,
-            'user_id': s.user_id,
-            'student_id': s.student_id,
-            'time_period': s.time_period,
-            'class_name': s.class_name,
-            'staff_name': s.staff_name,
-            'sort_order': s.sort_order
-        } for s in schedules]
+        result = [_serialize_schedule_row(s) for s in schedules]
 
         if schedule_type == 'student' and student_id:
             return jsonify({
@@ -12398,15 +12752,9 @@ def bulk_student_schedules():
 
     periods_by_student = {}
     for schedule in schedules:
-        periods_by_student.setdefault(schedule.student_id, []).append({
-            'id': schedule.id,
-            'schedule_type': schedule.schedule_type,
-            'student_id': schedule.student_id,
-            'time_period': schedule.time_period,
-            'class_name': schedule.class_name,
-            'staff_name': schedule.staff_name,
-            'sort_order': schedule.sort_order,
-        })
+        periods_by_student.setdefault(schedule.student_id, []).append(
+            _serialize_schedule_row(schedule)
+        )
 
     transitions = _transitions_by_student_id([student.id for student in students])
 

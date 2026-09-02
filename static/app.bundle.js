@@ -39,6 +39,458 @@ const SCHEDULE_PERIODS = [
     'PM Bus'
 ];
 
+const SCHEDULE_WEEKDAY_OPTIONS = [
+    { key: 'mon', label: 'Mon', short: 'M' },
+    { key: 'tue', label: 'Tue', short: 'T' },
+    { key: 'wed', label: 'Wed', short: 'W' },
+    { key: 'thu', label: 'Thu', short: 'Th' },
+    { key: 'fri', label: 'Fri', short: 'F' },
+];
+const SCHEDULE_WEEKDAY_FROM_JS = { 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri' };
+const SCHEDULE_WEEKDAY_LABELS = Object.fromEntries(
+    SCHEDULE_WEEKDAY_OPTIONS.map((d) => [d.key, d.label])
+);
+
+function parseScheduleDateValue(value) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    const text = String(value).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+    const [y, m, d] = text.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt;
+}
+
+function toScheduleDateInputValue(value) {
+    const dt = parseScheduleDateValue(value);
+    if (!dt) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function schoolLocalToday() {
+    // Prefer America/Chicago-aligned calendar day when available
+    try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Chicago',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(new Date());
+        const y = parts.find((p) => p.type === 'year')?.value;
+        const m = parts.find((p) => p.type === 'month')?.value;
+        const d = parts.find((p) => p.type === 'day')?.value;
+        if (y && m && d) return parseScheduleDateValue(`${y}-${m}-${d}`);
+    } catch (e) { /* fall through */ }
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function normalizeScheduleWeekdays(value) {
+    if (value == null || value === '') return [];
+    let raw = value;
+    if (typeof value === 'string') {
+        const text = value.trim();
+        if (!text) return [];
+        try {
+            raw = JSON.parse(text);
+        } catch (e) {
+            raw = text.split(',').map((p) => p.trim()).filter(Boolean);
+        }
+    }
+    if (!Array.isArray(raw)) return [];
+    const aliases = {
+        monday: 'mon', mon: 'mon', m: 'mon', 0: 'mon',
+        tuesday: 'tue', tue: 'tue', tues: 'tue', 1: 'tue',
+        wednesday: 'wed', wed: 'wed', w: 'wed', 2: 'wed',
+        thursday: 'thu', thu: 'thu', thur: 'thu', thurs: 'thu', 3: 'thu',
+        friday: 'fri', fri: 'fri', f: 'fri', 4: 'fri',
+    };
+    const out = [];
+    const seen = new Set();
+    raw.forEach((item) => {
+        const key = aliases[String(item).trim().toLowerCase()];
+        if (key && !seen.has(key)) {
+            seen.add(key);
+            out.push(key);
+        }
+    });
+    return out;
+}
+
+function mondayOfWeek(dt) {
+    const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    const day = d.getDay(); // 0 Sun
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d;
+}
+
+function nthWeekdayOfMonth(year, monthIndex, weekdayKey, ordinal) {
+    const pyMap = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5 }; // JS getDay()
+    const targetDow = pyMap[weekdayKey];
+    if (targetDow == null) return null;
+    if (ordinal === 'last') {
+        const cursor = new Date(year, monthIndex + 1, 0);
+        while (cursor.getDay() !== targetDow) cursor.setDate(cursor.getDate() - 1);
+        return cursor;
+    }
+    const n = parseInt(ordinal, 10);
+    if (!n || n < 1 || n > 4) return null;
+    const cursor = new Date(year, monthIndex, 1);
+    while (cursor.getDay() !== targetDow) cursor.setDate(cursor.getDate() + 1);
+    cursor.setDate(cursor.getDate() + (n - 1) * 7);
+    if (cursor.getMonth() !== monthIndex) return null;
+    return cursor;
+}
+
+function defaultScheduleRecurrence() {
+    return {
+        recurrence_type: 'daily',
+        weekdays: [],
+        month_ordinal: null,
+        biweekly_anchor: null,
+        effective_start: null,
+        effective_end: null,
+    };
+}
+
+function normalizeScheduleRecurrence(data) {
+    const src = data || {};
+    let recurrenceType = String(src.recurrence_type || 'daily').trim().toLowerCase() || 'daily';
+    if (!['daily', 'weekly', 'biweekly', 'nth_weekday'].includes(recurrenceType)) {
+        recurrenceType = 'daily';
+    }
+    let weekdays = normalizeScheduleWeekdays(src.weekdays);
+    let monthOrdinal = src.month_ordinal != null && src.month_ordinal !== ''
+        ? String(src.month_ordinal).trim().toLowerCase()
+        : null;
+    if (monthOrdinal === 'first') monthOrdinal = '1';
+    if (monthOrdinal === 'second') monthOrdinal = '2';
+    if (monthOrdinal === 'third') monthOrdinal = '3';
+    if (monthOrdinal === 'fourth') monthOrdinal = '4';
+    if (monthOrdinal === 'fifth' || monthOrdinal === '5th') monthOrdinal = 'last';
+    if (monthOrdinal && !['1', '2', '3', '4', 'last'].includes(monthOrdinal)) monthOrdinal = null;
+    let biweeklyAnchor = toScheduleDateInputValue(src.biweekly_anchor) || null;
+    const effectiveStart = toScheduleDateInputValue(src.effective_start) || null;
+    const effectiveEnd = toScheduleDateInputValue(src.effective_end) || null;
+
+    if (recurrenceType === 'daily') {
+        weekdays = [];
+        monthOrdinal = null;
+        biweeklyAnchor = null;
+    } else if (recurrenceType === 'weekly') {
+        monthOrdinal = null;
+        biweeklyAnchor = null;
+    } else if (recurrenceType === 'biweekly') {
+        monthOrdinal = null;
+        if (!biweeklyAnchor) biweeklyAnchor = effectiveStart || toScheduleDateInputValue(schoolLocalToday());
+    } else if (recurrenceType === 'nth_weekday') {
+        biweeklyAnchor = null;
+        if (weekdays.length) weekdays = weekdays.slice(0, 1);
+        if (!monthOrdinal) monthOrdinal = '1';
+    }
+
+    return {
+        recurrence_type: recurrenceType,
+        weekdays,
+        month_ordinal: monthOrdinal,
+        biweekly_anchor: biweeklyAnchor,
+        effective_start: effectiveStart,
+        effective_end: effectiveEnd,
+    };
+}
+
+function scheduleEntryAppliesOnDate(entry, onDate = null) {
+    const target = parseScheduleDateValue(onDate) || schoolLocalToday();
+    const rec = normalizeScheduleRecurrence(entry);
+    const start = parseScheduleDateValue(rec.effective_start);
+    const end = parseScheduleDateValue(rec.effective_end);
+    if (start && target < start) return false;
+    if (end && target > end) return false;
+
+    const jsDay = target.getDay();
+    if (jsDay === 0 || jsDay === 6) {
+        return rec.recurrence_type === 'daily';
+    }
+    const dayKey = SCHEDULE_WEEKDAY_FROM_JS[jsDay];
+
+    if (rec.recurrence_type === 'daily') return true;
+    if (rec.recurrence_type === 'weekly' || rec.recurrence_type === 'biweekly') {
+        if (!rec.weekdays.length) return true;
+        if (!rec.weekdays.includes(dayKey)) return false;
+        if (rec.recurrence_type === 'weekly') return true;
+        const anchor = parseScheduleDateValue(rec.biweekly_anchor) || parseScheduleDateValue(rec.effective_start);
+        if (!anchor) return true;
+        const weeks = Math.floor((mondayOfWeek(target) - mondayOfWeek(anchor)) / (7 * 24 * 60 * 60 * 1000));
+        return weeks % 2 === 0;
+    }
+    if (rec.recurrence_type === 'nth_weekday') {
+        if (!rec.weekdays.length) return false;
+        const hit = nthWeekdayOfMonth(target.getFullYear(), target.getMonth(), rec.weekdays[0], rec.month_ordinal || '1');
+        return !!(hit && hit.getTime() === target.getTime());
+    }
+    return true;
+}
+
+function formatScheduleRecurrenceSummary(data) {
+    const rec = normalizeScheduleRecurrence(data);
+    const dayLabels = rec.weekdays.map((k) => SCHEDULE_WEEKDAY_LABELS[k] || k).join(', ');
+    let core = 'Every school day';
+    if (rec.recurrence_type === 'weekly') {
+        core = dayLabels ? `Every ${dayLabels}` : 'Weekly';
+    } else if (rec.recurrence_type === 'biweekly') {
+        core = dayLabels ? `Every other ${dayLabels}` : 'Every other week';
+    } else if (rec.recurrence_type === 'nth_weekday') {
+        const ordMap = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', last: 'Last' };
+        const ord = ordMap[rec.month_ordinal || '1'] || rec.month_ordinal;
+        const day = dayLabels || 'weekday';
+        core = `${ord} ${day} of month`;
+    }
+    const rangeBits = [];
+    if (rec.effective_start) rangeBits.push(`from ${rec.effective_start}`);
+    if (rec.effective_end) rangeBits.push(`until ${rec.effective_end}`);
+    return rangeBits.length ? `${core} (${rangeBits.join(' ')})` : core;
+}
+
+function collectRecurrenceFromGroup(group) {
+    if (!group) return defaultScheduleRecurrence();
+    const typeSelect = group.querySelector('.recurrence-type');
+    const weekdays = Array.from(group.querySelectorAll('.recurrence-weekday:checked')).map((el) => el.value);
+    const monthOrdinal = group.querySelector('.recurrence-month-ordinal')?.value || null;
+    const biweeklyAnchor = group.querySelector('.recurrence-biweekly-anchor')?.value || null;
+    const effectiveStart = group.querySelector('.recurrence-effective-start')?.value || null;
+    const effectiveEnd = group.querySelector('.recurrence-effective-end')?.value || null;
+    return normalizeScheduleRecurrence({
+        recurrence_type: typeSelect ? typeSelect.value : 'daily',
+        weekdays,
+        month_ordinal: monthOrdinal,
+        biweekly_anchor: biweeklyAnchor,
+        effective_start: effectiveStart,
+        effective_end: effectiveEnd,
+    });
+}
+
+function updateRecurrenceControlsVisibility(group) {
+    if (!group) return;
+    const rec = collectRecurrenceFromGroup(group);
+    const weekdaysEl = group.querySelector('.schedule-recurrence-weekdays');
+    const nthEl = group.querySelector('.schedule-recurrence-nth');
+    const biweeklyEl = group.querySelector('.schedule-recurrence-biweekly');
+    const summaryEl = group.querySelector('.schedule-recurrence-summary');
+    if (weekdaysEl) {
+        weekdaysEl.hidden = !(rec.recurrence_type === 'weekly' || rec.recurrence_type === 'biweekly' || rec.recurrence_type === 'nth_weekday');
+        if (rec.recurrence_type === 'nth_weekday') {
+            // single-select behavior for nth
+            const checked = weekdaysEl.querySelectorAll('.recurrence-weekday:checked');
+            if (checked.length > 1) {
+                checked.forEach((el, idx) => { if (idx > 0) el.checked = false; });
+            }
+            weekdaysEl.querySelectorAll('label').forEach((label) => {
+                const input = label.querySelector('input');
+                label.classList.toggle('is-selected', !!(input && input.checked));
+            });
+        } else {
+            weekdaysEl.querySelectorAll('label').forEach((label) => {
+                const input = label.querySelector('input');
+                label.classList.toggle('is-selected', !!(input && input.checked));
+            });
+        }
+    }
+    if (nthEl) nthEl.hidden = rec.recurrence_type !== 'nth_weekday';
+    if (biweeklyEl) biweeklyEl.hidden = rec.recurrence_type !== 'biweekly';
+    if (summaryEl) summaryEl.textContent = formatScheduleRecurrenceSummary(rec);
+}
+
+function buildRecurrenceControlsHtml(recurrence = null) {
+    const rec = normalizeScheduleRecurrence(recurrence);
+    const weekdayHtml = SCHEDULE_WEEKDAY_OPTIONS.map((d) => {
+        const checked = rec.weekdays.includes(d.key) ? 'checked' : '';
+        const selected = checked ? ' is-selected' : '';
+        return `<label class="${selected}"><input type="checkbox" class="recurrence-weekday" value="${d.key}" ${checked}>${d.label}</label>`;
+    }).join('');
+    const ordOptions = [
+        ['1', '1st'],
+        ['2', '2nd'],
+        ['3', '3rd'],
+        ['4', '4th'],
+        ['last', 'Last'],
+    ].map(([v, label]) => `<option value="${v}" ${(rec.month_ordinal || '1') === v ? 'selected' : ''}>${label}</option>`).join('');
+    return `
+        <div class="schedule-recurrence">
+            <label>Repeats
+                <select class="recurrence-type">
+                    <option value="daily" ${rec.recurrence_type === 'daily' ? 'selected' : ''}>Every school day</option>
+                    <option value="weekly" ${rec.recurrence_type === 'weekly' ? 'selected' : ''}>Weekly</option>
+                    <option value="biweekly" ${rec.recurrence_type === 'biweekly' ? 'selected' : ''}>Every other week</option>
+                    <option value="nth_weekday" ${rec.recurrence_type === 'nth_weekday' ? 'selected' : ''}>Monthly (nth weekday)</option>
+                </select>
+            </label>
+            <div class="schedule-recurrence-weekdays" ${['weekly', 'biweekly', 'nth_weekday'].includes(rec.recurrence_type) ? '' : 'hidden'}>
+                ${weekdayHtml}
+            </div>
+            <div class="schedule-recurrence-nth" ${rec.recurrence_type === 'nth_weekday' ? '' : 'hidden'}>
+                <select class="recurrence-month-ordinal">${ordOptions}</select>
+            </div>
+            <div class="schedule-recurrence-biweekly" ${rec.recurrence_type === 'biweekly' ? '' : 'hidden'}>
+                <label>Week of <input type="date" class="recurrence-biweekly-anchor" value="${rec.biweekly_anchor || ''}"></label>
+            </div>
+            <div class="schedule-recurrence-range">
+                <label>From <input type="date" class="recurrence-effective-start" value="${rec.effective_start || ''}"></label>
+                <label>Until <input type="date" class="recurrence-effective-end" value="${rec.effective_end || ''}"></label>
+            </div>
+            <span class="schedule-recurrence-summary">${formatScheduleRecurrenceSummary(rec)}</span>
+        </div>
+    `;
+}
+
+function wireRecurrenceControls(group) {
+    if (!group) return;
+    const root = group.querySelector('.schedule-recurrence');
+    if (!root || root.dataset.wired === '1') {
+        updateRecurrenceControlsVisibility(group);
+        return;
+    }
+    root.dataset.wired = '1';
+    root.addEventListener('change', (e) => {
+        if (e.target.classList.contains('recurrence-weekday')) {
+            const type = group.querySelector('.recurrence-type')?.value;
+            if (type === 'nth_weekday' && e.target.checked) {
+                group.querySelectorAll('.recurrence-weekday').forEach((el) => {
+                    if (el !== e.target) el.checked = false;
+                });
+            }
+        }
+        updateRecurrenceControlsVisibility(group);
+    });
+    updateRecurrenceControlsVisibility(group);
+}
+
+function filterScheduleItemsForDate(items, onDate = null) {
+    return (items || []).filter((item) => scheduleEntryAppliesOnDate(item, onDate));
+}
+
+const TRANSITION_FIRST_BELL_MINUTES = 7 * 60 + 45;
+const TRANSITION_LAST_BELL_MINUTES = 14 * 60 + 45;
+const studentTransitionsByStudentId = {};
+
+function clockTokenToMinutes(token, afternoonHint = false) {
+    if (token == null) return null;
+    let raw = String(token).trim().toLowerCase().replace(/a\.?m\.?/g, '').replace(/p\.?m\.?/g, '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    let hour = parseInt(match[1], 10);
+    const minute = parseInt(match[2], 10);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return null;
+    if (hour > 12) return hour * 60 + minute;
+    if (hour === 12) return 12 * 60 + minute;
+    if (hour <= 6 || afternoonHint) hour += 12;
+    return hour * 60 + minute;
+}
+
+function periodStartEndMinutes(timePeriod) {
+    const label = String(timePeriod || '').trim();
+    if (!label) return null;
+    const lowered = label.toLowerCase();
+    if (lowered === 'am bus') {
+        return [TRANSITION_FIRST_BELL_MINUTES - 45, TRANSITION_FIRST_BELL_MINUTES];
+    }
+    if (lowered === 'pm bus') {
+        return [TRANSITION_LAST_BELL_MINUTES, TRANSITION_LAST_BELL_MINUTES + 30];
+    }
+    const match = label.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+    if (!match) return null;
+    const start = clockTokenToMinutes(match[1]);
+    let end = clockTokenToMinutes(match[2], start != null && start >= 12 * 60);
+    if (start == null || end == null) return null;
+    if (end <= start) {
+        end = clockTokenToMinutes(match[2], true) || end;
+    }
+    return [start, end];
+}
+
+function setStudentTransition(studentId, transition) {
+    if (studentId == null) return;
+    studentTransitionsByStudentId[studentId] = transition || null;
+    studentTransitionsByStudentId[String(studentId)] = transition || null;
+}
+
+function getStudentTransition(studentId) {
+    if (studentId == null) return null;
+    return studentTransitionsByStudentId[studentId] || studentTransitionsByStudentId[String(studentId)] || null;
+}
+
+function isHomePeriod(transition, timePeriod) {
+    if (!transition) return true;
+    const bounds = periodStartEndMinutes(timePeriod);
+    if (!bounds) return true;
+    const splitAt = clockTokenToMinutes(transition.time);
+    if (splitAt == null) return true;
+    const direction = String(transition.direction || '').trim().toLowerCase();
+    if (direction === 'arrive') return bounds[0] >= splitAt;
+    if (direction === 'leave') return bounds[1] <= splitAt;
+    return true;
+}
+
+function isOtherSchoolPeriod(studentId, timePeriod) {
+    const transition = getStudentTransition(studentId);
+    if (!transition) return false;
+    return !isHomePeriod(transition, timePeriod);
+}
+
+function canEditStarPeriod(studentId, timePeriod) {
+    if (isStudent()) return false;
+    const transition = getStudentTransition(studentId);
+    const home = isHomePeriod(transition, timePeriod);
+    if (isStaff() || isAdmin()) return home;
+    if (isOutsideStaff()) return !!transition && !home;
+    return false;
+}
+
+function canEditSchedulePeriod(studentId, timePeriod) {
+    if (isStudent()) return false;
+    const transition = getStudentTransition(studentId);
+    const home = isHomePeriod(transition, timePeriod);
+    if (isStaff() || isAdmin()) return home;
+    if (isOutsideStaff()) return !!transition && !home;
+    return false;
+}
+
+function canEditStudentTransition(studentId) {
+    if (studentId == null) return false;
+    if (isAdmin() || isStaff()) return true;
+    if (isOutsideStaff()) return true;
+    return false;
+}
+
+function canEditPointCardForStudent(studentId) {
+    if (canEdit()) return true;
+    return isOutsideStaff() && !!getStudentTransition(studentId);
+}
+
+function formatTransitionClock(hhmm) {
+    const minutes = clockTokenToMinutes(hhmm);
+    if (minutes == null) return String(hhmm || '');
+    let hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    if (hour === 0) hour = 12;
+    else if (hour > 12) hour -= 12;
+    return `${hour}:${String(minute).padStart(2, '0')}`;
+}
+
+function formatTransitionMarkerLabel(transition) {
+    if (!transition) return '';
+    const clock = formatTransitionClock(transition.time);
+    if (String(transition.direction).toLowerCase() === 'arrive') return `Arrives ${clock}`;
+    if (String(transition.direction).toLowerCase() === 'leave') return `Leaves ${clock}`;
+    return clock;
+}
+
 const INFRACTION_TYPES = {
     social: [
         { value: 'Language', label: 'Language (lang)', aliases: ['lang'] },
@@ -382,6 +834,7 @@ let currentStudentId = null;
 let currentDate = new Date().toISOString().split('T')[0];
 let currentPeriod = null;
 let currentClass = ''; // Track selected class for period entry
+const PERIOD_ENTRY_ALL_CLASSES = '__ALL__'; // Combined multi-class selection for a period
 let currentLocation = '';
 let allStudents = [];
 let editParentLinkedStudentIds = [];
@@ -449,6 +902,149 @@ const STAR_COLUMN_CRITERIA = {
         ]
     }
 };
+const STAR_POINT_OPTION_VALUES = ['2', '1', '0', 'E', 'U'];
+
+function normalizeStarValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'string') {
+        const text = value.trim().toUpperCase();
+        if (text === 'E' || text === 'U') {
+            return text;
+        }
+        if (text === '0' || text === '1' || text === '2') {
+            return text;
+        }
+    }
+    const num = Number(value);
+    if (num === 0 || num === 1 || num === 2) {
+        return String(num);
+    }
+    return null;
+}
+
+function parseStarInputValue(raw) {
+    if (raw === null || raw === undefined || raw === '') {
+        return null;
+    }
+    return normalizeStarValue(raw);
+}
+
+function formatStarDisplayValue(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '-' : normalized;
+}
+
+function starValueCountsTowardStats(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized !== null && normalized !== 'E';
+}
+
+function starValueForPercentage(value) {
+    const normalized = normalizeStarValue(value);
+    if (normalized === null || normalized === 'E') {
+        return null;
+    }
+    if (normalized === 'U') {
+        return 0;
+    }
+    return Number(normalized);
+}
+
+function isStarValueZero(value) {
+    return normalizeStarValue(value) === '0';
+}
+
+function starValuesEquivalent(a, b) {
+    return normalizeStarValue(a) === normalizeStarValue(b);
+}
+
+function populateStarPointSelectOptions(select, currentValue) {
+    if (!select) return;
+    const normalizedCurrent = normalizeStarValue(currentValue);
+    select.innerHTML = '';
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '-';
+    if (normalizedCurrent === null) {
+        emptyOption.selected = true;
+    }
+    select.appendChild(emptyOption);
+
+    STAR_POINT_OPTION_VALUES.forEach((val) => {
+        const option = document.createElement('option');
+        option.value = val;
+        option.textContent = val;
+        if (normalizedCurrent === val) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+}
+
+function getAttendanceStarLockValue(studentId) {
+    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+    if (attendance === 'excused') return 'E';
+    if (attendance === 'unexcused') return 'U';
+    return null;
+}
+
+function isAttendanceStarLocked(studentId) {
+    return getAttendanceStarLockValue(studentId) != null;
+}
+
+function formatPercentCellText(value) {
+    if (value === 'E' || value === 'U') return value;
+    if (value === '-' || value == null || value === '') return '-';
+    return `${value}%`;
+}
+
+function isNumericPercentDisplay(value) {
+    return value !== '-' && value !== 'E' && value !== 'U' && value != null && value !== '';
+}
+
+function getStoredStarValueForInput(inputEl, studentId) {
+    const category = inputEl && inputEl.dataset ? inputEl.dataset.category : null;
+    const period = inputEl && inputEl.dataset ? inputEl.dataset.period : null;
+    if (!category || !['s', 't', 'a', 'r'].includes(category)) {
+        return null;
+    }
+    const isPeriodEntry = document.getElementById('period-entry-view')?.classList.contains('active');
+    if (isPeriodEntry) {
+        const fieldMap = {
+            s: 'safety_points',
+            t: 'teamwork_points',
+            a: 'accountability_points',
+            r: 'relationships_points'
+        };
+        return periodData[studentId]?.[fieldMap[category]] ?? null;
+    }
+    return dailyData[studentId]?.[period]?.[category] ?? null;
+}
+
+function applyAttendanceStarCellState(studentId) {
+    const locked = isAttendanceStarLocked(studentId);
+    const studentIdStr = String(studentId);
+    document.querySelectorAll(`.daily-input[data-student-id="${studentIdStr}"]`).forEach((inputEl) => {
+        const category = inputEl.dataset.category;
+        if (!category || !['s', 't', 'a', 'r'].includes(category)) {
+            return;
+        }
+        const cell = inputEl.closest('.daily-data-cell, .pc-cell');
+        if (cell) {
+            cell.classList.toggle('attendance-locked-period', locked);
+        }
+        if (locked) {
+            populateStarPointSelectOptions(inputEl, null);
+            inputEl.disabled = true;
+        } else {
+            populateStarPointSelectOptions(inputEl, getStoredStarValueForInput(inputEl, studentId));
+            inputEl.disabled = isStudent() || !canEditStarPeriod(studentId, inputEl.dataset.period);
+        }
+    });
+}
+
 let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
 let starNavKeydownBound = false;
 let starZeroWarningKeydownBound = false;
@@ -547,7 +1143,7 @@ function periodHasEnteredStarPoints(periodOrCell) {
         periodOrCell.accountability_points,
         periodOrCell.relationships_points
     ];
-    return values.some((value) => value !== null && value !== undefined && value !== '');
+    return values.some((value) => starValueCountsTowardStats(value));
 }
 
 function defaultPointCardPeriod(standardPeriod) {
@@ -601,7 +1197,18 @@ function expandPointCardPeriods(periods) {
 }
 
 function starPointsPossible(periodOrCell) {
-    return periodHasEnteredStarPoints(periodOrCell) ? 4 : 0;
+    if (!periodOrCell) return 0;
+    const values = [
+        periodOrCell.s,
+        periodOrCell.t,
+        periodOrCell.a,
+        periodOrCell.r,
+        periodOrCell.safety_points,
+        periodOrCell.teamwork_points,
+        periodOrCell.accountability_points,
+        periodOrCell.relationships_points
+    ];
+    return values.filter((value) => starValueCountsTowardStats(value)).length;
 }
 
 function periodPointsPossibleValue(period) {
@@ -885,33 +1492,7 @@ function handleDailyAttendanceChange(e) {
     attendanceData[currentDate][studentId] = newStatus;
     markAttendanceDirty(studentId);
 
-    if (newStatus === 'unexcused') {
-        if (!dailyData[studentId]) {
-            dailyData[studentId] = {};
-        }
-
-        STANDARD_PERIODS.forEach(period => {
-            if (!dailyData[studentId][period.time]) {
-                dailyData[studentId][period.time] = { s: null, t: null, a: null, r: null, info: '' };
-            }
-            dailyData[studentId][period.time].s = 0;
-            dailyData[studentId][period.time].t = 0;
-            dailyData[studentId][period.time].a = 0;
-            dailyData[studentId][period.time].r = 0;
-            markDailyFieldDirty(studentId, period.time, 's');
-            markDailyFieldDirty(studentId, period.time, 't');
-            markDailyFieldDirty(studentId, period.time, 'a');
-            markDailyFieldDirty(studentId, period.time, 'r');
-        });
-
-        document.querySelectorAll(`.daily-input[data-student-id="${studentId}"]`).forEach(inputEl => {
-            const category = inputEl.dataset.category;
-            if (category && ['s', 't', 'a', 'r'].includes(category)) {
-                inputEl.value = '0';
-            }
-        });
-    }
-
+    applyAttendanceStarCellState(studentId);
     updateDailyPercentageRow();
 
     // Schedule an autosave of the current daily grid state
@@ -919,15 +1500,17 @@ function handleDailyAttendanceChange(e) {
 }
 
 function isStarPointSelect(el) {
-    return !!(el && el.tagName === 'SELECT' && el.classList && el.classList.contains('daily-input'));
+    return !!(el && el.tagName === 'SELECT' && el.classList && (
+        el.classList.contains('daily-input') || el.classList.contains('pc-edit-input')
+    ));
 }
 
 function getStarInputsInSameGrid(currentInput) {
     const grid = currentInput && currentInput.closest
-        ? currentInput.closest('#daily-grid, #students-grid')
+        ? currentInput.closest('#daily-grid, #students-grid, .point-card-edit-grid')
         : null;
     const root = grid || document;
-    return Array.from(root.querySelectorAll('select.daily-input'));
+    return Array.from(root.querySelectorAll('select.daily-input, select.pc-edit-input'));
 }
 
 function isCoarseTouchUi() {
@@ -950,7 +1533,9 @@ function shouldKeepStarPicker(e) {
 }
 
 function suppressStarSelectPicker(e) {
-    const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+    const select = e.target && e.target.closest
+        ? e.target.closest('select.daily-input, select.pc-edit-input')
+        : null;
     if (!isStarPointSelect(select) || select.disabled) return;
     if (e.type === 'pointerdown') {
         window.__starLastPointerWasTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
@@ -970,7 +1555,9 @@ function bindStarSelectEntryGuards() {
     document.addEventListener('pointerdown', suppressStarSelectPicker, true);
     document.addEventListener('mousedown', suppressStarSelectPicker, true);
     document.addEventListener('touchstart', (e) => {
-        const select = e.target && e.target.closest ? e.target.closest('select.daily-input') : null;
+        const select = e.target && e.target.closest
+            ? e.target.closest('select.daily-input, select.pc-edit-input')
+            : null;
         if (isStarPointSelect(select)) {
             window.__starLastPointerWasTouch = true;
             setTimeout(() => {
@@ -982,6 +1569,13 @@ function bindStarSelectEntryGuards() {
         if (e.pointerType === 'mouse') {
             window.__starLastPointerWasTouch = false;
         }
+    }, true);
+    document.addEventListener('keydown', (e) => {
+        if (isStarPointSelect(e.target)) {
+            handleDailyInputKeydown(e);
+            return;
+        }
+        handlePointCardTextInputKeydown(e);
     }, true);
     document.addEventListener('keyup', (e) => {
         if (isStarPointSelect(e.target)) {
@@ -1372,17 +1966,56 @@ function getPeriodEntryScheduleItems() {
     return [];
 }
 
-const DAILY_PERIOD_COL_WIDTH = '120px';
+const DAILY_PERIOD_COL_MIN = 44;
+const DAILY_PERIOD_COL_SEPARATION = 3;
 const DAILY_SCHEDULE_COL_MIN = 90;
 const DAILY_SCHEDULE_COL_MAX = 200;
 
-function measureDailyScheduleColumnWidth(texts) {
+function measureDailyPeriodColumnWidth(texts, options = {}) {
+    const measureHeader = document.createElement('div');
+    measureHeader.className = 'daily-header-cell daily-header-period';
+    measureHeader.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+
+    const measureBody = document.createElement('div');
+    measureBody.className = 'daily-period-cell';
+    measureBody.style.cssText = measureHeader.style.cssText;
+
+    document.body.appendChild(measureHeader);
+    document.body.appendChild(measureBody);
+
+    let maxWidth = options.minWidth || DAILY_PERIOD_COL_MIN;
+    (texts || []).forEach((text) => {
+        if (!text) return;
+        measureHeader.textContent = text;
+        measureBody.textContent = text;
+        maxWidth = Math.max(maxWidth, measureHeader.offsetWidth, measureBody.offsetWidth);
+    });
+
+    document.body.removeChild(measureHeader);
+    document.body.removeChild(measureBody);
+
+    if (options.extraWidth) {
+        maxWidth += options.extraWidth;
+    }
+
+    return Math.ceil(maxWidth) + DAILY_PERIOD_COL_SEPARATION;
+}
+
+function measurePointCardPeriodColumnWidth(texts, options = {}) {
+    return measureDailyPeriodColumnWidth(texts, options);
+}
+
+function measureDailyScheduleColumnWidth(texts, options = {}) {
     const measureEl = document.createElement('div');
-    measureEl.className = 'daily-location-cell';
-    measureEl.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    measureEl.className = options.measureClass || 'daily-location-cell';
+    const wrap = !!options.wrap;
+    measureEl.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;white-space:${wrap ? 'normal' : 'nowrap'};`;
+    if (wrap) {
+        measureEl.style.width = `${options.wrapWidth || DAILY_SCHEDULE_COL_MIN}px`;
+    }
     document.body.appendChild(measureEl);
 
-    let maxWidth = DAILY_SCHEDULE_COL_MIN;
+    let maxWidth = options.minWidth != null ? options.minWidth : DAILY_SCHEDULE_COL_MIN;
     (texts || []).forEach((text) => {
         if (!text) return;
         measureEl.textContent = text;
@@ -1390,30 +2023,49 @@ function measureDailyScheduleColumnWidth(texts) {
     });
     document.body.removeChild(measureEl);
 
-    return Math.min(Math.ceil(maxWidth), DAILY_SCHEDULE_COL_MAX);
+    const cap = options.extend ? 2000 : DAILY_SCHEDULE_COL_MAX;
+    return Math.min(Math.ceil(maxWidth), cap);
 }
 
-function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx) {
-    const scheduleCol = `${scheduleWidthPx}px`;
-    const template = `${DAILY_PERIOD_COL_WIDTH} ${scheduleCol} ${spacerWidth} ${studentColumns}`;
+function setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidthPx, options = {}) {
+    const hideOwnSchedule = !!options.hideOwnSchedule;
+    const periodWidthPx = options.periodWidthPx || DAILY_PERIOD_COL_MIN;
+    const periodCol = `${periodWidthPx}px`;
+    const scheduleCol = hideOwnSchedule ? '' : `${scheduleWidthPx}px `;
+    const template = hideOwnSchedule
+        ? `${periodCol} ${spacerWidth} ${studentColumns}`
+        : `${periodCol} ${scheduleCol}${spacerWidth} ${studentColumns}`;
     header.style.gridTemplateColumns = template;
     body.style.gridTemplateColumns = template;
     const grid = header.closest('#daily-grid, #students-grid');
     if (grid) {
-        grid.style.setProperty('--daily-schedule-col-width', scheduleCol);
+        grid.style.setProperty('--daily-period-col-width', periodCol);
+        if (hideOwnSchedule) {
+            grid.style.removeProperty('--daily-schedule-col-width');
+        } else {
+            grid.style.setProperty('--daily-schedule-col-width', `${scheduleWidthPx}px`);
+        }
     }
 }
 
 function getDailyFrozenColumnsWidth(grid) {
     if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) return 0;
     const periodCell = grid.querySelector('.daily-frozen-col-1');
-    const scheduleCell = grid.querySelector('.daily-frozen-col-2');
-    if (!periodCell || !scheduleCell) return 0;
-    return periodCell.offsetWidth + scheduleCell.offsetWidth;
+    if (!periodCell) return 0;
+    let width = periodCell.offsetWidth;
+    if (!grid.classList.contains('daily-grid--hide-own-schedule')) {
+        const scheduleCell = grid.querySelector('.daily-frozen-col-2');
+        if (scheduleCell) width += scheduleCell.offsetWidth;
+    }
+    return width;
 }
 
 function focusDailyStarInput(input) {
     if (!input || input.disabled) return false;
+    if (input.closest('.point-card-edit-grid')) {
+        input.focus();
+        return true;
+    }
     const grid = input.closest('#daily-grid, #students-grid');
     if (!grid || !grid.classList.contains('daily-grid--freeze-cols')) {
         input.focus();
@@ -1436,7 +2088,7 @@ function focusDailyStarInput(input) {
 }
 
 function formatPointCardScheduleForPeriod(timePeriod) {
-    const items = getPeriodEntryScheduleItems().filter((s) => s && s.time_period === timePeriod);
+    const items = filterScheduleItemsForDate(getPeriodEntryScheduleItems()).filter((s) => s && s.time_period === timePeriod);
     if (!items.length) return '';
     const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
     const staffNames = [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))];
@@ -1449,14 +2101,398 @@ function formatPointCardScheduleForPeriod(timePeriod) {
     return classText || '';
 }
 
+function isShowStudentSchedulesInPointCards() {
+    return !!(userPreferences && userPreferences.showStudentSchedulesInPointCards);
+}
+
+function isHideOwnScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.hideOwnScheduleInPointCards);
+}
+
+function isWrapScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.wrapScheduleInPointCards);
+}
+
+function isExtendScheduleInPointCards() {
+    return !!(userPreferences && userPreferences.extendScheduleInPointCards);
+}
+
+function getScheduleMeasureOptions() {
+    return {
+        extend: isExtendScheduleInPointCards(),
+        wrap: isWrapScheduleInPointCards(),
+    };
+}
+
+function getPointCardColumnsPerStudent() {
+    return isShowStudentSchedulesInPointCards() && canEdit() ? 6 : 5;
+}
+
+function buildPointCardStudentColumnsTemplate(students, spacerWidth, timePeriods) {
+    const showStudentSched = isShowStudentSchedulesInPointCards() && canEdit();
+    const parts = [];
+    const studentList = students || [];
+    for (let i = 0; i < studentList.length; i++) {
+        const schedulePart = showStudentSched
+            ? `minmax(0, ${measurePointCardStudentScheduleColumnWidthForStudent(studentList[i], timePeriods)}px) `
+            : '';
+        parts.push(`${schedulePart}repeat(4, 40px) 40px`);
+        if (i < studentList.length - 1) {
+            parts.push(spacerWidth);
+        }
+    }
+    return parts.join(' ');
+}
+
+function measurePointCardStudentScheduleColumnWidthForStudent(student, timePeriods) {
+    const headerWidth = measureStudentScheduleHeaderWidth();
+    const texts = [];
+    (timePeriods || []).forEach((period) => {
+        const time = typeof period === 'string' ? period : period.time;
+        const text = getStudentScheduleLocationForPeriod(student.id, time);
+        if (text) texts.push(text);
+    });
+    const dataWidth = texts.length
+        ? measureDailyScheduleColumnWidth(texts, {
+            measureClass: 'daily-student-schedule-cell',
+            minWidth: 0,
+            extend: false,
+            wrap: false,
+        })
+        : 0;
+    const width = Math.max(headerWidth, dataWidth);
+    return Number.isFinite(width) && width > 0 ? Math.ceil(width) : headerWidth;
+}
+
+function measurePointCardStudentScheduleColumnWidth(students, timePeriods) {
+    const studentList = students || [];
+    if (!studentList.length) {
+        return measureStudentScheduleHeaderWidth();
+    }
+    return Math.max(
+        ...studentList.map((student) => measurePointCardStudentScheduleColumnWidthForStudent(student, timePeriods))
+    );
+}
+
+function measureStudentScheduleHeaderWidth() {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-student-schedule-header';
+    const label = document.createElement('span');
+    label.className = 'daily-student-schedule-header-label';
+    label.textContent = 'SCHEDULE';
+    cell.appendChild(label);
+    if (canEdit()) {
+        const kebabWrap = document.createElement('div');
+        kebabWrap.className = 'student-schedule-header-kebab-wrap';
+        const kebabBtn = document.createElement('button');
+        kebabBtn.type = 'button';
+        kebabBtn.className = 'student-schedule-header-kebab-btn';
+        kebabBtn.textContent = '⋮';
+        kebabWrap.appendChild(kebabBtn);
+        cell.appendChild(kebabWrap);
+    }
+    cell.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(cell);
+    const width = cell.offsetWidth;
+    document.body.removeChild(cell);
+    return Math.ceil(width);
+}
+
+function measurePointCardOwnScheduleColumnWidth(texts) {
+    return measureDailyScheduleColumnWidth(texts, {
+        ...getScheduleMeasureOptions(),
+        minWidth: DAILY_SCHEDULE_COL_MIN,
+    });
+}
+
+function collectPointCardVisibleStudentIds() {
+    const ids = new Set();
+    if (document.getElementById('entry-view')?.classList.contains('active')) {
+        getVisibleDailyStudents().forEach((student) => ids.add(student.id));
+    }
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        (filteredStudentsForPeriod || []).forEach((student) => ids.add(student.id));
+    }
+    return [...ids];
+}
+
+function ensureStudentSchedulesLoadedForVisibleStudents(students) {
+    if (!isShowStudentSchedulesInPointCards() || !canEdit() || !students?.length) return;
+    const missing = students
+        .filter((student) => !studentSchedulesByStudentId[student.id] && !studentSchedulesByStudentId[String(student.id)])
+        .map((student) => student.id);
+    if (!missing.length) return;
+    loadStudentSchedulesForIds(missing).then(() => refreshPointCardGridsAfterScheduleLoad());
+}
+
+async function updatePointCardSchedulePreference(key, value) {
+    const existing = userPreferences || {};
+    userPreferences = { ...existing, [key]: value };
+    try {
+        await fetch('/api/user/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userPreferences)
+        });
+    } catch (error) {
+        console.warn('Failed to save point card schedule preference:', error);
+    }
+    if (key === 'showStudentSchedulesInPointCards' && value && canEdit()) {
+        const studentIds = collectPointCardVisibleStudentIds();
+        if (studentIds.length) {
+            await loadStudentSchedulesForIds(studentIds);
+        }
+    }
+    refreshPointCardGridsAfterScheduleLoad();
+}
+
+async function setShowStudentSchedulesInPointCards(enabled) {
+    await updatePointCardSchedulePreference('showStudentSchedulesInPointCards', !!enabled);
+}
+
+async function toggleShowStudentSchedulesInPointCards() {
+    await setShowStudentSchedulesInPointCards(!isShowStudentSchedulesInPointCards());
+}
+
+function applyPointCardGridScheduleClasses(gridEl, showStudentSchedules) {
+    if (!gridEl) return;
+    gridEl.classList.toggle('daily-grid--student-schedules-visible', !!showStudentSchedules);
+    gridEl.classList.toggle('daily-grid--hide-own-schedule', isHideOwnScheduleInPointCards());
+    gridEl.classList.toggle('daily-grid--wrap-schedule', isWrapScheduleInPointCards());
+    gridEl.classList.toggle('daily-grid--extend-schedule', isExtendScheduleInPointCards());
+}
+
+let scheduleHeaderKebabOpen = null;
+let pointCardScheduleEditContext = null;
+
+function closeScheduleHeaderKebabMenus() {
+    document.querySelectorAll('.schedule-header-kebab-menu.open, .student-schedule-header-kebab-menu.open').forEach((menu) => {
+        menu.classList.remove('open');
+    });
+    scheduleHeaderKebabOpen = null;
+}
+
+function bindScheduleHeaderKebabHandlers() {
+    if (window.__scheduleHeaderKebabBound) return;
+    window.__scheduleHeaderKebabBound = true;
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.schedule-header-kebab-wrap, .student-schedule-header-kebab-wrap')) {
+            closeScheduleHeaderKebabMenus();
+        }
+    });
+    document.querySelectorAll('#daily-grid, #students-grid').forEach((grid) => {
+        grid.addEventListener('scroll', closeScheduleHeaderKebabMenus, { passive: true });
+    });
+}
+
+function getScheduleHeaderMenuItems() {
+    return [
+        {
+            action: 'toggle-student-schedules',
+            label: 'Show student schedules',
+            checked: isShowStudentSchedulesInPointCards(),
+        },
+        {
+            action: 'toggle-hide-own',
+            label: 'Hide own schedule',
+            checked: isHideOwnScheduleInPointCards(),
+        },
+        {
+            action: 'toggle-wrap',
+            label: 'Wrap schedule',
+            checked: isWrapScheduleInPointCards(),
+        },
+        {
+            action: 'toggle-extend',
+            label: 'Extend schedule',
+            checked: isExtendScheduleInPointCards(),
+        },
+        { divider: true },
+        { action: 'edit-schedule', label: 'Edit schedule' },
+    ];
+}
+
+function refreshScheduleHeaderMenuLabels(menu) {
+    if (!menu) return;
+    getScheduleHeaderMenuItems().forEach((item) => {
+        if (item.divider) return;
+        const btn = menu.querySelector(`[data-action="${item.action}"]`);
+        if (btn) {
+            btn.textContent = item.checked ? `✓ ${item.label}` : item.label;
+        }
+    });
+}
+
+async function handleScheduleHeaderMenuAction(action, context = {}) {
+    switch (action) {
+        case 'toggle-student-schedules':
+            await toggleShowStudentSchedulesInPointCards();
+            break;
+        case 'toggle-hide-own':
+            await updatePointCardSchedulePreference('hideOwnScheduleInPointCards', !isHideOwnScheduleInPointCards());
+            break;
+        case 'toggle-wrap':
+            await updatePointCardSchedulePreference('wrapScheduleInPointCards', !isWrapScheduleInPointCards());
+            break;
+        case 'toggle-extend':
+            await updatePointCardSchedulePreference('extendScheduleInPointCards', !isExtendScheduleInPointCards());
+            break;
+        case 'edit-schedule':
+            await openPointCardScheduleEditModal({ type: 'teacher' });
+            break;
+        case 'change-schedule':
+            if (context.studentId != null) {
+                const studentId = parseInt(context.studentId, 10);
+                await openPointCardScheduleEditModal({
+                    type: 'student',
+                    studentId,
+                    studentName: context.studentName || getStudentNameById(studentId),
+                });
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+function buildScheduleHeaderKebabMenu(menuClass, ariaLabel, getItems, context = {}) {
+    bindScheduleHeaderKebabHandlers();
+    const kebabWrap = document.createElement('div');
+    kebabWrap.className = menuClass.includes('student-') ? 'student-schedule-header-kebab-wrap' : 'schedule-header-kebab-wrap';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = menuClass.includes('student-') ? 'student-schedule-header-kebab-btn' : 'schedule-header-kebab-btn';
+    btn.setAttribute('aria-label', ariaLabel);
+    btn.textContent = '⋮';
+    const menu = document.createElement('div');
+    menu.className = menuClass;
+    (getItems() || []).forEach((item) => {
+        if (item.divider) {
+            const divider = document.createElement('div');
+            divider.className = 'schedule-header-kebab-divider';
+            menu.appendChild(divider);
+            return;
+        }
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.dataset.action = item.action;
+        menuBtn.textContent = item.checked ? `✓ ${item.label}` : item.label;
+        menuBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeScheduleHeaderKebabMenus();
+            await handleScheduleHeaderMenuAction(item.action, context);
+        });
+        menu.appendChild(menuBtn);
+    });
+    btn.addEventListener('mousedown', (event) => {
+        event.stopPropagation();
+    });
+    btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const wasOpen = menu.classList.contains('open');
+        closeScheduleHeaderKebabMenus();
+        if (!wasOpen) {
+            if (typeof getItems === 'function' && menuClass === 'schedule-header-kebab-menu') {
+                refreshScheduleHeaderMenuLabels(menu);
+            }
+            menu.classList.add('open');
+            scheduleHeaderKebabOpen = menu;
+        }
+    });
+    kebabWrap.appendChild(btn);
+    kebabWrap.appendChild(menu);
+    return kebabWrap;
+}
+
+function appendStudentScheduleCategoryHeader(parent, student, options = {}) {
+    const cell = document.createElement('div');
+    cell.className = 'star-category-header daily-student-schedule-header';
+    if (options.isFirstStudent) {
+        cell.classList.add('daily-student-schedule-header--first');
+    }
+    const label = document.createElement('span');
+    label.className = 'daily-student-schedule-header-label';
+    label.textContent = 'SCHEDULE';
+    cell.appendChild(label);
+    if (canEdit() && student) {
+        cell.appendChild(buildScheduleHeaderKebabMenu(
+            'student-schedule-header-kebab-menu',
+            `Schedule menu for ${student.name || 'student'}`,
+            () => [{ action: 'change-schedule', label: 'Edit schedule' }],
+            { studentId: student.id, studentName: student.name }
+        ));
+    }
+    parent.appendChild(cell);
+    return cell;
+}
+
+function createStudentScheduleDataCell(studentId, timePeriod, options = {}) {
+    const cell = document.createElement('div');
+    cell.className = 'daily-student-schedule-cell';
+    cell.textContent = getStudentScheduleLocationForPeriod(studentId, timePeriod);
+    if (options.isOddRow) {
+        cell.style.background = 'var(--bg-page)';
+    }
+    if (options.borderTop) {
+        cell.style.borderTop = '2px solid #000';
+        cell.style.background = options.background || '#f8f9fa';
+    }
+    if (options.dataset) {
+        Object.entries(options.dataset).forEach(([key, value]) => {
+            cell.dataset[key] = value;
+        });
+    }
+    if (timePeriod && isOtherSchoolPeriod(studentId, timePeriod)) {
+        cell.classList.add('other-school-period');
+    }
+    return cell;
+}
+
+function appendScheduleHeaderKebabToPeriodHeader(periodHeader) {
+    if (!canEdit() || !periodHeader) return;
+    const labelText = periodHeader.textContent;
+    periodHeader.textContent = '';
+    periodHeader.classList.add('daily-period-header-with-menu');
+    const label = document.createElement('span');
+    label.className = 'daily-period-header-label';
+    label.textContent = labelText;
+    periodHeader.appendChild(label);
+    periodHeader.appendChild(buildScheduleHeaderKebabMenu(
+        'schedule-header-kebab-menu',
+        'Schedule column menu',
+        getScheduleHeaderMenuItems
+    ));
+}
+
 function createDailyScheduleHeaderCell() {
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const scheduleHeader = document.createElement('div');
-    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2';
-    scheduleHeader.textContent = 'Schedule';
+    scheduleHeader.className = 'daily-header-cell daily-header-location daily-frozen-col-2 daily-schedule-header-with-menu';
+
+    const label = document.createElement('span');
+    label.className = 'daily-schedule-header-label';
+    label.textContent = 'Schedule';
+    scheduleHeader.appendChild(label);
+
+    if (canEdit()) {
+        scheduleHeader.appendChild(buildScheduleHeaderKebabMenu(
+            'schedule-header-kebab-menu',
+            'Schedule column menu',
+            getScheduleHeaderMenuItems
+        ));
+    }
+
     return scheduleHeader;
 }
 
 function createDailyScheduleCategoryHeaderCell() {
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const cell = document.createElement('div');
     cell.className = 'star-category-header daily-frozen-col-2';
     cell.style.background = '#f8f9fa';
@@ -1464,6 +2500,9 @@ function createDailyScheduleCategoryHeaderCell() {
 }
 
 function createDailyScheduleCell(timePeriod, options = {}) {
+    if (isHideOwnScheduleInPointCards()) {
+        return null;
+    }
     const cell = document.createElement('div');
     cell.className = 'daily-location-cell daily-frozen-col-2';
     cell.textContent = formatPointCardScheduleForPeriod(timePeriod);
@@ -1475,6 +2514,338 @@ function createDailyScheduleCell(timePeriod, options = {}) {
         cell.style.background = options.background || '#f8f9fa';
     }
     return cell;
+}
+
+function appendPointCardGridCell(parent, cell) {
+    if (parent && cell) {
+        parent.appendChild(cell);
+    }
+}
+
+function ensurePointCardScheduleEditModal() {
+    let modal = document.getElementById('point-card-schedule-edit-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'point-card-schedule-edit-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content point-card-schedule-edit-modal-content" onclick="event.stopPropagation()">
+            <span class="close" id="point-card-schedule-edit-close">&times;</span>
+            <h2 id="point-card-schedule-edit-title">Edit schedule</h2>
+            <div class="point-card-schedule-edit-table-wrap">
+                <table class="schedule-table point-card-schedule-edit-table">
+                    <thead id="point-card-schedule-edit-head"></thead>
+                    <tbody id="point-card-schedule-edit-body"></tbody>
+                </table>
+            </div>
+            <div class="point-card-schedule-edit-actions">
+                <button type="button" id="point-card-schedule-edit-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="point-card-schedule-edit-save" class="btn-primary">Save schedule</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closePointCardScheduleEditModal();
+        }
+    });
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#point-card-schedule-edit-close');
+    const cancelBtn = modal.querySelector('#point-card-schedule-edit-cancel');
+    const saveBtn = modal.querySelector('#point-card-schedule-edit-save');
+    if (closeBtn) closeBtn.addEventListener('click', closePointCardScheduleEditModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closePointCardScheduleEditModal);
+    if (saveBtn) saveBtn.addEventListener('click', savePointCardScheduleEditModal);
+
+    return modal;
+}
+
+function closePointCardScheduleEditModal() {
+    const modal = document.getElementById('point-card-schedule-edit-modal');
+    if (modal) modal.style.display = 'none';
+    pointCardScheduleEditContext = null;
+}
+
+function populateTeacherScheduleTbody(tbody, scheduleData) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const schedulesByTime = {};
+    (scheduleData || []).forEach((schedule) => {
+        const time = schedule.time_period;
+        if (!schedulesByTime[time]) {
+            schedulesByTime[time] = [];
+        }
+        schedulesByTime[time].push(schedule);
+    });
+    SCHEDULE_PERIODS.forEach((time) => {
+        const savedSchedules = schedulesByTime[time] || [];
+        if (savedSchedules.length > 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="time-cell">
+                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+                </td>
+                <td class="classes-cell">
+                    <div class="classes-container"></div>
+                </td>
+                <td class="actions-cell">
+                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+                </td>
+            `;
+            const classesContainer = row.querySelector('.classes-container');
+            savedSchedules.forEach((schedule) => {
+                if (schedule.class_name || schedule.recurrence_type) {
+                    addClassInputGroup(classesContainer, {
+                        className: schedule.class_name || '',
+                        recurrence: schedule,
+                        includeStaff: false,
+                    });
+                }
+            });
+            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(classesContainer, { includeStaff: false });
+            }
+            row.dataset.timePeriod = time;
+            setupScheduleRowButtons(row, time, tbody, 'teacher');
+            tbody.appendChild(row);
+        } else {
+            addScheduleRow('teacher', time, null, tbody);
+        }
+    });
+}
+
+function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentScheduleStudentId) {
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const transition = getStudentTransition(studentId);
+    const markerLabel = formatTransitionMarkerLabel(transition);
+    let insertedMarker = false;
+    let prevHome = null;
+    const schedulesByTime = {};
+    (scheduleData || []).forEach((schedule) => {
+        const time = schedule && schedule.time_period;
+        if (!time) return;
+        if (!schedulesByTime[time]) schedulesByTime[time] = [];
+        schedulesByTime[time].push(schedule);
+    });
+    SCHEDULE_PERIODS.forEach((time) => {
+        const savedSchedules = schedulesByTime[time] || [];
+        const home = isHomePeriod(transition, time);
+        if (transition && prevHome !== null && home !== prevHome && !insertedMarker) {
+            appendTransitionMarkerRow(tbody, markerLabel);
+            insertedMarker = true;
+        }
+        if (savedSchedules.length > 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="time-cell">
+                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+                </td>
+                <td class="classes-cell">
+                    <div class="classes-container"></div>
+                </td>
+                <td class="actions-cell">
+                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+                </td>
+            `;
+            const classesContainer = row.querySelector('.classes-container');
+            savedSchedules.forEach((schedule) => {
+                addClassInputGroup(classesContainer, {
+                    className: schedule.class_name || '',
+                    staffName: schedule.staff_name || '',
+                    recurrence: schedule,
+                    includeStaff: true,
+                });
+            });
+            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(classesContainer, { includeStaff: true });
+            }
+            row.dataset.timePeriod = time;
+            setupScheduleRowButtons(row, time, tbody, 'student');
+            applyStudentScheduleRowOwnership(row, time, studentId);
+            tbody.appendChild(row);
+        } else {
+            addScheduleRow('student', time, null, tbody, studentId);
+        }
+        prevHome = home;
+    });
+}
+
+function appendTransitionMarkerRow(tbody, label) {
+    if (!tbody) return;
+    const row = document.createElement('tr');
+    row.className = 'schedule-row-split-marker';
+    const cell = document.createElement('td');
+    cell.colSpan = 3;
+    cell.textContent = label || 'Transition';
+    row.appendChild(cell);
+    tbody.appendChild(row);
+}
+
+async function openPointCardScheduleEditModal({ type, studentId = null, studentName = '' } = {}) {
+    if (!canEdit()) return;
+    const modal = ensurePointCardScheduleEditModal();
+    const title = modal.querySelector('#point-card-schedule-edit-title');
+    const thead = modal.querySelector('#point-card-schedule-edit-head');
+    const tbody = modal.querySelector('#point-card-schedule-edit-body');
+    if (!title || !thead || !tbody) return;
+
+    pointCardScheduleEditContext = { type, studentId, studentName };
+
+    if (type === 'teacher') {
+        title.textContent = 'Edit My Schedule';
+        thead.innerHTML = `
+            <tr>
+                <th>Time</th>
+                <th>Class</th>
+                <th></th>
+            </tr>
+        `;
+        await loadSchedules('teacher');
+        populateTeacherScheduleTbody(tbody, teacherScheduleData);
+    } else if (type === 'student' && studentId) {
+        title.textContent = `Change Schedule — ${studentName || getStudentNameById(studentId)}`;
+        thead.innerHTML = `
+            <tr>
+                <th>Time</th>
+                <th>Class / Staff</th>
+                <th></th>
+            </tr>
+        `;
+        await loadSchedules('student', studentId);
+        populateStudentScheduleTbody(tbody, studentScheduleData, studentId);
+    } else {
+        return;
+    }
+
+    modal.style.display = 'block';
+}
+
+function collectSchedulePeriodsFromTbody(tbody, type) {
+    const periods = [];
+    if (!tbody) return periods;
+    const rows = tbody.querySelectorAll('tr');
+    rows.forEach((row) => {
+        if (row.classList.contains('schedule-row-split-marker')) return;
+        const timeInput = row.querySelector('.time-input');
+        const timePeriod = timeInput ? timeInput.value.trim() : '';
+        if (!timePeriod) return;
+
+        const classesContainer = row.querySelector('.classes-container');
+        if (classesContainer) {
+            const groups = classesContainer.querySelectorAll('.class-input-group');
+            let pushed = false;
+            groups.forEach((group) => {
+                const classInput = group.querySelector('.class-input');
+                const staffInput = group.querySelector('.staff-input');
+                const classValue = classInput ? classInput.value.trim() : '';
+                const staffValue = staffInput ? staffInput.value.trim() : '';
+                const recurrence = collectRecurrenceFromGroup(group);
+                if (classValue || staffValue || recurrence.recurrence_type !== 'daily') {
+                    periods.push({
+                        time_period: timePeriod,
+                        class_name: classValue,
+                        staff_name: type === 'student' ? staffValue : '',
+                        ...recurrence,
+                    });
+                    pushed = true;
+                }
+            });
+            if (!pushed && type === 'student') {
+                periods.push({
+                    time_period: timePeriod,
+                    class_name: '',
+                    staff_name: '',
+                    ...defaultScheduleRecurrence(),
+                });
+            }
+        } else {
+            const classInput = row.querySelector('.class-input');
+            const staffInput = row.querySelector('.staff-input');
+            if (classInput) {
+                periods.push({
+                    time_period: timePeriod,
+                    class_name: classInput.value.trim(),
+                    staff_name: staffInput ? staffInput.value.trim() : '',
+                    ...defaultScheduleRecurrence(),
+                });
+            }
+        }
+    });
+    return periods;
+}
+
+async function savePointCardScheduleEditModal() {
+    const modal = document.getElementById('point-card-schedule-edit-modal');
+    const tbody = modal ? modal.querySelector('#point-card-schedule-edit-body') : null;
+    const context = pointCardScheduleEditContext;
+    if (!tbody || !context) return;
+
+    const { type, studentId } = context;
+    const periods = collectSchedulePeriodsFromTbody(tbody, type);
+    const payload = {
+        schedule_type: type,
+        periods,
+    };
+    if (type === 'student' && studentId) {
+        payload.student_id = studentId;
+    }
+    if (type === 'teacher' && currentTeacherScheduleUserId != null
+        && currentTeacherScheduleUserId !== (window.currentUser && window.currentUser.id)
+        && window.currentUser && window.currentUser.role === 'admin') {
+        payload.user_id = currentTeacherScheduleUserId;
+    }
+
+    const saveBtn = modal.querySelector('#point-card-schedule-edit-save');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+    }
+
+    try {
+        const response = await fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            let errorMessage = 'Error saving schedule. Please try again.';
+            try {
+                const errorData = await response.json();
+                if (errorData.error) errorMessage = errorData.error;
+            } catch (e) {
+                errorMessage = `Error saving schedule: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+        }
+
+        if (type === 'teacher') {
+            await loadSchedules('teacher');
+            if (document.getElementById('teacher-schedule-body')) {
+                renderTeacherSchedule();
+            }
+        } else if (type === 'student' && studentId) {
+            await loadSchedules('student', studentId);
+            studentSchedulesByStudentId[studentId] = studentScheduleData;
+            if (currentScheduleStudentId === studentId && document.getElementById('student-schedule-body')) {
+                renderStudentSchedule();
+            }
+        }
+
+        closePointCardScheduleEditModal();
+        refreshPointCardGridsAfterScheduleLoad();
+        showMessage('Schedule saved successfully!', 'success');
+    } catch (error) {
+        console.error('Error saving schedule from point card modal:', error);
+        showMessage(error.message || 'Error saving schedule. Please try again.', 'error');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save schedule';
+        }
+    }
 }
 
 function refreshPointCardGridsAfterScheduleLoad() {
@@ -1513,31 +2884,47 @@ function setPeriodEntryLocation(value) {
     }
 }
 
+function getPeriodEntryCombinedClassLabel(classesForPeriod) {
+    return (classesForPeriod || []).filter(Boolean).join(' / ');
+}
+
+function getPeriodEntryLocationForClass(classValue, classesForPeriod) {
+    if (classValue === PERIOD_ENTRY_ALL_CLASSES) {
+        return getPeriodEntryCombinedClassLabel(classesForPeriod);
+    }
+    return classValue || '';
+}
+
 function applyPeriodEntrySelection() {
     currentClass = '';
     const classSelectorGroup = document.getElementById('class-selector-group');
     const classSelect = document.getElementById('class-select');
-    const scheduleItems = getPeriodEntryScheduleItems();
+    const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems(), currentDate || null);
     const classesForPeriod = scheduleItems
         .filter(s => s && s.time_period === currentPeriod && s.class_name)
         .map(s => s.class_name)
         .filter((name, index, self) => self.indexOf(name) === index);
 
     if (classesForPeriod.length > 1 && canEdit()) {
+        const combinedLabel = getPeriodEntryCombinedClassLabel(classesForPeriod);
         if (classSelectorGroup) classSelectorGroup.style.display = 'block';
         if (classSelect) {
-            classSelect.innerHTML = '<option value="">Select Class</option>';
+            classSelect.innerHTML = '';
+            const allOption = document.createElement('option');
+            allOption.value = PERIOD_ENTRY_ALL_CLASSES;
+            allOption.textContent = combinedLabel;
+            classSelect.appendChild(allOption);
             classesForPeriod.forEach(className => {
                 const option = document.createElement('option');
                 option.value = className;
                 option.textContent = className;
                 classSelect.appendChild(option);
             });
-            classSelect.value = '';
+            classSelect.value = PERIOD_ENTRY_ALL_CLASSES;
         }
-        setPeriodEntryLocation('');
-        filteredStudentsForPeriod = [];
-        renderStudentsGrid();
+        currentClass = PERIOD_ENTRY_ALL_CLASSES;
+        setPeriodEntryLocation(combinedLabel);
+        loadPeriodData();
         return;
     }
 
@@ -1772,15 +3159,18 @@ function setupEventListeners() {
                 await flushPendingPointCardSaves();
                 currentClass = e.target.value;
                 console.log('Class selected:', currentClass);
-                
-                // Auto-fill location with selected class
-                const locationInput = document.getElementById('location-input');
-                if (locationInput && currentClass) {
-                    locationInput.value = currentClass;
-                    currentLocation = currentClass;
+
+                const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems(), currentDate || null);
+                const classesForPeriod = scheduleItems
+                    .filter(s => s && s.time_period === currentPeriod && s.class_name)
+                    .map(s => s.class_name)
+                    .filter((name, index, self) => self.indexOf(name) === index);
+                const locationValue = getPeriodEntryLocationForClass(currentClass, classesForPeriod);
+                if (locationValue) {
+                    setPeriodEntryLocation(locationValue);
                 }
-                
-                // Reload students for this class
+
+                // Reload students for this class (or all classes when combined)
                 loadPeriodData();
             });
         }
@@ -2029,6 +3419,7 @@ function setupEventListeners() {
         const userSectionToggleConfigs = [
             { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
             { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+            { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
             { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
             { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
             { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -2817,7 +4208,7 @@ function parseTimeRange(timeStr) {
 
 // Function to get current period based on current time and user's schedule
 function getCurrentPeriodFromSchedule() {
-    const scheduleItems = getPeriodEntryScheduleItems();
+    const scheduleItems = filterScheduleItemsForDate(getPeriodEntryScheduleItems());
     if (!scheduleItems.length) {
         console.log('getCurrentPeriodFromSchedule: no schedule data');
         return null;
@@ -2999,13 +4390,20 @@ async function loadPeriodData() {
     if (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) {
         try {
             let url = `/api/students/by-staff-period?period=${encodeURIComponent(currentPeriod)}`;
-            if (currentClass) {
+            if (currentDate) {
+                url += `&date=${encodeURIComponent(currentDate)}`;
+            }
+            // Combined multi-class selection omits class_name so all students for the period are returned
+            if (currentClass && currentClass !== PERIOD_ENTRY_ALL_CLASSES) {
                 url += `&class_name=${encodeURIComponent(currentClass)}`;
             }
             const response = await fetch(url);
             if (response.ok) {
                 filteredStudentsForPeriod = await response.json();
-                console.log(`Loaded ${filteredStudentsForPeriod.length} students for period ${currentPeriod}${currentClass ? `, class ${currentClass}` : ''}`);
+                const classLabel = currentClass === PERIOD_ENTRY_ALL_CLASSES
+                    ? 'all classes'
+                    : (currentClass ? `class ${currentClass}` : '');
+                console.log(`Loaded ${filteredStudentsForPeriod.length} students for period ${currentPeriod}${classLabel ? `, ${classLabel}` : ''}`);
             } else {
                 console.error('Error loading filtered students:', response.statusText);
                 filteredStudentsForPeriod = [];
@@ -3053,6 +4451,17 @@ function updatePeriodPercentageRow() {
         ? filteredStudentsForPeriod 
         : allStudents;
     studentsToUpdate.forEach((student) => {
+        const lockValue = getAttendanceStarLockValue(student.id);
+        if (lockValue) {
+            ['s', 't', 'a', 'r'].forEach((catShort) => {
+                const cell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="${catShort}"]`);
+                if (cell) cell.textContent = lockValue;
+            });
+            const overallCell = document.querySelector(`.period-percent-cell[data-student-id="${student.id}"][data-category="overall"]`);
+            if (overallCell) overallCell.textContent = lockValue === 'E' ? 'E' : '0%';
+            return;
+        }
+
         const data = periodData[student.id] || {};
         const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
         const categoryShort = ['s', 't', 'a', 'r'];
@@ -3067,10 +4476,11 @@ function updatePeriodPercentageRow() {
             
             if (cell) {
                 const value = data[catFull];
-                if (value !== null && value !== undefined) {
-                    const percentage = ((value / 2) * 100).toFixed(0);
+                const points = starValueForPercentage(value);
+                if (points !== null) {
+                    const percentage = ((points / 2) * 100).toFixed(0);
                     cell.textContent = `${percentage}%`;
-                    totalPoints += value;
+                    totalPoints += points;
                     countedCategories++;
                 } else {
                     cell.textContent = '-';
@@ -3113,30 +4523,46 @@ function renderStudentsGrid() {
         return;
     }
 
+    ensureStudentSchedulesLoadedForVisibleStudents(studentsToDisplay);
+
     // Reuse the same grid structure as daily grid
     const spacerWidth = '7px';
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            return 'repeat(4, 40px) 40px';
-        } else {
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
+    const studentColumns = buildPointCardStudentColumnsTemplate(
+        studentsToDisplay,
+        spacerWidth,
+        [currentPeriod || '']
+    );
+    const columnsPerStudent = getPointCardColumnsPerStudent();
+    const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
-    const scheduleWidth = measureDailyScheduleColumnWidth([
+    const scheduleWidth = measurePointCardOwnScheduleColumnWidth([
         'Schedule',
         formatPointCardScheduleForPeriod(currentPeriod || ''),
     ]);
-    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth);
+    const hideOwnSchedule = isHideOwnScheduleInPointCards();
+    const periodWidth = measurePointCardPeriodColumnWidth(
+        ['Period', currentPeriod || '', 'Percent'],
+        hideOwnSchedule && canEdit() ? { extraWidth: 18 } : {}
+    );
+    setDailyGridColumnTemplate(header, grid, studentColumns, spacerWidth, scheduleWidth, {
+        hideOwnSchedule,
+        periodWidthPx: periodWidth,
+    });
     const studentsGridEl = document.getElementById('students-grid');
-    if (studentsGridEl) studentsGridEl.classList.add('daily-grid--freeze-cols');
+    if (studentsGridEl) {
+        studentsGridEl.classList.add('daily-grid--freeze-cols');
+        applyPointCardGridScheduleClasses(studentsGridEl, showStudentSchedules);
+    }
 
     // 1. Period/Schedule Header
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = currentPeriod || 'Period';
+    if (hideOwnSchedule && canEdit()) {
+        appendScheduleHeaderKebabToPeriodHeader(periodHeader);
+    }
     header.appendChild(periodHeader);
-    header.appendChild(createDailyScheduleHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleHeaderCell());
 
     const periodSpacer = document.createElement('div');
     // Gutter between period and first student: keep space but make it visually transparent
@@ -3158,7 +4584,7 @@ function renderStudentsGrid() {
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.style.gridColumn = 'span 5';
+        studentHeader.style.gridColumn = `span ${columnsPerStudent}`;
         studentHeader.dataset.studentId = student.id;
         
         // Apply card color background
@@ -3191,7 +4617,7 @@ function renderStudentsGrid() {
     emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
-    header.appendChild(createDailyScheduleCategoryHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleCategoryHeaderCell());
     
     const emptySpacerCell = document.createElement('div');
     // Gutter column under the period header
@@ -3200,9 +4626,15 @@ function renderStudentsGrid() {
     
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
+        if (showStudentSchedules) {
+            appendStudentScheduleCategoryHeader(header, student, { isFirstStudent: index === 0 });
+        }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
+            if (showStudentSchedules && labelIndex === 0) {
+                catHeader.classList.add('star-category-header--after-schedule');
+            }
             catHeader.textContent = label;
             catHeader.dataset.category = categoryKeys[labelIndex];
             header.appendChild(catHeader);
@@ -3222,7 +4654,7 @@ function renderStudentsGrid() {
     periodCell.className = 'daily-period-cell daily-frozen-col-1';
     periodCell.textContent = currentPeriod || '';
     grid.appendChild(periodCell);
-    grid.appendChild(createDailyScheduleCell(currentPeriod || ''));
+    appendPointCardGridCell(grid, createDailyScheduleCell(currentPeriod || ''));
 
     const rowSpacer = document.createElement('div');
     // Gutter column next to period in this compact grid
@@ -3238,6 +4670,10 @@ function renderStudentsGrid() {
             { full: 'accountability', short: 'a' },
             { full: 'relationships', short: 'r' }
         ];
+
+            if (showStudentSchedules) {
+                grid.appendChild(createStudentScheduleDataCell(student.id, currentPeriod || ''));
+            }
         
         categories.forEach(cat => {
             const cell = document.createElement('div');
@@ -3246,6 +4682,12 @@ function renderStudentsGrid() {
             cell.style.display = 'flex';
             cell.style.justifyContent = 'center';
             cell.style.alignItems = 'center';
+            if (isOtherSchoolPeriod(student.id, currentPeriod || '')) {
+                cell.classList.add('other-school-period');
+            }
+            if (isAttendanceStarLocked(student.id)) {
+                cell.classList.add('attendance-locked-period');
+            }
             
             const select = document.createElement('select');
             select.className = 'daily-input';
@@ -3254,23 +4696,12 @@ function renderStudentsGrid() {
             select.dataset.category = cat.short;
             select.dataset.studentName = student.name || '';
             
-            if (isStudent()) select.disabled = true;
+            if (isStudent() || isAttendanceStarLocked(student.id) || !canEditStarPeriod(student.id, currentPeriod || '')) select.disabled = true;
             
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = '-';
-            select.appendChild(emptyOption);
-            
-            [2, 1, 0].forEach(val => {
-                const option = document.createElement('option');
-                option.value = val;
-                option.textContent = val;
-                if (data[`${cat.full}_points`] === val) option.selected = true;
-                select.appendChild(option);
-            });
+            populateStarPointSelectOptions(select, isAttendanceStarLocked(student.id) ? null : data[`${cat.full}_points`]);
             
             select.addEventListener('change', (e) => {
-                const val = e.target.value === '' ? null : parseInt(e.target.value);
+                const val = parseStarInputValue(e.target.value);
                 if (!periodData[student.id]) {
                     periodData[student.id] = { student_id: student.id };
                 }
@@ -3350,7 +4781,7 @@ function renderStudentsGrid() {
     percentLabel.style.borderTop = '2px solid #000';
     percentLabel.style.background = '#f8f9fa';
     grid.appendChild(percentLabel);
-    grid.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
+    appendPointCardGridCell(grid, createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     const percentSpacer = document.createElement('div');
     // Gutter at the start of the percentage row
@@ -3360,12 +4791,20 @@ function renderStudentsGrid() {
     
     // Calculate and display percentage for each student
     studentsToDisplay.forEach((student, studentIndex) => {
+        const lockValue = getAttendanceStarLockValue(student.id);
         const data = periodData[student.id] || {};
         const categories = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'];
         const categoryShort = ['s', 't', 'a', 'r'];
         
         let totalPoints = 0;
         let countedCategories = 0;
+
+        if (showStudentSchedules) {
+            grid.appendChild(createStudentScheduleDataCell(student.id, '', {
+                borderTop: true,
+                background: '#f8f9fa'
+            }));
+        }
         
         // Calculate percentages for each category
         categoryShort.forEach((catShort, catIndex) => {
@@ -3383,20 +4822,25 @@ function renderStudentsGrid() {
             cell.style.fontSize = '11px';
             cell.style.background = '#f8f9fa';
             
-            const value = data[catFull];
-            if (value !== null && value !== undefined) {
-                const percentage = ((value / 2) * 100).toFixed(0);
-                cell.textContent = `${percentage}%`;
-                totalPoints += value;
-                countedCategories++;
-                
-                // Color code based on category
-                if (catShort === 's') cell.style.color = '#B91C1C';
-                else if (catShort === 't') cell.style.color = '#1E40AF';
-                else if (catShort === 'a') cell.style.color = '#047857';
-                else if (catShort === 'r') cell.style.color = '#B45309';
+            if (lockValue) {
+                cell.textContent = lockValue;
             } else {
-                cell.textContent = '-';
+                const value = data[catFull];
+                const points = starValueForPercentage(value);
+                if (points !== null) {
+                    const percentage = ((points / 2) * 100).toFixed(0);
+                    cell.textContent = `${percentage}%`;
+                    totalPoints += points;
+                    countedCategories++;
+                    
+                    // Color code based on category
+                    if (catShort === 's') cell.style.color = '#B91C1C';
+                    else if (catShort === 't') cell.style.color = '#1E40AF';
+                    else if (catShort === 'a') cell.style.color = '#047857';
+                    else if (catShort === 'r') cell.style.color = '#B45309';
+                } else {
+                    cell.textContent = '-';
+                }
             }
             
             grid.appendChild(cell);
@@ -3417,7 +4861,9 @@ function renderStudentsGrid() {
         overallCell.style.background = 'var(--bg-elevated)';
         overallCell.style.color = 'var(--accent)';
         
-        if (countedCategories > 0) {
+        if (lockValue) {
+            overallCell.textContent = lockValue === 'E' ? 'E' : '0%';
+        } else if (countedCategories > 0) {
             const maxPossible = countedCategories * 2;
             const overallPercentage = ((totalPoints / maxPossible) * 100).toFixed(0);
             overallCell.textContent = `${overallPercentage}%`;
@@ -3438,6 +4884,7 @@ function renderStudentsGrid() {
     
     // Update "I" box highlights for all students on initial load
     studentsToDisplay.forEach(student => {
+        applyAttendanceStarCellState(student.id);
         updateInfoButtonHighlight(student.id, currentPeriod);
     });
 
@@ -3766,10 +5213,10 @@ async function loadDailyData() {
 
             record.periods.forEach(period => {
                 nextDailyData[studentId][period.time_range] = {
-                    s: period.safety_points,
-                    t: period.teamwork_points,
-                    a: period.accountability_points,
-                    r: period.relationships_points,
+                    s: normalizeStarValue(period.safety_points),
+                    t: normalizeStarValue(period.teamwork_points),
+                    a: normalizeStarValue(period.accountability_points),
+                    r: normalizeStarValue(period.relationships_points),
                     info: period.info || ''
                 };
             });
@@ -3812,17 +5259,12 @@ async function loadDailyData() {
 }
 
 function calculateStudentPercentages(studentId) {
-    // Check attendance status
-    const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-    
-    // If excused, exclude from calculations (return '-')
-    if (attendance === 'excused') {
-        return { s: '-', t: '-', a: '-', r: '-', overall: '-' };
+    const lockValue = getAttendanceStarLockValue(studentId);
+    if (lockValue === 'E') {
+        return { s: 'E', t: 'E', a: 'E', r: 'E', overall: 'E' };
     }
-    
-    // If unexcused, return 0% for all
-    if (attendance === 'unexcused') {
-        return { s: '0', t: '0', a: '0', r: '0', overall: '0' };
+    if (lockValue === 'U') {
+        return { s: 'U', t: 'U', a: 'U', r: 'U', overall: '0' };
     }
     
     // Normal calculation for present
@@ -3833,10 +5275,12 @@ function calculateStudentPercentages(studentId) {
     // Calculate totals and counts for each category
     Object.values(studentData).forEach(periodData => {
         ['s', 't', 'a', 'r'].forEach(category => {
-            if (periodData[category] !== null && periodData[category] !== undefined) {
-                totals[category] += periodData[category];
-                counts[category]++;
+            const points = starValueForPercentage(periodData[category]);
+            if (points === null) {
+                return;
             }
+            totals[category] += points;
+            counts[category]++;
         });
     });
     
@@ -3899,29 +5343,43 @@ function renderDailyGrid() {
         return;
     }
 
-    // Calculate grid columns: Period + spacer + (5 columns per student: S, T, A, R, I + 1 spacer between)
+    ensureStudentSchedulesLoadedForVisibleStudents(studentsToDisplay);
+
+    // Calculate grid columns: Period + spacer + (5 or 6 columns per student)
     const spacerWidth = '7px'; // 1/4 of original 27px
-    const studentColumns = studentsToDisplay.map((_, index) => {
-        if (index === studentsToDisplay.length - 1) {
-            // Last student - no spacer after (4 STAR columns + 1 Info column)
-            return 'repeat(4, 40px) 40px';
-        } else {
-            // Add spacer after student (4 STAR columns + 1 Info column + spacer)
-            return `repeat(4, 40px) 40px ${spacerWidth}`;
-        }
-    }).join(' ');
+    const studentColumns = buildPointCardStudentColumnsTemplate(
+        studentsToDisplay,
+        spacerWidth,
+        STANDARD_PERIODS
+    );
+    const columnsPerStudent = getPointCardColumnsPerStudent();
+    const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
     const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
-    const scheduleWidth = measureDailyScheduleColumnWidth(['Schedule', ...scheduleTexts]);
-    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth);
-    if (dailyGridEl) dailyGridEl.classList.add('daily-grid--freeze-cols');
+    const scheduleWidth = measurePointCardOwnScheduleColumnWidth(['Schedule', ...scheduleTexts]);
+    const hideOwnSchedule = isHideOwnScheduleInPointCards();
+    const periodWidth = measurePointCardPeriodColumnWidth(
+        ['Period', 'Percent', ...STANDARD_PERIODS.map((period) => period.time)],
+        hideOwnSchedule && canEdit() ? { extraWidth: 18 } : {}
+    );
+    setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth, {
+        hideOwnSchedule,
+        periodWidthPx: periodWidth,
+    });
+    if (dailyGridEl) {
+        dailyGridEl.classList.add('daily-grid--freeze-cols');
+        applyPointCardGridScheduleClasses(dailyGridEl, showStudentSchedules);
+    }
 
     // Create header row
     const periodHeader = document.createElement('div');
     periodHeader.className = 'daily-header-cell daily-header-period daily-frozen-col-1';
     periodHeader.textContent = 'Period';
+    if (hideOwnSchedule && canEdit()) {
+        appendScheduleHeaderKebabToPeriodHeader(periodHeader);
+    }
     header.appendChild(periodHeader);
-    header.appendChild(createDailyScheduleHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleHeaderCell());
 
     // Add spacer after period column (gutter, but visually transparent)
     const periodSpacer = document.createElement('div');
@@ -3939,11 +5397,11 @@ function renderDailyGrid() {
         return colors[cardColor.toLowerCase()] || null;
     };
 
-    // Student headers (each spans 5 columns for S, T, A, R, I, plus spacer spans)
+    // Student headers (each spans S, T, A, R, I columns, plus optional schedule column)
     studentsToDisplay.forEach((student, index) => {
         const studentHeader = document.createElement('div');
         studentHeader.className = 'daily-header-cell daily-header-student';
-        studentHeader.style.gridColumn = 'span 5';
+        studentHeader.style.gridColumn = `span ${columnsPerStudent}`;
         studentHeader.dataset.studentIndex = index;
         studentHeader.style.display = 'flex';
         studentHeader.style.flexDirection = 'column';
@@ -4036,7 +5494,7 @@ function renderDailyGrid() {
     emptyCell.className = 'star-category-header daily-frozen-col-1';
     emptyCell.style.background = '#f8f9fa';
     header.appendChild(emptyCell);
-    header.appendChild(createDailyScheduleCategoryHeaderCell());
+    appendPointCardGridCell(header, createDailyScheduleCategoryHeaderCell());
     
     // Empty spacer cell after period column
     const emptySpacerCell = document.createElement('div');
@@ -4047,9 +5505,15 @@ function renderDailyGrid() {
     // S, T, A, R, I headers for each student
     studentsToDisplay.forEach((student, index) => {
         const categoryKeys = ['s', 't', 'a', 'r', 'i'];
+        if (showStudentSchedules) {
+            appendStudentScheduleCategoryHeader(header, student, { isFirstStudent: index === 0 });
+        }
         categoryLabels.forEach((label, labelIndex) => {
             const catHeader = document.createElement('div');
             catHeader.className = 'star-category-header';
+            if (showStudentSchedules && labelIndex === 0) {
+                catHeader.classList.add('star-category-header--after-schedule');
+            }
             catHeader.textContent = label;
             catHeader.dataset.studentIndex = index;
             catHeader.dataset.category = categoryKeys[labelIndex];
@@ -4078,7 +5542,7 @@ function renderDailyGrid() {
             periodCell.style.background = 'var(--bg-page)';
         }
         body.appendChild(periodCell);
-        body.appendChild(createDailyScheduleCell(period.time, { isOddRow }));
+        appendPointCardGridCell(body, createDailyScheduleCell(period.time, { isOddRow }));
 
         // Add spacer after period column (gutter, but visually transparent)
         const periodRowSpacer = document.createElement('div');
@@ -4086,9 +5550,16 @@ function renderDailyGrid() {
         periodRowSpacer.dataset.periodIndex = periodIndex;
         body.appendChild(periodRowSpacer);
 
-        // For each student, create 5 cells (S, T, A, R, I)
+        // For each student, create STAR cells (and optional schedule column)
         studentsToDisplay.forEach((student, studentIndex) => {
             const studentData = dailyData[student.id]?.[period.time] || { s: null, t: null, a: null, r: null, info: '' };
+
+            if (showStudentSchedules) {
+                body.appendChild(createStudentScheduleDataCell(student.id, period.time, {
+                    isOddRow,
+                    dataset: { studentIndex, periodIndex }
+                }));
+            }
             
             ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
                 const cell = document.createElement('div');
@@ -4102,6 +5573,12 @@ function renderDailyGrid() {
                 if (isOddRow) {
                     cell.style.background = 'var(--bg-page)';
                 }
+                if (isOtherSchoolPeriod(student.id, period.time)) {
+                    cell.classList.add('other-school-period');
+                }
+                if (isAttendanceStarLocked(student.id)) {
+                    cell.classList.add('attendance-locked-period');
+                }
                 
                 const select = document.createElement('select');
                 select.className = 'daily-input';
@@ -4110,27 +5587,12 @@ function renderDailyGrid() {
                 select.dataset.category = category;
                 select.dataset.studentName = student.name || '';
                 
-                // Disable for students
-                if (isStudent()) {
+                // Disable for students, attendance lock, or unowned transition periods
+                if (isStudent() || isAttendanceStarLocked(student.id) || !canEditStarPeriod(student.id, period.time)) {
                     select.disabled = true;
                 }
                 
-                // Add empty option
-                const emptyOption = document.createElement('option');
-                emptyOption.value = '';
-                emptyOption.textContent = '-';
-                select.appendChild(emptyOption);
-                
-                // Add options 2, 1, 0
-                [2, 1, 0].forEach(val => {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.textContent = val;
-                    if (studentData[category] === val) {
-                        option.selected = true;
-                    }
-                    select.appendChild(option);
-                });
+                populateStarPointSelectOptions(select, isAttendanceStarLocked(student.id) ? null : studentData[category]);
                 
                 cell.appendChild(select);
                 body.appendChild(cell);
@@ -4200,7 +5662,7 @@ function renderDailyGrid() {
     percentPeriodCell.style.borderTop = '2px solid #000';
     percentPeriodCell.style.background = '#f8f9fa';
     body.appendChild(percentPeriodCell);
-    body.appendChild(createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
+    appendPointCardGridCell(body, createDailyScheduleCell('', { borderTop: true, background: '#f8f9fa' }));
     
     // Add spacer after period column (gutter, but visually transparent)
     const percentSpacer = document.createElement('div');
@@ -4211,6 +5673,13 @@ function renderDailyGrid() {
     // For each student, add percentage cells
     studentsToDisplay.forEach((student, studentIndex) => {
         const percentages = calculateStudentPercentages(student.id);
+
+        if (showStudentSchedules) {
+            body.appendChild(createStudentScheduleDataCell(student.id, '', {
+                borderTop: true,
+                background: '#f8f9fa'
+            }));
+        }
         
         // Add percentage cells for S, T, A, R
         ['s', 't', 'a', 'r'].forEach((category, catIndex) => {
@@ -4227,11 +5696,11 @@ function renderDailyGrid() {
             percentCell.style.fontSize = '11px';
             percentCell.style.background = '#f8f9fa';
             
-            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
+            const percentText = formatPercentCellText(percentages[category]);
             percentCell.textContent = percentText;
             
             // Color code based on category
-            if (percentages[category] !== '-') {
+            if (isNumericPercentDisplay(percentages[category])) {
                 if (category === 's') percentCell.style.color = '#B91C1C';
                 else if (category === 't') percentCell.style.color = '#1E40AF';
                 else if (category === 'a') percentCell.style.color = '#047857';
@@ -4256,8 +5725,7 @@ function renderDailyGrid() {
         overallPercentCell.style.background = 'var(--bg-elevated)';
         overallPercentCell.style.color = 'var(--accent)';
         
-        const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
-        overallPercentCell.textContent = overallText;
+        overallPercentCell.textContent = formatPercentCellText(percentages.overall);
         
         body.appendChild(overallPercentCell);
         
@@ -4273,6 +5741,7 @@ function renderDailyGrid() {
     
     // Update "I" box highlights for all students and periods on initial load
     studentsToDisplay.forEach(student => {
+        applyAttendanceStarCellState(student.id);
         STANDARD_PERIODS.forEach(period => {
             updateInfoButtonHighlight(student.id, period.time);
         });
@@ -4306,11 +5775,9 @@ function updateDailyPercentageRow() {
         
         // Update the cell text
         if (category === 'overall') {
-            const overallText = percentages.overall !== '-' ? `${percentages.overall}%` : '-';
-            cell.textContent = overallText;
+            cell.textContent = formatPercentCellText(percentages.overall);
         } else {
-            const percentText = percentages[category] !== '-' ? `${percentages[category]}%` : '-';
-            cell.textContent = percentText;
+            cell.textContent = formatPercentCellText(percentages[category]);
         }
     });
 }
@@ -4322,21 +5789,24 @@ function updateInfoButtonHighlight(studentId, period) {
     
     let hasZero = false;
     
-    if (isDailyEntry) {
+    if (isAttendanceStarLocked(studentId)) {
+        hasZero = false;
+    } else if (isDailyEntry) {
         // Check dailyData structure: dailyData[studentId][period] with s, t, a, r
         const studentData = dailyData[studentId];
         if (studentData && studentData[period]) {
             const periodData = studentData[period];
             // Check if any STAR value is 0
-            hasZero = periodData.s === 0 || periodData.t === 0 || periodData.a === 0 || periodData.r === 0;
+            hasZero = isStarValueZero(periodData.s) || isStarValueZero(periodData.t) ||
+                     isStarValueZero(periodData.a) || isStarValueZero(periodData.r);
         }
     } else if (isPeriodEntry) {
         // Check periodData structure: periodData[studentId] with safety_points, teamwork_points, etc.
         const data = periodData[studentId];
         if (data) {
             // Check if any STAR value is 0
-            hasZero = data.safety_points === 0 || data.teamwork_points === 0 || 
-                     data.accountability_points === 0 || data.relationships_points === 0;
+            hasZero = isStarValueZero(data.safety_points) || isStarValueZero(data.teamwork_points) ||
+                     isStarValueZero(data.accountability_points) || isStarValueZero(data.relationships_points);
         }
     }
     
@@ -4357,7 +5827,7 @@ function handleDailyInputChange(e) {
     const studentId = parseInt(select.dataset.studentId);
     const period = select.dataset.period;
     const category = select.dataset.category;
-    const value = select.value === '' ? null : parseInt(select.value);
+    const value = parseStarInputValue(select.value);
     
     // Update dailyData
     if (!dailyData[studentId]) {
@@ -4392,13 +5862,157 @@ function handleDailyInputChange(e) {
     }
 }
 
-function commitStarDigit(select, digit) {
-    select.value = digit;
+function commitStarValue(select, rawValue) {
+    const normalized = normalizeStarValue(rawValue);
+    select.value = normalized === null ? '' : normalized;
     const event = new Event('change', { bubbles: true });
     event.fromStarKey = true;
     select.dispatchEvent(event);
     if (select.dataset.category !== 'r') {
         moveToNextInput(select);
+    }
+}
+
+function commitStarDigit(select, digit) {
+    commitStarValue(select, digit);
+}
+
+const STAR_GRID_CATEGORIES = ['s', 't', 'a', 'r'];
+const POINT_CARD_STAR_COLUMNS = ['safety', 'teamwork', 'accountability', 'relationships'];
+const POINT_CARD_TEXT_COLUMNS = ['time_range', 'location'];
+
+function getPointCardEditColumnsForRow(periodIndex) {
+    const grid = document.querySelector('.point-card-edit-grid');
+    if (!grid) return POINT_CARD_STAR_COLUMNS;
+    const hasTextInputs = POINT_CARD_TEXT_COLUMNS.some((category) => (
+        grid.querySelector(`input.edit-input[data-period-index="${periodIndex}"][data-category="${category}"]`)
+    ));
+    return hasTextInputs
+        ? [...POINT_CARD_TEXT_COLUMNS, ...POINT_CARD_STAR_COLUMNS]
+        : POINT_CARD_STAR_COLUMNS;
+}
+
+function findPointCardEditInput(periodIndex, category) {
+    const grid = document.querySelector('.point-card-edit-grid');
+    if (!grid || !Number.isInteger(periodIndex) || periodIndex < 0) return null;
+    const input = grid.querySelector(`.edit-input[data-period-index="${periodIndex}"][data-category="${category}"]`);
+    if (input && !input.disabled) return input;
+    return null;
+}
+
+function movePointCardEditInput(currentInput, direction) {
+    const periodIndex = Number(currentInput.dataset.periodIndex);
+    const category = currentInput.dataset.category;
+    const columns = getPointCardEditColumnsForRow(periodIndex);
+    const colIdx = columns.indexOf(category);
+    if (!Number.isInteger(periodIndex) || colIdx < 0) return false;
+
+    const rowCount = window.editingPointCardRecord?.periods?.length || 0;
+    let nextPeriod = periodIndex;
+    let nextCol = colIdx;
+
+    if (direction === 'right') {
+        if (colIdx >= columns.length - 1) return false;
+        nextCol += 1;
+    } else if (direction === 'left') {
+        if (colIdx <= 0) return false;
+        nextCol -= 1;
+    } else if (direction === 'down') {
+        if (periodIndex >= rowCount - 1) return false;
+        nextPeriod += 1;
+    } else if (direction === 'up') {
+        if (periodIndex <= 0) return false;
+        nextPeriod -= 1;
+    } else {
+        return false;
+    }
+
+    const targetColumns = getPointCardEditColumnsForRow(nextPeriod);
+    const targetCategory = direction === 'right' || direction === 'left'
+        ? targetColumns[nextCol]
+        : targetColumns[Math.min(colIdx, targetColumns.length - 1)];
+    const target = findPointCardEditInput(nextPeriod, targetCategory);
+    if (!target) return false;
+    target.focus();
+    return true;
+}
+
+function moveDailyStarInput(currentInput, direction) {
+    const students = getStudentsForStarNav();
+    const studentId = parseInt(currentInput.dataset.studentId, 10);
+    const period = getPeriodForStarInput(currentInput);
+    const category = currentInput.dataset.category;
+    const studentIdx = students.findIndex((s) => String(s.id) === String(studentId));
+    const catIdx = STAR_GRID_CATEGORIES.indexOf(category);
+    const periodIdx = isPeriodEntryViewActive()
+        ? 0
+        : STANDARD_PERIODS.findIndex((p) => p.time === period);
+
+    if (studentIdx < 0 || catIdx < 0) return false;
+    if (!isPeriodEntryViewActive() && periodIdx < 0) return false;
+
+    let nextStudentIdx = studentIdx;
+    let nextPeriodIdx = periodIdx;
+    let nextCatIdx = catIdx;
+
+    if (direction === 'right') {
+        if (catIdx < STAR_GRID_CATEGORIES.length - 1) {
+            nextCatIdx += 1;
+        } else if (studentIdx < students.length - 1) {
+            nextStudentIdx += 1;
+            nextCatIdx = 0;
+        } else {
+            return false;
+        }
+    } else if (direction === 'left') {
+        if (catIdx > 0) {
+            nextCatIdx -= 1;
+        } else if (studentIdx > 0) {
+            nextStudentIdx -= 1;
+            nextCatIdx = STAR_GRID_CATEGORIES.length - 1;
+        } else {
+            return false;
+        }
+    } else if (direction === 'down') {
+        if (isPeriodEntryViewActive() || periodIdx >= STANDARD_PERIODS.length - 1) return false;
+        nextPeriodIdx += 1;
+    } else if (direction === 'up') {
+        if (isPeriodEntryViewActive() || periodIdx <= 0) return false;
+        nextPeriodIdx -= 1;
+    } else {
+        return false;
+    }
+
+    const nextStudent = students[nextStudentIdx];
+    const nextPeriod = isPeriodEntryViewActive() ? period : STANDARD_PERIODS[nextPeriodIdx].time;
+    return focusStarInput(nextStudent.id, nextPeriod, STAR_GRID_CATEGORIES[nextCatIdx]);
+}
+
+function moveStarInputByDirection(currentInput, direction) {
+    if (!currentInput) return false;
+    if (currentInput.closest('.point-card-edit-grid')) {
+        return movePointCardEditInput(currentInput, direction);
+    }
+    if (currentInput.classList.contains('daily-input')) {
+        return moveDailyStarInput(currentInput, direction);
+    }
+    return false;
+}
+
+function handlePointCardTextInputKeydown(e) {
+    const input = e.target;
+    if (!input || !input.classList || !input.classList.contains('pc-text-input')) return;
+    if (!input.closest('.point-card-edit-grid')) return;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const direction = {
+            ArrowRight: 'right',
+            ArrowLeft: 'left',
+            ArrowDown: 'down',
+            ArrowUp: 'up'
+        }[e.key];
+        moveStarInputByDirection(input, direction);
     }
 }
 
@@ -4428,22 +6042,30 @@ function handleDailyInputKeydown(e) {
             moveToPreviousInput(select);
         }
     }
-    // Handle number keys 0, 1, 2
+    // Handle number keys 0, 1, 2 and letter keys E/U
     else if (e.key >= '0' && e.key <= '2') {
         e.preventDefault();
         select.dataset.starKeyHandled = '1';
         commitStarDigit(select, e.key);
     }
-    // Handle arrow keys for navigation
-    else if (e.key === 'ArrowRight' || e.key === 'Tab') {
-        if (e.key === 'ArrowRight') {
-            e.preventDefault();
-        }
-        moveToNextInput(select);
-    }
-    else if (e.key === 'ArrowLeft') {
+    else if (e.key === 'e' || e.key === 'E' || e.key === 'u' || e.key === 'U') {
         e.preventDefault();
-        moveToPreviousInput(select);
+        select.dataset.starKeyHandled = '1';
+        commitStarValue(select, e.key);
+    }
+    // Arrow keys move between grid cells; prevent native select option cycling.
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const direction = {
+            ArrowRight: 'right',
+            ArrowLeft: 'left',
+            ArrowDown: 'down',
+            ArrowUp: 'up'
+        }[e.key];
+        moveStarInputByDirection(select, direction);
+    }
+    else if (e.key === 'Tab') {
+        moveToNextInput(select);
     }
 }
 
@@ -4457,6 +6079,8 @@ function handleDailyInputKeyup(e) {
     // Native typeahead can change the displayed value without keydown (open picker).
     if (e.key >= '0' && e.key <= '2' && select.value === e.key) {
         commitStarDigit(select, e.key);
+    } else if ((e.key === 'e' || e.key === 'E' || e.key === 'u' || e.key === 'U') && starValuesEquivalent(select.value, e.key)) {
+        commitStarValue(select, e.key);
     }
 }
 
@@ -4471,6 +6095,15 @@ function moveToNextInput(currentInput) {
 }
 
 function moveToPreviousInput(currentInput) {
+    if (currentInput.classList.contains('pc-edit-input')) {
+        const allInputs = getStarInputsInSameGrid(currentInput);
+        const currentIndex = allInputs.indexOf(currentInput);
+        if (currentIndex > 0) {
+            focusDailyStarInput(allInputs[currentIndex - 1]);
+        }
+        return;
+    }
+
     const category = currentInput.dataset.category;
     const studentId = parseInt(currentInput.dataset.studentId, 10);
     const period = getPeriodForStarInput(currentInput);
@@ -4790,15 +6423,15 @@ function getPeriodStarValues(studentId, period) {
     const inputs = document.querySelectorAll(
         `.daily-input[data-student-id="${studentId}"][data-period="${period}"]`
     );
-    return Array.from(inputs).map((el) => (el.value === '' ? null : parseInt(el.value, 10)));
+    return Array.from(inputs).map((el) => parseStarInputValue(el.value));
 }
 
 function rowHasStarZero(studentId, period) {
-    return getPeriodStarValues(studentId, period).some((v) => v === 0);
+    return getPeriodStarValues(studentId, period).some((v) => isStarValueZero(v));
 }
 
 function rowHasStarOne(studentId, period) {
-    return getPeriodStarValues(studentId, period).some((v) => v === 1);
+    return getPeriodStarValues(studentId, period).some((v) => normalizeStarValue(v) === '1');
 }
 
 function clearInfoModalStarHighlights() {
@@ -7569,6 +9202,7 @@ async function loadPointCardData(studentIdOverride) {
     updatePointCardFilterStatus(0, 0);
 
     try {
+        await loadStudentSchedulesForIds([studentId]);
         const response = await fetch(`/api/daily-records?student_id=${studentId}`);
         const allRecords = await response.json();
         if (loadToken !== pastPointCardsLoadToken) return;
@@ -7599,15 +9233,19 @@ async function loadPointCardData(studentIdOverride) {
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             const formattedDate = date.toLocaleDateString('en-US', options);
 
+            const attendanceStatus = getPointCardAttendanceStatus(record);
             html += `
-                <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}">
+                <div class="point-card-day" data-record-id="${record.id}" data-date="${record.date}" data-attendance-status="${attendanceStatus}">
                     <div class="point-card-day-header">
-                        <h4>${formattedDate}</h4>
-                        ${canEdit() ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
+                        <div class="point-card-day-header-title">
+                            <h4>${formattedDate}</h4>
+                            ${renderPointCardAttendanceBadge(record)}
+                        </div>
+                        ${canEditPointCardForStudent(studentId) ? `<button class="btn-secondary edit-day-btn" data-record-id="${record.id}" data-date="${record.date}" data-student-id="${studentId}" data-student-name="${safeStudentName}">Edit</button>` : ''}
                     </div>
                     <div class="point-card-day-content">
                         <div class="point-card-grid" id="point-card-grid-${record.id}">
-                            ${renderPointCardGrid(record)}
+                            ${renderPointCardGrid(record, studentId)}
                         </div>
                         <div class="point-card-info-aggregate">
                             ${renderPointCardInfoAggregate(record, records[recordIndex + 1] || null)}
@@ -7620,7 +9258,7 @@ async function loadPointCardData(studentIdOverride) {
 
         container.innerHTML = html;
 
-        if (canEdit()) {
+        if (canEditPointCardForStudent(studentId)) {
             container.querySelectorAll('.edit-day-btn').forEach((btn) => {
                 btn.addEventListener('click', editPointCardDay);
             });
@@ -7853,7 +9491,11 @@ function applyPointCardFilters() {
             });
         }
 
-        const matchesSearch = !query || dateMatches || periodMatches;
+        const attendanceStatus = getPointCardAttendanceStatus(record);
+        const attendanceLabel = formatPointCardAttendanceLabel(attendanceStatus).toLowerCase();
+        const attendanceMatches = query && (attendanceStatus.includes(query) || attendanceLabel.includes(query));
+
+        const matchesSearch = !query || dateMatches || periodMatches || attendanceMatches;
         const visible = matchesDateFilters && matchesSearch;
 
         if (visible) {
@@ -7954,34 +9596,84 @@ function clearHighlights(dayElement) {
     });
 }
 
-function renderPointCardGrid(record) {
+function getPointCardAttendanceStatus(record) {
+    if (!record) return 'present';
+    const status = record.attendance_status;
+    if (status === 'excused' || status === 'unexcused' || status === 'present') {
+        return status;
+    }
+    if (record.present === false) return 'unexcused';
+    return 'present';
+}
+
+function formatPointCardAttendanceLabel(status) {
+    const labels = { present: 'Present', excused: 'Excused', unexcused: 'Unexcused' };
+    return labels[status] || 'Present';
+}
+
+function renderPointCardAttendanceBadge(record) {
+    const status = getPointCardAttendanceStatus(record);
+    if (status === 'present') return '';
+    const label = formatPointCardAttendanceLabel(status);
+    return `<span class="point-card-attendance-badge point-card-attendance-badge--${status}">${label}</span>`;
+}
+
+function formatPointCardStarCell(record, value) {
+    const attendance = getPointCardAttendanceStatus(record);
+    if (attendance === 'excused' || attendance === 'unexcused') {
+        return '-';
+    }
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '-' : normalized;
+}
+
+function renderPointCardGrid(record, studentId) {
     const periods = expandPointCardPeriods(record && record.periods);
+    const attendance = getPointCardAttendanceStatus(record);
+    const sid = studentId || record?.student_id;
 
     let totals = { s: 0, t: 0, a: 0, r: 0 };
     let counts = { s: 0, t: 0, a: 0, r: 0 };
 
     periods.forEach(period => {
-        if (period.safety_points !== null && period.safety_points !== undefined) {
-            totals.s += period.safety_points; counts.s++;
+        const safetyPoints = starValueForPercentage(period.safety_points);
+        if (safetyPoints !== null) {
+            totals.s += safetyPoints; counts.s++;
         }
-        if (period.teamwork_points !== null && period.teamwork_points !== undefined) {
-            totals.t += period.teamwork_points; counts.t++;
+        const teamworkPoints = starValueForPercentage(period.teamwork_points);
+        if (teamworkPoints !== null) {
+            totals.t += teamworkPoints; counts.t++;
         }
-        if (period.accountability_points !== null && period.accountability_points !== undefined) {
-            totals.a += period.accountability_points; counts.a++;
+        const accountabilityPoints = starValueForPercentage(period.accountability_points);
+        if (accountabilityPoints !== null) {
+            totals.a += accountabilityPoints; counts.a++;
         }
-        if (period.relationships_points !== null && period.relationships_points !== undefined) {
-            totals.r += period.relationships_points; counts.r++;
+        const relationshipsPoints = starValueForPercentage(period.relationships_points);
+        if (relationshipsPoints !== null) {
+            totals.r += relationshipsPoints; counts.r++;
         }
     });
 
-    const sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
-    const tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
-    const aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
-    const rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
-    const totalPoints = totals.s + totals.t + totals.a + totals.r;
-    const totalCounts = counts.s + counts.t + counts.a + counts.r;
-    const overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
+    let sPercent;
+    let tPercent;
+    let aPercent;
+    let rPercent;
+    let overallPercent;
+    if (attendance === 'excused') {
+        sPercent = tPercent = aPercent = rPercent = 'E';
+        overallPercent = 'E';
+    } else if (attendance === 'unexcused') {
+        sPercent = tPercent = aPercent = rPercent = 'U';
+        overallPercent = '0';
+    } else {
+        sPercent = counts.s > 0 ? ((totals.s / (counts.s * 2)) * 100).toFixed(0) : '-';
+        tPercent = counts.t > 0 ? ((totals.t / (counts.t * 2)) * 100).toFixed(0) : '-';
+        aPercent = counts.a > 0 ? ((totals.a / (counts.a * 2)) * 100).toFixed(0) : '-';
+        rPercent = counts.r > 0 ? ((totals.r / (counts.r * 2)) * 100).toFixed(0) : '-';
+        const totalPoints = totals.s + totals.t + totals.a + totals.r;
+        const totalCounts = counts.s + counts.t + counts.a + counts.r;
+        overallPercent = totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-';
+    }
 
     let html = `
         <div class="pc-grid" style="grid-template-columns: minmax(80px, max-content) minmax(80px, max-content) 44px 44px 44px 44px 56px;">
@@ -8010,24 +9702,28 @@ function renderPointCardGrid(record) {
             : '<span style="color: var(--text-secondary);">-</span>';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
 
+        const otherClass = (sid && isOtherSchoolPeriod(sid, period.time_range)) ? ' other-school-period' : '';
+        const attendanceLockedClass = (attendance === 'excused' || attendance === 'unexcused') ? ' attendance-locked-period' : '';
+        const locationText = period.location || (otherClass ? 'Other school' : '');
+
         html += `
-            <div class="pc-cell pc-time-cell">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell">${period.location}</div>
-            <div class="pc-cell pc-data-cell" data-category="s">${period.safety_points !== null && period.safety_points !== undefined ? period.safety_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="t">${period.teamwork_points !== null && period.teamwork_points !== undefined ? period.teamwork_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="a">${period.accountability_points !== null && period.accountability_points !== undefined ? period.accountability_points : '-'}</div>
-            <div class="pc-cell pc-data-cell" data-category="r">${period.relationships_points !== null && period.relationships_points !== undefined ? period.relationships_points : '-'}</div>
-            <div class="${infoCellClass}">${infoHtml}</div>
+            <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${locationText}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s">${formatPointCardStarCell(record, period.safety_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="t">${formatPointCardStarCell(record, period.teamwork_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="a">${formatPointCardStarCell(record, period.accountability_points)}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="r">${formatPointCardStarCell(record, period.relationships_points)}</div>
+            <div class="${infoCellClass}${otherClass}">${infoHtml}</div>
         `;
     });
 
     html += `
             <div class="pc-cell pc-percent-label" style="grid-column: span 2;">Percent:</div>
-            <div class="pc-cell pc-percent-cell" style="color: #B91C1C;">${sPercent !== '-' ? sPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #1E40AF;">${tPercent !== '-' ? tPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #047857;">${aPercent !== '-' ? aPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-cell" style="color: #B45309;">${rPercent !== '-' ? rPercent + '%' : '-'}</div>
-            <div class="pc-cell pc-percent-overall">${overallPercent !== '-' ? overallPercent + '%' : '-'}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B91C1C;">${formatPercentCellText(sPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #1E40AF;">${formatPercentCellText(tPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #047857;">${formatPercentCellText(aPercent)}</div>
+            <div class="pc-cell pc-percent-cell" style="color: #B45309;">${formatPercentCellText(rPercent)}</div>
+            <div class="pc-cell pc-percent-overall">${formatPercentCellText(overallPercent)}</div>
         </div>
     `;
 
@@ -8131,6 +9827,10 @@ function renderAggregateMetricRow(label, currentValue, previousValue, options = 
 }
 
 function getPointCardAveragePercent(record) {
+    const attendance = getPointCardAttendanceStatus(record);
+    if (attendance === 'excused') return null;
+    if (attendance === 'unexcused') return 0;
+
     const periods = Array.isArray(record?.periods) ? record.periods : [];
     let totalPoints = 0;
     let totalPossiblePoints = 0;
@@ -8142,10 +9842,12 @@ function getPointCardAveragePercent(record) {
             period?.relationships_points
         ];
         values.forEach((value) => {
-            if (value !== null && value !== undefined && value !== '') {
-                totalPoints += Number(value) || 0;
-                totalPossiblePoints += 2;
+            const points = starValueForPercentage(value);
+            if (points === null) {
+                return;
             }
+            totalPoints += points;
+            totalPossiblePoints += 2;
         });
     });
     if (!totalPossiblePoints) return null;
@@ -8172,10 +9874,16 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
         ? formatPercentDelta(currentPercent, previousPercent)
         : '';
 
+    const attendance = getPointCardAttendanceStatus(record);
+    const attendanceNote = attendance !== 'present'
+        ? `<p class="point-card-aggregate-attendance point-card-aggregate-attendance--${attendance}">Attendance: ${formatPointCardAttendanceLabel(attendance)}</p>`
+        : '';
+
     if (!infoRows.length) {
         return `
             <div class="point-card-aggregate-card">
                 <h5>Info Insights</h5>
+                ${attendanceNote}
                 ${averagePercentRow}
                 <p class="point-card-aggregate-empty">No info data for this day.</p>
             </div>
@@ -8285,6 +9993,7 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
     return `
         <div class="point-card-aggregate-card">
             <h5>Info Insights</h5>
+            ${attendanceNote}
             ${averagePercentRow}
             ${renderAggregateMetricRow('Reminders', totals.reminders, previousTotals.reminders, { higherIsBetter: false })}
             ${renderAggregateMetricRow('Resets', totals.reset, previousTotals.reset, { higherIsBetter: false })}
@@ -8332,7 +10041,7 @@ async function editPointCardDay(e) {
 }
 
 function showEditPointCardModal(record, studentId, studentName, date) {
-    if (!canEdit()) {
+    if (!canEditPointCardForStudent(studentId)) {
         showMessage('View-only access. Contact staff to make changes.', 'error');
         return;
     }
@@ -8347,37 +10056,47 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     const formattedDate = dateObj.toLocaleDateString('en-US', options);
 
-    const buildSelectHtml = (index, category, currentValue) => {
-        const opts = ['', '2', '1', '0'].map(v => {
+    const attendance = getPointCardAttendanceStatus(record);
+    const starDisabled = attendance === 'excused' || attendance === 'unexcused';
+
+    const buildSelectHtml = (index, category, currentValue, timeRange) => {
+        const displayValue = starDisabled ? null : currentValue;
+        const normalized = normalizeStarValue(displayValue);
+        const opts = ['', ...STAR_POINT_OPTION_VALUES].map(v => {
             const label = v === '' ? '-' : v;
-            const sel = (v !== '' && parseInt(v) === currentValue) ? 'selected' : (v === '' && (currentValue === null || currentValue === undefined) ? 'selected' : '');
-            return `<option value="${v}" ${sel}>${label}</option>`;
+            const selected = (v !== '' && normalized === v) || (v === '' && normalized === null);
+            return `<option value="${v}" ${selected ? 'selected' : ''}>${label}</option>`;
         }).join('');
-        return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}">${opts}</select>`;
+        const periodLocked = starDisabled || !canEditStarPeriod(studentId, timeRange);
+        const disabledAttr = periodLocked ? ' disabled' : '';
+        return `<select class="pc-edit-input edit-input" data-period-index="${index}" data-category="${category}"${disabledAttr}>${opts}</select>`;
     };
 
     let gridRows = '';
     record.periods.forEach((period, index) => {
         const parsedInfo = parsePointCardInfoData(period.info || '');
         const hasInfo = !!(parsedInfo && hasInfoData(parsedInfo));
+        const otherClass = isOtherSchoolPeriod(studentId, period.time_range) ? ' other-school-period' : '';
+        const attendanceLockedClass = starDisabled ? ' attendance-locked-period' : '';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
+        const infoLabel = canEditStarPeriod(studentId, period.time_range) ? (hasInfo ? 'Edit' : 'Add') : (hasInfo ? 'View' : 'Info');
         gridRows += `
-            <div class="pc-cell pc-time-cell">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell">${period.location}</div>
-            <div class="pc-cell pc-data-cell" data-category="s" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'safety', period.safety_points)}
+            <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${period.location || (otherClass ? 'Other school' : '')}</div>
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'safety', period.safety_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="t" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'teamwork', period.teamwork_points)}
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="t" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'teamwork', period.teamwork_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="a" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'accountability', period.accountability_points)}
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="a" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'accountability', period.accountability_points, period.time_range)}
             </div>
-            <div class="pc-cell pc-data-cell" data-category="r" style="padding: 2px; justify-content: center;">
-                ${buildSelectHtml(index, 'relationships', period.relationships_points)}
+            <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="r" style="padding: 2px; justify-content: center;">
+                ${buildSelectHtml(index, 'relationships', period.relationships_points, period.time_range)}
             </div>
-            <div class="${infoCellClass}" style="padding: 2px; justify-content: center;">
-                <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${hasInfo ? 'Edit' : 'Add'}</button>
+            <div class="${infoCellClass}${otherClass}" style="padding: 2px; justify-content: center;">
+                <button class="info-btn-small" data-period-index="${index}" style="padding: 3px 8px; font-size: 10px;">${infoLabel}</button>
             </div>
         `;
     });
@@ -8472,6 +10191,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
         });
     }
 
+    bindStarSelectEntryGuards();
     initializeEditPointCardDirtyTracking(modal);
 }
 
@@ -8508,12 +10228,7 @@ function addPointCardRow() {
         sel.className = 'pc-edit-input edit-input';
         sel.dataset.periodIndex = index;
         sel.dataset.category = cat;
-        ['', '2', '1', '0'].forEach(v => {
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = v === '' ? '-' : v;
-            sel.appendChild(opt);
-        });
+        populateStarPointSelectOptions(sel, null);
         return sel;
     };
 
@@ -8607,6 +10322,11 @@ function initializeEditPointCardDirtyTracking(modal) {
             updateEditPointCardInputDirtyState(input);
             syncEditingPointCardRecordField(input);
             refreshEditPointCardInfoAggregate();
+            if (input.tagName === 'SELECT' && input.classList.contains('pc-edit-input')) {
+                if (!e.isBackspaceClear && !e.fromStarKey) {
+                    moveToNextInput(input);
+                }
+            }
         };
         modal.addEventListener('input', onDirtyChange);
         modal.addEventListener('change', onDirtyChange);
@@ -8635,7 +10355,7 @@ function syncEditingPointCardRecordField(input) {
         return;
     }
     if (['safety', 'teamwork', 'accountability', 'relationships'].includes(category)) {
-        record.periods[periodIndex][`${category}_points`] = value === '' ? null : parseInt(value, 10);
+        record.periods[periodIndex][`${category}_points`] = parseStarInputValue(value);
         const period = record.periods[periodIndex];
         recordPeriodEditHistory(
             window.editingPointCardStudentId,
@@ -8667,7 +10387,7 @@ function updateEditPointCardInfoDirtyState(periodIndex) {
 }
 
 async function saveEditedPointCard(recordId, studentId, date) {
-    if (!canEdit()) {
+    if (!canEditPointCardForStudent(studentId)) {
         showMessage('View-only access. Contact staff to make changes.', 'error');
         return;
     }
@@ -8712,10 +10432,10 @@ async function saveEditedPointCard(recordId, studentId, date) {
         const accountabilitySelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="accountability"]`);
         const relationshipsSelect = modal.querySelector(`.edit-input[data-period-index="${index}"][data-category="relationships"]`);
         
-        const safetyPoints = !safetySelect || safetySelect.value === '' ? null : parseInt(safetySelect.value);
-        const teamworkPoints = !teamworkSelect || teamworkSelect.value === '' ? null : parseInt(teamworkSelect.value);
-        const accountabilityPoints = !accountabilitySelect || accountabilitySelect.value === '' ? null : parseInt(accountabilitySelect.value);
-        const relationshipsPoints = !relationshipsSelect || relationshipsSelect.value === '' ? null : parseInt(relationshipsSelect.value);
+        const safetyPoints = !safetySelect || safetySelect.value === '' ? null : parseStarInputValue(safetySelect.value);
+        const teamworkPoints = !teamworkSelect || teamworkSelect.value === '' ? null : parseStarInputValue(teamworkSelect.value);
+        const accountabilityPoints = !accountabilitySelect || accountabilitySelect.value === '' ? null : parseStarInputValue(accountabilitySelect.value);
+        const relationshipsPoints = !relationshipsSelect || relationshipsSelect.value === '' ? null : parseStarInputValue(relationshipsSelect.value);
 
         return {
             time_range: (time_range && String(time_range).trim()) ? String(time_range).trim() : (period.time_range || ''),
@@ -10203,23 +11923,21 @@ function getEditHistoryList(infoData) {
 }
 
 function normalizeStarHistoryValue(value) {
-    if (value === null || value === undefined || value === '') return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
+    return normalizeStarValue(value);
 }
 
 function starSnapshotsEqual(a, b) {
     if (!a && !b) return true;
     if (!a || !b) return false;
-    return normalizeStarHistoryValue(a.s) === normalizeStarHistoryValue(b.s)
-        && normalizeStarHistoryValue(a.t) === normalizeStarHistoryValue(b.t)
-        && normalizeStarHistoryValue(a.a) === normalizeStarHistoryValue(b.a)
-        && normalizeStarHistoryValue(a.r) === normalizeStarHistoryValue(b.r);
+    return normalizeStarValue(a.s) === normalizeStarValue(b.s)
+        && normalizeStarValue(a.t) === normalizeStarValue(b.t)
+        && normalizeStarValue(a.a) === normalizeStarValue(b.a)
+        && normalizeStarValue(a.r) === normalizeStarValue(b.r);
 }
 
 function formatStarHistoryDisplay(value) {
-    const normalized = normalizeStarHistoryValue(value);
-    return normalized === null ? '–' : String(normalized);
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '–' : normalized;
 }
 
 function getStarSnapshot(studentId, period, periodIndex) {
@@ -10729,7 +12447,7 @@ async function showInfoModal(event) {
     const modal = document.getElementById('info-modal');
     const modalTitle = document.getElementById('info-modal-title');
     
-    const viewOnly = isStudent() ? ' (View Only)' : '';
+    const viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
     modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
     
     // Parse existing info (stored as JSON string)
@@ -10744,7 +12462,7 @@ async function showInfoModal(event) {
     }
     
     // Populate form fields and disable for students
-    const isReadOnly = isStudent();
+    const isReadOnly = isStudent() || !canEditStarPeriod(studentId, period);
     
     // Get student's card color
     const studentIdInt = parseInt(studentId);
@@ -10970,8 +12688,13 @@ async function showInfoModal(event) {
         });
         
         newAddPurposeBtn.addEventListener('click', function() {
+            if (!document.getElementById('info-frenzy')?.checked) {
+                warnInfoFrenzyFieldsLocked();
+                return;
+            }
             const row = createPurposeRow('', false);
             purposesContainer.appendChild(row);
+            syncInfoFrenzyDependentFields(true, false);
             refreshInfoModalAutoPreview();
         });
     } else {
@@ -10988,12 +12711,15 @@ async function showInfoModal(event) {
     if (severitySelect) {
         const frenzyOn = isInfoFrenzyChecked(infoData);
         severitySelect.value = (frenzyOn && infoData.severity) ? String(infoData.severity) : '';
-        severitySelect.disabled = isReadOnly;
     }
-    syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
     if (frenzyCheckbox && frenzyCheckbox.dataset.severityVisibilityBound !== 'true') {
         frenzyCheckbox.addEventListener('change', () => {
-            syncInfoSeverityVisibility(!!frenzyCheckbox.checked);
+            const frenzyOn = !!frenzyCheckbox.checked;
+            syncInfoFrenzyDependentFields(frenzyOn, frenzyCheckbox.disabled);
+            if (!frenzyOn) {
+                clearInfoFrenzyDependentFields();
+                refreshInfoModalAutoPreview();
+            }
         });
         frenzyCheckbox.dataset.severityVisibilityBound = 'true';
     }
@@ -11008,9 +12734,8 @@ async function showInfoModal(event) {
     }
     
     document.getElementById('info-duration').value = infoData.duration || '';
-    document.getElementById('info-duration').disabled = isReadOnly;
     document.getElementById('info-results').value = infoData.results || '';
-    document.getElementById('info-results').disabled = isReadOnly;
+    syncInfoFrenzyDependentFields(!!frenzyCheckbox.checked, isReadOnly);
     
     // Store context for saving
     modal.dataset.studentId = studentId;
@@ -11032,6 +12757,9 @@ async function showInfoModal(event) {
     bindInfoModalAutoPreview();
     refreshInfoModalAutoPreview();
     applyInfoModalStarHighlights(studentId, period);
+
+    const saveBtn = document.querySelector('#info-modal .modal-buttons .btn-primary');
+    if (saveBtn) saveBtn.style.display = isReadOnly ? 'none' : '';
     
     modal.style.display = 'block';
 }
@@ -11066,13 +12794,105 @@ function ensureInfoSeverityControl() {
     return document.getElementById('info-severity');
 }
 
-function syncInfoSeverityVisibility(frenzyChecked) {
+const INFO_FRENZY_FIELD_WARNING = 'These fields cannot be filled out unless Frenzy is checked.';
+let infoFrenzyWarningLastShown = 0;
+
+function getInfoFrenzyDependentGroups() {
+    const severityGroup = document.getElementById('info-severity-group');
+    const purposesGroup = document.getElementById('purposes-container')?.closest('.form-group');
+    const durationGroup = document.getElementById('info-duration')?.closest('.form-group');
+    const resultsGroup = document.getElementById('info-results')?.closest('.form-group');
+    return [severityGroup, purposesGroup, durationGroup, resultsGroup].filter(Boolean);
+}
+
+function warnInfoFrenzyFieldsLocked() {
+    const now = Date.now();
+    if (now - infoFrenzyWarningLastShown < 2000) return;
+    infoFrenzyWarningLastShown = now;
+
+    let warningEl = document.getElementById('info-frenzy-lock-warning');
+    if (!warningEl) {
+        warningEl = document.createElement('div');
+        warningEl.id = 'info-frenzy-lock-warning';
+        warningEl.className = 'info-frenzy-lock-warning error';
+        const title = document.getElementById('info-modal-title');
+        if (title?.parentNode) {
+            title.parentNode.insertBefore(warningEl, title.nextSibling);
+        }
+    }
+    warningEl.textContent = INFO_FRENZY_FIELD_WARNING;
+    warningEl.style.display = 'block';
+    clearTimeout(warningEl._hideTimer);
+    warningEl._hideTimer = setTimeout(() => {
+        warningEl.style.display = 'none';
+    }, 5000);
+}
+
+function clearInfoFrenzyDependentFields() {
     const severitySelect = document.getElementById('info-severity');
+    if (severitySelect) severitySelect.value = '';
+
+    const durationInput = document.getElementById('info-duration');
+    if (durationInput) durationInput.value = '';
+
+    const resultsInput = document.getElementById('info-results');
+    if (resultsInput) resultsInput.value = '';
+
+    const purposesContainer = document.getElementById('purposes-container');
+    if (purposesContainer) {
+        purposesContainer.innerHTML = '';
+        purposesContainer.appendChild(createPurposeRow('', false));
+    }
+}
+
+function bindInfoFrenzyFieldGuard() {
+    getInfoFrenzyDependentGroups().forEach((group) => {
+        if (group.dataset.frenzyLockBound === 'true') return;
+        group.addEventListener('mousedown', (e) => {
+            if (!group.classList.contains('info-frenzy-locked')) return;
+            e.preventDefault();
+            warnInfoFrenzyFieldsLocked();
+        });
+        group.dataset.frenzyLockBound = 'true';
+    });
+}
+
+function syncInfoFrenzyDependentFields(frenzyChecked, isReadOnly = false) {
+    const locked = !frenzyChecked && !isReadOnly;
+
     const severityGroup = document.getElementById('info-severity-group')
-        || severitySelect?.closest('.form-group');
+        || document.getElementById('info-severity')?.closest('.form-group');
     if (severityGroup) {
         severityGroup.style.display = frenzyChecked ? '' : 'none';
     }
+
+    const durationInput = document.getElementById('info-duration');
+    const resultsInput = document.getElementById('info-results');
+    const severitySelect = document.getElementById('info-severity');
+    [durationInput, resultsInput, severitySelect].forEach((el) => {
+        if (el) el.disabled = isReadOnly || !frenzyChecked;
+    });
+
+    const addPurposeBtn = document.getElementById('add-purpose-btn');
+    if (addPurposeBtn) addPurposeBtn.disabled = isReadOnly || !frenzyChecked;
+
+    document.querySelectorAll('#purposes-container .info-purpose-select, #purposes-container .purpose-row .delete-btn').forEach((el) => {
+        el.disabled = isReadOnly || !frenzyChecked;
+    });
+
+    bindInfoFrenzyFieldGuard();
+    getInfoFrenzyDependentGroups().forEach((group) => {
+        group.classList.toggle('info-frenzy-locked', locked);
+    });
+
+    if (!locked) {
+        const warningEl = document.getElementById('info-frenzy-lock-warning');
+        if (warningEl) warningEl.style.display = 'none';
+    }
+}
+
+function syncInfoSeverityVisibility(frenzyChecked) {
+    syncInfoFrenzyDependentFields(frenzyChecked, !!document.getElementById('info-frenzy')?.disabled);
 }
 
 function readInfoModalSeverityValue(frenzyChecked) {
@@ -11246,8 +13066,8 @@ function collectInfoModalDraftData() {
         alternate_location_manual: isAlternateLocationManual(),
         frenzy: frenzyChecked,
         severity: readInfoModalSeverityValue(frenzyChecked),
-        duration: getValue('info-duration'),
-        results: getValue('info-results'),
+        duration: frenzyChecked ? getValue('info-duration') : '',
+        results: frenzyChecked ? getValue('info-results') : '',
         infractions: [],
         purposes: []
     };
@@ -11262,10 +13082,12 @@ function collectInfoModalDraftData() {
             });
         }
     });
-    document.querySelectorAll('#purposes-container .purpose-row').forEach((row) => {
-        const select = row.querySelector('.info-purpose-select');
-        if (select && select.value) draft.purposes.push(select.value);
-    });
+    if (frenzyChecked) {
+        document.querySelectorAll('#purposes-container .purpose-row').forEach((row) => {
+            const select = row.querySelector('.info-purpose-select');
+            if (select && select.value) draft.purposes.push(select.value);
+        });
+    }
     return draft;
 }
 
@@ -11341,15 +13163,14 @@ function closeInfoModal() {
 }
 
 function saveInfoModal() {
-    // Students cannot save
-    if (isStudent()) {
-        showMessage('View-only access. Contact staff to make changes.', 'error');
-        return;
-    }
-    
     const modal = document.getElementById('info-modal');
     const studentId = modal.dataset.studentId;
     const period = modal.dataset.period;
+
+    if (isStudent() || !canEditStarPeriod(studentId, period)) {
+        showMessage('View-only access. Contact staff to make changes.', 'error');
+        return;
+    }
     
     // Collect all form data
     let infoData = {
@@ -11362,8 +13183,12 @@ function saveInfoModal() {
         alternate_location_manual: isAlternateLocationManual(),
         frenzy: document.getElementById('info-frenzy').checked,
         severity: readInfoModalSeverityValue(!!document.getElementById('info-frenzy')?.checked),
-        duration: document.getElementById('info-duration').value,
-        results: document.getElementById('info-results').value
+        duration: document.getElementById('info-frenzy').checked
+            ? document.getElementById('info-duration').value
+            : '',
+        results: document.getElementById('info-frenzy').checked
+            ? document.getElementById('info-results').value
+            : ''
     };
     
     // Collect infractions from dynamic rows
@@ -11381,15 +13206,17 @@ function saveInfoModal() {
     });
     infoData.infractions = infractions;
     
-    // Collect purposes from dynamic rows
+    // Collect purposes from dynamic rows (only when Frenzy is checked)
     const purposes = [];
-    const purposeRows = document.querySelectorAll('#purposes-container .purpose-row');
-    purposeRows.forEach(row => {
-        const select = row.querySelector('.info-purpose-select');
-        if (select && select.value) {
-            purposes.push(select.value);
-        }
-    });
+    if (infoData.frenzy) {
+        const purposeRows = document.querySelectorAll('#purposes-container .purpose-row');
+        purposeRows.forEach(row => {
+            const select = row.querySelector('.info-purpose-select');
+            if (select && select.value) {
+                purposes.push(select.value);
+            }
+        });
+    }
     infoData.purposes = purposes;
 
     // Parse text fields for exact keyword matches and auto-fill related Info values.
@@ -12076,19 +13903,20 @@ function updateAllClassAutocompletes() {
     // when they are focused or typed in, so no manual update needed
 }
 
-function formatStudentScheduleLocation(scheduleItems, timePeriod) {
-    const items = (scheduleItems || []).filter((item) => item && item.time_period === timePeriod);
+function formatStudentScheduleLocation(scheduleItems, timePeriod, onDate = null) {
+    const items = filterScheduleItemsForDate(scheduleItems, onDate).filter((item) => item && item.time_period === timePeriod);
     if (!items.length) return '';
     const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
     return classNames.join(', ');
 }
 
-function getStudentScheduleLocationForPeriod(studentId, timePeriod) {
+function getStudentScheduleLocationForPeriod(studentId, timePeriod, onDate = null) {
     const items = studentSchedulesByStudentId[studentId]
         || studentSchedulesByStudentId[String(studentId)]
         || [];
-    const location = formatStudentScheduleLocation(items, timePeriod);
+    const location = formatStudentScheduleLocation(items, timePeriod, onDate || currentDate || null);
     if (location) return location;
+    if (isOtherSchoolPeriod(studentId, timePeriod)) return 'Other school';
     const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
     return standard ? standard.location : timePeriod;
 }
@@ -12097,7 +13925,10 @@ async function loadStudentSchedulesForIds(studentIds) {
     const ids = [...new Set((studentIds || []).filter((id) => id != null))];
     if (!ids.length) return;
     const missing = ids.filter((id) => {
-        return !studentSchedulesByStudentId[id] && !studentSchedulesByStudentId[String(id)];
+        const hasSched = studentSchedulesByStudentId[id] || studentSchedulesByStudentId[String(id)];
+        const hasTransitionKey = Object.prototype.hasOwnProperty.call(studentTransitionsByStudentId, id)
+            || Object.prototype.hasOwnProperty.call(studentTransitionsByStudentId, String(id));
+        return !hasSched || !hasTransitionKey;
     });
     if (!missing.length) return;
     try {
@@ -12107,6 +13938,7 @@ async function loadStudentSchedulesForIds(studentIds) {
         (payload.items || []).forEach((item) => {
             if (item && item.student_id != null) {
                 studentSchedulesByStudentId[item.student_id] = item.periods || [];
+                setStudentTransition(item.student_id, item.transition || null);
             }
         });
     } catch (error) {
@@ -12138,10 +13970,20 @@ function loadSchedules(type, studentId = null, teacherUserId = null) {
                 updateTeacherScheduleSubtitle();
                 updateTeacherScheduleEditability();
             } else {
-                studentScheduleData = Array.isArray(data) ? data : [];
+                let periods = [];
+                let transition = null;
+                if (Array.isArray(data)) {
+                    periods = data;
+                } else if (data && typeof data === 'object') {
+                    periods = Array.isArray(data.periods) ? data.periods : [];
+                    transition = data.transition || null;
+                }
+                studentScheduleData = periods;
                 if (studentId) {
                     studentSchedulesByStudentId[studentId] = studentScheduleData;
+                    setStudentTransition(studentId, transition);
                 }
+                updateTransitionButtonState();
                 if (document.getElementById('student-schedule-body')) {
                     renderStudentSchedule();
                 }
@@ -12186,14 +14028,15 @@ function updateTeacherScheduleEditability() {
     if (addBtn) addBtn.style.display = canEdit ? '' : 'none';
     if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
     if (tbody) {
-        tbody.querySelectorAll('.time-input, .class-input, .btn-add-class, .btn-remove-class').forEach(el => {
-            if (el.classList && (el.classList.contains('time-input') || el.classList.contains('class-input'))) {
-                el.readOnly = !canEdit;
-                el.disabled = !canEdit;
-            }
-            if (el.classList && (el.classList.contains('btn-add-class') || el.classList.contains('btn-remove-class'))) {
+        tbody.querySelectorAll('input, select, button').forEach((el) => {
+            if (el.classList.contains('btn-add-class') || el.classList.contains('btn-delete-class')) {
                 el.style.display = canEdit ? '' : 'none';
                 el.disabled = !canEdit;
+                return;
+            }
+            el.disabled = !canEdit;
+            if (el.tagName === 'INPUT' && (el.type === 'text' || !el.type)) {
+                el.readOnly = !canEdit;
             }
         });
     }
@@ -12254,69 +14097,11 @@ function renderTeacherSchedule() {
         return;
     }
 
-    // Ensure teacherScheduleData is an array
     if (!Array.isArray(teacherScheduleData)) {
         teacherScheduleData = [];
     }
 
-    tbody.innerHTML = '';
-
-    // Group schedules by time_period to handle multiple classes per time
-    const schedulesByTime = {};
-    teacherScheduleData.forEach(schedule => {
-        const time = schedule.time_period;
-        if (!schedulesByTime[time]) {
-            schedulesByTime[time] = [];
-        }
-        schedulesByTime[time].push(schedule);
-    });
-
-    // Always show all periods from SCHEDULE_PERIODS
-    // For each time period, create one row with all classes in the same cell
-    SCHEDULE_PERIODS.forEach(time => {
-        const savedSchedules = schedulesByTime[time] || [];
-        
-        if (savedSchedules.length > 0) {
-            // Create one row with the first schedule data (will load all classes into same cell)
-            const row = document.createElement('tr');
-            const firstSchedule = savedSchedules[0];
-            row.innerHTML = `
-                <td class="time-cell">
-                    <input type="text" value="${time}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-                </td>
-                <td class="classes-cell">
-                    <div class="classes-container">
-                    </div>
-                </td>
-                <td class="actions-cell">
-                    <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
-                </td>
-            `;
-            
-            // Add all classes to the container
-            const classesContainer = row.querySelector('.classes-container');
-            savedSchedules.forEach(schedule => {
-                if (schedule.class_name) {
-                    addClassInputGroup(classesContainer, schedule.class_name);
-                }
-            });
-            
-            // If no classes, add one empty input
-            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(classesContainer);
-            }
-            
-            // Store reference and setup buttons
-            row.dataset.timePeriod = time;
-            setupScheduleRowButtons(row, time, tbody);
-            
-            tbody.appendChild(row);
-        } else {
-            // Show one empty row for this time period
-            addScheduleRow('teacher', time, null);
-        }
-    });
-
+    populateTeacherScheduleTbody(tbody, teacherScheduleData);
     requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
@@ -12332,7 +14117,8 @@ function syncScheduleRowHeights() {
     const teacherHeader = teacherTable.querySelector('thead tr');
     const studentHeader = studentTable.querySelector('thead tr');
     const teacherRows = teacherTable.querySelectorAll('tbody tr');
-    const studentRows = studentTable.querySelectorAll('tbody tr');
+    const studentRows = Array.from(studentTable.querySelectorAll('tbody tr'))
+        .filter((row) => !row.classList.contains('schedule-row-split-marker'));
 
     const clearHeight = (el) => {
         if (el) el.style.height = '';
@@ -13077,201 +14863,276 @@ function renderStudentSchedule() {
         return;
     }
 
-    // Ensure studentScheduleData is an array
     if (!Array.isArray(studentScheduleData)) {
         studentScheduleData = [];
     }
 
     container.style.display = 'block';
-    tbody.innerHTML = '';
-
-    // Always show all periods from SCHEDULE_PERIODS
-    // If saved data exists for a period, use it; otherwise show empty row
-    SCHEDULE_PERIODS.forEach(time => {
-        const savedSchedule = studentScheduleData.find(s => s && s.time_period === time);
-        addScheduleRow('student', time, savedSchedule || null);
-    });
-
+    populateStudentScheduleTbody(tbody, studentScheduleData);
     requestAnimationFrame(() => syncScheduleRowHeights());
 }
 
-// Helper function to add a class input group to the classes container
-function addClassInputGroup(container, value = '') {
+// Helper function to add a class/entry input group to the classes container
+function addClassInputGroup(container, options = {}) {
+    // Back-compat: addClassInputGroup(container, 'Math')
+    if (typeof options === 'string') {
+        options = { className: options, includeStaff: false };
+    }
+    const includeStaff = !!options.includeStaff;
+    const className = options.className || '';
+    const staffName = options.staffName || '';
+    const recurrence = normalizeScheduleRecurrence(options.recurrence);
+    const escapeAttr = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
     const group = document.createElement('div');
     group.className = 'class-input-group';
-    group.innerHTML = `
-        <input type="text" value="${value}" class="class-input" placeholder="Enter class/activity">
-        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
+    const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const staffUniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const staffHtml = includeStaff ? `
+        <div class="staff-autocomplete-wrapper">
+            <input type="text" value="${escapeAttr(staffName)}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${staffUniqueId}">
+            <div class="staff-autocomplete-dropdown" id="dropdown-${staffUniqueId}"></div>
+        </div>
+    ` : '';
+
+    const classInputHtml = includeStaff ? `
+        <div class="class-autocomplete-wrapper">
+            <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
+            <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
+        </div>
+    ` : `
+        <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity">
     `;
-    
-    // Add delete button event listener
+
+    group.innerHTML = `
+        <div class="schedule-entry-main">
+            ${classInputHtml}
+            ${staffHtml}
+            <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
+        </div>
+        ${buildRecurrenceControlsHtml(recurrence)}
+    `;
+
     const deleteBtn = group.querySelector('.btn-delete-class');
     if (deleteBtn) {
         deleteBtn.addEventListener('click', () => {
-            const container = group.parentElement;
+            const parent = group.parentElement;
             group.remove();
-            // If this was the last class input, ensure at least one remains
-            if (container && container.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(container);
+            if (parent && parent.querySelectorAll('.class-input-group').length === 0) {
+                addClassInputGroup(parent, { includeStaff });
             }
             syncScheduleRowHeights();
         });
     }
-    
+
+    if (includeStaff) {
+        const classInput = group.querySelector('.class-input');
+        const staffInput = group.querySelector('.staff-input');
+        if (classInput) setupClassAutocomplete(classInput);
+        if (staffInput) setupStaffAutocomplete(staffInput);
+    }
+
+    wireRecurrenceControls(group);
     container.appendChild(group);
     return group;
 }
 
-// Helper function to setup button event listeners for a teacher schedule row
-function setupScheduleRowButtons(row, timePeriod, tbody) {
-    // Add event listener for "Add Class" button
+// Helper function to setup button event listeners for a schedule row
+function setupScheduleRowButtons(row, timePeriod, tbody, type = 'teacher') {
+    const includeStaff = type === 'student';
     const addClassBtn = row.querySelector('.btn-add-class');
     if (addClassBtn) {
-        // Remove existing listener if any, then add new one
         const newAddClassBtn = addClassBtn.cloneNode(true);
         addClassBtn.parentNode.replaceChild(newAddClassBtn, addClassBtn);
         newAddClassBtn.addEventListener('click', () => {
-            // Add a new class input group within the same cell
             const classesContainer = row.querySelector('.classes-container');
             if (classesContainer) {
-                addClassInputGroup(classesContainer);
+                addClassInputGroup(classesContainer, { includeStaff });
                 syncScheduleRowHeights();
             }
         });
     }
-    
-    // Setup delete button listeners for existing class input groups
-    const deleteButtons = row.querySelectorAll('.btn-delete-class');
-    deleteButtons.forEach(deleteBtn => {
-        deleteBtn.addEventListener('click', () => {
-            const group = deleteBtn.closest('.class-input-group');
-            const container = group?.parentElement;
-            if (group && container) {
-                group.remove();
-                // If this was the last class input, ensure at least one remains
-                if (container.querySelectorAll('.class-input-group').length === 0) {
-                    addClassInputGroup(container);
-                } else {
-                    syncScheduleRowHeights();
-                }
-            }
-        });
-    });
 }
 
-function addScheduleRow(type, timePeriod = '', data = null) {
-    const tbody = document.getElementById(`${type}-schedule-body`);
+function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, studentId = currentScheduleStudentId) {
+    const tbody = targetTbody || document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
-    
+
     const row = document.createElement('tr');
-    
-    if (type === 'teacher') {
-        // Teacher schedule - Class cell contains container for multiple class inputs
-        const initialClassValue = data?.class_name || '';
-        row.innerHTML = `
-            <td class="time-cell">
-                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-            </td>
-            <td class="classes-cell">
-                <div class="classes-container">
-                    ${initialClassValue ? `<div class="class-input-group">
-                        <input type="text" value="${initialClassValue}" class="class-input" placeholder="Enter class/activity">
-                        <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
-                    </div>` : ''}
-                </div>
-            </td>
-            <td class="actions-cell">
-                <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
-            </td>
-        `;
-        
-        // If no initial class, add one empty class input group
-        if (!initialClassValue) {
-            const classesContainer = row.querySelector('.classes-container');
-            if (classesContainer) {
-                addClassInputGroup(classesContainer);
-            }
-        }
-        
-        // Store reference to row for button setup
-        row.dataset.timePeriod = timePeriod;
-        
-        // Setup button event listeners for this row
-        setupScheduleRowButtons(row, timePeriod, tbody);
+    const includeStaff = type === 'student';
+
+    row.innerHTML = `
+        <td class="time-cell">
+            <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+        </td>
+        <td class="classes-cell">
+            <div class="classes-container"></div>
+        </td>
+        <td class="actions-cell">
+            <button type="button" class="btn-add-class" title="Add another class for this time period" style="padding: 4px 8px; font-size: 12px;">+ Add Class</button>
+        </td>
+    `;
+
+    const classesContainer = row.querySelector('.classes-container');
+    if (data && (data.class_name || data.staff_name || data.recurrence_type)) {
+        addClassInputGroup(classesContainer, {
+            className: data.class_name || '',
+            staffName: data.staff_name || '',
+            recurrence: data,
+            includeStaff,
+        });
     } else {
-        // Student schedule - includes staff column with custom autocomplete dropdown
-        const staffValue = data?.staff_name || '';
-        const uniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        row.innerHTML = `
-            <td class="time-cell">
-                <input type="text" value="${timePeriod}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
-            </td>
-            <td>
-                <div class="class-autocomplete-wrapper">
-                    <input type="text" value="${data?.class_name || ''}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
-                    <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
-                </div>
-            </td>
-            <td>
-                <div class="staff-autocomplete-wrapper">
-                    <input type="text" value="${staffValue}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${uniqueId}">
-                    <div class="staff-autocomplete-dropdown" id="dropdown-${uniqueId}"></div>
-                </div>
-            </td>
-        `;
-        
-        // Setup autocomplete for staff input
-        setupStaffAutocomplete(row.querySelector('.staff-input'));
-        
-        // Setup autocomplete for class input
-        setupClassAutocomplete(row.querySelector('.class-input'));
+        addClassInputGroup(classesContainer, { includeStaff });
     }
-    
+
+    row.dataset.timePeriod = timePeriod;
+    setupScheduleRowButtons(row, timePeriod, tbody, type);
+    if (type === 'student') {
+        applyStudentScheduleRowOwnership(row, timePeriod, studentId);
+    }
+
     tbody.appendChild(row);
+}
+
+function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
+    if (!row) return;
+    const other = isOtherSchoolPeriod(studentId, timePeriod);
+    const canEditPeriod = canEditSchedulePeriod(studentId, timePeriod);
+    row.classList.toggle('schedule-row-other-school', other);
+    row.querySelectorAll('input, select, button').forEach((el) => {
+        if (el.classList.contains('time-input')) {
+            el.disabled = !canEditPeriod;
+            if (!canEditPeriod) el.tabIndex = -1;
+            return;
+        }
+        el.disabled = !canEditPeriod;
+        if (!canEditPeriod && el.tagName === 'INPUT') el.tabIndex = -1;
+    });
+    const timeCell = row.querySelector('.time-cell');
+    if (timeCell) {
+        let tag = timeCell.querySelector('.schedule-other-school-tag');
+        if (other) {
+            if (!tag) {
+                tag = document.createElement('span');
+                tag.className = 'schedule-other-school-tag';
+                tag.textContent = 'Other school';
+                timeCell.appendChild(tag);
+            }
+        } else if (tag) {
+            tag.remove();
+        }
+    }
+}
+
+function updateTransitionButtonState() {
+    const btn = document.getElementById('student-transition-btn');
+    if (!btn) return;
+    const studentId = currentScheduleStudentId;
+    const enabled = !!(studentId && canEditStudentTransition(studentId));
+    btn.disabled = !enabled;
+    const transition = getStudentTransition(studentId);
+    btn.textContent = transition ? 'Edit Transition' : 'Transition';
+}
+
+function openStudentTransitionModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId || !canEditStudentTransition(studentId)) return;
+    const modal = document.getElementById('student-transition-modal');
+    if (!modal) return;
+    const transition = getStudentTransition(studentId);
+    const directionEl = document.getElementById('student-transition-direction');
+    const timeEl = document.getElementById('student-transition-time');
+    const msg = document.getElementById('student-transition-modal-msg');
+    const removeBtn = document.getElementById('student-transition-remove-btn');
+    if (directionEl) directionEl.value = transition?.direction === 'leave' ? 'leave' : 'arrive';
+    if (timeEl) timeEl.value = transition?.time || '';
+    if (msg) {
+        msg.style.display = 'none';
+        msg.textContent = '';
+    }
+    if (removeBtn) removeBtn.style.display = transition ? '' : 'none';
+    modal.style.display = 'block';
+}
+
+function closeStudentTransitionModal() {
+    const modal = document.getElementById('student-transition-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveStudentTransitionFromModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId) return;
+    const directionEl = document.getElementById('student-transition-direction');
+    const timeEl = document.getElementById('student-transition-time');
+    const msg = document.getElementById('student-transition-modal-msg');
+    const direction = directionEl ? directionEl.value : 'arrive';
+    const time = timeEl ? timeEl.value : '';
+    if (!time) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = 'Please choose a time.';
+        }
+        return;
+    }
+    try {
+        const response = await fetch(`/api/students/${studentId}/transition`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ direction, time }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Could not save transition');
+        }
+        setStudentTransition(studentId, payload.transition || null);
+        closeStudentTransitionModal();
+        renderStudentSchedule();
+        updateTransitionButtonState();
+        refreshPointCardGridsAfterScheduleLoad();
+    } catch (error) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = error.message || 'Could not save transition';
+        }
+    }
+}
+
+async function removeStudentTransitionFromModal() {
+    const studentId = currentScheduleStudentId;
+    if (!studentId) return;
+    try {
+        const response = await fetch(`/api/students/${studentId}/transition`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Could not remove transition');
+        }
+        setStudentTransition(studentId, null);
+        closeStudentTransitionModal();
+        renderStudentSchedule();
+        updateTransitionButtonState();
+        refreshPointCardGridsAfterScheduleLoad();
+    } catch (error) {
+        const msg = document.getElementById('student-transition-modal-msg');
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.color = 'var(--danger)';
+            msg.textContent = error.message || 'Could not remove transition';
+        }
+    }
 }
 
 async function saveSchedule(type) {
     const tbody = document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
-    
-    const rows = tbody.querySelectorAll('tr');
-    const periods = [];
-    
-    rows.forEach(row => {
-        const timeInput = row.querySelector('.time-input');
-        const staffInput = row.querySelector('.staff-input');
-        
-        const timePeriod = timeInput.value.trim();
-        
-        if (timePeriod) {
-            // For teacher schedules, get all class inputs from the classes container
-            const classesContainer = row.querySelector('.classes-container');
-            if (classesContainer && type === 'teacher') {
-                const classInputs = classesContainer.querySelectorAll('.class-input');
-                classInputs.forEach(classInput => {
-                    const classValue = classInput.value.trim();
-                    if (classValue) { // Only save non-empty classes
-                        periods.push({
-                            time_period: timePeriod,
-                            class_name: classValue,
-                            staff_name: ''
-                        });
-                    }
-                });
-            } else {
-                // For student schedules, use single class input (existing behavior)
-                const classInput = row.querySelector('.class-input');
-                if (classInput) {
-                    periods.push({
-                        time_period: timePeriod,
-                        class_name: classInput.value.trim(),
-                        staff_name: staffInput ? staffInput.value.trim() : ''
-                    });
-                }
-            }
-        }
-    });
+
+    const periods = collectSchedulePeriodsFromTbody(tbody, type);
     
     const payload = {
         schedule_type: type,
@@ -13409,34 +15270,7 @@ function getSelectedStudentScheduleName() {
 
 function collectSchedulePeriodsFromTable(type) {
     const tbody = document.getElementById(`${type}-schedule-body`);
-    if (!tbody) return [];
-    const periods = [];
-    tbody.querySelectorAll('tr').forEach((row) => {
-        const timeInput = row.querySelector('.time-input');
-        const timePeriod = (timeInput ? timeInput.value : row.dataset.timePeriod || '').trim();
-        if (!timePeriod) return;
-        if (type === 'teacher') {
-            const classValues = Array.from(row.querySelectorAll('.class-input'))
-                .map((input) => input.value.trim())
-                .filter(Boolean);
-            if (classValues.length) {
-                classValues.forEach((className) => {
-                    periods.push({ time_period: timePeriod, class_name: className, staff_name: '' });
-                });
-            } else {
-                periods.push({ time_period: timePeriod, class_name: '', staff_name: '' });
-            }
-        } else {
-            const classInput = row.querySelector('.class-input');
-            const staffInput = row.querySelector('.staff-input');
-            periods.push({
-                time_period: timePeriod,
-                class_name: classInput ? classInput.value.trim() : '',
-                staff_name: staffInput ? staffInput.value.trim() : ''
-            });
-        }
-    });
-    return periods;
+    return collectSchedulePeriodsFromTbody(tbody, type);
 }
 
 function groupSchedulePeriodsForPrint(periods, includeStaff) {
@@ -13453,13 +15287,24 @@ function groupSchedulePeriodsForPrint(periods, includeStaff) {
     });
     return times.map((time) => {
         const items = byTime[time] || [];
-        const classNames = [...new Set(items.map((item) => (item.class_name || '').trim()).filter(Boolean))];
-        const staffNames = includeStaff
-            ? [...new Set(items.map((item) => (item.staff_name || '').trim()).filter(Boolean))]
-            : [];
+        const classParts = [];
+        const staffNames = [];
+        items.forEach((item) => {
+            const className = (item.class_name || '').trim();
+            if (!className) return;
+            const summary = formatScheduleRecurrenceSummary(item);
+            const label = (!item.recurrence_type || item.recurrence_type === 'daily')
+                ? className
+                : `${className} (${summary})`;
+            if (!classParts.includes(label)) classParts.push(label);
+            const staffName = (item.staff_name || '').trim();
+            if (includeStaff && staffName && !staffNames.includes(staffName)) {
+                staffNames.push(staffName);
+            }
+        });
         return {
             time,
-            className: classNames.join(', '),
+            className: classParts.join(', '),
             staffName: staffNames.join(', ')
         };
     });
@@ -13478,13 +15323,17 @@ function buildSchedulePrintCardHtml(block) {
     const includeStaff = block.kind === 'student';
     const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
     const printedOn = block.printedOn || formatSchedulePrintDate();
-    const rowHtml = rows.map((row) => `
-        <tr>
-            <td>${escapeHtml(row.time)}</td>
+    const transition = block.transition || null;
+    const rowHtml = rows.map((row) => {
+        const other = transition && !isHomePeriod(transition, row.time);
+        const extra = other ? ' class="schedule-print-other-school"' : '';
+        return `
+        <tr${extra}>
+            <td>${escapeHtml(row.time)}${other ? '<div class="schedule-print-other-label">Other school</div>' : ''}</td>
             <td>${escapeHtml(row.className)}</td>
             ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
     return `
         <section class="schedule-print-card">
             <header class="schedule-print-header">
@@ -13581,6 +15430,17 @@ html, body {
     vertical-align: top;
     white-space: nowrap;
     color: #000;
+}
+.schedule-print-other-school td {
+    background: #e7e5e4;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.schedule-print-other-label {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #444;
 }
 .schedule-print-table th {
     background: #eee;
@@ -13739,7 +15599,8 @@ async function printSelectedStudentSchedule() {
     openSchedulePrintPreview([{
         title: `${name}'s Schedule`,
         kind: 'student',
-        periods: collectSchedulePeriodsFromTable('student')
+        periods: collectSchedulePeriodsFromTable('student'),
+        transition: getStudentTransition(currentScheduleStudentId)
     }], `${name} Student Schedule`);
 }
 
@@ -13767,7 +15628,8 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
             title: `${item.name || 'Student'}'s Schedule`,
             kind: 'student',
             printedOn,
-            periods: item.periods || []
+            periods: item.periods || [],
+            transition: item.transition || null
         }));
         openSchedulePrintPreview(blocks, documentTitle);
     } catch (error) {
@@ -13851,6 +15713,13 @@ async function loadUserPreferences() {
         userPreferences = data || {};
         applyUserManagementSectionVisibility();
         syncClientTimezonePreference();
+        if (isShowStudentSchedulesInPointCards() && canEdit()) {
+            const studentIds = collectPointCardVisibleStudentIds();
+            if (studentIds.length) {
+                await loadStudentSchedulesForIds(studentIds);
+            }
+            refreshPointCardGridsAfterScheduleLoad();
+        }
     } catch (error) {
         console.error('Error loading user preferences:', error);
     }
@@ -13885,6 +15754,7 @@ function applyUserManagementSectionVisibility() {
     const sectionConfigs = [
         { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
         { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
+        { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
         { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
         { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
         { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -14074,6 +15944,7 @@ async function loadUsers() {
         const staffTbody = document.getElementById('staff-users-table-body');
         const studentTbody = document.getElementById('student-users-table-body');
         const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
+        const parentTbody = document.getElementById('parent-users-table-body');
         const archivedStudentsTbody = document.getElementById('archived-students-table-body');
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
@@ -14082,10 +15953,11 @@ async function loadUsers() {
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
         if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
+        if (parentTbody) parentTbody.innerHTML = '';
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
                 archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
@@ -14093,10 +15965,11 @@ async function loadUsers() {
             return;
         }
         
-        // Separate users by role (excluding parent role)
+        // Separate users by role
         const adminUsers = users.filter(u => u.role === 'admin' && !u.hidden_from_management && u.username !== 'cursor');
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
+        const parentUsers = users.filter(u => u.role === 'parent');
         const studentUsers = users.filter(u => u.role === 'student');
         allStudentUsers = studentUsers;
         
@@ -14182,10 +16055,19 @@ async function loadUsers() {
             if (nameA > nameB) return 1;
             return 0;
         });
+
+        // Parents: by email, then username
+        parentUsers.sort((a, b) => {
+            const emailA = sortKey(a.email || a.username);
+            const emailB = sortKey(b.email || b.username);
+            if (emailA < emailB) return -1;
+            if (emailA > emailB) return 1;
+            return 0;
+        });
         
         // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
-            adminTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
+            adminTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No admin users</td></tr>';
         } else {
             const adminFrag = document.createDocumentFragment();
             adminUsers.forEach(user => {
@@ -14196,7 +16078,7 @@ async function loadUsers() {
         
         // Populate Staff table (DocumentFragment for single reflow)
         if (staffUsers.length === 0) {
-            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
+            staffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="7" style="text-align: center; padding: 20px; color: #999;">No staff users</td></tr>';
         } else {
             const staffFrag = document.createDocumentFragment();
             staffUsers.forEach(user => {
@@ -14208,7 +16090,7 @@ async function loadUsers() {
         // Populate Outside Staff table (DocumentFragment for single reflow)
         if (outsideStaffTbody) {
             if (outsideStaffUsers.length === 0) {
-                outsideStaffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
+                outsideStaffTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="7" style="text-align: center; padding: 20px; color: #999;">No outside staff users</td></tr>';
             } else {
                 const outsideFrag = document.createDocumentFragment();
                 outsideStaffUsers.forEach(user => {
@@ -14217,10 +16099,23 @@ async function loadUsers() {
                 outsideStaffTbody.appendChild(outsideFrag);
             }
         }
+
+        // Populate Parent/Guardian table
+        if (parentTbody) {
+            if (parentUsers.length === 0) {
+                parentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No parent/guardian users</td></tr>';
+            } else {
+                const parentFrag = document.createDocumentFragment();
+                parentUsers.forEach(user => {
+                    parentFrag.appendChild(createParentRow(user));
+                });
+                parentTbody.appendChild(parentFrag);
+            }
+        }
         
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -14326,6 +16221,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     const gradesTaught = user.grades_taught ? `'${String(user.grades_taught).replace(/'/g, "\\'")}'` : 'null';
     const cardColorVal = user.card_color ? `'${user.card_color}'` : 'null';
     const linkedCaseManagerId = user.linked_case_manager_id != null ? user.linked_case_manager_id : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     const isTeacherOrCaseManager = user.role === 'staff' && (user.designation === 'Case Manager' || user.designation === 'Teacher');
     const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
         ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
@@ -14341,6 +16237,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     row.innerHTML = `
         <td><strong>${name}</strong></td>
         <td style="font-weight: 500; color: ${user.role === 'admin' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(displayRole)}${gradesTaughtHtml}${linkedCaseManagerHtml}</td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         ${isStaffTable ? `
         <td>
@@ -14355,7 +16252,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
             ` : '<span style="color: #999;">Hidden</span>'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId})">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId}, ${userEmail})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -14511,6 +16408,7 @@ function createStudentRow(user) {
     const userDesignation = user.designation ? `'${user.designation}'` : 'null';
     const gradeValue = user.grade ? `'${user.grade}'` : 'null';
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     
     const cardColor = user.card_color || '-';
     const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
@@ -14523,6 +16421,7 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${practitioner}</td>
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}" class="users-table-password-col">
             ${canSeePassword ? `
@@ -14533,7 +16432,7 @@ function createStudentRow(user) {
             ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
         </td>
         <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null)">Edit</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null, null, ${userEmail})">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
         </td>
     `;
@@ -14606,6 +16505,7 @@ function createOutsideStaffRow(user) {
     
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
     const userDistrict = user.district ? `'${user.district.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     
     row.innerHTML = `
         <td><strong>${name}</strong></td>
@@ -14613,6 +16513,7 @@ function createOutsideStaffRow(user) {
         <td style="cursor: pointer; color: var(--accent); text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
             ${studentsAssignedDisplay}
         </td>
+        <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}">
             ${canSeePassword ? `
@@ -14628,6 +16529,39 @@ function createOutsideStaffRow(user) {
     return row;
 }
 
+function createParentRow(user) {
+    const row = document.createElement('tr');
+    row.dataset.userId = user.id;
+
+    const email = user.email || '—';
+    const linkedDisplay = (user.linked_students && user.linked_students.length > 0)
+        ? user.linked_students.map(s => s.student_name || 'Unknown').join(', ')
+        : 'No students linked';
+
+    const canDelete = isAdmin();
+    const canEdit = isAdmin();
+    const canSeePassword = isAdmin();
+    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
+    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
+
+    row.innerHTML = `
+        <td><strong>${escapeHtml(email)}</strong></td>
+        <td>Parent/Guardian</td>
+        <td>${escapeHtml(linkedDisplay)}</td>
+        <td>${user.username}</td>
+        <td id="password-cell-${user.id}">
+            ${canSeePassword ? `
+                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
+            ` : '<span style="color: #999;">Hidden</span>'}
+        </td>
+        <td class="actions-cell">
+            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', 'parent', null, 'Parent/Guardian', null, null, null, null, ${userEmail})">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
+        </td>
+    `;
+
+    return row;
+}
 
 async function resetAndViewPassword(userId, username) {
     // Confirm before resetting
@@ -14689,7 +16623,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId, email) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -14704,6 +16638,8 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         displayRole = designation;
     } else if (role === 'student') {
         displayRole = 'Student';
+    } else if (role === 'parent') {
+        displayRole = 'Parent/Guardian';
     } else {
         displayRole = role;
     }
@@ -14713,6 +16649,10 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     document.getElementById('edit-user-student-id').value = studentId || '';
     document.getElementById('edit-user-name').value = name || '';
     document.getElementById('edit-user-username').value = username;
+    const emailInput = document.getElementById('edit-user-email');
+    if (emailInput) {
+        emailInput.value = (email && email !== 'null') ? email : '';
+    }
     document.getElementById('edit-user-role').value = displayRole;
     document.getElementById('edit-user-original-role').value = role;
     document.getElementById('edit-user-password').value = '';
@@ -14817,7 +16757,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     // Show/hide role field
     const roleGroup = document.getElementById('edit-user-role-group');
     {
-        if (roleGroup) roleGroup.style.display = 'block';
+        if (roleGroup) roleGroup.style.display = role === 'parent' ? 'none' : 'block';
     }
     
     // Hide district field for parent users
@@ -14829,7 +16769,15 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     
     // Show/hide team member section based on role
     const teamSection = document.getElementById('edit-user-team-section');
-    if (role === 'student' && studentId) {
+    const parentSection = document.getElementById('edit-user-parent-students-section');
+    if (role === 'parent') {
+        teamSection.style.display = 'none';
+        if (parentSection) {
+            parentSection.style.display = 'block';
+            await loadParentStudentsForEdit(userId);
+        }
+    } else if (role === 'student' && studentId) {
+        if (parentSection) parentSection.style.display = 'none';
         teamSection.style.display = 'block';
         
         // Populate staff member dropdowns
@@ -14851,6 +16799,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         }
     } else {
         teamSection.style.display = 'none';
+        if (parentSection) parentSection.style.display = 'none';
     }
     
     
@@ -14861,9 +16810,9 @@ async function editUser(userId, name, username, role, studentId, designation, gr
 // Load parent's linked students for edit modal
 async function loadParentStudentsForEdit(parentId) {
     try {
-        const response = await fetch('/api/parents');
-        const parents = await response.json();
-        const parent = parents.find(p => p.id === parentId);
+        const response = await fetch('/api/users');
+        const users = await response.json();
+        const parent = users.find(p => p.id === parentId);
         
         const studentsList = document.getElementById('edit-parent-students-list');
         const claimedDiv = document.getElementById('edit-parent-claimed-name');
@@ -14876,20 +16825,17 @@ async function loadParentStudentsForEdit(parentId) {
             return;
         }
         
-        const linkedStudentIds = parent.students ? parent.students.map(s => s.student_id) : [];
+        const linkedStudents = parent.linked_students || [];
+        const linkedStudentIds = linkedStudents.map(s => s.student_id);
         editParentLinkedStudentIds = linkedStudentIds;
         
-        if (parent.students && parent.students.length > 0) {
-            studentsList.innerHTML = parent.students.map(student => `
+        if (linkedStudents.length > 0) {
+            studentsList.innerHTML = linkedStudents.map(student => `
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 8px; background: #f5f5f5; border-radius: 4px;">
                     <div>
-                        <strong>${student.student_name || 'Unknown'}</strong>
-                        <span style="color: var(--text-secondary); margin-left: 10px;">(${student.relationship})</span>
+                        <strong>${escapeHtml(student.student_name || 'Unknown')}</strong>
+                        <span style="color: var(--text-secondary); margin-left: 10px;">(${escapeHtml(student.relationship || 'parent/guardian')})</span>
                         ${student.verified ? '<span style="color: green; margin-left: 10px;">✓ Verified</span>' : '<span style="color: orange; margin-left: 10px;">Pending Verification</span>'}
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        ${!student.verified ? `<button type="button" class="btn-primary" style="padding: 4px 12px; font-size: 12px;" onclick="verifyParentStudent(${parentId}, ${student.student_id})">Verify</button>` : ''}
-                        <button type="button" class="btn-danger" style="padding: 4px 12px; font-size: 12px;" onclick="removeParentStudent(${parentId}, ${student.student_id})">Remove</button>
                     </div>
                 </div>
             `).join('');
@@ -14898,36 +16844,16 @@ async function loadParentStudentsForEdit(parentId) {
         }
         
         if (claimedDiv) {
-            if (parent.claimed_student_name) {
-                claimedDiv.style.display = 'block';
-                claimedDiv.textContent = 'Parent indicated: ' + parent.claimed_student_name;
-            } else {
-                claimedDiv.style.display = 'none';
-                claimedDiv.textContent = '';
-            }
+            claimedDiv.style.display = 'none';
+            claimedDiv.textContent = '';
         }
         
         if (relSelect) {
-            relSelect.value = parent.claimed_relationship || 'parent';
-        }
-        
-        await loadStudents();
-        const pool = (allStudents || []).filter(s => !linkedStudentIds.includes(s.id));
-        const claimed = (parent.claimed_student_name || '').trim().toLowerCase();
-        let preselected = null;
-        if (claimed) {
-            preselected = pool.find(s => {
-                const n = (s.name || '').toLowerCase();
-                return n.includes(claimed) || claimed.includes(n);
-            });
+            relSelect.value = 'parent';
         }
         
         if (addInput) { addInput.value = ''; addInput.placeholder = 'Type to search students...'; }
         if (addHidden) addHidden.value = '';
-        if (preselected) {
-            if (addInput) addInput.value = preselected.name || `Student ${preselected.id}`;
-            if (addHidden) addHidden.value = preselected.id;
-        }
     } catch (error) {
         console.error('Error loading parent students:', error);
         const el = document.getElementById('edit-parent-students-list');
@@ -15209,6 +17135,7 @@ async function saveEditUser() {
     const passwordConfirm = document.getElementById('edit-user-password-confirm').value;
     const grade = document.getElementById('edit-user-grade').value;
     const cardColor = document.getElementById('edit-user-card-color')?.value || '';
+    const emailValue = document.getElementById('edit-user-email')?.value.trim() || '';
     
     // Map display role to system role and designation
     // Skip role mapping for parent users (role field is hidden)
@@ -15264,7 +17191,8 @@ async function saveEditUser() {
     const updateData = {
         id: userId,
         name: name || null,
-        username: username
+        username: username,
+        email: emailValue || null
     };
     
     // Check if this is an Outside Staff user (district field visible means it's Outside Staff)
@@ -16311,10 +18239,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const scheduleStudentSelect = document.getElementById('schedule-student-select');
     if (scheduleStudentSelect) {
         scheduleStudentSelect.addEventListener('change', (e) => {
-            currentScheduleStudentId = parseInt(e.target.value);
+            const parsed = parseInt(e.target.value, 10);
+            currentScheduleStudentId = Number.isFinite(parsed) ? parsed : null;
             if (currentScheduleStudentId) {
                 loadSchedules('student', currentScheduleStudentId);
+            } else {
+                studentScheduleData = [];
+                renderStudentSchedule();
             }
+            updateTransitionButtonState();
         });
         // Note: Student dropdown is now populated by loadStudents() function
     }
@@ -16332,6 +18265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentScheduleStudentId = null;
                     studentScheduleData = [];
                     renderStudentSchedule();
+                    updateTransitionButtonState();
                 }
             }
         });
@@ -16363,6 +18297,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveStudentScheduleBtn = document.getElementById('save-student-schedule-btn');
     if (saveStudentScheduleBtn) {
         saveStudentScheduleBtn.addEventListener('click', () => saveSchedule('student'));
+    }
+
+    const studentTransitionBtn = document.getElementById('student-transition-btn');
+    if (studentTransitionBtn) {
+        studentTransitionBtn.addEventListener('click', openStudentTransitionModal);
+    }
+    const studentTransitionClose = document.getElementById('student-transition-modal-close');
+    if (studentTransitionClose) {
+        studentTransitionClose.addEventListener('click', closeStudentTransitionModal);
+    }
+    const studentTransitionSave = document.getElementById('student-transition-save-btn');
+    if (studentTransitionSave) {
+        studentTransitionSave.addEventListener('click', saveStudentTransitionFromModal);
+    }
+    const studentTransitionRemove = document.getElementById('student-transition-remove-btn');
+    if (studentTransitionRemove) {
+        studentTransitionRemove.addEventListener('click', removeStudentTransitionFromModal);
+    }
+    const studentTransitionModal = document.getElementById('student-transition-modal');
+    if (studentTransitionModal) {
+        studentTransitionModal.addEventListener('click', (e) => {
+            if (e.target === studentTransitionModal) closeStudentTransitionModal();
+        });
     }
 
     const printStaffScheduleBtn = document.getElementById('print-staff-schedule-btn');
@@ -16487,13 +18444,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (outsideStaffSearch) {
         outsideStaffSearch.addEventListener('input', (e) => filterUserTable('outside-staff', e.target.value));
     }
+
+    const parentSearch = document.getElementById('parent-search');
+    if (parentSearch) {
+        parentSearch.addEventListener('input', (e) => filterUserTable('parent', e.target.value));
+    }
     
 });
 
 function filterUserTable(tableType, searchQuery) {
-    // Skip parent table as it no longer exists
-    if (tableType === 'parent') return;
-    
     const query = searchQuery.toLowerCase().trim();
     const tbody = document.getElementById(`${tableType}-users-table-body`);
     
@@ -16512,19 +18471,8 @@ function filterUserTable(tableType, searchQuery) {
         if (query === '') {
             shouldShow = true;
         } else {
-            // Get text content from all cells except password and actions columns
-            const cells = Array.from(row.cells);
-            const searchableText = cells
-                .filter((cell, index) => {
-                    // Exclude password column and actions column
-                    if (tableType === 'student') {
-                        // For students: exclude password (index 7) and actions (index 8)
-                        return index !== 7 && index !== 8;
-                    } else {
-                        // For admin/staff: exclude password (index 3) and actions (index 4)
-                        return index !== 3 && index !== 4;
-                    }
-                })
+            const searchableText = Array.from(row.cells)
+                .filter(cell => !cell.classList.contains('actions-cell') && !cell.id.startsWith('password-cell-'))
                 .map(cell => cell.textContent.toLowerCase())
                 .join(' ');
             

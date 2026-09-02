@@ -3379,13 +3379,34 @@ table tbody tr:hover {
 
 .class-input-group {
     display: flex;
-    align-items: center;
-    gap: 5px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
 }
 
-.class-input-group .class-input {
+.class-input-group:last-child {
+    border-bottom: none;
+}
+
+.schedule-entry-main {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.class-input-group .class-input,
+.class-input-group .staff-input {
     flex: 1;
-    min-width: 150px;
+    min-width: 120px;
+}
+
+.class-input-group .class-autocomplete-wrapper,
+.class-input-group .staff-autocomplete-wrapper {
+    flex: 1;
+    min-width: 120px;
 }
 
 .class-input-group .btn-delete-class {
@@ -3397,6 +3418,82 @@ table tbody tr:hover {
     align-items: center;
     justify-content: center;
     font-size: 16px;
+}
+
+.schedule-recurrence {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.schedule-recurrence select,
+.schedule-recurrence input[type="date"] {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    max-width: 100%;
+}
+
+.schedule-recurrence-weekdays {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.schedule-recurrence-weekdays label {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: none;
+}
+
+.schedule-recurrence-weekdays label.is-selected {
+    border-color: var(--accent);
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--accent);
+}
+
+.schedule-recurrence-weekdays input {
+    display: none;
+}
+
+.schedule-recurrence-summary {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.schedule-recurrence-range {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.student-schedule-table td:nth-child(2) {
+    width: auto;
+    min-width: 220px;
+}
+
+.student-schedule-table td:nth-child(3) {
+    width: 100px;
+    min-width: 100px;
+}
+
+.student-schedule-table .classes-cell {
+    width: auto !important;
+}
+
+.class-input-group .btn-delete-class {
     line-height: 1;
     background: transparent;
     border: 1px solid var(--danger);
