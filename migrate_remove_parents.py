@@ -1,88 +1,78 @@
 """
-Migration script to remove parent accounts and related data.
+Migration script to remove parent accounts and the parent_students table,
+and ensure students.parent_emails exists.
 
-This script deletes:
-- All parent user accounts
-- All parent-student relationships
-- All rights notifications for parent accounts
+This script:
+- Adds students.parent_emails if missing
+- Drops parent_students
+- Deletes parent user accounts and related rights notifications
 
-WARNING: This operation cannot be undone. Make sure to backup your database before running this script.
+WARNING: Deleting parent accounts cannot be undone. Backup before running.
 """
 
 import sqlite3
-import os
 from pathlib import Path
 
+
 def remove_parent_accounts():
-    """Remove all parent accounts and related data from the database"""
-    
-    # Find the database file
+    """Remove parent accounts / parent_students and ensure parent_emails column."""
+
     db_path = Path('instance/behavior_tracking.db')
     if not db_path.exists():
         print(f"Error: Database file not found at {db_path}")
         print("Please run this script from the project root directory.")
         return False
-    
+
     print(f"Connecting to database at {db_path}...")
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
-    
+
     try:
-        # Get count of parent accounts before deletion
+        cursor.execute("PRAGMA table_info(students)")
+        student_columns = {row[1] for row in cursor.fetchall()}
+        if 'parent_emails' not in student_columns:
+            print("Adding parent_emails column to students...")
+            cursor.execute("ALTER TABLE students ADD COLUMN parent_emails TEXT")
+
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='parent_students'"
+        )
+        if cursor.fetchone():
+            print("Dropping parent_students table...")
+            cursor.execute("DROP TABLE IF EXISTS parent_students")
+
         cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'parent'")
         parent_count = cursor.fetchone()[0]
-        
+
         if parent_count == 0:
             print("No parent accounts found in the database.")
+            conn.commit()
             return True
-        
+
         print(f"Found {parent_count} parent account(s) to delete.")
-        
-        # Get parent user IDs
+
         cursor.execute("SELECT id FROM users WHERE role = 'parent'")
         parent_ids = [row[0] for row in cursor.fetchall()]
-        
-        if not parent_ids:
-            print("No parent IDs found.")
-            return True
-        
-        # Delete rights notifications for parents
+
         cursor.execute(
-            "DELETE FROM ferpa_rights_notifications WHERE user_id IN ({})".format(
-                ','.join('?' * len(parent_ids))
-            ),
-            parent_ids
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='ferpa_rights_notifications'"
         )
-        notifications_deleted = cursor.rowcount
-        print(f"Deleted {notifications_deleted} rights notification(s) for parent accounts.")
-        
-        # Delete parent-student relationships
-        cursor.execute(
-            "DELETE FROM parent_students WHERE parent_user_id IN ({})".format(
-                ','.join('?' * len(parent_ids))
-            ),
-            parent_ids
-        )
-        relationships_deleted = cursor.rowcount
-        print(f"Deleted {relationships_deleted} parent-student relationship(s).")
-        
-        # Delete parent users
-        cursor.execute(
-            "DELETE FROM users WHERE role = 'parent'"
-        )
-        users_deleted = cursor.rowcount
-        print(f"Deleted {users_deleted} parent user account(s).")
-        
-        # Commit the changes
+        if cursor.fetchone() and parent_ids:
+            cursor.execute(
+                "DELETE FROM ferpa_rights_notifications WHERE user_id IN ({})".format(
+                    ','.join('?' * len(parent_ids))
+                ),
+                parent_ids
+            )
+            print(f"Deleted {cursor.rowcount} rights notification(s) for parent accounts.")
+
+        cursor.execute("DELETE FROM users WHERE role = 'parent'")
+        print(f"Deleted {cursor.rowcount} parent user account(s).")
+
         conn.commit()
         print("\nMigration completed successfully!")
-        print(f"Summary:")
-        print(f"  - Parent accounts deleted: {users_deleted}")
-        print(f"  - Parent-student relationships deleted: {relationships_deleted}")
-        print(f"  - Rights notifications deleted: {notifications_deleted}")
-        
         return True
-        
+
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         conn.rollback()
@@ -94,28 +84,28 @@ def remove_parent_accounts():
     finally:
         conn.close()
 
+
 if __name__ == '__main__':
     import sys
-    
-    # Allow running with --yes flag to skip confirmation
+
     auto_confirm = '--yes' in sys.argv or '-y' in sys.argv
-    
+
     print("=" * 60)
     print("Parent Account Removal Migration Script")
     print("=" * 60)
     print()
     print("WARNING: This script will permanently delete:")
     print("  - All parent user accounts")
-    print("  - All parent-student relationships")
-    print("  - All rights notifications for parent accounts")
+    print("  - The parent_students table")
+    print("  - Rights notifications for parent accounts")
     print()
-    
+
     if not auto_confirm:
         response = input("Do you want to continue? (yes/no): ")
         if response.lower() not in ['yes', 'y']:
             print("Migration cancelled.")
             exit(0)
-    
+
     print()
     success = remove_parent_accounts()
     if not success:

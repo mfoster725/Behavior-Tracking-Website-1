@@ -490,6 +490,7 @@
                                     <th>Professional</th>
                                     <th>Group Leader</th>
                                     <th>Email</th>
+                                    <th>Parent/Guardian</th>
                                     <th>Username</th>
                                     <th class="users-table-password-col">Password</th>
                                     <th>Plan</th>
@@ -542,39 +543,6 @@
                     </div>
                 </div>
                 {% endif %}
-                
-                <!-- Parent/Guardian Users Table -->
-                <div class="user-role-section" id="user-section-parents" style="margin-bottom: 30px;">
-                    <h3 style="display: flex; align-items: center; justify-content: space-between;">
-                        <span>Parent/Guardian Users</span>
-                        <label style="font-size: 13px; font-weight: normal; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-                            <input type="checkbox" id="toggle-section-parents" style="cursor: pointer;">
-                            <span>Hide section</span>
-                        </label>
-                    </h3>
-                    <div class="user-role-section-body" id="user-section-parents-body">
-                        <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="parent-search" placeholder="🔍 Search parents by email, linked student, or username..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
-                        </div>
-                        <div class="user-table-scroll">
-                        <table class="users-table">
-                            <thead>
-                                <tr>
-                                    <th>Email</th>
-                                    <th>Role</th>
-                                    <th>Linked Students</th>
-                                    <th>Username</th>
-                                    <th>Password</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="parent-users-table-body">
-                                <!-- Parent user rows will be loaded dynamically -->
-                            </tbody>
-                        </table>
-                        </div>
-                    </div>
-                </div>
                 
                 <!-- Staff Users Table -->
                 <div class="user-role-section" id="user-section-staff" style="margin-bottom: 30px;">
@@ -770,7 +738,7 @@
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Card Color: yellow, green, or blue. Team member columns are optional.
-                                Parent emails create Parent/Guardian user accounts linked to the student.
+                                Parent 1/2 emails (M/N) are stored stacked on the student as Parent/Guardian contact emails (no parent user accounts).
                                 Team names can be a first name or a partial match of at least 4 letters, matched to staff in that role
                                 (e.g. Professional <strong>Britt</strong> assigns the student to <strong>Brittany Roers</strong> if she is the unique Professional match).
                             </p>
@@ -2340,7 +2308,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=support-team-ui1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=parent-emails-on-students"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

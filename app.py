@@ -670,13 +670,13 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(100))  # Full name of the user
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
-    role = db.Column(db.String(20), nullable=False)  # 'student', 'staff', 'admin', or 'parent'
+    role = db.Column(db.String(20), nullable=False)  # 'student', 'staff', or 'admin'
     designation = db.Column(db.String(50))  # 'Case Manager', 'Practitioner', 'Paraprofessional', 'Professional', 'Admin'
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=True)
     is_outside_staff = db.Column(db.Boolean, default=False, nullable=False)  # True for Outside Staff users
     district = db.Column(db.String(100), nullable=True)  # District name for Outside Staff
-    claimed_student_name = db.Column(db.String(200), nullable=True)  # Parent self-registration: name they gave
-    claimed_relationship = db.Column(db.String(50), nullable=True)  # Parent self-registration: relationship
+    claimed_student_name = db.Column(db.String(200), nullable=True)  # Legacy parent self-registration field
+    claimed_relationship = db.Column(db.String(50), nullable=True)  # Legacy parent self-registration field
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # JSON-encoded per-user UI preferences (non-PHI, e.g., hidden sections)
     ui_preferences = db.Column(db.Text, nullable=True)
@@ -698,8 +698,6 @@ class User(UserMixin, db.Model):
     
     # Relationship to assigned students (for Outside Staff)
     assigned_students = db.relationship('OutsideStaffStudent', backref='user', lazy=True, cascade='all, delete-orphan')
-    # Relationship to parent-student relationships (for Parents)
-    parent_student_relationships = db.relationship('ParentStudent', foreign_keys='ParentStudent.parent_user_id', backref='parent_user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -887,6 +885,48 @@ def ensure_user_email_column():
 
 
 ensure_user_email_column()
+
+
+def ensure_student_parent_emails_column():
+    """Add students.parent_emails and remove parent user accounts / parent_students table."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            table_names = inspector.get_table_names()
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+
+            if 'students' in table_names:
+                columns = [col['name'] for col in inspector.get_columns('students')]
+                if 'parent_emails' not in columns:
+                    with db.engine.connect() as conn:
+                        if is_postgres:
+                            conn.execute(text(
+                                "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_emails TEXT"
+                            ))
+                        else:
+                            conn.execute(text(
+                                "ALTER TABLE students ADD COLUMN parent_emails TEXT"
+                            ))
+                        conn.commit()
+
+            with db.engine.connect() as conn:
+                if 'parent_students' in table_names:
+                    conn.execute(text("DROP TABLE IF EXISTS parent_students"))
+                    conn.commit()
+                if 'users' in table_names:
+                    result = conn.execute(text("DELETE FROM users WHERE role = 'parent'"))
+                    conn.commit()
+                    if result.rowcount:
+                        print(f"Removed {result.rowcount} parent/guardian user account(s).")
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure students.parent_emails / remove parent tables: {e}")
+        except Exception:
+            print(f"Failed to ensure students.parent_emails / remove parent tables: {e}")
+
+
+ensure_student_parent_emails_column()
 
 
 def ensure_frenzy_severity_column():
@@ -2242,6 +2282,8 @@ class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100))
+    # Parent/guardian contact emails stacked with newlines (CSV import columns M/N)
+    parent_emails = db.Column(db.Text, nullable=True)
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
     # When set, only school days with data after this date count toward the next level-up window.
@@ -2254,7 +2296,6 @@ class Student(db.Model):
     
     # Relationships
     daily_records = db.relationship('DailyRecord', backref='student', lazy=True, cascade='all, delete-orphan')
-    parent_relationships = db.relationship('ParentStudent', backref='student', lazy=True, cascade='all, delete-orphan')
 
 
 def get_archived_students():
@@ -2403,24 +2444,6 @@ class OutsideStaffStudent(db.Model):
     student = db.relationship('Student', backref='outside_staff_assignments')
     
     __table_args__ = (db.UniqueConstraint('user_id', 'student_id', name='unique_outside_staff_student'),)
-
-# Parent-Student Relationship
-class ParentStudent(db.Model):
-    __tablename__ = 'parent_students'
-    id = db.Column(db.Integer, primary_key=True)
-    parent_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
-    relationship = db.Column(db.String(50), nullable=False)  # 'parent', 'guardian', 'custodial_parent', etc.
-    verified = db.Column(db.Boolean, default=False, nullable=False)  # Must be verified by admin/staff
-    verified_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    verified_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    # Note: parent_user is available via backref from User.parent_student_relationships
-    verified_by = db.relationship('User', foreign_keys=[verified_by_user_id])
-    
-    __table_args__ = (db.UniqueConstraint('parent_user_id', 'student_id', name='unique_parent_student'),)
 
 # Amendment Request
 class AmendmentRequest(db.Model):
@@ -3421,6 +3444,33 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add card_level_reset_at column (may already exist): {e}")
+                    if 'parent_emails' not in columns:
+                        print("Adding parent_emails column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE students ADD COLUMN parent_emails TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add parent_emails column (may already exist): {e}")
+
+                # Parent/Guardian users are not used yet — drop link table and remove leftover accounts
+                if 'parent_students' in table_names:
+                    print("Dropping parent_students table...")
+                    try:
+                        with db.engine.connect() as conn:
+                            conn.execute(text("DROP TABLE IF EXISTS parent_students"))
+                            conn.commit()
+                    except (OperationalError, ProgrammingError) as e:
+                        print(f"Note: Could not drop parent_students table: {e}")
+                if 'users' in table_names:
+                    try:
+                        with db.engine.connect() as conn:
+                            result = conn.execute(text("DELETE FROM users WHERE role = 'parent'"))
+                            conn.commit()
+                            if result.rowcount:
+                                print(f"Removed {result.rowcount} parent/guardian user account(s).")
+                    except (OperationalError, ProgrammingError) as e:
+                        print(f"Note: Could not remove parent users: {e}")
             except Exception as inner_e:
                 print(f"Error during database migration: {inner_e}")
                 import traceback
@@ -10992,7 +11042,6 @@ OUTSIDE_STAFF_EMAIL_COL = 4  # column E
 STUDENT_EMAIL_COL = 11  # column L
 STUDENT_PARENT1_EMAIL_COL = 12  # column M
 STUDENT_PARENT2_EMAIL_COL = 13  # column N
-PARENT_GUARDIAN_DESIGNATION = 'Parent/Guardian'
 
 
 def _normalize_import_email(value):
@@ -11004,88 +11053,17 @@ def _normalize_import_email(value):
     return email[:200]
 
 
-def _generate_parent_username_from_email(email, used_usernames):
-    local = (email.split('@')[0] if email else '') or 'parent'
-    base = re.sub(r'[^a-z0-9]', '', local.lower()) or 'parent'
-    return _unique_import_username(base, used_usernames)
-
-
-def _upsert_parent_from_import(email, student, slot, used_usernames, warnings, student_label):
-    """Create or update a parent/guardian user linked to a student. Returns True if anything changed."""
-    email = _normalize_import_email(email)
-    if not email:
-        return False
-
-    changed = False
-    existing_non_parent = User.query.filter(
-        func.lower(User.email) == email,
-        User.role != 'parent',
-    ).first()
-    if existing_non_parent:
-        warnings.append(
-            f"{student_label}: parent email {email} is already used by {existing_non_parent.username}."
-        )
-        return False
-
-    parent = User.query.filter(
-        func.lower(User.email) == email,
-        User.role == 'parent',
-    ).first()
-
-    if parent:
-        if parent.designation != PARENT_GUARDIAN_DESIGNATION:
-            parent.designation = PARENT_GUARDIAN_DESIGNATION
-            changed = True
-        if not _import_str_eq(parent.email, email):
-            parent.email = email
-            changed = True
-    else:
-        username = _generate_parent_username_from_email(email, used_usernames)
-        password = f"{username}123"
-        parent = User(
-            name=f"{PARENT_GUARDIAN_DESIGNATION} ({email})",
-            username=username,
-            role='parent',
-            designation=PARENT_GUARDIAN_DESIGNATION,
-            email=email,
-            must_change_password=True,
-            hidden_from_management=False,
-        )
-        _set_imported_password(parent, password)
-        db.session.add(parent)
-        db.session.flush()
-        changed = True
-
-    relationship = 'parent' if slot == 1 else 'guardian'
-    link = ParentStudent.query.filter_by(parent_user_id=parent.id, student_id=student.id).first()
-    if not link:
-        db.session.add(ParentStudent(
-            parent_user_id=parent.id,
-            student_id=student.id,
-            relationship=relationship,
-            verified=True,
-            verified_by_user_id=current_user.id if current_user.is_authenticated else None,
-            verified_at=datetime.utcnow(),
-        ))
-        changed = True
-    elif link.relationship != relationship and slot == 1:
-        link.relationship = relationship
-        changed = True
-
-    return changed
-
-
-def _sync_parents_from_student_import(student, parent_emails, used_usernames, warnings, student_label):
-    changed = False
-    seen_emails = set()
-    for slot, raw_email in enumerate(parent_emails, start=1):
-        email = _normalize_import_email(raw_email)
-        if not email or email in seen_emails:
+def _stack_parent_emails(parent_emails):
+    """Stack CSV parent email columns into one newline-separated student field."""
+    seen = set()
+    stacked = []
+    for raw in parent_emails or []:
+        email = _normalize_import_email(raw)
+        if not email or email in seen:
             continue
-        seen_emails.add(email)
-        if _upsert_parent_from_import(email, student, slot, used_usernames, warnings, student_label):
-            changed = True
-    return changed
+        seen.add(email)
+        stacked.append(email)
+    return '\n'.join(stacked) if stacked else None
 
 
 def _parse_student_team_members(row):
@@ -11287,8 +11265,6 @@ def _apply_student_import_updates(
     team_members,
     student_email=None,
     parent_emails=None,
-    used_usernames=None,
-    warnings=None,
     user=None,
     existing_team=None,
 ):
@@ -11310,6 +11286,11 @@ def _apply_student_import_updates(
     if not _import_str_eq(student.email, normalized_email):
         student.email = normalized_email
         changed = True
+    if parent_emails is not None:
+        stacked_parent_emails = _stack_parent_emails(parent_emails)
+        if not _import_str_eq(getattr(student, 'parent_emails', None), stacked_parent_emails):
+            student.parent_emails = stacked_parent_emails
+            changed = True
     if user is None:
         user = _student_user_for(student)
     if user:
@@ -11321,15 +11302,6 @@ def _apply_student_import_updates(
             changed = True
     if team_members and _sync_student_team_members(student.id, team_members, existing=existing_team):
         changed = True
-    if parent_emails and used_usernames is not None:
-        if _sync_parents_from_student_import(
-            student,
-            parent_emails,
-            used_usernames,
-            warnings or [],
-            initials or lunch_number,
-        ):
-            changed = True
     return changed
 
 
@@ -11668,8 +11640,6 @@ def import_users():
                             team_members=team_members,
                             student_email=student_email,
                             parent_emails=parent_emails,
-                            used_usernames=used_usernames,
-                            warnings=warnings,
                             user=users_by_student_id.get(existing_student.id),
                             existing_team=team_by_student_id.get(existing_student.id, []),
                         )
@@ -11694,6 +11664,7 @@ def import_users():
                     lunch_number=lunch_number,
                     directory_info_opt_out=False,
                     email=_normalize_import_email(student_email) or None,
+                    parent_emails=_stack_parent_emails(parent_emails),
                 )
                 db.session.add(student)
                 new_student_items.append(
@@ -11706,7 +11677,6 @@ def import_users():
                         'grade': grade,
                         'team_members': team_members,
                         'student_email': student_email,
-                        'parent_emails': parent_emails,
                     }
                 )
                 by_lunch[lunch_number] = student
@@ -11728,13 +11698,6 @@ def import_users():
                     db.session.add(user)
                     for role_name, member_name in item['team_members']:
                         db.session.add(TeamMember(student_id=student.id, role=role_name, name=member_name))
-                    _sync_parents_from_student_import(
-                        student,
-                        item.get('parent_emails') or [],
-                        used_usernames,
-                        warnings,
-                        item['initials'] or item['lunch_number'],
-                    )
                     success.append(
                         {
                             'initials': item['initials'],
@@ -12911,18 +12874,6 @@ def manage_users():
         if assigned_student_ids:
             for s in Student.query.filter(Student.id.in_(assigned_student_ids)).all():
                 assigned_students_by_id[s.id] = {'id': s.id, 'name': s.name}
-        parent_user_ids = [u.id for u in users if getattr(u, 'role', None) == 'parent']
-        parent_links_by_user = {}
-        parent_student_ids = set()
-        if parent_user_ids:
-            for ps in ParentStudent.query.filter(ParentStudent.parent_user_id.in_(parent_user_ids)).all():
-                parent_links_by_user.setdefault(ps.parent_user_id, []).append(ps)
-                parent_student_ids.add(ps.student_id)
-        parent_students_by_id = {}
-        if parent_student_ids:
-            for s in Student.query.filter(Student.id.in_(parent_student_ids)).all():
-                parent_students_by_id[s.id] = s
-        
         result = []
         for user in users:
             user_data = {
@@ -12951,6 +12902,7 @@ def manage_users():
                 user_data['student_name'] = student.name
                 user_data['grade'] = student.grade
                 user_data['card_color'] = student.card_color
+                user_data['parent_emails'] = getattr(student, 'parent_emails', None)
                 if not user_data['email'] and student.email:
                     user_data['email'] = student.email
                 user_data['team_members'] = {
@@ -12961,17 +12913,6 @@ def manage_users():
                     role_key = (tm.role or '').lower().replace(' ', '_')
                     if role_key in user_data['team_members']:
                         user_data['team_members'][role_key].append(tm.name)
-            if user.role == 'parent':
-                linked_students = []
-                for ps in parent_links_by_user.get(user.id, []):
-                    student = parent_students_by_id.get(ps.student_id)
-                    linked_students.append({
-                        'student_id': ps.student_id,
-                        'student_name': student.name if student else 'Unknown',
-                        'relationship': ps.relationship,
-                        'verified': ps.verified,
-                    })
-                user_data['linked_students'] = linked_students
             result.append(user_data)
         
         return jsonify(result)

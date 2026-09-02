@@ -4010,7 +4010,6 @@ function setupEventListeners() {
         const userSectionToggleConfigs = [
             { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
             { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
-            { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
             { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
             { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
             { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -16231,7 +16230,6 @@ function applyUserManagementSectionVisibility() {
     const sectionConfigs = [
         { key: 'students', checkboxId: 'toggle-section-students', bodyId: 'user-section-students-body' },
         { key: 'archived', checkboxId: 'toggle-section-archived', bodyId: 'user-section-archived-body' },
-        { key: 'parents', checkboxId: 'toggle-section-parents', bodyId: 'user-section-parents-body' },
         { key: 'staff', checkboxId: 'toggle-section-staff', bodyId: 'user-section-staff-body' },
         { key: 'outsideStaff', checkboxId: 'toggle-section-outside-staff', bodyId: 'user-section-outside-staff-body' },
         { key: 'admin', checkboxId: 'toggle-section-admin', bodyId: 'user-section-admin-body' }
@@ -16421,7 +16419,6 @@ async function loadUsers() {
         const staffTbody = document.getElementById('staff-users-table-body');
         const studentTbody = document.getElementById('student-users-table-body');
         const outsideStaffTbody = document.getElementById('outside-staff-users-table-body');
-        const parentTbody = document.getElementById('parent-users-table-body');
         const archivedStudentsTbody = document.getElementById('archived-students-table-body');
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
@@ -16430,11 +16427,10 @@ async function loadUsers() {
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
         if (outsideStaffTbody) outsideStaffTbody.innerHTML = '';
-        if (parentTbody) parentTbody.innerHTML = '';
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="13" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
                 archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
@@ -16446,7 +16442,6 @@ async function loadUsers() {
         const adminUsers = users.filter(u => u.role === 'admin' && !u.hidden_from_management && u.username !== 'cursor');
         const staffUsers = users.filter(u => u.role === 'staff' && !u.is_outside_staff);
         const outsideStaffUsers = users.filter(u => u.role === 'staff' && u.is_outside_staff);
-        const parentUsers = users.filter(u => u.role === 'parent');
         const studentUsers = users.filter(u => u.role === 'student');
         allStudentUsers = studentUsers;
         
@@ -16532,15 +16527,6 @@ async function loadUsers() {
             if (nameA > nameB) return 1;
             return 0;
         });
-
-        // Parents: by email, then username
-        parentUsers.sort((a, b) => {
-            const emailA = sortKey(a.email || a.username);
-            const emailB = sortKey(b.email || b.username);
-            if (emailA < emailB) return -1;
-            if (emailA > emailB) return 1;
-            return 0;
-        });
         
         // Populate Admin table (DocumentFragment for single reflow)
         if (adminUsers.length === 0) {
@@ -16577,22 +16563,9 @@ async function loadUsers() {
             }
         }
 
-        // Populate Parent/Guardian table
-        if (parentTbody) {
-            if (parentUsers.length === 0) {
-                parentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="6" style="text-align: center; padding: 20px; color: #999;">No parent/guardian users</td></tr>';
-            } else {
-                const parentFrag = document.createDocumentFragment();
-                parentUsers.forEach(user => {
-                    parentFrag.appendChild(createParentRow(user));
-                });
-                parentTbody.appendChild(parentFrag);
-            }
-        }
-        
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="12" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="13" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -16893,6 +16866,12 @@ function createStudentRow(user) {
     
     const cardColor = user.card_color || '-';
     const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
+    const parentEmailsDisplay = (user.parent_emails || '')
+        .split(/[\n,;]+/)
+        .map(e => e.trim())
+        .filter(Boolean)
+        .map(e => escapeHtml(e))
+        .join('<br>') || '<span style="color: #999;">—</span>';
     
     row.innerHTML = `
         <td><strong>${name}</strong></td>
@@ -16903,6 +16882,7 @@ function createStudentRow(user) {
         <td style="font-size: 13px;">${professional}</td>
         <td style="font-size: 13px;">${groupLeader}</td>
         <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
+        <td style="font-size: 13px;">${parentEmailsDisplay}</td>
         <td>${user.username}</td>
         <td id="password-cell-${user.id}" class="users-table-password-col">
             ${canSeePassword ? `
@@ -17011,37 +16991,8 @@ function createOutsideStaffRow(user) {
 }
 
 function createParentRow(user) {
-    const row = document.createElement('tr');
-    row.dataset.userId = user.id;
-
-    const email = user.email || '—';
-    const linkedDisplay = (user.linked_students && user.linked_students.length > 0)
-        ? user.linked_students.map(s => s.student_name || 'Unknown').join(', ')
-        : 'No students linked';
-
-    const canDelete = isAdmin();
-    const canEdit = isAdmin();
-    const canSeePassword = isAdmin();
-    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
-    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
-
-    row.innerHTML = `
-        <td><strong>${escapeHtml(email)}</strong></td>
-        <td>Parent/Guardian</td>
-        <td>${escapeHtml(linkedDisplay)}</td>
-        <td>${user.username}</td>
-        <td id="password-cell-${user.id}">
-            ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
-            ` : '<span style="color: #999;">Hidden</span>'}
-        </td>
-        <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', 'parent', null, 'Parent/Guardian', null, null, null, null, ${userEmail})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
-        </td>
-    `;
-
-    return row;
+    // Parent/Guardian users are no longer managed here; emails live on students.
+    return document.createElement('tr');
 }
 
 async function resetAndViewPassword(userId, username) {
@@ -18916,11 +18867,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const outsideStaffSearch = document.getElementById('outside-staff-search');
     if (outsideStaffSearch) {
         outsideStaffSearch.addEventListener('input', (e) => filterUserTable('outside-staff', e.target.value));
-    }
-
-    const parentSearch = document.getElementById('parent-search');
-    if (parentSearch) {
-        parentSearch.addEventListener('input', (e) => filterUserTable('parent', e.target.value));
     }
     
 });
