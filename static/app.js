@@ -3330,7 +3330,9 @@ function collectSchedulePeriodsFromTbody(tbody, type) {
                     ? row.querySelector(`.staff-stack .schedule-entry-item[data-entry-id="${entryId}"]`)
                     : null;
                 const classValue = (classItem.querySelector('.class-input')?.value || '').trim();
-                const staffValue = (staffItem?.querySelector('.staff-input')?.value || '').trim();
+                const staffValue = type === 'teacher'
+                    ? ''
+                    : (staffItem?.querySelector('.staff-input')?.value || '').trim();
                 const recurrence = collectRecurrenceFromGroup(classItem);
                 if (classValue || staffValue || recurrence.recurrence_type !== 'daily') {
                     periods.push({
