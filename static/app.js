@@ -257,14 +257,14 @@ function formatScheduleRecurrenceSummary(data) {
     return rangeBits.length ? `${core} (${rangeBits.join(' ')})` : core;
 }
 
-function collectRecurrenceFromGroup(group) {
-    if (!group) return defaultScheduleRecurrence();
-    const typeSelect = group.querySelector('.recurrence-type');
-    const weekdays = Array.from(group.querySelectorAll('.recurrence-weekday:checked')).map((el) => el.value);
-    const monthOrdinal = group.querySelector('.recurrence-month-ordinal')?.value || null;
-    const biweeklyAnchor = group.querySelector('.recurrence-biweekly-anchor')?.value || null;
-    const effectiveStart = group.querySelector('.recurrence-effective-start')?.value || null;
-    const effectiveEnd = group.querySelector('.recurrence-effective-end')?.value || null;
+function collectRecurrenceFromElement(root) {
+    if (!root) return defaultScheduleRecurrence();
+    const typeSelect = root.querySelector('.recurrence-type');
+    const weekdays = Array.from(root.querySelectorAll('.recurrence-weekday:checked')).map((el) => el.value);
+    const monthOrdinal = root.querySelector('.recurrence-month-ordinal')?.value || null;
+    const biweeklyAnchor = root.querySelector('.recurrence-biweekly-anchor')?.value || null;
+    const effectiveStart = root.querySelector('.recurrence-effective-start')?.value || null;
+    const effectiveEnd = root.querySelector('.recurrence-effective-end')?.value || null;
     return normalizeScheduleRecurrence({
         recurrence_type: typeSelect ? typeSelect.value : 'daily',
         weekdays,
@@ -275,31 +275,48 @@ function collectRecurrenceFromGroup(group) {
     });
 }
 
-function updateRecurrenceControlsVisibility(group) {
+function collectRecurrenceFromGroup(group) {
+    if (!group) return defaultScheduleRecurrence();
+    if (group.dataset && group.dataset.recurrence) {
+        try {
+            return normalizeScheduleRecurrence(JSON.parse(group.dataset.recurrence));
+        } catch (e) { /* fall through */ }
+    }
+    return collectRecurrenceFromElement(group);
+}
+
+function setGroupRecurrence(group, recurrence) {
     if (!group) return;
-    const rec = collectRecurrenceFromGroup(group);
-    const weekdaysEl = group.querySelector('.schedule-recurrence-weekdays');
-    const nthEl = group.querySelector('.schedule-recurrence-nth');
-    const biweeklyEl = group.querySelector('.schedule-recurrence-biweekly');
-    const summaryEl = group.querySelector('.schedule-recurrence-summary');
+    const rec = normalizeScheduleRecurrence(recurrence);
+    group.dataset.recurrence = JSON.stringify(rec);
+    const chip = group.querySelector('.schedule-entry-recurrence-chip');
+    if (chip) {
+        const isDefault = rec.recurrence_type === 'daily' && !rec.effective_start && !rec.effective_end;
+        chip.hidden = isDefault;
+        chip.textContent = isDefault ? '' : formatScheduleRecurrenceSummary(rec);
+        chip.title = formatScheduleRecurrenceSummary(rec);
+    }
+}
+
+function updateRecurrenceControlsVisibility(root) {
+    if (!root) return;
+    const rec = collectRecurrenceFromElement(root);
+    const weekdaysEl = root.querySelector('.schedule-recurrence-weekdays');
+    const nthEl = root.querySelector('.schedule-recurrence-nth');
+    const biweeklyEl = root.querySelector('.schedule-recurrence-biweekly');
+    const summaryEl = root.querySelector('.schedule-recurrence-summary');
     if (weekdaysEl) {
         weekdaysEl.hidden = !(rec.recurrence_type === 'weekly' || rec.recurrence_type === 'biweekly' || rec.recurrence_type === 'nth_weekday');
         if (rec.recurrence_type === 'nth_weekday') {
-            // single-select behavior for nth
             const checked = weekdaysEl.querySelectorAll('.recurrence-weekday:checked');
             if (checked.length > 1) {
                 checked.forEach((el, idx) => { if (idx > 0) el.checked = false; });
             }
-            weekdaysEl.querySelectorAll('label').forEach((label) => {
-                const input = label.querySelector('input');
-                label.classList.toggle('is-selected', !!(input && input.checked));
-            });
-        } else {
-            weekdaysEl.querySelectorAll('label').forEach((label) => {
-                const input = label.querySelector('input');
-                label.classList.toggle('is-selected', !!(input && input.checked));
-            });
         }
+        weekdaysEl.querySelectorAll('label').forEach((label) => {
+            const input = label.querySelector('input');
+            label.classList.toggle('is-selected', !!(input && input.checked));
+        });
     }
     if (nthEl) nthEl.hidden = rec.recurrence_type !== 'nth_weekday';
     if (biweeklyEl) biweeklyEl.hidden = rec.recurrence_type !== 'biweekly';
@@ -322,7 +339,7 @@ function buildRecurrenceControlsHtml(recurrence = null) {
     ].map(([v, label]) => `<option value="${v}" ${(rec.month_ordinal || '1') === v ? 'selected' : ''}>${label}</option>`).join('');
     return `
         <div class="schedule-recurrence">
-            <label>Repeats
+            <label class="schedule-recurrence-type-label">Repeats
                 <select class="recurrence-type">
                     <option value="daily" ${rec.recurrence_type === 'daily' ? 'selected' : ''}>Every school day</option>
                     <option value="weekly" ${rec.recurrence_type === 'weekly' ? 'selected' : ''}>Weekly</option>
@@ -348,26 +365,202 @@ function buildRecurrenceControlsHtml(recurrence = null) {
     `;
 }
 
-function wireRecurrenceControls(group) {
-    if (!group) return;
-    const root = group.querySelector('.schedule-recurrence');
-    if (!root || root.dataset.wired === '1') {
-        updateRecurrenceControlsVisibility(group);
+function wireRecurrenceControls(root) {
+    if (!root) return;
+    const recurrenceRoot = root.querySelector('.schedule-recurrence') || (root.classList.contains('schedule-recurrence') ? root : null);
+    if (!recurrenceRoot) return;
+    if (recurrenceRoot.dataset.wired === '1') {
+        updateRecurrenceControlsVisibility(root);
         return;
     }
-    root.dataset.wired = '1';
-    root.addEventListener('change', (e) => {
+    recurrenceRoot.dataset.wired = '1';
+    recurrenceRoot.addEventListener('change', (e) => {
         if (e.target.classList.contains('recurrence-weekday')) {
-            const type = group.querySelector('.recurrence-type')?.value;
+            const type = root.querySelector('.recurrence-type')?.value;
             if (type === 'nth_weekday' && e.target.checked) {
-                group.querySelectorAll('.recurrence-weekday').forEach((el) => {
+                root.querySelectorAll('.recurrence-weekday').forEach((el) => {
                     if (el !== e.target) el.checked = false;
                 });
             }
         }
-        updateRecurrenceControlsVisibility(group);
+        updateRecurrenceControlsVisibility(root);
     });
-    updateRecurrenceControlsVisibility(group);
+    updateRecurrenceControlsVisibility(root);
+}
+
+let scheduleEntryModalContext = null;
+
+function closeAllScheduleEntryKebabMenus(exceptMenu = null) {
+    document.querySelectorAll('.schedule-entry-kebab-menu.open').forEach((menu) => {
+        if (menu !== exceptMenu) menu.classList.remove('open');
+    });
+    document.querySelectorAll('.schedule-entry-kebab-btn[aria-expanded="true"]').forEach((btn) => {
+        if (exceptMenu && btn.nextElementSibling === exceptMenu) return;
+        btn.setAttribute('aria-expanded', 'false');
+    });
+}
+
+if (!window.__scheduleEntryKebabDocClickBound) {
+    window.__scheduleEntryKebabDocClickBound = true;
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.schedule-entry-kebab-wrap')) return;
+        closeAllScheduleEntryKebabMenus();
+    });
+}
+
+function ensureScheduleEntryModal() {
+    let modal = document.getElementById('schedule-entry-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'schedule-entry-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content schedule-entry-modal-content" onclick="event.stopPropagation()">
+            <span class="close" id="schedule-entry-modal-close">&times;</span>
+            <h2 id="schedule-entry-modal-title">Add Class</h2>
+            <p id="schedule-entry-modal-subtitle" class="schedule-entry-modal-subtitle"></p>
+            <div class="schedule-entry-modal-fields">
+                <label class="schedule-entry-modal-field">
+                    <span>Class / Activity</span>
+                    <div class="class-autocomplete-wrapper">
+                        <input type="text" id="schedule-entry-modal-class" class="class-input" placeholder="Enter class/activity" autocomplete="off">
+                        <div class="class-autocomplete-dropdown" id="schedule-entry-modal-class-dropdown"></div>
+                    </div>
+                </label>
+                <label class="schedule-entry-modal-field" id="schedule-entry-modal-staff-wrap">
+                    <span>Staff</span>
+                    <div class="staff-autocomplete-wrapper">
+                        <input type="text" id="schedule-entry-modal-staff" class="staff-input" placeholder="Enter staff name" autocomplete="off">
+                        <div class="staff-autocomplete-dropdown" id="schedule-entry-modal-staff-dropdown"></div>
+                    </div>
+                </label>
+                <div id="schedule-entry-modal-recurrence" class="schedule-entry-modal-recurrence"></div>
+            </div>
+            <div class="schedule-entry-modal-actions">
+                <button type="button" id="schedule-entry-modal-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="schedule-entry-modal-save" class="btn-primary">Add</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeScheduleEntryModal();
+    });
+    document.body.appendChild(modal);
+
+    const closeBtn = modal.querySelector('#schedule-entry-modal-close');
+    const cancelBtn = modal.querySelector('#schedule-entry-modal-cancel');
+    const saveBtn = modal.querySelector('#schedule-entry-modal-save');
+    if (closeBtn) closeBtn.addEventListener('click', closeScheduleEntryModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeScheduleEntryModal);
+    if (saveBtn) saveBtn.addEventListener('click', saveScheduleEntryModal);
+
+    return modal;
+}
+
+function closeScheduleEntryModal() {
+    const modal = document.getElementById('schedule-entry-modal');
+    if (modal) modal.style.display = 'none';
+    scheduleEntryModalContext = null;
+}
+
+function openScheduleEntryModal({
+    mode = 'add',
+    includeStaff = false,
+    container = null,
+    group = null,
+    timePeriod = '',
+} = {}) {
+    closeAllScheduleEntryKebabMenus();
+    const modal = ensureScheduleEntryModal();
+    const title = modal.querySelector('#schedule-entry-modal-title');
+    const subtitle = modal.querySelector('#schedule-entry-modal-subtitle');
+    const staffWrap = modal.querySelector('#schedule-entry-modal-staff-wrap');
+    const classInput = modal.querySelector('#schedule-entry-modal-class');
+    const staffInput = modal.querySelector('#schedule-entry-modal-staff');
+    const recurrenceHost = modal.querySelector('#schedule-entry-modal-recurrence');
+    const saveBtn = modal.querySelector('#schedule-entry-modal-save');
+
+    scheduleEntryModalContext = { mode, includeStaff, container, group, timePeriod };
+
+    if (title) title.textContent = mode === 'edit' ? 'Edit Class' : 'Add Class';
+    if (subtitle) {
+        subtitle.textContent = timePeriod ? `Time: ${timePeriod}` : '';
+        subtitle.hidden = !timePeriod;
+    }
+    if (staffWrap) staffWrap.hidden = !includeStaff;
+    if (saveBtn) saveBtn.textContent = mode === 'edit' ? 'Save' : 'Add';
+
+    let className = '';
+    let staffName = '';
+    let recurrence = defaultScheduleRecurrence();
+    if (mode === 'edit' && group) {
+        className = group.querySelector('.class-input')?.value.trim() || '';
+        staffName = group.querySelector('.staff-input')?.value.trim() || '';
+        recurrence = collectRecurrenceFromGroup(group);
+    }
+
+    if (classInput) classInput.value = className;
+    if (staffInput) {
+        staffInput.value = includeStaff ? staffName : '';
+        staffInput.disabled = !includeStaff;
+    }
+    if (recurrenceHost) {
+        recurrenceHost.innerHTML = buildRecurrenceControlsHtml(recurrence);
+        wireRecurrenceControls(recurrenceHost);
+    }
+
+    if (classInput && !classInput.dataset.autocompleteWired) {
+        classInput.dataset.autocompleteId = 'schedule-entry-modal-class';
+        classInput.dataset.autocompleteWired = '1';
+        setupClassAutocomplete(classInput);
+    }
+    if (staffInput && !staffInput.dataset.autocompleteWired) {
+        staffInput.dataset.autocompleteId = 'schedule-entry-modal-staff';
+        staffInput.dataset.autocompleteWired = '1';
+        setupStaffAutocomplete(staffInput);
+    }
+
+    modal.style.display = 'block';
+    if (classInput) {
+        requestAnimationFrame(() => classInput.focus());
+    }
+}
+
+function saveScheduleEntryModal() {
+    const context = scheduleEntryModalContext;
+    const modal = document.getElementById('schedule-entry-modal');
+    if (!context || !modal) return;
+
+    const classInput = modal.querySelector('#schedule-entry-modal-class');
+    const staffInput = modal.querySelector('#schedule-entry-modal-staff');
+    const recurrenceHost = modal.querySelector('#schedule-entry-modal-recurrence');
+    const className = classInput ? classInput.value.trim() : '';
+    const staffName = context.includeStaff && staffInput ? staffInput.value.trim() : '';
+    const recurrence = collectRecurrenceFromElement(recurrenceHost);
+
+    if (!className && !staffName && recurrence.recurrence_type === 'daily') {
+        if (classInput) classInput.focus();
+        return;
+    }
+
+    if (context.mode === 'edit' && context.group) {
+        const groupClass = context.group.querySelector('.class-input');
+        const groupStaff = context.group.querySelector('.staff-input');
+        if (groupClass) groupClass.value = className;
+        if (groupStaff) groupStaff.value = staffName;
+        setGroupRecurrence(context.group, recurrence);
+    } else if (context.container) {
+        addClassInputGroup(context.container, {
+            className,
+            staffName,
+            recurrence,
+            includeStaff: context.includeStaff,
+        });
+    }
+
+    closeScheduleEntryModal();
+    syncScheduleRowHeights();
 }
 
 function filterScheduleItemsForDate(items, onDate = null) {
@@ -2595,7 +2788,7 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
             `;
             const classesContainer = row.querySelector('.classes-container');
             savedSchedules.forEach((schedule) => {
-                if (schedule.class_name || schedule.recurrence_type) {
+                if (schedule.class_name || schedule.staff_name || (schedule.recurrence_type && schedule.recurrence_type !== 'daily')) {
                     addClassInputGroup(classesContainer, {
                         className: schedule.class_name || '',
                         recurrence: schedule,
@@ -2603,9 +2796,6 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
                     });
                 }
             });
-            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(classesContainer, { includeStaff: false });
-            }
             row.dataset.timePeriod = time;
             setupScheduleRowButtons(row, time, tbody, 'teacher');
             tbody.appendChild(row);
@@ -2651,16 +2841,15 @@ function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentSc
             `;
             const classesContainer = row.querySelector('.classes-container');
             savedSchedules.forEach((schedule) => {
-                addClassInputGroup(classesContainer, {
-                    className: schedule.class_name || '',
-                    staffName: schedule.staff_name || '',
-                    recurrence: schedule,
-                    includeStaff: true,
-                });
+                if (schedule.class_name || schedule.staff_name || (schedule.recurrence_type && schedule.recurrence_type !== 'daily')) {
+                    addClassInputGroup(classesContainer, {
+                        className: schedule.class_name || '',
+                        staffName: schedule.staff_name || '',
+                        recurrence: schedule,
+                        includeStaff: true,
+                    });
+                }
             });
-            if (classesContainer.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(classesContainer, { includeStaff: true });
-            }
             row.dataset.timePeriod = time;
             setupScheduleRowButtons(row, time, tbody, 'student');
             applyStudentScheduleRowOwnership(row, time, studentId);
@@ -14028,8 +14217,14 @@ function updateTeacherScheduleEditability() {
     if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
     if (tbody) {
         tbody.querySelectorAll('input, select, button').forEach((el) => {
-            if (el.classList.contains('btn-add-class') || el.classList.contains('btn-delete-class')) {
+            if (el.classList.contains('btn-add-class') || el.classList.contains('schedule-entry-kebab-btn')
+                || el.classList.contains('schedule-entry-edit-btn') || el.classList.contains('schedule-entry-remove-btn')) {
                 el.style.display = canEdit ? '' : 'none';
+                el.disabled = !canEdit;
+                return;
+            }
+            if (el.classList.contains('class-input') || el.classList.contains('staff-input')) {
+                el.readOnly = true;
                 el.disabled = !canEdit;
                 return;
             }
@@ -14037,6 +14232,9 @@ function updateTeacherScheduleEditability() {
             if (el.tagName === 'INPUT' && (el.type === 'text' || !el.type)) {
                 el.readOnly = !canEdit;
             }
+        });
+        tbody.querySelectorAll('.schedule-entry-kebab-wrap').forEach((el) => {
+            el.style.display = canEdit ? '' : 'none';
         });
     }
 }
@@ -14891,52 +15089,86 @@ function addClassInputGroup(container, options = {}) {
     group.className = 'class-input-group';
     const classUniqueId = `class-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const staffUniqueId = `staff-input-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const isDefaultRecurrence = recurrence.recurrence_type === 'daily'
+        && !recurrence.effective_start
+        && !recurrence.effective_end;
+    const summary = formatScheduleRecurrenceSummary(recurrence);
 
     const staffHtml = includeStaff ? `
         <div class="staff-autocomplete-wrapper">
-            <input type="text" value="${escapeAttr(staffName)}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${staffUniqueId}">
+            <input type="text" value="${escapeAttr(staffName)}" class="staff-input" placeholder="Enter staff name" data-autocomplete-id="${staffUniqueId}" readonly tabindex="-1">
             <div class="staff-autocomplete-dropdown" id="dropdown-${staffUniqueId}"></div>
         </div>
     ` : '';
 
     const classInputHtml = includeStaff ? `
         <div class="class-autocomplete-wrapper">
-            <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}">
+            <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity" data-autocomplete-id="${classUniqueId}" readonly tabindex="-1">
             <div class="class-autocomplete-dropdown" id="dropdown-${classUniqueId}"></div>
         </div>
     ` : `
-        <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity">
+        <input type="text" value="${escapeAttr(className)}" class="class-input" placeholder="Enter class/activity" readonly tabindex="-1">
     `;
 
     group.innerHTML = `
         <div class="schedule-entry-main">
             ${classInputHtml}
             ${staffHtml}
-            <button type="button" class="btn-delete-class" title="Remove this class" style="padding: 4px 8px; font-size: 12px; background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-sm); cursor: pointer; margin-left: 5px;">×</button>
+            <span class="schedule-entry-recurrence-chip" ${isDefaultRecurrence ? 'hidden' : ''} title="${escapeAttr(summary)}">${isDefaultRecurrence ? '' : escapeAttr(summary)}</span>
+            <div class="schedule-entry-kebab-wrap">
+                <button type="button" class="schedule-entry-kebab-btn" title="More options" aria-haspopup="menu" aria-expanded="false">⋯</button>
+                <div class="schedule-entry-kebab-menu" role="menu">
+                    <button type="button" class="schedule-entry-edit-btn" role="menuitem">Edit</button>
+                    <button type="button" class="schedule-entry-remove-btn" role="menuitem">Remove</button>
+                </div>
+            </div>
         </div>
-        ${buildRecurrenceControlsHtml(recurrence)}
     `;
 
-    const deleteBtn = group.querySelector('.btn-delete-class');
-    if (deleteBtn) {
-        deleteBtn.addEventListener('click', () => {
+    setGroupRecurrence(group, recurrence);
+    group.dataset.includeStaff = includeStaff ? '1' : '0';
+
+    const kebabBtn = group.querySelector('.schedule-entry-kebab-btn');
+    const kebabMenu = group.querySelector('.schedule-entry-kebab-menu');
+    const editBtn = group.querySelector('.schedule-entry-edit-btn');
+    const removeBtn = group.querySelector('.schedule-entry-remove-btn');
+
+    if (kebabBtn && kebabMenu) {
+        kebabBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const willOpen = !kebabMenu.classList.contains('open');
+            closeAllScheduleEntryKebabMenus(willOpen ? kebabMenu : null);
+            kebabMenu.classList.toggle('open', willOpen);
+            kebabBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    }
+    if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAllScheduleEntryKebabMenus();
+            const row = group.closest('tr');
+            const timePeriod = row?.querySelector('.time-input')?.value.trim()
+                || row?.dataset.timePeriod
+                || '';
+            openScheduleEntryModal({
+                mode: 'edit',
+                includeStaff,
+                container,
+                group,
+                timePeriod,
+            });
+        });
+    }
+    if (removeBtn) {
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAllScheduleEntryKebabMenus();
             const parent = group.parentElement;
             group.remove();
-            if (parent && parent.querySelectorAll('.class-input-group').length === 0) {
-                addClassInputGroup(parent, { includeStaff });
-            }
             syncScheduleRowHeights();
         });
     }
 
-    if (includeStaff) {
-        const classInput = group.querySelector('.class-input');
-        const staffInput = group.querySelector('.staff-input');
-        if (classInput) setupClassAutocomplete(classInput);
-        if (staffInput) setupStaffAutocomplete(staffInput);
-    }
-
-    wireRecurrenceControls(group);
     container.appendChild(group);
     return group;
 }
@@ -14950,10 +15182,14 @@ function setupScheduleRowButtons(row, timePeriod, tbody, type = 'teacher') {
         addClassBtn.parentNode.replaceChild(newAddClassBtn, addClassBtn);
         newAddClassBtn.addEventListener('click', () => {
             const classesContainer = row.querySelector('.classes-container');
-            if (classesContainer) {
-                addClassInputGroup(classesContainer, { includeStaff });
-                syncScheduleRowHeights();
-            }
+            if (!classesContainer) return;
+            const time = row.querySelector('.time-input')?.value.trim() || timePeriod || '';
+            openScheduleEntryModal({
+                mode: 'add',
+                includeStaff,
+                container: classesContainer,
+                timePeriod: time,
+            });
         });
     }
 }
@@ -14978,15 +15214,13 @@ function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, 
     `;
 
     const classesContainer = row.querySelector('.classes-container');
-    if (data && (data.class_name || data.staff_name || data.recurrence_type)) {
+    if (data && (data.class_name || data.staff_name || (data.recurrence_type && data.recurrence_type !== 'daily'))) {
         addClassInputGroup(classesContainer, {
             className: data.class_name || '',
             staffName: data.staff_name || '',
             recurrence: data,
             includeStaff,
         });
-    } else {
-        addClassInputGroup(classesContainer, { includeStaff });
     }
 
     row.dataset.timePeriod = timePeriod;
@@ -15011,6 +15245,9 @@ function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
         }
         el.disabled = !canEditPeriod;
         if (!canEditPeriod && el.tagName === 'INPUT') el.tabIndex = -1;
+    });
+    row.querySelectorAll('.btn-add-class, .schedule-entry-kebab-wrap').forEach((el) => {
+        el.style.display = canEditPeriod ? '' : 'none';
     });
     const timeCell = row.querySelector('.time-cell');
     if (timeCell) {

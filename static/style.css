@@ -3381,8 +3381,8 @@ table tbody tr:hover {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 6px;
-    padding: 6px 0;
+    gap: 4px;
+    padding: 4px 0;
     border-bottom: 1px solid var(--border);
 }
 
@@ -3393,31 +3393,150 @@ table tbody tr:hover {
 .schedule-entry-main {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     flex-wrap: wrap;
 }
 
 .class-input-group .class-input,
 .class-input-group .staff-input {
     flex: 1;
-    min-width: 120px;
+    min-width: 110px;
+    background: var(--bg-page);
+    cursor: default;
 }
 
 .class-input-group .class-autocomplete-wrapper,
 .class-input-group .staff-autocomplete-wrapper {
     flex: 1;
-    min-width: 120px;
+    min-width: 110px;
 }
 
-.class-input-group .btn-delete-class {
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    padding: 0;
+.schedule-entry-recurrence-chip {
+    flex: 0 1 auto;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+}
+
+.schedule-entry-kebab-wrap {
+    position: relative;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.schedule-entry-kebab-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.schedule-entry-kebab-btn:hover,
+.schedule-entry-kebab-btn:focus {
+    background: #f1f5f9;
+    outline: none;
+}
+
+.schedule-entry-kebab-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 40;
+    min-width: 120px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+}
+
+.schedule-entry-kebab-menu.open {
+    display: block;
+}
+
+.schedule-entry-kebab-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.schedule-entry-kebab-menu button:hover {
+    background: var(--bg-page);
+}
+
+.schedule-entry-kebab-menu .schedule-entry-remove-btn {
+    color: var(--danger);
+}
+
+.schedule-entry-modal-content {
+    max-width: 520px;
+}
+
+.schedule-entry-modal-subtitle {
+    margin: -0.5rem 0 1rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.schedule-entry-modal-fields {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+
+.schedule-entry-modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.schedule-entry-modal-field input {
+    font-weight: 400;
+    color: var(--text-primary);
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+}
+
+.schedule-entry-modal-recurrence .schedule-recurrence {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-page);
+}
+
+.schedule-entry-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
 }
 
 .schedule-recurrence {
@@ -3438,6 +3557,13 @@ table tbody tr:hover {
     background: var(--bg-surface);
     color: var(--text-primary);
     max-width: 100%;
+}
+
+.schedule-recurrence-type-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-weight: 600;
 }
 
 .schedule-recurrence-weekdays {
@@ -3491,21 +3617,6 @@ table tbody tr:hover {
 
 .student-schedule-table .classes-cell {
     width: auto !important;
-}
-
-.class-input-group .btn-delete-class {
-    line-height: 1;
-    background: transparent;
-    border: 1px solid var(--danger);
-    color: var(--danger);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.class-input-group .btn-delete-class:hover {
-    background: var(--danger);
-    color: #fff;
 }
 
 .schedule-table .delete-period-btn {
