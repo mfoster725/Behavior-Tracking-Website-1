@@ -7567,17 +7567,6 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
     }
 
     const attendance = attendanceData[currentDate]?.[studentId] || 'present';
-    let payloadStar = 0;
-    let payloadNullStarKeys = 0;
-    (periods || []).forEach((period) => {
-        ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'].forEach((key) => {
-            if (period[key] === null || period[key] === '' || period[key] === undefined) payloadNullStarKeys += 1;
-            else payloadStar += 1;
-        });
-    });
-    // #region agent log
-    fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'D',location:'app.js:submitStudentPointCard',message:'browser submit payload STAR',data:{studentId,date:currentDate,silent,periodCount:periods.length,payloadStar,payloadNullStarKeys,attendance},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const abortController = new AbortController();
     const timeoutId = setTimeout(function () {
         abortController.abort();
@@ -7649,10 +7638,6 @@ async function autoSubmitPointCardsIfDue() {
     if (dailyIds.length === 0 && periodIds.length === 0) {
         return;
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'D',location:'app.js:autoSubmitPointCardsIfDue',message:'browser nightly submit starting',data:{currentDate,dailyIds,periodIds,dailyDataCount:Object.keys(dailyData||{}).length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
 
     pointCardAutoSubmitInFlight = true;
     let submittedCount = 0;
@@ -9811,46 +9796,6 @@ async function loadPointCardData(studentIdOverride) {
         const response = await fetch(`/api/daily-records?student_id=${studentId}`);
         const allRecords = await response.json();
         if (loadToken !== pastPointCardsLoadToken) return;
-
-        const todayUtc = new Date().toISOString().split('T')[0];
-        const _local = new Date();
-        const todayLocal = `${_local.getFullYear()}-${String(_local.getMonth() + 1).padStart(2, '0')}-${String(_local.getDate()).padStart(2, '0')}`;
-        const busTimes = new Set(['AM Bus', 'PM Bus']);
-        const summarizeRecord = (record) => {
-            const periods = Array.isArray(record && record.periods) ? record.periods : [];
-            let starCells = 0;
-            let infoRows = 0;
-            let nonBusStar = 0;
-            let nonBusRows = 0;
-            periods.forEach((period) => {
-                const vals = [period.safety_points, period.teamwork_points, period.accountability_points, period.relationships_points];
-                const filled = vals.filter((v) => normalizeStarValue(v) !== null).length;
-                starCells += filled;
-                const tr = String(period.time_range || '').trim();
-                if (!busTimes.has(tr)) {
-                    nonBusRows += 1;
-                    nonBusStar += filled;
-                }
-                if (period.info && String(period.info).trim() && String(period.info).trim() !== '{}') infoRows += 1;
-            });
-            return {
-                date: record.date,
-                submitted: !!record.submitted,
-                attendance: record.attendance_status || (record.present === false ? 'unexcused' : 'present'),
-                periodCount: periods.length,
-                starCells,
-                infoRows,
-                nonBusStar,
-                nonBusRows,
-                passesFilter: isSubmittedPointCardRecord(record),
-                dateGteTodayUtc: !!(record && record.date && record.date >= todayUtc)
-            };
-        };
-        const summaries = (allRecords || []).map(summarizeRecord);
-        const filteredSummaries = summaries.filter((s) => s.passesFilter);
-        // #region agent log
-        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'A',location:'app.js:loadPointCardData',message:'past cards API vs filter',data:{studentId,todayUtc,todayLocal,total:summaries.length,filtered:filteredSummaries.length,recent:summaries.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
 
         const records = (allRecords || []).filter(isSubmittedPointCardRecord);
 
