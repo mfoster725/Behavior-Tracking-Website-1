@@ -311,16 +311,25 @@ function escapeScheduleAttr(value) {
         .replace(/>/g, '&gt;');
 }
 
+function scheduleRowIncludesStaff(row) {
+    if (!row) return true;
+    if (row.dataset.scheduleKind === 'teacher') return false;
+    if (row.dataset.scheduleKind === 'student') return true;
+    return !!row.querySelector('.staff-stack');
+}
+
 function addScheduleEntry(row, options = {}) {
     if (!row) return null;
+    const includeStaff = scheduleRowIncludesStaff(row);
     const className = options.className || '';
-    const staffName = options.staffName || '';
+    const staffName = includeStaff ? (options.staffName || '') : '';
     const recurrence = normalizeScheduleRecurrence(options.recurrence);
     const entryId = options.entryId || newScheduleEntryId();
     const classesStack = row.querySelector('.classes-stack');
     const staffStack = row.querySelector('.staff-stack');
     const actionsStack = row.querySelector('.actions-stack');
-    if (!classesStack || !staffStack || !actionsStack) return null;
+    if (!classesStack || !actionsStack) return null;
+    if (includeStaff && !staffStack) return null;
 
     const isDefaultRecurrence = recurrence.recurrence_type === 'daily'
         && !recurrence.effective_start
@@ -336,13 +345,17 @@ function addScheduleEntry(row, options = {}) {
     `;
     setGroupRecurrence(classItem, recurrence);
 
-    const staffItem = document.createElement('div');
-    staffItem.className = 'schedule-entry-item schedule-entry-staff-item';
-    staffItem.dataset.entryId = entryId;
-    staffItem.innerHTML = `
-        <input type="text" value="${escapeScheduleAttr(staffName)}" class="staff-input" placeholder="—" readonly tabindex="-1">
-    `;
+    let staffItem = null;
+    if (includeStaff) {
+        staffItem = document.createElement('div');
+        staffItem.className = 'schedule-entry-item schedule-entry-staff-item';
+        staffItem.dataset.entryId = entryId;
+        staffItem.innerHTML = `
+            <input type="text" value="${escapeScheduleAttr(staffName)}" class="staff-input" placeholder="—" readonly tabindex="-1">
+        `;
+    }
 
+    const editLabel = includeStaff ? 'Edit Class / Staff' : 'Edit Class';
     const actionsItem = document.createElement('div');
     actionsItem.className = 'schedule-entry-item schedule-entry-actions-item';
     actionsItem.dataset.entryId = entryId;
@@ -351,7 +364,7 @@ function addScheduleEntry(row, options = {}) {
             <button type="button" class="schedule-entry-kebab-btn" title="More options" aria-haspopup="menu" aria-expanded="false" aria-label="Entry actions">⋮</button>
             <div class="schedule-entry-kebab-menu" role="menu">
                 <button type="button" class="schedule-entry-add-btn" role="menuitem">Add Class</button>
-                <button type="button" class="schedule-entry-edit-btn" role="menuitem">Edit Class / Staff</button>
+                <button type="button" class="schedule-entry-edit-btn" role="menuitem">${editLabel}</button>
                 <button type="button" class="schedule-entry-remove-btn" role="menuitem">Remove Class</button>
             </div>
         </div>
@@ -405,9 +418,8 @@ function addScheduleEntry(row, options = {}) {
     }
 
     classesStack.appendChild(classItem);
-    staffStack.appendChild(staffItem);
+    if (staffItem && staffStack) staffStack.appendChild(staffItem);
     actionsStack.appendChild(actionsItem);
-    // Remove empty-period placeholder kebab once a real entry exists
     actionsStack.querySelectorAll('.schedule-period-add-item').forEach((el) => el.remove());
     return entryId;
 }
@@ -498,7 +510,12 @@ function addClassInputGroup(container, options = {}) {
     return addScheduleEntry(row, options);
 }
 
-function buildSchedulePeriodRowHtml(timePeriod) {
+function buildSchedulePeriodRowHtml(timePeriod, { includeStaff = true } = {}) {
+    const staffCell = includeStaff ? `
+        <td class="staff-cell">
+            <div class="schedule-entry-stack staff-stack"></div>
+        </td>
+    ` : '';
     return `
         <td class="time-cell">
             <input type="text" value="${escapeScheduleAttr(timePeriod)}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
@@ -506,9 +523,7 @@ function buildSchedulePeriodRowHtml(timePeriod) {
         <td class="classes-cell">
             <div class="schedule-entry-stack classes-stack"></div>
         </td>
-        <td class="staff-cell">
-            <div class="schedule-entry-stack staff-stack"></div>
-        </td>
+        ${staffCell}
         <td class="actions-cell">
             <div class="schedule-entry-stack actions-stack"></div>
         </td>
@@ -523,14 +538,16 @@ function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, 
     const tbody = targetTbody || document.getElementById(`${type}-schedule-body`);
     if (!tbody) return;
 
+    const includeStaff = type === 'student';
     const row = document.createElement('tr');
-    row.innerHTML = buildSchedulePeriodRowHtml(timePeriod);
+    row.dataset.scheduleKind = type === 'teacher' ? 'teacher' : 'student';
+    row.innerHTML = buildSchedulePeriodRowHtml(timePeriod, { includeStaff });
     row.dataset.timePeriod = timePeriod;
 
     if (data && (data.class_name || data.staff_name || (data.recurrence_type && data.recurrence_type !== 'daily'))) {
         addScheduleEntry(row, {
             className: data.class_name || '',
-            staffName: data.staff_name || '',
+            staffName: includeStaff ? (data.staff_name || '') : '',
             recurrence: data,
         });
     }
@@ -729,6 +746,12 @@ function addScheduleModalValueRow(kind, value = '', { focus = false } = {}) {
     );
     if (!list) return null;
 
+    const defaultValue = value != null && value !== ''
+        ? value
+        : (kind === 'staff' && scheduleEntryModalContext?.includeStaff
+            ? getSignedInEditorName()
+            : '');
+
     const row = document.createElement('div');
     row.className = 'schedule-entry-modal-value-row';
     const uniqueId = `schedule-modal-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -753,7 +776,7 @@ function addScheduleModalValueRow(kind, value = '', { focus = false } = {}) {
     }
 
     const input = row.querySelector('input');
-    if (input) input.value = value || '';
+    if (input) input.value = defaultValue || '';
     const addBtn = row.querySelector('.btn-schedule-field-add');
     const removeBtn = row.querySelector('.btn-schedule-field-remove');
     if (addBtn) {
@@ -765,7 +788,11 @@ function addScheduleModalValueRow(kind, value = '', { focus = false } = {}) {
         removeBtn.addEventListener('click', () => {
             const rows = list.querySelectorAll('.schedule-entry-modal-value-row');
             if (rows.length <= 1) {
-                if (input) input.value = '';
+                if (input) {
+                    input.value = kind === 'staff' && scheduleEntryModalContext?.includeStaff
+                        ? getSignedInEditorName()
+                        : '';
+                }
                 return;
             }
             row.remove();
@@ -790,7 +817,11 @@ function resetScheduleModalValueLists({ classNames = [''], staffNames = [''] } =
     if (classList) classList.innerHTML = '';
     if (staffList) staffList.innerHTML = '';
     (classNames.length ? classNames : ['']).forEach((name) => addScheduleModalValueRow('class', name));
-    (staffNames.length ? staffNames : ['']).forEach((name) => addScheduleModalValueRow('staff', name));
+    if (scheduleEntryModalContext?.includeStaff) {
+        (staffNames.length ? staffNames : [getSignedInEditorName()]).forEach((name) => {
+            addScheduleModalValueRow('staff', name);
+        });
+    }
 }
 
 function collectScheduleModalValues(kind) {
@@ -806,7 +837,7 @@ function collectScheduleModalValues(kind) {
 
 function openScheduleEntryModal({
     mode = 'add',
-    includeStaff = true,
+    includeStaff = null,
     row = null,
     entryId = null,
     timePeriod = '',
@@ -821,30 +852,48 @@ function openScheduleEntryModal({
     const topAddClass = modal.querySelector('#schedule-entry-modal-add-class');
     const topAddStaff = modal.querySelector('#schedule-entry-modal-add-staff');
 
-    scheduleEntryModalContext = { mode, includeStaff: true, row, entryId, timePeriod };
+    const resolvedIncludeStaff = includeStaff == null
+        ? scheduleRowIncludesStaff(row)
+        : !!includeStaff;
+
+    scheduleEntryModalContext = {
+        mode,
+        includeStaff: resolvedIncludeStaff,
+        row,
+        entryId,
+        timePeriod,
+    };
 
     if (title) title.textContent = mode === 'edit' ? 'Edit Class' : 'Add Class';
     if (subtitle) {
         subtitle.textContent = timePeriod ? `Time: ${timePeriod}` : '';
         subtitle.hidden = !timePeriod;
     }
-    if (staffWrap) staffWrap.hidden = false;
-    if (topAddClass) topAddClass.hidden = true; // per-row + buttons handle this
+    if (staffWrap) staffWrap.hidden = !resolvedIncludeStaff;
+    if (topAddClass) topAddClass.hidden = true;
     if (topAddStaff) topAddStaff.hidden = true;
     if (saveBtn) saveBtn.textContent = mode === 'edit' ? 'Save' : 'Add';
 
     let classNames = [''];
-    let staffNames = [''];
+    let staffNames = resolvedIncludeStaff ? [getSignedInEditorName()] : [''];
     let recurrence = defaultScheduleRecurrence();
     if (mode === 'edit' && row && entryId) {
         const classItem = row.querySelector(`.classes-stack .schedule-entry-item[data-entry-id="${entryId}"]`);
         const staffItem = row.querySelector(`.staff-stack .schedule-entry-item[data-entry-id="${entryId}"]`);
         classNames = [(classItem?.querySelector('.class-input')?.value || '').trim()];
-        staffNames = [(staffItem?.querySelector('.staff-input')?.value || '').trim()];
+        if (resolvedIncludeStaff) {
+            const existingStaff = (staffItem?.querySelector('.staff-input')?.value || '').trim();
+            staffNames = [existingStaff || getSignedInEditorName()];
+        } else {
+            staffNames = [''];
+        }
         recurrence = collectRecurrenceFromGroup(classItem);
     }
 
-    resetScheduleModalValueLists({ classNames, staffNames });
+    resetScheduleModalValueLists({
+        classNames,
+        staffNames: resolvedIncludeStaff ? staffNames : [''],
+    });
     if (recurrenceHost) {
         recurrenceHost.innerHTML = buildRecurrenceControlsHtml(recurrence);
         wireRecurrenceControls(recurrenceHost);
@@ -863,7 +912,7 @@ function saveScheduleEntryModal() {
     if (!context || !modal || !context.row) return;
 
     const classNames = collectScheduleModalValues('class');
-    const staffNames = collectScheduleModalValues('staff');
+    const staffNames = context.includeStaff ? collectScheduleModalValues('staff') : [];
     const recurrenceHost = modal.querySelector('#schedule-entry-modal-recurrence');
     const recurrence = collectRecurrenceFromElement(recurrenceHost);
 
@@ -874,8 +923,12 @@ function saveScheduleEntryModal() {
     }
 
     const pairs = [];
-    if (!classNames.length && !staffNames.length) {
-        pairs.push({ className: '', staffName: '' });
+    if (!context.includeStaff) {
+        (classNames.length ? classNames : ['']).forEach((className) => {
+            pairs.push({ className, staffName: '' });
+        });
+    } else if (!classNames.length && !staffNames.length) {
+        pairs.push({ className: '', staffName: getSignedInEditorName() });
     } else if (classNames.length && staffNames.length) {
         for (let i = 0; i < Math.max(classNames.length, staffNames.length); i++) {
             pairs.push({
@@ -884,7 +937,10 @@ function saveScheduleEntryModal() {
             });
         }
     } else if (classNames.length) {
-        classNames.forEach((className) => pairs.push({ className, staffName: '' }));
+        classNames.forEach((className) => pairs.push({
+            className,
+            staffName: getSignedInEditorName(),
+        }));
     } else {
         staffNames.forEach((staffName) => pairs.push({ className: '', staffName }));
     }
@@ -3140,12 +3196,13 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
         const savedSchedules = schedulesByTime[time] || [];
         if (savedSchedules.length > 0) {
             const row = document.createElement('tr');
-            row.innerHTML = buildSchedulePeriodRowHtml(time);
+            row.dataset.scheduleKind = 'teacher';
+            row.innerHTML = buildSchedulePeriodRowHtml(time, { includeStaff: false });
             savedSchedules.forEach((schedule) => {
-                if (schedule.class_name || schedule.staff_name || (schedule.recurrence_type && schedule.recurrence_type !== 'daily')) {
+                if (schedule.class_name || (schedule.recurrence_type && schedule.recurrence_type !== 'daily')) {
                     addScheduleEntry(row, {
                         className: schedule.class_name || '',
-                        staffName: schedule.staff_name || '',
+                        staffName: '',
                         recurrence: schedule,
                     });
                 }
@@ -3182,7 +3239,8 @@ function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentSc
         }
         if (savedSchedules.length > 0) {
             const row = document.createElement('tr');
-            row.innerHTML = buildSchedulePeriodRowHtml(time);
+            row.dataset.scheduleKind = 'student';
+            row.innerHTML = buildSchedulePeriodRowHtml(time, { includeStaff: true });
             savedSchedules.forEach((schedule) => {
                 if (schedule.class_name || schedule.staff_name || (schedule.recurrence_type && schedule.recurrence_type !== 'daily')) {
                     addScheduleEntry(row, {
@@ -3230,7 +3288,6 @@ async function openPointCardScheduleEditModal({ type, studentId = null, studentN
             <tr>
                 <th>Time</th>
                 <th>Class</th>
-                <th>Staff</th>
                 <th class="schedule-actions-col"></th>
             </tr>
         `;
