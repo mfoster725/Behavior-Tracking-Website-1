@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=attendance-lock2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=support-team-ui1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <!-- jsPDF library for PDF generation -->
@@ -1374,22 +1374,18 @@
                     <div class="form-group">
                         <label>Case Manager:</label>
                         <div id="case-manager-container" class="team-member-container"></div>
-                        <button type="button" id="add-case-manager-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Case Manager</button>
                     </div>
                     <div class="form-group">
                         <label>Practitioner:</label>
                         <div id="practitioner-container" class="team-member-container"></div>
-                        <button type="button" id="add-practitioner-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Practitioner</button>
                     </div>
                     <div class="form-group">
                         <label>Professional:</label>
                         <div id="professional-container" class="team-member-container"></div>
-                        <button type="button" id="add-professional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Professional</button>
                     </div>
                     <div class="form-group">
                         <label>Group Leader:</label>
                         <div id="group-leader-container" class="team-member-container"></div>
-                        <button type="button" id="add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
                     </div>
                 </div>
             </div>
@@ -1652,22 +1648,18 @@
                     <div class="form-group">
                         <label>Case Manager:</label>
                         <div id="edit-case-manager-container" class="team-member-container"></div>
-                        <button type="button" id="edit-add-case-manager-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Case Manager</button>
                     </div>
                     <div class="form-group">
                         <label>Practitioner:</label>
                         <div id="edit-practitioner-container" class="team-member-container"></div>
-                        <button type="button" id="edit-add-practitioner-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Practitioner</button>
                     </div>
                     <div class="form-group">
                         <label>Professional:</label>
                         <div id="edit-professional-container" class="team-member-container"></div>
-                        <button type="button" id="edit-add-professional-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Professional</button>
                     </div>
                     <div class="form-group">
                         <label>Group Leader:</label>
                         <div id="edit-group-leader-container" class="team-member-container"></div>
-                        <button type="button" id="edit-add-group-leader-btn" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12px;">Add Group Leader</button>
                     </div>
                 </div>
                 
@@ -2348,7 +2340,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=pc-star-submit2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=support-team-ui1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

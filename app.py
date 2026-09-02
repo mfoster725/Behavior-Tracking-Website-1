@@ -11099,19 +11099,51 @@ def _parse_student_team_members(row):
 
 
 def _resolve_student_team_members(members, staff_users, warnings, student_label):
-    """Replace CSV team names with the matched staff user's full name when unique."""
+    """Replace CSV team names with the matched staff user's username when unique.
+
+    Usernames are the canonical identifier used by support-team dropdowns in
+    Add/Edit Student; storing display names breaks pre-selection on edit.
+    """
     resolved = []
     for role_name, member_name in members:
         pool = _staff_pool_for_team_role(staff_users, role_name)
         matches = _best_import_name_matches(member_name, pool)
         if len(matches) == 1:
-            resolved.append((role_name, matches[0].name))
+            resolved.append((role_name, matches[0].username or matches[0].name))
         else:
             warnings.append(
                 f"{student_label}: {_unresolved_staff_name_message(member_name, matches, role_name)}"
             )
             resolved.append((role_name, member_name))
     return resolved
+
+
+def _resolve_team_member_to_username(name_or_username, staff_by_username=None, staff_by_name=None):
+    """Map a team_members.name value (username or display name) to a staff username."""
+    value = (name_or_username or '').strip()
+    if not value:
+        return value
+    if staff_by_username is None or staff_by_name is None:
+        staff_users = User.query.filter_by(role='staff').all()
+        staff_by_username = {}
+        staff_by_name = {}
+        for u in staff_users:
+            if u.username:
+                staff_by_username[u.username.lower()] = u.username
+            if u.name and str(u.name).strip():
+                key = str(u.name).strip().lower()
+                # Ambiguous display names must not resolve
+                if key in staff_by_name:
+                    staff_by_name[key] = None
+                else:
+                    staff_by_name[key] = u.username
+    key = value.lower()
+    if key in staff_by_username:
+        return staff_by_username[key]
+    mapped = staff_by_name.get(key)
+    if mapped:
+        return mapped
+    return value
 
 
 def _sync_student_team_members(student_id, members, existing=None):
@@ -13289,11 +13321,31 @@ def team_members(student_id):
             'group_leader': [],
             'paraprofessional': []
         }
+
+        # Normalize stored name/username values to usernames so edit dropdowns pre-select
+        staff_users = User.query.filter_by(role='staff').all()
+        staff_by_username = {}
+        staff_by_name = {}
+        for u in staff_users:
+            if u.username:
+                staff_by_username[u.username.lower()] = u.username
+            if u.name and str(u.name).strip():
+                key = str(u.name).strip().lower()
+                if key in staff_by_name:
+                    staff_by_name[key] = None
+                else:
+                    staff_by_name[key] = u.username
         
         for tm in team_members:
             role_key = tm.role.lower().replace(' ', '_')
-            if role_key in result:
-                result[role_key].append(tm.name)
+            if role_key in result and tm.name:
+                result[role_key].append(
+                    _resolve_team_member_to_username(
+                        tm.name,
+                        staff_by_username=staff_by_username,
+                        staff_by_name=staff_by_name,
+                    )
+                )
         
         return jsonify(result)
     

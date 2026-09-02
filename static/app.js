@@ -16844,10 +16844,14 @@ function createStudentRow(user) {
     const name = user.name || user.student_name || user.username;
     const grade = user.grade || '-';
     
-    // Helper function to get staff name by username
+    // Helper function to get staff name by username or display name
     const getStaffNameByUsername = (username) => {
         if (!username || username === '-') return null;
-        const staff = allStaffMembers.find(s => s.username === username);
+        const staff = allStaffMembers.find(s =>
+            s.username === username ||
+            (s.username && s.username.toLowerCase() === String(username).toLowerCase()) ||
+            (s.name && s.name.trim().toLowerCase() === String(username).toLowerCase())
+        );
         return staff ? (staff.name || staff.username) : username;
     };
     
@@ -17428,23 +17432,27 @@ async function addParentStudent(parentId) {
     }
 }
 
-// Function to create a new team member row (similar to createInfractionRow)
+// Function to create a new team member row (similar to schedule modal value rows)
 function createTeamMemberRow(containerId, selectedUsername = '', roles = []) {
     const row = document.createElement('div');
     row.className = 'form-group team-member-group';
     row.style.display = 'flex';
     row.style.alignItems = 'center';
-    row.style.gap = '10px';
+    row.style.gap = '8px';
     row.style.marginBottom = '10px';
     
     const select = document.createElement('select');
     select.className = 'team-member-select';
     select.style.flex = '1';
+    select.style.minWidth = '0';
     
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
     defaultOption.textContent = 'Select Team Member';
     select.appendChild(defaultOption);
+
+    const selectedValue = (selectedUsername || '').trim();
+    const selectedLower = selectedValue.toLowerCase();
     
     // Add staff members who match the role requirements
     allStaffMembers.forEach(staff => {
@@ -17477,24 +17485,61 @@ function createTeamMemberRow(containerId, selectedUsername = '', roles = []) {
             option.value = staff.username;
             const designationText = staff.designation ? ` (${staff.designation})` : ' (No designation)';
             option.textContent = `${staffName}${designationText}`;
-            if (staff.username === selectedUsername) {
+            // Match username (canonical) or display name (legacy CSV imports)
+            const matchesSelected = selectedValue && (
+                staff.username === selectedValue ||
+                (staff.username && staff.username.toLowerCase() === selectedLower) ||
+                (staff.name && staff.name.trim().toLowerCase() === selectedLower)
+            );
+            if (matchesSelected) {
                 option.selected = true;
             }
             select.appendChild(option);
         }
     });
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn-schedule-field-add';
+    addBtn.title = 'Add another';
+    addBtn.textContent = '+';
+    addBtn.addEventListener('click', () => {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const newRow = createTeamMemberRow(containerId, '', roles);
+        // Insert after this row so consecutive adds stay grouped
+        if (row.nextSibling) {
+            container.insertBefore(newRow, row.nextSibling);
+        } else {
+            container.appendChild(newRow);
+        }
+        const newSelect = newRow.querySelector('.team-member-select');
+        if (newSelect) {
+            requestAnimationFrame(() => newSelect.focus());
+        }
+    });
     
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.className = 'delete-btn';
-    removeBtn.textContent = '×';
-    removeBtn.style.padding = '4px 8px';
-    removeBtn.style.fontSize = '14px';
-    removeBtn.onclick = function() {
+    removeBtn.className = 'btn-schedule-field-remove';
+    removeBtn.title = 'Remove';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            row.remove();
+            return;
+        }
+        const rows = container.querySelectorAll('.team-member-group');
+        if (rows.length <= 1) {
+            select.value = '';
+            return;
+        }
         row.remove();
-    };
+    });
     
     row.appendChild(select);
+    row.appendChild(addBtn);
     row.appendChild(removeBtn);
     
     return row;
@@ -17537,58 +17582,9 @@ function populateTeamMemberRows(containerId, usernames, roles) {
     });
 }
 
-// Set up team member add buttons (for both add and edit modals)
+// Set up team member add buttons (legacy no-op; + is now on each row)
 function setupTeamMemberButtons() {
-    // Add Student modal buttons
-    const addButtons = [
-        { id: 'add-case-manager-btn', container: 'case-manager-container', roles: ['case_manager', 'teacher'] },
-        { id: 'add-practitioner-btn', container: 'practitioner-container', roles: ['practitioner'] },
-        { id: 'add-professional-btn', container: 'professional-container', roles: ['professional'] },
-        { id: 'add-group-leader-btn', container: 'group-leader-container', roles: ['group_leader'] }
-    ];
-    
-    addButtons.forEach(config => {
-        const btn = document.getElementById(config.id);
-        if (btn) {
-            // Remove old listeners by replacing button
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            newBtn.addEventListener('click', function() {
-                const container = document.getElementById(config.container);
-                if (container) {
-                    const row = createTeamMemberRow(config.container, '', config.roles);
-                    container.appendChild(row);
-                }
-            });
-        }
-    });
-    
-    // Edit User modal buttons
-    const editButtons = [
-        { id: 'edit-add-case-manager-btn', container: 'edit-case-manager-container', roles: ['case_manager', 'teacher'] },
-        { id: 'edit-add-practitioner-btn', container: 'edit-practitioner-container', roles: ['practitioner'] },
-        { id: 'edit-add-professional-btn', container: 'edit-professional-container', roles: ['professional'] },
-        { id: 'edit-add-group-leader-btn', container: 'edit-group-leader-container', roles: ['group_leader'] },
-        { id: 'edit-add-paraprofessional-btn', container: 'edit-paraprofessional-container', roles: ['paraprofessional'] }
-    ];
-    
-    editButtons.forEach(config => {
-        const btn = document.getElementById(config.id);
-        if (btn) {
-            // Remove old listeners by replacing button
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            newBtn.addEventListener('click', function() {
-                const container = document.getElementById(config.container);
-                if (container) {
-                    const row = createTeamMemberRow(config.container, '', config.roles);
-                    container.appendChild(row);
-                }
-            });
-        }
-    });
+    // Rows carry their own + / × controls (see createTeamMemberRow).
 }
 
 async function populateStaffDropdowns() {

@@ -4213,15 +4213,21 @@ table tbody tr:hover {
 .team-member-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0.4rem;
 }
 
 .team-member-group .team-member-select {
     flex: 1 1 auto;
     min-width: 0;
+    width: auto;
 }
 
-/* Override generic delete button styles for team member rows */
+.team-member-group .btn-schedule-field-add,
+.team-member-group .btn-schedule-field-remove {
+    flex: 0 0 auto;
+}
+
+/* Override generic delete button styles for team member rows (legacy) */
 .team-member-group .delete-btn {
     position: static;
     top: auto;
