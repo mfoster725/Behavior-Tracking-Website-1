@@ -1344,8 +1344,40 @@ def schedule_entry_applies_on_date(entry, on_date=None):
     return True
 
 
+def _schedule_row_recurrence_type(row):
+    if isinstance(row, dict):
+        return (row.get('recurrence_type') or 'daily').strip().lower() or 'daily'
+    return (getattr(row, 'recurrence_type', None) or 'daily').strip().lower() or 'daily'
+
+
+def _schedule_row_time_period(row):
+    if isinstance(row, dict):
+        return (row.get('time_period') or '').strip()
+    return (getattr(row, 'time_period', None) or '').strip()
+
+
+def _apply_schedule_recurrence_override(rows):
+    """If a period has any non-daily entry, those override daily entries for display."""
+    by_period = {}
+    order = []
+    for row in rows or []:
+        period = _schedule_row_time_period(row)
+        if period not in by_period:
+            by_period[period] = []
+            order.append(period)
+        by_period[period].append(row)
+
+    result = []
+    for period in order:
+        items = by_period[period]
+        specific = [row for row in items if _schedule_row_recurrence_type(row) != 'daily']
+        result.extend(specific if specific else items)
+    return result
+
+
 def _filter_schedule_rows_for_date(rows, on_date=None):
-    return [row for row in (rows or []) if schedule_entry_applies_on_date(row, on_date)]
+    applicable = [row for row in (rows or []) if schedule_entry_applies_on_date(row, on_date)]
+    return _apply_schedule_recurrence_override(applicable)
 
 
 def _normalize_period_recurrence(period):
@@ -1654,7 +1686,27 @@ def _expand_serialized_point_card_periods(periods, include_details=True):
             continue
         time_range = (period.get('time_range') or '').strip()
         if time_range in standard_times:
-            by_time.setdefault(time_range, period)
+            prev = by_time.get(time_range)
+            if prev is None:
+                by_time[time_range] = period
+            else:
+                prev_filled, _ = _agent_star_filled_count(prev)
+                new_filled, _ = _agent_star_filled_count(period)
+                if new_filled > prev_filled:
+                    # #region agent log
+                    _agent_debug_log(
+                        'app.py:_expand_serialized_point_card_periods',
+                        'duplicate time_range first-wins dropped filled row',
+                        {
+                            'time_range': time_range,
+                            'kept_filled': prev_filled,
+                            'dropped_filled': new_filled,
+                            'kept_id': prev.get('id') if isinstance(prev, dict) else None,
+                            'dropped_id': period.get('id'),
+                        },
+                        'C',
+                    )
+                    # #endregion
         else:
             extras.append(period)
     expanded = []
@@ -1670,6 +1722,49 @@ def _expand_serialized_point_card_periods(periods, include_details=True):
         if time_range or location:
             expanded.append(period)
     return expanded
+
+
+def _agent_debug_log(location, message, data, hypothesis_id):
+    # #region agent log
+    try:
+        _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug-1e0e8e.log')
+        with open(_log_path, 'a', encoding='utf-8') as _f:
+            _f.write(json.dumps({
+                'sessionId': '1e0e8e',
+                'runId': 'pre-fix',
+                'hypothesisId': hypothesis_id,
+                'location': location,
+                'message': message,
+                'data': data,
+                'timestamp': int(datetime.now().timestamp() * 1000),
+            }, default=str) + '\n')
+    except Exception:
+        pass
+    # #endregion
+
+
+def _agent_star_filled_count(period):
+    if period is None:
+        return 0, False
+    if isinstance(period, dict):
+        vals = [
+            period.get('safety_points'),
+            period.get('teamwork_points'),
+            period.get('accountability_points'),
+            period.get('relationships_points'),
+        ]
+        info = period.get('info') or ''
+    else:
+        vals = [
+            getattr(period, 'safety_points', None),
+            getattr(period, 'teamwork_points', None),
+            getattr(period, 'accountability_points', None),
+            getattr(period, 'relationships_points', None),
+        ]
+        info = getattr(period, 'info', None) or ''
+    filled = sum(1 for v in vals if v not in (None, ''))
+    has_info = bool(str(info).strip() and str(info).strip() not in ('{}', 'null'))
+    return filled, has_info
 
 
 def _ensure_full_point_card_periods(daily_record):
@@ -1742,13 +1837,16 @@ def _sync_period_flags_from_info(period_record, info_value):
         period_record.frenzy = bool(info_obj.get('frenzy'))
 
 
-def _apply_period_payload(period_record, period_data, *, merge=False):
+def _apply_period_payload(period_record, period_data, *, merge=False, skip_blank_overwrite=False):
     """Copy client fields onto a PeriodRecord. Merge mode updates only present keys."""
     if not isinstance(period_data, dict):
         return
 
     def has(key):
         return True if not merge else key in period_data
+
+    def keep_existing_star(old_val, new_val):
+        return skip_blank_overwrite and new_val is None and old_val not in (None, '')
 
     if has('location'):
         location = period_data.get('location')
@@ -1758,28 +1856,116 @@ def _apply_period_payload(period_record, period_data, *, merge=False):
         elif location or not (period_record.location or '').strip():
             period_record.location = location or period_record.location
     if has('safety_points'):
-        period_record.safety_points = _nullable_star_points(period_data.get('safety_points'))
+        new_val = _nullable_star_points(period_data.get('safety_points'))
+        if keep_existing_star(period_record.safety_points, new_val):
+            new_val = period_record.safety_points
+        elif merge and new_val is None and period_record.safety_points not in (None, ''):
+            # #region agent log
+            _agent_debug_log(
+                'app.py:_apply_period_payload',
+                'merge overwrite non-empty STAR with null',
+                {
+                    'field': 'safety_points',
+                    'time_range': period_record.time_range,
+                    'daily_record_id': period_record.daily_record_id,
+                    'old': period_record.safety_points,
+                    'incoming_present': 'safety_points' in period_data,
+                },
+                'D',
+            )
+            # #endregion
+        period_record.safety_points = new_val
     if has('teamwork_points'):
-        period_record.teamwork_points = _nullable_star_points(period_data.get('teamwork_points'))
+        new_val = _nullable_star_points(period_data.get('teamwork_points'))
+        if keep_existing_star(period_record.teamwork_points, new_val):
+            new_val = period_record.teamwork_points
+        elif merge and new_val is None and period_record.teamwork_points not in (None, ''):
+            # #region agent log
+            _agent_debug_log(
+                'app.py:_apply_period_payload',
+                'merge overwrite non-empty STAR with null',
+                {
+                    'field': 'teamwork_points',
+                    'time_range': period_record.time_range,
+                    'daily_record_id': period_record.daily_record_id,
+                    'old': period_record.teamwork_points,
+                },
+                'D',
+            )
+            # #endregion
+        period_record.teamwork_points = new_val
     if has('accountability_points'):
-        period_record.accountability_points = _nullable_star_points(period_data.get('accountability_points'))
+        new_val = _nullable_star_points(period_data.get('accountability_points'))
+        if keep_existing_star(period_record.accountability_points, new_val):
+            new_val = period_record.accountability_points
+        elif merge and new_val is None and period_record.accountability_points not in (None, ''):
+            # #region agent log
+            _agent_debug_log(
+                'app.py:_apply_period_payload',
+                'merge overwrite non-empty STAR with null',
+                {
+                    'field': 'accountability_points',
+                    'time_range': period_record.time_range,
+                    'daily_record_id': period_record.daily_record_id,
+                    'old': period_record.accountability_points,
+                },
+                'D',
+            )
+            # #endregion
+        period_record.accountability_points = new_val
     if has('relationships_points'):
-        period_record.relationships_points = _nullable_star_points(period_data.get('relationships_points'))
+        new_val = _nullable_star_points(period_data.get('relationships_points'))
+        if keep_existing_star(period_record.relationships_points, new_val):
+            new_val = period_record.relationships_points
+        elif merge and new_val is None and period_record.relationships_points not in (None, ''):
+            # #region agent log
+            _agent_debug_log(
+                'app.py:_apply_period_payload',
+                'merge overwrite non-empty STAR with null',
+                {
+                    'field': 'relationships_points',
+                    'time_range': period_record.time_range,
+                    'daily_record_id': period_record.daily_record_id,
+                    'old': period_record.relationships_points,
+                },
+                'D',
+            )
+            # #endregion
+        period_record.relationships_points = new_val
     if has('info'):
-        period_record.info = period_data.get('info')
+        incoming_info = period_data.get('info')
+        old_info = period_record.info or ''
+        incoming_empty = not incoming_info or str(incoming_info).strip() in ('', '{}', 'null')
+        old_has = bool(str(old_info).strip() and str(old_info).strip() not in ('{}', 'null'))
+        if skip_blank_overwrite and incoming_empty and old_has:
+            incoming_info = period_record.info
+        elif merge and incoming_empty and old_has:
+            # #region agent log
+            _agent_debug_log(
+                'app.py:_apply_period_payload',
+                'merge overwrite non-empty info with empty',
+                {
+                    'time_range': period_record.time_range,
+                    'daily_record_id': period_record.daily_record_id,
+                    'old_len': len(str(old_info)),
+                },
+                'D',
+            )
+            # #endregion
+        period_record.info = incoming_info
         _sync_period_flags_from_info(period_record, period_record.info)
-    if has('reset'):
+    if has('reset') and not (skip_blank_overwrite and not period_data.get('reset') and period_record.reset):
         period_record.reset = bool(period_data.get('reset', False))
-    if has('frenzy'):
+    if has('frenzy') and not (skip_blank_overwrite and not period_data.get('frenzy') and period_record.frenzy):
         period_record.frenzy = bool(period_data.get('frenzy', False))
-    if has('notes'):
+    if has('notes') and not (skip_blank_overwrite and not period_data.get('notes') and period_record.notes):
         period_record.notes = period_data.get('notes')
-    if has('reminders'):
+    if has('reminders') and not (skip_blank_overwrite and not period_data.get('reminders') and period_record.reminders):
         period_record.reminders = period_data.get('reminders')
     period_record.points_possible = _points_possible_for_star_values(period_record)
 
 
-def _upsert_period_record(daily_record, period_data, *, merge=False, default_location=''):
+def _upsert_period_record(daily_record, period_data, *, merge=False, default_location='', skip_blank_overwrite=False):
     """Create or update one period row without loading DailyRecord.periods."""
     if not daily_record or not getattr(daily_record, 'id', None):
         return None
@@ -1806,7 +1992,9 @@ def _upsert_period_record(daily_record, period_data, *, merge=False, default_loc
         )
         db.session.add(period_record)
         db.session.flush()
-    _apply_period_payload(period_record, period_data, merge=merge)
+    _apply_period_payload(
+        period_record, period_data, merge=merge, skip_blank_overwrite=skip_blank_overwrite
+    )
     if default_location and not (period_record.location or '').strip():
         period_record.location = default_location
     db.session.flush()
@@ -1960,8 +2148,8 @@ def notify_missing_point_card_entries(dates):
             gaps_by_staff = {}
             student_rows = schedules_by_student.get(student_id, [])
             period_staff = {}
-            for row in sorted(student_rows, key=lambda r: (r.sort_order or 0, r.id or 0)):
-                if not row.time_period or not schedule_entry_applies_on_date(row, record_date):
+            for row in _filter_schedule_rows_for_date(student_rows, record_date):
+                if not row.time_period:
                     continue
                 period_staff.setdefault(row.time_period, row.staff_name)
             for gap in gaps:
@@ -2023,6 +2211,27 @@ def run_point_card_auto_submit(target_date=None):
             continue
         if not is_past_point_card_submit_time(record.date):
             continue
+        star_cells = 0
+        info_rows = 0
+        for _p in record.periods:
+            filled, has_info = _agent_star_filled_count(_p)
+            star_cells += filled
+            if has_info:
+                info_rows += 1
+        # #region agent log
+        _agent_debug_log(
+            'app.py:run_point_card_auto_submit',
+            'cron/thread submit (sets submitted_at only)',
+            {
+                'student_id': record.student_id,
+                'date': record.date.isoformat(),
+                'period_count': len(record.periods),
+                'star_cells': star_cells,
+                'info_rows': info_rows,
+            },
+            'D',
+        )
+        # #endregion
         record.submitted_at = now_naive
         count += 1
     if count:
@@ -4428,25 +4637,32 @@ def students_by_staff_period():
     
     # Get current user's name (prefer name, fall back to username)
     staff_name = current_user.name or current_user.username
-    
-    # Find all student schedules where staff_name matches and time_period matches
-    query = Schedule.query.filter_by(
+    staff_name_key = (staff_name or '').strip().lower()
+
+    # Load all student rows for this period, apply date + recurrence override, then match staff
+    period_rows = Schedule.query.filter_by(
         schedule_type='student',
         time_period=period,
-        staff_name=staff_name
-    )
-    
-    # Filter by class_name if provided
-    if class_name:
-        query = query.filter_by(class_name=class_name)
-    
-    matching_schedules = [
-        s for s in query.all()
-        if schedule_entry_applies_on_date(s, on_date)
-    ]
-    
-    # Get unique student IDs
-    student_ids = list(set([s.student_id for s in matching_schedules if s.student_id]))
+    ).all()
+    rows_by_student = {}
+    for row in period_rows:
+        if row.student_id:
+            rows_by_student.setdefault(row.student_id, []).append(row)
+
+    student_ids = []
+    for student_id, rows in rows_by_student.items():
+        active = _filter_schedule_rows_for_date(rows, on_date)
+        matched = False
+        for row in active:
+            row_staff = (row.staff_name or '').strip()
+            if row_staff.lower() != staff_name_key:
+                continue
+            if class_name and (row.class_name or '').strip() != class_name:
+                continue
+            matched = True
+            break
+        if matched:
+            student_ids.append(student_id)
 
     # Assigned outside staff also see students who are at the other school this period
     if current_user.role == 'staff' and current_user.is_outside_staff:
@@ -5549,11 +5765,70 @@ def daily_records():
         
         db.session.flush()
 
+        existing_star_before = 0
+        existing_info_before = 0
+        existing_period_count = 0
+        if daily_record.id:
+            existing_rows = PeriodRecord.query.filter_by(daily_record_id=daily_record.id).all()
+            existing_period_count = len(existing_rows)
+            for _p in existing_rows:
+                filled, has_info = _agent_star_filled_count(_p)
+                existing_star_before += filled
+                if has_info:
+                    existing_info_before += 1
+        payload_star = 0
+        payload_info = 0
+        payload_null_star_keys = 0
+        for _pd in writable_periods:
+            filled, has_info = _agent_star_filled_count(_pd)
+            payload_star += filled
+            if has_info:
+                payload_info += 1
+            for _k in ('safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'):
+                if _k in _pd and _pd.get(_k) in (None, ''):
+                    payload_null_star_keys += 1
+        # #region agent log
+        _agent_debug_log(
+            'app.py:daily_records POST',
+            'save path and STAR payload vs existing',
+            {
+                'student_id': student_id,
+                'date': record_date.isoformat() if hasattr(record_date, 'isoformat') else str(record_date),
+                'merge': merge,
+                'has_split': has_split,
+                'full_replace': not (merge or has_split),
+                'writable_periods': len(writable_periods),
+                'existing_period_count': existing_period_count,
+                'existing_star_before': existing_star_before,
+                'existing_info_before': existing_info_before,
+                'payload_star': payload_star,
+                'payload_info': payload_info,
+                'payload_null_star_keys': payload_null_star_keys,
+            },
+            'E',
+        )
+        # #endregion
+
+        star_keys = [field for field, _label in STAR_POINT_FIELDS]
+        looks_like_full_snapshot = (
+            merge
+            and len(writable_periods) >= len(POINT_CARD_TIME_RANGES)
+            and all(
+                isinstance(period_data, dict) and all(key in period_data for key in star_keys)
+                for period_data in writable_periods
+            )
+        )
+
         if merge or has_split:
             # Concurrent saves, and split-day cards: never delete the other
             # side's periods. Only upsert periods this user is allowed to write.
             for period_data in writable_periods:
-                _upsert_period_record(daily_record, period_data, merge=True if merge else False)
+                _upsert_period_record(
+                    daily_record,
+                    period_data,
+                    merge=True if merge else False,
+                    skip_blank_overwrite=looks_like_full_snapshot,
+                )
         else:
             # Full replace used by the dedicated point-card editors that send
             # a complete day snapshot for one student.
@@ -5744,6 +6019,7 @@ def daily_records():
 
         records = query.order_by(DailyRecord.student_id, DailyRecord.date).all()
         result = []
+        _agent_past_card_summaries = []
         for record in records:
             periods = []
             for period in record.periods:
@@ -5798,6 +6074,49 @@ def daily_records():
             attendance_status = record.attendance_status
             if not attendance_status:
                 attendance_status = 'present' if record.present else 'unexcused'
+
+            expanded_periods = _expand_serialized_point_card_periods(periods, include_details)
+            if student_id and not start_date:
+                bus_times = {'AM Bus', 'PM Bus'}
+                raw_times = [(p.time_range or '').strip() for p in record.periods]
+                dup_times = sorted({t for t in raw_times if t and raw_times.count(t) > 1})
+                raw_star = 0
+                raw_info = 0
+                raw_nonbus_star = 0
+                raw_nonbus_rows = 0
+                for p in record.periods:
+                    filled, has_info = _agent_star_filled_count(p)
+                    raw_star += filled
+                    if has_info:
+                        raw_info += 1
+                    tr = (p.time_range or '').strip()
+                    if tr not in bus_times:
+                        raw_nonbus_rows += 1
+                        raw_nonbus_star += filled
+                exp_star = 0
+                exp_info = 0
+                exp_nonbus_star = 0
+                for p in expanded_periods:
+                    filled, has_info = _agent_star_filled_count(p)
+                    exp_star += filled
+                    if has_info:
+                        exp_info += 1
+                    if (p.get('time_range') or '').strip() not in bus_times:
+                        exp_nonbus_star += filled
+                _agent_past_card_summaries.append({
+                    'date': record.date.isoformat(),
+                    'attendance': attendance_status,
+                    'submitted': bool(record.submitted_at),
+                    'raw_period_count': len(record.periods),
+                    'dup_times': dup_times,
+                    'raw_star_cells': raw_star,
+                    'raw_info_rows': raw_info,
+                    'raw_nonbus_star': raw_nonbus_star,
+                    'raw_nonbus_rows': raw_nonbus_rows,
+                    'exp_star_cells': exp_star,
+                    'exp_info_rows': exp_info,
+                    'exp_nonbus_star': exp_nonbus_star,
+                })
             
             result.append({
                 'id': record.id,
@@ -5808,9 +6127,23 @@ def daily_records():
                 'attendance_status': attendance_status,
                 'submitted': bool(record.submitted_at),
                 'submitted_at': record.submitted_at.isoformat() if record.submitted_at else None,
-                'periods': _expand_serialized_point_card_periods(periods, include_details),
+                'periods': expanded_periods,
                 'frenzies': frenzies
             })
+
+        if student_id and not start_date:
+            # #region agent log
+            _agent_debug_log(
+                'app.py:daily_records GET',
+                'past-cards raw vs expanded STAR',
+                {
+                    'student_id': student_id,
+                    'record_count': len(_agent_past_card_summaries),
+                    'recent': _agent_past_card_summaries[-8:],
+                },
+                'C',
+            )
+            # #endregion
         
         return jsonify(result)
 

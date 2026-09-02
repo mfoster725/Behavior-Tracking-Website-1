@@ -349,6 +349,7 @@ function addScheduleEntry(row, options = {}) {
         <div class="schedule-entry-kebab-wrap">
             <button type="button" class="schedule-entry-kebab-btn" title="More options" aria-haspopup="menu" aria-expanded="false" aria-label="Entry actions">⋮</button>
             <div class="schedule-entry-kebab-menu" role="menu">
+                <button type="button" class="schedule-entry-add-btn" role="menuitem">Add Class</button>
                 <button type="button" class="schedule-entry-edit-btn" role="menuitem">Edit Class / Staff</button>
                 <button type="button" class="schedule-entry-remove-btn" role="menuitem">Remove Class</button>
             </div>
@@ -357,6 +358,7 @@ function addScheduleEntry(row, options = {}) {
 
     const kebabBtn = actionsItem.querySelector('.schedule-entry-kebab-btn');
     const kebabMenu = actionsItem.querySelector('.schedule-entry-kebab-menu');
+    const addBtn = actionsItem.querySelector('.schedule-entry-add-btn');
     const editBtn = actionsItem.querySelector('.schedule-entry-edit-btn');
     const removeBtn = actionsItem.querySelector('.schedule-entry-remove-btn');
 
@@ -367,6 +369,13 @@ function addScheduleEntry(row, options = {}) {
             closeAllScheduleEntryKebabMenus(willOpen ? kebabMenu : null);
             kebabMenu.classList.toggle('open', willOpen);
             kebabBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    }
+    if (addBtn) {
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAllScheduleEntryKebabMenus();
+            openAddClassForRow(row);
         });
     }
     if (editBtn) {
@@ -389,6 +398,7 @@ function addScheduleEntry(row, options = {}) {
             e.stopPropagation();
             closeAllScheduleEntryKebabMenus();
             removeScheduleEntry(row, entryId);
+            ensurePeriodAddKebab(row);
             syncScheduleRowHeights();
         });
     }
@@ -396,6 +406,8 @@ function addScheduleEntry(row, options = {}) {
     classesStack.appendChild(classItem);
     staffStack.appendChild(staffItem);
     actionsStack.appendChild(actionsItem);
+    // Remove empty-period placeholder kebab once a real entry exists
+    actionsStack.querySelectorAll('.schedule-period-add-item').forEach((el) => el.remove());
     return entryId;
 }
 
@@ -419,6 +431,62 @@ function removeScheduleEntry(row, entryId) {
     row.querySelectorAll(`.schedule-entry-item[data-entry-id="${entryId}"]`).forEach((el) => el.remove());
 }
 
+function openAddClassForRow(row) {
+    if (!row) return;
+    const timePeriod = row.querySelector('.time-input')?.value.trim()
+        || row.dataset.timePeriod
+        || '';
+    openScheduleEntryModal({
+        mode: 'add',
+        row,
+        timePeriod,
+    });
+}
+
+function ensurePeriodAddKebab(row) {
+    if (!row) return;
+    const actionsStack = row.querySelector('.actions-stack');
+    if (!actionsStack) return;
+    const hasEntries = !!row.querySelector('.classes-stack .schedule-entry-item');
+    const existing = actionsStack.querySelector('.schedule-period-add-item');
+    if (hasEntries) {
+        if (existing) existing.remove();
+        return;
+    }
+    if (existing) return;
+
+    const actionsItem = document.createElement('div');
+    actionsItem.className = 'schedule-entry-item schedule-entry-actions-item schedule-period-add-item';
+    actionsItem.innerHTML = `
+        <div class="schedule-entry-kebab-wrap">
+            <button type="button" class="schedule-entry-kebab-btn" title="More options" aria-haspopup="menu" aria-expanded="false" aria-label="Period actions">⋮</button>
+            <div class="schedule-entry-kebab-menu" role="menu">
+                <button type="button" class="schedule-entry-add-btn" role="menuitem">Add Class</button>
+            </div>
+        </div>
+    `;
+    const kebabBtn = actionsItem.querySelector('.schedule-entry-kebab-btn');
+    const kebabMenu = actionsItem.querySelector('.schedule-entry-kebab-menu');
+    const addBtn = actionsItem.querySelector('.schedule-entry-add-btn');
+    if (kebabBtn && kebabMenu) {
+        kebabBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const willOpen = !kebabMenu.classList.contains('open');
+            closeAllScheduleEntryKebabMenus(willOpen ? kebabMenu : null);
+            kebabMenu.classList.toggle('open', willOpen);
+            kebabBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    }
+    if (addBtn) {
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAllScheduleEntryKebabMenus();
+            openAddClassForRow(row);
+        });
+    }
+    actionsStack.appendChild(actionsItem);
+}
+
 // Back-compat wrapper used by older call sites
 function addClassInputGroup(container, options = {}) {
     if (typeof options === 'string') {
@@ -436,7 +504,6 @@ function buildSchedulePeriodRowHtml(timePeriod) {
         </td>
         <td class="classes-cell">
             <div class="schedule-entry-stack classes-stack"></div>
-            <button type="button" class="btn-add-class" title="Add class for this time period">+ Add Class</button>
         </td>
         <td class="staff-cell">
             <div class="schedule-entry-stack staff-stack"></div>
@@ -448,19 +515,7 @@ function buildSchedulePeriodRowHtml(timePeriod) {
 }
 
 function setupScheduleRowButtons(row, timePeriod, tbody, type = 'teacher') {
-    const addClassBtn = row.querySelector('.btn-add-class');
-    if (addClassBtn) {
-        const newAddClassBtn = addClassBtn.cloneNode(true);
-        addClassBtn.parentNode.replaceChild(newAddClassBtn, addClassBtn);
-        newAddClassBtn.addEventListener('click', () => {
-            const time = row.querySelector('.time-input')?.value.trim() || timePeriod || '';
-            openScheduleEntryModal({
-                mode: 'add',
-                row,
-                timePeriod: time,
-            });
-        });
-    }
+    ensurePeriodAddKebab(row);
 }
 
 function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, studentId = currentScheduleStudentId) {
@@ -862,7 +917,28 @@ function saveScheduleEntryModal() {
 }
 
 function filterScheduleItemsForDate(items, onDate = null) {
-    return (items || []).filter((item) => scheduleEntryAppliesOnDate(item, onDate));
+    const applicable = (items || []).filter((item) => scheduleEntryAppliesOnDate(item, onDate));
+    const byPeriod = {};
+    const order = [];
+    applicable.forEach((item) => {
+        const period = (item && item.time_period) ? String(item.time_period).trim() : '';
+        if (!period) return;
+        if (!byPeriod[period]) {
+            byPeriod[period] = [];
+            order.push(period);
+        }
+        byPeriod[period].push(item);
+    });
+    const result = [];
+    order.forEach((period) => {
+        const list = byPeriod[period] || [];
+        const specific = list.filter((item) => {
+            const type = String(item.recurrence_type || 'daily').trim().toLowerCase() || 'daily';
+            return type !== 'daily';
+        });
+        result.push(...(specific.length ? specific : list));
+    });
+    return result;
 }
 
 const TRANSITION_FIRST_BELL_MINUTES = 7 * 60 + 45;
@@ -1710,46 +1786,36 @@ function periodPointsPossibleValue(period) {
     return starPointsPossible(period);
 }
 
+function buildMergePeriodPayload(studentId, periodTime, data) {
+    if (!data) return null;
+    const payload = { time_range: periodTime };
+    const location = getStudentScheduleLocationForPeriod(studentId, periodTime);
+    if (location) payload.location = location;
+    if (data.s !== null && data.s !== undefined) payload.safety_points = data.s;
+    if (data.t !== null && data.t !== undefined) payload.teamwork_points = data.t;
+    if (data.a !== null && data.a !== undefined) payload.accountability_points = data.a;
+    if (data.r !== null && data.r !== undefined) payload.relationships_points = data.r;
+    if (periodLocalHasInfo(data)) {
+        payload.info = typeof data.info === 'string' ? data.info : JSON.stringify(data.info);
+    }
+    const hasStarOrInfo = ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points', 'info']
+        .some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+    return hasStarOrInfo ? payload : null;
+}
+
 function buildCompleteDailyPeriodsForStudent(studentId) {
     const studentData = dailyData[studentId] || {};
     const used = new Set();
-    const periods = STANDARD_PERIODS.map((sp) => {
+    const periods = [];
+    STANDARD_PERIODS.forEach((sp) => {
         used.add(sp.time);
-        const data = studentData[sp.time] || { s: null, t: null, a: null, r: null, info: '' };
-        return {
-            time_range: sp.time,
-            location: getStudentScheduleLocationForPeriod(studentId, sp.time),
-            safety_points: data.s,
-            teamwork_points: data.t,
-            accountability_points: data.a,
-            relationships_points: data.r,
-            points_possible: starPointsPossible(data),
-            reset: false,
-            frenzy: false,
-            notes: '',
-            reminders: '',
-            info: data.info || '',
-            infractions: []
-        };
+        const payload = buildMergePeriodPayload(studentId, sp.time, studentData[sp.time]);
+        if (payload) periods.push(payload);
     });
     Object.keys(studentData).forEach((periodTime) => {
         if (used.has(periodTime)) return;
-        const data = studentData[periodTime] || { s: null, t: null, a: null, r: null, info: '' };
-        periods.push({
-            time_range: periodTime,
-            location: getStudentScheduleLocationForPeriod(studentId, periodTime),
-            safety_points: data.s,
-            teamwork_points: data.t,
-            accountability_points: data.a,
-            relationships_points: data.r,
-            points_possible: starPointsPossible(data),
-            reset: false,
-            frenzy: false,
-            notes: '',
-            reminders: '',
-            info: data.info || '',
-            infractions: []
-        });
+        const payload = buildMergePeriodPayload(studentId, periodTime, studentData[periodTime]);
+        if (payload) periods.push(payload);
     });
     return periods;
 }
@@ -7442,6 +7508,17 @@ async function submitStudentPointCard(studentId, studentName, options = {}) {
     }
 
     const attendance = attendanceData[currentDate]?.[studentId] || 'present';
+    let payloadStar = 0;
+    let payloadNullStarKeys = 0;
+    (periods || []).forEach((period) => {
+        ['safety_points', 'teamwork_points', 'accountability_points', 'relationships_points'].forEach((key) => {
+            if (period[key] === null || period[key] === '' || period[key] === undefined) payloadNullStarKeys += 1;
+            else payloadStar += 1;
+        });
+    });
+    // #region agent log
+    fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'D',location:'app.js:submitStudentPointCard',message:'browser submit payload STAR',data:{studentId,date:currentDate,silent,periodCount:periods.length,payloadStar,payloadNullStarKeys,attendance},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const abortController = new AbortController();
     const timeoutId = setTimeout(function () {
         abortController.abort();
@@ -7514,6 +7591,10 @@ async function autoSubmitPointCardsIfDue() {
         return;
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'D',location:'app.js:autoSubmitPointCardsIfDue',message:'browser nightly submit starting',data:{currentDate,dailyIds,periodIds,dailyDataCount:Object.keys(dailyData||{}).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     pointCardAutoSubmitInFlight = true;
     let submittedCount = 0;
     try {
@@ -7539,20 +7620,19 @@ async function autoSubmitPointCardsIfDue() {
             }
         }
 
-        for (const studentId of dailyIds) {
-            await loadStudentSchedulesForIds([studentId]);
-            const ok = await submitStudentPointCard(studentId, getStudentNameById(studentId), { silent: true });
-            if (ok) {
-                submittedCount += 1;
-            }
+        try {
+            await fetch(`/api/daily-records?start_date=${encodeURIComponent(currentDate)}&end_date=${encodeURIComponent(currentDate)}&include_details=false`);
+        } catch (error) {
+            console.error('Error triggering nightly point-card submit:', error);
         }
 
-        for (const studentId of periodIds) {
-            if (isStudentSubmittedForDate(currentDate, studentId)) {
-                continue;
-            }
+        const studentIds = [...new Set([...dailyIds, ...periodIds])];
+        for (const studentId of studentIds) {
             markStudentSubmitted(currentDate, studentId);
-            delete periodData[studentId];
+            delete dailyData[studentId];
+            if (periodData[studentId]) {
+                delete periodData[studentId];
+            }
             submittedCount += 1;
         }
 
@@ -9672,6 +9752,46 @@ async function loadPointCardData(studentIdOverride) {
         const response = await fetch(`/api/daily-records?student_id=${studentId}`);
         const allRecords = await response.json();
         if (loadToken !== pastPointCardsLoadToken) return;
+
+        const todayUtc = new Date().toISOString().split('T')[0];
+        const _local = new Date();
+        const todayLocal = `${_local.getFullYear()}-${String(_local.getMonth() + 1).padStart(2, '0')}-${String(_local.getDate()).padStart(2, '0')}`;
+        const busTimes = new Set(['AM Bus', 'PM Bus']);
+        const summarizeRecord = (record) => {
+            const periods = Array.isArray(record && record.periods) ? record.periods : [];
+            let starCells = 0;
+            let infoRows = 0;
+            let nonBusStar = 0;
+            let nonBusRows = 0;
+            periods.forEach((period) => {
+                const vals = [period.safety_points, period.teamwork_points, period.accountability_points, period.relationships_points];
+                const filled = vals.filter((v) => normalizeStarValue(v) !== null).length;
+                starCells += filled;
+                const tr = String(period.time_range || '').trim();
+                if (!busTimes.has(tr)) {
+                    nonBusRows += 1;
+                    nonBusStar += filled;
+                }
+                if (period.info && String(period.info).trim() && String(period.info).trim() !== '{}') infoRows += 1;
+            });
+            return {
+                date: record.date,
+                submitted: !!record.submitted,
+                attendance: record.attendance_status || (record.present === false ? 'unexcused' : 'present'),
+                periodCount: periods.length,
+                starCells,
+                infoRows,
+                nonBusStar,
+                nonBusRows,
+                passesFilter: isSubmittedPointCardRecord(record),
+                dateGteTodayUtc: !!(record && record.date && record.date >= todayUtc)
+            };
+        };
+        const summaries = (allRecords || []).map(summarizeRecord);
+        const filteredSummaries = summaries.filter((s) => s.passesFilter);
+        // #region agent log
+        fetch('http://127.0.0.1:7331/ingest/4f3bd460-c93e-47cd-b395-72b8f6ab1d64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1e0e8e'},body:JSON.stringify({sessionId:'1e0e8e',runId:'pre-fix',hypothesisId:'A',location:'app.js:loadPointCardData',message:'past cards API vs filter',data:{studentId,todayUtc,todayLocal,total:summaries.length,filtered:filteredSummaries.length,recent:summaries.slice(-8)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
 
         const records = (allRecords || []).filter(isSubmittedPointCardRecord);
 
@@ -14495,8 +14615,8 @@ function updateTeacherScheduleEditability() {
     if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
     if (tbody) {
         tbody.querySelectorAll('input, select, button').forEach((el) => {
-            if (el.classList.contains('btn-add-class')
-                || el.classList.contains('schedule-entry-kebab-btn')
+            if (el.classList.contains('schedule-entry-kebab-btn')
+                || el.classList.contains('schedule-entry-add-btn')
                 || el.classList.contains('schedule-entry-edit-btn')
                 || el.classList.contains('schedule-entry-remove-btn')) {
                 el.style.display = canEdit ? '' : 'none';
@@ -14513,7 +14633,7 @@ function updateTeacherScheduleEditability() {
                 el.readOnly = !canEdit;
             }
         });
-        tbody.querySelectorAll('.schedule-entry-kebab-wrap, .btn-add-class').forEach((el) => {
+        tbody.querySelectorAll('.schedule-entry-kebab-wrap').forEach((el) => {
             el.style.display = canEdit ? '' : 'none';
         });
     }
@@ -15363,7 +15483,7 @@ function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
         el.disabled = !canEditPeriod;
         if (!canEditPeriod && el.tagName === 'INPUT') el.tabIndex = -1;
     });
-    row.querySelectorAll('.btn-add-class, .schedule-entry-kebab-wrap').forEach((el) => {
+    row.querySelectorAll('.schedule-entry-kebab-wrap').forEach((el) => {
         el.style.display = canEditPeriod ? '' : 'none';
     });
     const timeCell = row.querySelector('.time-cell');

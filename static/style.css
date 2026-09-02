@@ -3496,12 +3496,6 @@ table tbody tr:hover {
     color: var(--danger);
 }
 
-.btn-add-class {
-    margin-top: 6px;
-    padding: 4px 8px;
-    font-size: 12px;
-}
-
 .teacher-schedule-table th.schedule-actions-col,
 .student-schedule-table th.schedule-actions-col,
 .teacher-schedule-table td.actions-cell,
