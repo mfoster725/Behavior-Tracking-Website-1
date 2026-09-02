@@ -8653,6 +8653,15 @@ function getPointCardDataContainer() {
     return document.getElementById('point-card-data-container');
 }
 
+function isSubmittedPointCardRecord(record) {
+    if (!record || !record.date) return false;
+    const today = new Date().toISOString().split('T')[0];
+    if (record.date >= today) return false;
+    if (record.submitted) return true;
+    const periods = record.periods || [];
+    return periods.some(periodHasEnteredStarPoints);
+}
+
 function resetPointCardFilters({ preserveValues = false } = {}) {
     if (preserveValues) return;
     const dateInput = document.getElementById('point-card-filter-date');
@@ -8773,8 +8782,10 @@ async function loadPointCardData(studentIdOverride) {
     try {
         await loadStudentSchedulesForIds([studentId]);
         const response = await fetch(`/api/daily-records?student_id=${studentId}`);
-        const records = await response.json();
+        const allRecords = await response.json();
         if (loadToken !== pastPointCardsLoadToken) return;
+
+        const records = (allRecords || []).filter(isSubmittedPointCardRecord);
 
         if (!records || records.length === 0) {
             window.currentPointCardRecords = [];
