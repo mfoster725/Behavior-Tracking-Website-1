@@ -497,6 +497,7 @@ let currentStudentId = null;
 let currentDate = new Date().toISOString().split('T')[0];
 let currentPeriod = null;
 let currentClass = ''; // Track selected class for period entry
+const PERIOD_ENTRY_ALL_CLASSES = '__ALL__'; // Combined multi-class selection for a period
 let currentLocation = '';
 let allStudents = [];
 let editParentLinkedStudentIds = [];
@@ -2488,6 +2489,17 @@ function setPeriodEntryLocation(value) {
     }
 }
 
+function getPeriodEntryCombinedClassLabel(classesForPeriod) {
+    return (classesForPeriod || []).filter(Boolean).join(' / ');
+}
+
+function getPeriodEntryLocationForClass(classValue, classesForPeriod) {
+    if (classValue === PERIOD_ENTRY_ALL_CLASSES) {
+        return getPeriodEntryCombinedClassLabel(classesForPeriod);
+    }
+    return classValue || '';
+}
+
 function applyPeriodEntrySelection() {
     currentClass = '';
     const classSelectorGroup = document.getElementById('class-selector-group');
@@ -2499,20 +2511,25 @@ function applyPeriodEntrySelection() {
         .filter((name, index, self) => self.indexOf(name) === index);
 
     if (classesForPeriod.length > 1 && canEdit()) {
+        const combinedLabel = getPeriodEntryCombinedClassLabel(classesForPeriod);
         if (classSelectorGroup) classSelectorGroup.style.display = 'block';
         if (classSelect) {
-            classSelect.innerHTML = '<option value="">Select Class</option>';
+            classSelect.innerHTML = '';
+            const allOption = document.createElement('option');
+            allOption.value = PERIOD_ENTRY_ALL_CLASSES;
+            allOption.textContent = combinedLabel;
+            classSelect.appendChild(allOption);
             classesForPeriod.forEach(className => {
                 const option = document.createElement('option');
                 option.value = className;
                 option.textContent = className;
                 classSelect.appendChild(option);
             });
-            classSelect.value = '';
+            classSelect.value = PERIOD_ENTRY_ALL_CLASSES;
         }
-        setPeriodEntryLocation('');
-        filteredStudentsForPeriod = [];
-        renderStudentsGrid();
+        currentClass = PERIOD_ENTRY_ALL_CLASSES;
+        setPeriodEntryLocation(combinedLabel);
+        loadPeriodData();
         return;
     }
 
@@ -2747,15 +2764,18 @@ function setupEventListeners() {
                 await flushPendingPointCardSaves();
                 currentClass = e.target.value;
                 console.log('Class selected:', currentClass);
-                
-                // Auto-fill location with selected class
-                const locationInput = document.getElementById('location-input');
-                if (locationInput && currentClass) {
-                    locationInput.value = currentClass;
-                    currentLocation = currentClass;
+
+                const scheduleItems = getPeriodEntryScheduleItems();
+                const classesForPeriod = scheduleItems
+                    .filter(s => s && s.time_period === currentPeriod && s.class_name)
+                    .map(s => s.class_name)
+                    .filter((name, index, self) => self.indexOf(name) === index);
+                const locationValue = getPeriodEntryLocationForClass(currentClass, classesForPeriod);
+                if (locationValue) {
+                    setPeriodEntryLocation(locationValue);
                 }
-                
-                // Reload students for this class
+
+                // Reload students for this class (or all classes when combined)
                 loadPeriodData();
             });
         }
@@ -3975,13 +3995,17 @@ async function loadPeriodData() {
     if (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) {
         try {
             let url = `/api/students/by-staff-period?period=${encodeURIComponent(currentPeriod)}`;
-            if (currentClass) {
+            // Combined multi-class selection omits class_name so all students for the period are returned
+            if (currentClass && currentClass !== PERIOD_ENTRY_ALL_CLASSES) {
                 url += `&class_name=${encodeURIComponent(currentClass)}`;
             }
             const response = await fetch(url);
             if (response.ok) {
                 filteredStudentsForPeriod = await response.json();
-                console.log(`Loaded ${filteredStudentsForPeriod.length} students for period ${currentPeriod}${currentClass ? `, class ${currentClass}` : ''}`);
+                const classLabel = currentClass === PERIOD_ENTRY_ALL_CLASSES
+                    ? 'all classes'
+                    : (currentClass ? `class ${currentClass}` : '');
+                console.log(`Loaded ${filteredStudentsForPeriod.length} students for period ${currentPeriod}${classLabel ? `, ${classLabel}` : ''}`);
             } else {
                 console.error('Error loading filtered students:', response.statusText);
                 filteredStudentsForPeriod = [];
