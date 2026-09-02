@@ -3228,12 +3228,16 @@ table tbody tr:hover {
     font-size: 0.8125rem;
 }
 
-.student-schedule-table td:nth-child(2) {
-    width: 150px;
+.student-schedule-table td:nth-child(2),
+.teacher-schedule-table td:nth-child(2) {
+    width: auto;
+    min-width: 140px;
 }
 
-.student-schedule-table td:nth-child(3) {
-    width: 150px;
+.student-schedule-table td:nth-child(3),
+.teacher-schedule-table td:nth-child(3) {
+    width: auto;
+    min-width: 120px;
 }
 
 .teacher-schedule-table .time-cell {
@@ -3390,30 +3394,31 @@ table tbody tr:hover {
     border-bottom: none;
 }
 
-.schedule-entry-main {
+.schedule-entry-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+}
+
+.schedule-entry-item {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
+    min-height: 34px;
 }
 
-.class-input-group .class-input,
-.class-input-group .staff-input {
+.schedule-entry-class-item .class-input,
+.schedule-entry-staff-item .staff-input {
     flex: 1;
-    min-width: 110px;
+    min-width: 0;
     background: var(--bg-page);
     cursor: default;
 }
 
-.class-input-group .class-autocomplete-wrapper,
-.class-input-group .staff-autocomplete-wrapper {
-    flex: 1;
-    min-width: 110px;
-}
-
 .schedule-entry-recurrence-chip {
     flex: 0 1 auto;
-    max-width: 180px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3426,10 +3431,13 @@ table tbody tr:hover {
     padding: 2px 6px;
 }
 
+.schedule-entry-actions-item {
+    justify-content: center;
+}
+
 .schedule-entry-kebab-wrap {
     position: relative;
     flex: 0 0 auto;
-    margin-left: auto;
 }
 
 .schedule-entry-kebab-btn {
@@ -3437,10 +3445,11 @@ table tbody tr:hover {
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
-    padding: 2px 6px;
+    padding: 4px 2px;
     border-radius: 4px;
+    width: 22px;
 }
 
 .schedule-entry-kebab-btn:hover,
@@ -3455,7 +3464,7 @@ table tbody tr:hover {
     top: 100%;
     right: 0;
     z-index: 40;
-    min-width: 120px;
+    min-width: 160px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -3487,6 +3496,35 @@ table tbody tr:hover {
     color: var(--danger);
 }
 
+.btn-add-class {
+    margin-top: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.teacher-schedule-table th.schedule-actions-col,
+.student-schedule-table th.schedule-actions-col,
+.teacher-schedule-table td.actions-cell,
+.student-schedule-table td.actions-cell,
+.point-card-schedule-edit-table th.schedule-actions-col,
+.point-card-schedule-edit-table td.actions-cell {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+    text-align: center;
+}
+
+.teacher-schedule-table td.classes-cell,
+.student-schedule-table td.classes-cell,
+.teacher-schedule-table td.staff-cell,
+.student-schedule-table td.staff-cell {
+    width: auto;
+    min-width: 120px;
+    vertical-align: top;
+}
+
 .schedule-entry-modal-content {
     max-width: 520px;
 }
@@ -3506,13 +3544,36 @@ table tbody tr:hover {
 .schedule-entry-modal-field {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.5rem;
     font-size: 0.8125rem;
     font-weight: 600;
     color: var(--text-secondary);
 }
 
-.schedule-entry-modal-field input {
+.schedule-entry-modal-field-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.schedule-entry-modal-value-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.schedule-entry-modal-value-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.schedule-entry-modal-input-wrap {
+    flex: 1;
+    min-width: 0;
+}
+
+.schedule-entry-modal-value-row input {
     font-weight: 400;
     color: var(--text-primary);
     width: 100%;
@@ -3520,6 +3581,31 @@ table tbody tr:hover {
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     font-size: 0.875rem;
+}
+
+.btn-schedule-field-add,
+.btn-schedule-field-remove {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.btn-schedule-field-add:hover,
+.btn-schedule-field-remove:hover {
+    background: var(--bg-page);
+}
+
+.btn-schedule-field-remove {
+    color: var(--danger);
+    border-color: var(--danger);
 }
 
 .schedule-entry-modal-recurrence .schedule-recurrence {
@@ -3605,17 +3691,20 @@ table tbody tr:hover {
     gap: 4px;
 }
 
-.student-schedule-table td:nth-child(2) {
+.student-schedule-table td:nth-child(2),
+.teacher-schedule-table td:nth-child(2) {
     width: auto;
-    min-width: 220px;
+    min-width: 140px;
 }
 
-.student-schedule-table td:nth-child(3) {
-    width: 100px;
-    min-width: 100px;
+.student-schedule-table td:nth-child(3),
+.teacher-schedule-table td:nth-child(3) {
+    width: auto;
+    min-width: 120px;
 }
 
-.student-schedule-table .classes-cell {
+.student-schedule-table .classes-cell,
+.teacher-schedule-table .classes-cell {
     width: auto !important;
 }
 
