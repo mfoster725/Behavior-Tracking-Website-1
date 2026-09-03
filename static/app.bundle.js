@@ -17219,7 +17219,7 @@ async function shareLoginInformation(userId, username) {
         }
         const sentTo = (data.sent_to || []).join(', ');
         showMessage(
-            `Login info sent to: ${sentTo || 'recipients'}${data.password ? ` (password: ${data.password})` : ''}`,
+            `Login info sent to: ${sentTo || 'recipients'}${data.username ? ` (username: ${data.username}` : ''}${data.password ? `, password: ${data.password})` : (data.username ? ')' : '')}`,
             'success'
         );
     } catch (error) {
@@ -17357,7 +17357,9 @@ function formatBulkShareReport(label, data, options = {}) {
     (data.details || []).forEach((d) => {
         if (d.status === 'sent') {
             const to = (d.sent_to || []).join(', ');
-            lines.push(`✓ ${d.username}: sent${to ? ` → ${to}` : ''}`);
+            const loginUser = d.login_username || d.username;
+            const creds = loginUser && d.password ? ` — login: ${loginUser} / ${d.password}` : '';
+            lines.push(`✓ ${d.username}: sent${to ? ` → ${to}` : ''}${creds}`);
         } else if (d.status === 'skipped') {
             lines.push(`○ ${d.username}: skipped — ${d.error || 'no email on row'}`);
         } else {
@@ -17370,11 +17372,11 @@ function formatBulkShareReport(label, data, options = {}) {
     return lines.join('\n');
 }
 
-async function fetchBulkShareBatch(scope, limit) {
+async function fetchBulkShareBatch(scope, limit, force = false) {
     const response = await fetch('/api/users/share-login-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, limit })
+        body: JSON.stringify({ scope, limit, force: !!force })
     });
     const rawText = await response.text();
     let data = {};
@@ -17396,19 +17398,23 @@ async function fetchBulkShareBatch(scope, limit) {
     return { ok: true, data };
 }
 
-async function shareLoginInformationBulk(scope) {
+async function shareLoginInformationBulk(scope, options = {}) {
+    const force = !!options.force;
     if (!isAdmin()) {
         showMessage('Only admins can share login information.', 'error');
         return;
     }
     const labels = {
         all: 'all new users',
-        students: 'all new students',
+        students: force ? 'all students (resend)' : 'all new students',
         staff: 'all new staff',
         outside_staff: 'all new Outside Staff'
     };
     const label = labels[scope] || scope;
-    if (!confirm(`Reset passwords and email login information to ${label} who have never been sent credentials?`)) {
+    const confirmText = force
+        ? `Reset passwords and resend login information to ${label} who have email addresses on their row?`
+        : `Reset passwords and email login information to ${label} who have never been sent credentials?`;
+    if (!confirm(confirmText)) {
         return;
     }
     const BATCH_SIZE = 8;
@@ -17446,7 +17452,7 @@ async function shareLoginInformationBulk(scope) {
                     `\n\nBatch ${batchNum} in progress…`
             );
 
-            const result = await fetchBulkShareBatch(scope, BATCH_SIZE);
+            const result = await fetchBulkShareBatch(scope, BATCH_SIZE, force);
             if (!result.ok) {
                 showBulkShareResultModal(
                     'Share login information — error',
@@ -17543,7 +17549,9 @@ function initializeShareLoginBulkMenu() {
             e.preventDefault();
             menu.setAttribute('hidden', '');
             btn.setAttribute('aria-expanded', 'false');
-            shareLoginInformationBulk(item.getAttribute('data-share-scope'));
+            const scope = item.getAttribute('data-share-scope');
+            const force = item.getAttribute('data-share-force') === 'true';
+            shareLoginInformationBulk(scope, { force });
         });
     });
 

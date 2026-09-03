@@ -3972,36 +3972,61 @@ def _collect_user_recipient_emails(user):
     return deduped
 
 
-def _default_share_password(user):
+def _canonical_student_password(student, user):
+    """Match CSV import: {INITIALS}{lunch_number} with normalized lunch."""
+    initials = ((student.name if student else None) or user.name or '').strip().upper()
+    lunch = normalize_import_identifier((student.lunch_number if student else None) or '')
+    if not initials:
+        return None, 'Student initials are missing; cannot build password.'
+    if not lunch:
+        return None, 'Student lunch number is missing; cannot build password {initials}{lunch}.'
+    return f'{initials}{lunch}', None
+
+
+def _resolve_share_login_credentials(user):
     """
-    Staff/admin/outside staff: {username}2149
-    Students: {initials}{lunch} (initials uppercased + lunch number)
+    Return (login_username, password, student_display_name, error).
+    login_username is always User.username — the value used at sign-in.
     """
-    if user.role == 'student':
+    login_username = (user.username or '').strip()
+    if not login_username:
+        return None, None, None, 'Username is missing.'
+
+    role = (user.role or '').strip().lower()
+    student_display_name = (user.name or '').strip() or login_username
+
+    if role == 'student':
         student = getattr(user, 'student', None)
         if student is None and user.student_id:
             student = Student.query.get(user.student_id)
-        initials = ((student.name if student else None) or user.name or '').strip().upper()
-        lunch = ((student.lunch_number if student else None) or '').strip()
-        if not initials:
-            return None, 'Student initials are missing; cannot build password.'
-        if not lunch:
-            return None, 'Student lunch number is missing; cannot build password {initials}{lunch}.'
-        return f'{initials}{lunch}', None
-    username = (user.username or '').strip()
-    if not username:
-        return None, 'Username is missing; cannot build password.'
-    return f'{username}2149', None
+        if student is not None:
+            student_display_name = (student.name or user.name or login_username).strip()
+        password, err = _canonical_student_password(student, user)
+        if err:
+            return login_username, None, student_display_name, err
+        return login_username, password, student_display_name, None
+
+    password = f'{login_username}2149'
+    return login_username, password, student_display_name, None
 
 
-def _login_info_email_content(username, password, login_url):
+def _default_share_password(user):
+    """Backward-compatible wrapper for callers that only need the password."""
+    _login_username, password, _display, err = _resolve_share_login_credentials(user)
+    if err:
+        return None, err
+    return password, None
+
+
+def _login_info_email_content(login_username, password, login_url, student_display_name=None):
     subject = 'Your Behavior Tracking System login information'
+    greeting_name = student_display_name or login_username
     body = (
         'Hello,\n\n'
-        'An account has been set up for you in Behavior Tracking System. '
+        f'An account has been set up for {greeting_name} in Behavior Tracking System. '
         'Use the login details below:\n\n'
         f'Login page: {login_url}\n'
-        f'Username: {username}\n'
+        f'Username: {login_username}\n'
         f'Password: {password}\n\n'
         'Please keep this information private. If you did not expect this email, '
         'contact your school administrator.\n\n'
@@ -4052,10 +4077,17 @@ def _share_login_info_for_user(user, *, reset_password=True, password_override=N
     if password_override:
         password = password_override
         err = None
+        login_username, _pw, student_display_name, cred_err = _resolve_share_login_credentials(user)
+        if cred_err and not login_username:
+            return {'ok': False, 'sent_to': [], 'password': None, 'error': cred_err}
+        if not login_username:
+            login_username = (user.username or '').strip()
+        if not student_display_name:
+            student_display_name = (user.name or login_username or '').strip()
     else:
-        password, err = _default_share_password(user)
-    if err:
-        return {'ok': False, 'sent_to': [], 'password': None, 'error': err}
+        login_username, password, student_display_name, err = _resolve_share_login_credentials(user)
+        if err:
+            return {'ok': False, 'sent_to': [], 'password': None, 'error': err}
 
     is_valid, strength_err = validate_password_strength(password)
     if not is_valid:
@@ -4067,13 +4099,16 @@ def _share_login_info_for_user(user, *, reset_password=True, password_override=N
             user.must_change_password = True
 
     login_url = f"{_public_base_url()}/login"
-    subject, body = _login_info_email_content(user.username, password, login_url)
+    subject, body = _login_info_email_content(
+        login_username, password, login_url, student_display_name=student_display_name
+    )
     sent_ok, send_err = _send_smtp_email(recipients, subject, body)
     if not sent_ok:
         return {
             'ok': False,
             'sent_to': [],
             'password': password if reset_password else None,
+            'username': login_username,
             'error': send_err,
         }
 
@@ -4081,6 +4116,7 @@ def _share_login_info_for_user(user, *, reset_password=True, password_override=N
     return {
         'ok': True,
         'sent_to': recipients,
+        'username': login_username,
         'password': password,
         'error': None,
     }
@@ -4588,7 +4624,7 @@ def students():
             )
             # Prefer standard student password {initials}{lunch} when lunch is available
             db.session.flush()
-            share_password, _share_err = _default_share_password(user)
+            login_username, share_password, _display, share_err = _resolve_share_login_credentials(user)
             if share_password:
                 user.set_password(share_password)
                 password_for_email = share_password
@@ -4640,11 +4676,7 @@ def students():
 
         email_warning = None
         if created_user is not None:
-            result = _share_login_info_for_user(
-                created_user,
-                reset_password=False,
-                password_override=getattr(created_user, '_password_for_email', None),
-            )
+            result = _share_login_info_for_user(created_user, reset_password=True)
             if result.get('ok'):
                 db.session.commit()
             else:
@@ -11658,11 +11690,9 @@ def _email_login_info_after_import(success_rows, warnings):
         if not user:
             warnings.append(f"Login email skipped for {username}: user not found after import.")
             continue
-        password = row.get('password')
         result = _share_login_info_for_user(
             user,
-            reset_password=False,
-            password_override=password,
+            reset_password=True,
         )
         if result.get('ok'):
             continue
@@ -13330,24 +13360,19 @@ def manage_users():
             email=email,
         )
         # Staff/admin: always use {username}2149 for emailed credentials
-        share_password, share_err = _default_share_password(user)
+        login_username, share_password, _display, share_err = _resolve_share_login_credentials(user)
         if role == 'student':
-            # Student create via /api/users is rare; prefer scheme when possible
             if share_password:
                 user.set_password(share_password)
-                password_for_email = share_password
             else:
                 user.set_password(password)
-                password_for_email = password
         else:
             if share_password:
                 user.set_password(share_password)
-                password_for_email = share_password
                 if hasattr(user, 'must_change_password'):
                     user.must_change_password = True
             else:
                 user.set_password(password)
-                password_for_email = password
         
         db.session.add(user)
         db.session.commit()
@@ -13365,11 +13390,7 @@ def manage_users():
         )
 
         email_warning = None
-        share_result = _share_login_info_for_user(
-            user,
-            reset_password=False,
-            password_override=password_for_email,
-        )
+        share_result = _share_login_info_for_user(user, reset_password=True)
         if share_result.get('ok'):
             db.session.commit()
         else:
@@ -13561,6 +13582,7 @@ def share_user_login(user_id):
     return jsonify({
         'message': 'Login information shared successfully',
         'sent_to': result.get('sent_to') or [],
+        'username': result.get('username'),
         'password': result.get('password'),
     }), 200
 
@@ -13583,12 +13605,18 @@ def share_user_login_bulk():
     except (TypeError, ValueError):
         limit = 8
     limit = max(1, min(limit, 20))
+    force = bool(data.get('force'))
 
     query = User.query.filter(
-        User.login_info_sent_at.is_(None),
-        User.login_info_skipped_at.is_(None),
         or_(User.hidden_from_management.is_(False), User.hidden_from_management.is_(None)),
     )
+    if not force:
+        query = query.filter(
+            User.login_info_sent_at.is_(None),
+            User.login_info_skipped_at.is_(None),
+        )
+    else:
+        query = query.filter(User.login_info_skipped_at.is_(None))
     if scope == 'students':
         query = query.filter(User.role == 'student')
     elif scope == 'staff':
@@ -13627,6 +13655,8 @@ def share_user_login_bulk():
                     'username': user.username,
                     'status': 'sent',
                     'sent_to': result.get('sent_to') or [],
+                    'login_username': result.get('username') or user.username,
+                    'password': result.get('password'),
                 })
             else:
                 err = result.get('error') or 'Unknown error'

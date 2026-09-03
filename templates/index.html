@@ -654,6 +654,7 @@
                             <button type="button" role="menuitem" data-share-scope="students">All new students</button>
                             <button type="button" role="menuitem" data-share-scope="staff">All new staff</button>
                             <button type="button" role="menuitem" data-share-scope="outside_staff">All new Outside Staff</button>
+                            <button type="button" role="menuitem" data-share-scope="students" data-share-force="true">Resend login info to all students</button>
                         </div>
                     </div>
                     {% endif %}
@@ -2324,7 +2325,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=bulk-share-skip-mark"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=student-login-credentials-fix"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
