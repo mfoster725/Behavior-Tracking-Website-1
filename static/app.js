@@ -8076,6 +8076,9 @@ async function saveStudent() {
         const data = await response.json();
 
         if (response.ok) {
+            if (data.email_warning) {
+                showMessage('Student created, but login email was not sent: ' + data.email_warning, 'error');
+            }
             // Clear all fields
             document.getElementById('student-name').value = '';
             document.getElementById('student-grade').value = '';
@@ -16430,9 +16433,9 @@ async function loadUsers() {
         if (archivedStudentsTbody) archivedStudentsTbody.innerHTML = '';
         
         if (users.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="13" style="text-align: center; padding: 20px;">No users found</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px;">No users found</td></tr>';
             if (archivedStudentsTbody) {
-                archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="5" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
             }
             scheduleUserManagementTablesAutoFit();
             return;
@@ -16565,7 +16568,7 @@ async function loadUsers() {
 
         // Populate Student table (DocumentFragment for single reflow)
         if (studentUsers.length === 0) {
-            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="13" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
+            studentTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="11" style="text-align: center; padding: 20px; color: #999;">No student users</td></tr>';
         } else {
             const studentFrag = document.createDocumentFragment();
             studentUsers.forEach(user => {
@@ -16597,7 +16600,7 @@ async function loadUsers() {
                     });
                     
                     if (archivedStudents.length === 0) {
-                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="9" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
+                        archivedStudentsTbody.innerHTML = '<tr class="empty-row"><td class="empty-message-cell" colspan="8" style="text-align: center; padding: 20px; color: #999;">No archived students</td></tr>';
                     } else {
                         const archivedFrag = document.createDocumentFragment();
                         archivedStudents.forEach(student => {
@@ -16620,29 +16623,29 @@ async function loadUsers() {
                                 <td style="font-size: 13px;">${practitioner}</td>
                                 <td style="font-size: 13px;">${professional}</td>
                                 <td style="font-size: 13px;">${groupLeader}</td>
-                                <td class="plan-cell">
-                                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
-                                        onclick='openStudentPlanModal(${student.id}, ${nameForJs}, false)'>
-                                        Plan
-                                    </button>
-                                </td>
-                                <td class="actions-cell">
-                                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;"
-                                        onclick="restoreArchivedStudent(${student.id}, '${safeName}')">
-                                        Restore Student User
-                                    </button>
-                                </td>
+                                <td class="actions-cell"></td>
                             `;
+                            const actionsCell = row.querySelector('.actions-cell');
+                            actionsCell.appendChild(buildUsersActionsKebab([
+                                {
+                                    label: 'Add/Edit Plan',
+                                    onClick: () => openStudentPlanModal(student.id, student.name || 'Student', false)
+                                },
+                                {
+                                    label: 'Restore Student User',
+                                    onClick: () => restoreArchivedStudent(student.id, safeName)
+                                }
+                            ]));
                             archivedFrag.appendChild(row);
                         });
                         archivedStudentsTbody.appendChild(archivedFrag);
                     }
                 } else {
-                    archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                    archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
                 }
             } catch (e) {
                 console.error('Error loading archived students:', e);
-                archivedStudentsTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
+                archivedStudentsTbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #e53935;">Error loading archived students</td></tr>';
             }
         }
 
@@ -16651,6 +16654,83 @@ async function loadUsers() {
         console.error('Error loading users:', error);
         showMessage('Error loading users. Please try again.', 'error');
     }
+}
+
+function closeAllUsersActionsKebabMenus(exceptMenu = null) {
+    document.querySelectorAll('.users-actions-kebab-menu.open').forEach((menu) => {
+        if (exceptMenu && menu === exceptMenu) return;
+        menu.classList.remove('open');
+    });
+    document.querySelectorAll('.users-actions-kebab-btn[aria-expanded="true"]').forEach((btn) => {
+        if (exceptMenu && btn.nextElementSibling === exceptMenu) return;
+        btn.setAttribute('aria-expanded', 'false');
+    });
+}
+
+if (!window.__usersActionsKebabDocClickBound) {
+    window.__usersActionsKebabDocClickBound = true;
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.users-actions-kebab-wrap')) return;
+        closeAllUsersActionsKebabMenus();
+    });
+}
+
+function buildUsersActionsKebab(items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'users-actions-kebab-wrap';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'users-actions-kebab-btn';
+    btn.title = 'More options';
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'User actions');
+    btn.textContent = '⋮';
+    const menu = document.createElement('div');
+    menu.className = 'users-actions-kebab-menu';
+    menu.setAttribute('role', 'menu');
+
+    (items || []).forEach((item) => {
+        if (!item) return;
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.setAttribute('role', 'menuitem');
+        actionBtn.textContent = item.label;
+        if (item.danger) actionBtn.className = 'users-actions-kebab-danger';
+        actionBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeAllUsersActionsKebabMenus();
+            if (typeof item.onClick === 'function') item.onClick();
+        });
+        menu.appendChild(actionBtn);
+    });
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const willOpen = !menu.classList.contains('open');
+        closeAllUsersActionsKebabMenus(willOpen ? menu : null);
+        menu.classList.toggle('open', willOpen);
+        btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    return wrap;
+}
+
+function defaultSharePasswordForUser(user) {
+    if (!user) return null;
+    if (user.role === 'student') {
+        const initials = String(user.name || user.student_name || '').trim().toUpperCase();
+        const lunch = String(user.lunch_number || '').trim();
+        if (!initials || !lunch) return null;
+        return `${initials}${lunch}`;
+    }
+    const username = String(user.username || '').trim();
+    if (!username) return null;
+    return `${username}2149`;
 }
 
 function createAdminStaffRow(user, displayRole, isStaffTable) {
@@ -16696,16 +16776,48 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
                 Show Caseload
             </button>
         </td>` : ''}
-        <td id="password-cell-${user.id}">
-            ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
-            ` : '<span style="color: #999;">Hidden</span>'}
-        </td>
-        <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${grade}, ${cardColorVal}, ${gradesTaught}, ${linkedCaseManagerId}, ${userEmail})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
-        </td>
+        <td class="actions-cell"></td>
     `;
+
+    const menuItems = [];
+    if (isAdmin()) {
+        menuItems.push({
+            label: 'Share login information',
+            onClick: () => shareLoginInformation(user.id, user.username)
+        });
+    }
+    if (canSeePassword) {
+        menuItems.push({
+            label: 'Reset & View Password',
+            onClick: () => resetAndViewPassword(user.id, user.username, user)
+        });
+    }
+    if (canEdit) {
+        menuItems.push({
+            label: 'Edit',
+            onClick: () => editUser(
+                user.id,
+                user.name || null,
+                user.username,
+                user.role,
+                user.student_id || null,
+                user.designation || null,
+                user.grade || null,
+                user.card_color || null,
+                user.grades_taught || null,
+                user.linked_case_manager_id || null,
+                user.email || null
+            )
+        });
+    }
+    if (canDelete) {
+        menuItems.push({
+            label: 'Remove',
+            danger: true,
+            onClick: () => deleteUser(user.id, user.username, user.role)
+        });
+    }
+    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
     
     return row;
 }
@@ -16859,11 +16971,6 @@ function createStudentRow(user) {
     // Password visibility: Admin and staff can see/edit all student passwords, students see their own
     const canSeePassword = isAdmin() || isStaff() || user.id === window.currentUser.id;
     
-    const userDesignation = user.designation ? `'${user.designation}'` : 'null';
-    const gradeValue = user.grade ? `'${user.grade}'` : 'null';
-    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
-    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
-    
     const cardColor = user.card_color || '-';
     const cardColorDisplay = cardColor === '-' ? '-' : cardColor.charAt(0).toUpperCase() + cardColor.slice(1);
     const parentEmailsDisplay = (user.parent_emails || '')
@@ -16884,19 +16991,54 @@ function createStudentRow(user) {
         <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td style="font-size: 13px;">${parentEmailsDisplay}</td>
         <td>${user.username}</td>
-        <td id="password-cell-${user.id}" class="users-table-password-col">
-            ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View</button>
-            ` : '<span style="color: #999;">Hidden</span>'}
-        </td>
-        <td class="plan-cell">
-            ${user.student_id ? `<button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openStudentPlanModal(${user.student_id}, ${userName}, false)">Plan</button>` : '—'}
-        </td>
-        <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editUser(${user.id}, ${userName}, '${user.username}', '${user.role}', ${user.student_id || 'null'}, ${userDesignation}, ${gradeValue}, ${user.card_color ? `'${user.card_color}'` : 'null'}, null, null, ${userEmail})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
-        </td>
+        <td class="actions-cell"></td>
     `;
+
+    const menuItems = [];
+    if (isAdmin()) {
+        menuItems.push({
+            label: 'Share login information',
+            onClick: () => shareLoginInformation(user.id, user.username)
+        });
+    }
+    if (canSeePassword) {
+        menuItems.push({
+            label: 'Reset & View Password',
+            onClick: () => resetAndViewPassword(user.id, user.username, user)
+        });
+    }
+    if (user.student_id) {
+        menuItems.push({
+            label: 'Add/Edit Plan',
+            onClick: () => openStudentPlanModal(user.student_id, name, false)
+        });
+    }
+    if (canEdit) {
+        menuItems.push({
+            label: 'Edit',
+            onClick: () => editUser(
+                user.id,
+                user.name || null,
+                user.username,
+                user.role,
+                user.student_id || null,
+                user.designation || null,
+                user.grade || null,
+                user.card_color || null,
+                null,
+                null,
+                user.email || null
+            )
+        });
+    }
+    if (canDelete) {
+        menuItems.push({
+            label: 'Remove',
+            danger: true,
+            onClick: () => deleteUser(user.id, user.username, user.role)
+        });
+    }
+    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
     
     return row;
 }
@@ -16964,28 +17106,44 @@ function createOutsideStaffRow(user) {
     const canEdit = isAdmin();
     const canSeePassword = isAdmin();
     
-    const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
-    const userDistrict = user.district ? `'${user.district.replace(/'/g, "\\'")}'` : 'null';
-    const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
-    
     row.innerHTML = `
         <td><strong>${name}</strong></td>
         <td>${district}</td>
-        <td style="cursor: pointer; color: var(--accent); text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${userName})" title="Click to manage student assignments">
+        <td style="cursor: pointer; color: var(--accent); text-decoration: underline;" onclick="manageOutsideStaffStudents(${user.id}, ${user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null'})" title="Click to manage student assignments">
             ${studentsAssignedDisplay}
         </td>
         <td>${user.email ? escapeHtml(user.email) : '<span style="color: #999;">—</span>'}</td>
         <td>${user.username}</td>
-        <td id="password-cell-${user.id}">
-            ${canSeePassword ? `
-                <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${user.id}, '${user.username}')">Reset & View Password</button>
-            ` : '<span style="color: #999;">Hidden</span>'}
-        </td>
-        <td class="actions-cell">
-            ${canEdit ? `<button class="btn-secondary" onclick="editOutsideStaffUser(${user.id}, ${userName}, '${user.username}', ${userDistrict})">Edit</button>` : ''}
-            ${canDelete ? `<button class="btn-danger" onclick="deleteUser(${user.id}, '${user.username}', '${user.role}')">Delete</button>` : ''}
-        </td>
+        <td class="actions-cell"></td>
     `;
+
+    const menuItems = [];
+    if (isAdmin()) {
+        menuItems.push({
+            label: 'Share login information',
+            onClick: () => shareLoginInformation(user.id, user.username)
+        });
+    }
+    if (canSeePassword) {
+        menuItems.push({
+            label: 'Reset & View Password',
+            onClick: () => resetAndViewPassword(user.id, user.username, user)
+        });
+    }
+    if (canEdit) {
+        menuItems.push({
+            label: 'Edit',
+            onClick: () => editOutsideStaffUser(user.id, user.name || null, user.username, user.district || null)
+        });
+    }
+    if (canDelete) {
+        menuItems.push({
+            label: 'Remove',
+            danger: true,
+            onClick: () => deleteUser(user.id, user.username, user.role)
+        });
+    }
+    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
     
     return row;
 }
@@ -16995,14 +17153,24 @@ function createParentRow(user) {
     return document.createElement('tr');
 }
 
-async function resetAndViewPassword(userId, username) {
-    // Confirm before resetting
-    if (!confirm(`This will reset the password for ${username}. Continue?`)) {
+async function resetAndViewPassword(userId, username, userHint) {
+    const user = userHint || (Array.isArray(allStaffMembers) ? allStaffMembers.find(u => u.id === userId) : null)
+        || (Array.isArray(allStudentUsers) ? allStudentUsers.find(u => u.id === userId) : null)
+        || { id: userId, username, role: 'staff' };
+
+    const newPassword = defaultSharePasswordForUser(user);
+    if (!newPassword) {
+        if (user.role === 'student') {
+            showMessage('Cannot reset student password: initials and lunch number are required ({initials}{lunch}).', 'error');
+        } else {
+            showMessage('Cannot reset password: username is missing.', 'error');
+        }
         return;
     }
-    
-    // Generate a simple, memorable password (username + 2024)
-    const newPassword = username + '2024';
+
+    if (!confirm(`This will reset the password for ${username} to ${newPassword}. Continue?`)) {
+        return;
+    }
     
     try {
         const response = await fetch('/api/users', {
@@ -17015,18 +17183,13 @@ async function resetAndViewPassword(userId, username) {
         });
         
         if (response.ok) {
-            // Update the password cell to show the new password
-            const cell = document.getElementById(`password-cell-${userId}`);
-            if (cell) {
-                cell.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <code style="background: #e8f5e9; padding: 6px 12px; border-radius: 4px; font-weight: bold; color: #2e7d32; font-size: 14px;">${newPassword}</code>
-                        <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyToClipboard('${newPassword}', this)">📋 Copy</button>
-                        <button class="btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="resetAndViewPassword(${userId}, '${username}')">Reset Again</button>
-                    </div>
-                `;
-            }
             showMessage(`Password reset to: ${newPassword}`, 'success');
+            try {
+                await navigator.clipboard.writeText(newPassword);
+                showMessage(`Password reset to: ${newPassword} (copied)`, 'success');
+            } catch (_) {
+                // Clipboard may be denied; message already shown
+            }
         } else {
             const data = await response.json();
             throw new Error(data.error || 'Failed to reset password');
@@ -17035,6 +17198,105 @@ async function resetAndViewPassword(userId, username) {
         console.error('Error resetting password:', error);
         showMessage('Error: ' + error.message, 'error');
     }
+}
+
+async function shareLoginInformation(userId, username) {
+    if (!isAdmin()) {
+        showMessage('Only admins can share login information.', 'error');
+        return;
+    }
+    if (!confirm(`Reset password and email login information for ${username} to all emails on this row?`)) {
+        return;
+    }
+    try {
+        const response = await fetch(`/api/users/${userId}/share-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to share login information');
+        }
+        const sentTo = (data.sent_to || []).join(', ');
+        showMessage(
+            `Login info sent to: ${sentTo || 'recipients'}${data.password ? ` (password: ${data.password})` : ''}`,
+            'success'
+        );
+    } catch (error) {
+        console.error('Error sharing login information:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+async function shareLoginInformationBulk(scope) {
+    if (!isAdmin()) {
+        showMessage('Only admins can share login information.', 'error');
+        return;
+    }
+    const labels = {
+        all: 'all new users',
+        students: 'all new students',
+        staff: 'all new staff',
+        outside_staff: 'all new Outside Staff'
+    };
+    const label = labels[scope] || scope;
+    if (!confirm(`Reset passwords and email login information to ${label} who have never been sent credentials?`)) {
+        return;
+    }
+    try {
+        const response = await fetch('/api/users/share-login-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Bulk share failed');
+        }
+        showMessage(
+            `Share complete for ${label}: sent ${data.sent || 0}, skipped ${data.skipped || 0}, failed ${data.failed || 0} (of ${data.total || 0}).`,
+            (data.failed || 0) > 0 ? 'error' : 'success'
+        );
+        await loadUsers();
+    } catch (error) {
+        console.error('Error bulk-sharing login information:', error);
+        showMessage('Error: ' + error.message, 'error');
+    }
+}
+
+function initializeShareLoginBulkMenu() {
+    const btn = document.getElementById('share-login-bulk-btn');
+    const menu = document.getElementById('share-login-bulk-menu');
+    if (!btn || !menu || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const willOpen = menu.hasAttribute('hidden');
+        if (willOpen) {
+            menu.removeAttribute('hidden');
+            btn.setAttribute('aria-expanded', 'true');
+        } else {
+            menu.setAttribute('hidden', '');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    menu.querySelectorAll('[data-share-scope]').forEach((item) => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            menu.setAttribute('hidden', '');
+            btn.setAttribute('aria-expanded', 'false');
+            shareLoginInformationBulk(item.getAttribute('data-share-scope'));
+        });
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.users-share-login-bulk-wrap')) return;
+        menu.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', 'false');
+    });
 }
 
 function copyToClipboard(text, buttonElement) {
@@ -17906,7 +18168,11 @@ async function saveStaffUser() {
         });
         
         if (response.ok) {
+            const data = await response.json().catch(() => ({}));
             showButtonStatus('#save-staff-user-btn', 'Staff user created successfully', 'success');
+            if (data && data.email_warning) {
+                showMessage('Staff created, but login email was not sent: ' + data.email_warning, 'error');
+            }
             setTimeout(() => {
                 document.getElementById('staff-modal').style.display = 'none';
             }, 1200);
@@ -17980,7 +18246,11 @@ async function saveOutsideStaffUser() {
         });
         
         if (response.ok) {
+            const data = await response.json().catch(() => ({}));
             showButtonStatus('#save-outside-staff-user-btn', 'Outside Staff user created successfully', 'success');
+            if (data.email_warning) {
+                showMessage('Outside Staff created, but login email was not sent: ' + data.email_warning, 'error');
+            }
             setTimeout(() => {
                 document.getElementById('outside-staff-modal').style.display = 'none';
             }, 1200);
@@ -18040,7 +18310,11 @@ async function saveAdminUser() {
         });
         
         if (response.ok) {
+            const data = await response.json().catch(() => ({}));
             showButtonStatus('#save-admin-user-btn', 'Admin user created successfully', 'success');
+            if (data.email_warning) {
+                showMessage('Admin created, but login email was not sent: ' + data.email_warning, 'error');
+            }
             setTimeout(() => {
                 document.getElementById('admin-modal').style.display = 'none';
             }, 1200);
@@ -18830,6 +19104,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // User management buttons
     initializeUserManagementTableAutoFitObserver();
+    initializeShareLoginBulkMenu();
 
     const refreshUsersBtn = document.getElementById('refresh-users-btn');
     if (refreshUsersBtn) {

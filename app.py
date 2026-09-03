@@ -44,6 +44,8 @@ from urllib.parse import urlparse, urljoin
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import calendar as _calendar
+import smtplib
+from email.message import EmailMessage
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -692,6 +694,8 @@ class User(UserMixin, db.Model):
     hidden_from_management = db.Column(db.Boolean, default=False, nullable=False)
     # Contact email for user management and future notifications
     email = db.Column(db.String(200), nullable=True)
+    # When login credentials were last emailed successfully
+    login_info_sent_at = db.Column(db.DateTime, nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -761,6 +765,9 @@ def ensure_ui_preferences_column():
                 conn.execute(text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)"
                 ))
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_info_sent_at TIMESTAMP"
+                ))
                 conn.commit()
     except Exception as e:
         # Log but don't crash the app if migration fails
@@ -769,6 +776,38 @@ def ensure_ui_preferences_column():
 
 # Run the migration once when the app starts up in a Postgres environment
 ensure_ui_preferences_column()
+
+
+def ensure_login_info_sent_at_column():
+    """Add users.login_info_sent_at on SQLite and Postgres if it is missing."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'users' not in inspector.get_table_names():
+                return
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'login_info_sent_at' in columns:
+                return
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            with db.engine.connect() as conn:
+                if is_postgres:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_info_sent_at TIMESTAMP"
+                    ))
+                else:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN login_info_sent_at DATETIME"
+                    ))
+                conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure login_info_sent_at column exists: {e}")
+        except Exception:
+            print(f"Failed to ensure login_info_sent_at column exists: {e}")
+
+
+ensure_login_info_sent_at_column()
 
 
 def ensure_hidden_from_management_column():
@@ -3383,6 +3422,18 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add must_change_password column (may already exist): {e}")
+
+                    if 'login_info_sent_at' not in columns:
+                        print("Adding login_info_sent_at column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN login_info_sent_at TIMESTAMP"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN login_info_sent_at DATETIME"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add login_info_sent_at column (may already exist): {e}")
                 
                 # Verify columns exist in frenzy_events table
                 if 'frenzy_events' in table_names:
@@ -3812,6 +3863,181 @@ def _public_base_url():
     if env_url:
         return env_url
     return request.host_url.rstrip('/')
+
+
+def _mail_config():
+    """Return SMTP settings from env, or None if not configured."""
+    server = (os.environ.get('MAIL_SERVER') or '').strip()
+    mail_from = (os.environ.get('MAIL_FROM') or '').strip()
+    if not server or not mail_from:
+        return None
+    try:
+        port = int((os.environ.get('MAIL_PORT') or '587').strip() or '587')
+    except ValueError:
+        port = 587
+    use_tls = (os.environ.get('MAIL_USE_TLS') or 'true').strip().lower() in ('1', 'true', 'yes')
+    return {
+        'server': server,
+        'port': port,
+        'username': (os.environ.get('MAIL_USERNAME') or '').strip() or None,
+        'password': (os.environ.get('MAIL_PASSWORD') or '').strip() or None,
+        'from_addr': mail_from,
+        'use_tls': use_tls,
+    }
+
+
+def _parse_email_list(raw):
+    if not raw:
+        return []
+    parts = re.split(r'[\n,;]+', str(raw))
+    seen = set()
+    result = []
+    for part in parts:
+        email = part.strip()
+        if not email or '@' not in email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(email)
+    return result
+
+
+def _collect_user_recipient_emails(user):
+    """Emails on the user row: user.email (+ student email / parent_emails for students)."""
+    emails = []
+    emails.extend(_parse_email_list(getattr(user, 'email', None)))
+    student = None
+    if getattr(user, 'student_id', None):
+        student = getattr(user, 'student', None) or Student.query.get(user.student_id)
+    if student is not None:
+        emails.extend(_parse_email_list(getattr(student, 'email', None)))
+        emails.extend(_parse_email_list(getattr(student, 'parent_emails', None)))
+    # Dedupe preserving order
+    seen = set()
+    deduped = []
+    for e in emails:
+        key = e.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(e)
+    return deduped
+
+
+def _default_share_password(user):
+    """
+    Staff/admin/outside staff: {username}2149
+    Students: {initials}{lunch} (initials uppercased + lunch number)
+    """
+    if user.role == 'student':
+        student = getattr(user, 'student', None)
+        if student is None and user.student_id:
+            student = Student.query.get(user.student_id)
+        initials = ((student.name if student else None) or user.name or '').strip().upper()
+        lunch = ((student.lunch_number if student else None) or '').strip()
+        if not initials:
+            return None, 'Student initials are missing; cannot build password.'
+        if not lunch:
+            return None, 'Student lunch number is missing; cannot build password {initials}{lunch}.'
+        return f'{initials}{lunch}', None
+    username = (user.username or '').strip()
+    if not username:
+        return None, 'Username is missing; cannot build password.'
+    return f'{username}2149', None
+
+
+def _login_info_email_content(username, password, login_url):
+    subject = 'Your Behavior Tracking System login information'
+    body = (
+        'Hello,\n\n'
+        'An account has been set up for you in Behavior Tracking System. '
+        'Use the login details below:\n\n'
+        f'Login page: {login_url}\n'
+        f'Username: {username}\n'
+        f'Password: {password}\n\n'
+        'Please keep this information private. If you did not expect this email, '
+        'contact your school administrator.\n\n'
+        'Thank you,\n'
+        'Behavior Tracking System\n'
+    )
+    return subject, body
+
+
+def _send_smtp_email(to_addrs, subject, body):
+    cfg = _mail_config()
+    if not cfg:
+        return False, 'Email is not configured. Set MAIL_SERVER and MAIL_FROM.'
+    if not to_addrs:
+        return False, 'No recipient email addresses.'
+    msg = EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = cfg['from_addr']
+    msg['To'] = ', '.join(to_addrs)
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(cfg['server'], cfg['port'], timeout=30) as smtp:
+            if cfg['use_tls']:
+                smtp.starttls()
+            if cfg['username'] and cfg['password']:
+                smtp.login(cfg['username'], cfg['password'])
+            smtp.send_message(msg)
+        return True, None
+    except Exception as e:
+        app.logger.exception('Failed to send login-info email')
+        return False, f'Failed to send email: {e}'
+
+
+def _share_login_info_for_user(user, *, reset_password=True, password_override=None):
+    """
+    Reset (optional) and email login credentials to all emails on the user row.
+    Returns dict: {ok, sent_to, password, error, warning}
+    """
+    recipients = _collect_user_recipient_emails(user)
+    if not recipients:
+        return {
+            'ok': False,
+            'sent_to': [],
+            'password': None,
+            'error': 'No email addresses on this user row.',
+        }
+
+    if password_override:
+        password = password_override
+        err = None
+    else:
+        password, err = _default_share_password(user)
+    if err:
+        return {'ok': False, 'sent_to': [], 'password': None, 'error': err}
+
+    is_valid, strength_err = validate_password_strength(password)
+    if not is_valid:
+        return {'ok': False, 'sent_to': [], 'password': None, 'error': strength_err}
+
+    if reset_password:
+        user.set_password(password)
+        if hasattr(user, 'must_change_password') and user.role == 'staff':
+            user.must_change_password = True
+
+    login_url = f"{_public_base_url()}/login"
+    subject, body = _login_info_email_content(user.username, password, login_url)
+    sent_ok, send_err = _send_smtp_email(recipients, subject, body)
+    if not sent_ok:
+        return {
+            'ok': False,
+            'sent_to': [],
+            'password': password if reset_password else None,
+            'error': send_err,
+        }
+
+    user.login_info_sent_at = datetime.utcnow()
+    return {
+        'ok': True,
+        'sent_to': recipients,
+        'password': password,
+        'error': None,
+    }
 
 
 def _stripe_get(obj, key, default=None):
@@ -4257,16 +4483,28 @@ def students():
         
         data = request.json
         
+        lunch_number = (data.get('lunch_number') or '').strip() or None
+        parent_emails_raw = data.get('parent_emails')
+        if isinstance(parent_emails_raw, list):
+            parent_emails_stacked = '\n'.join(
+                e.strip() for e in parent_emails_raw if e and str(e).strip()
+            ) or None
+        else:
+            parent_emails_stacked = (parent_emails_raw or '').strip() or None
+
         # Create student record
         student = Student(
-            name=data['name'], 
-            email=data.get('email'),
+            name=data['name'],
+            email=(data.get('email') or '').strip() or None,
             grade=data.get('grade'),
-            card_color=data.get('card_color')
+            card_color=data.get('card_color'),
+            lunch_number=lunch_number,
+            parent_emails=parent_emails_stacked,
         )
         db.session.add(student)
         db.session.flush()  # Get student ID before committing
         
+        created_user = None
         # Create user account if username and password provided
         if data.get('username') and data.get('password'):
             # Check if username already exists
@@ -4285,10 +4523,21 @@ def students():
                 name=data['name'],
                 username=data['username'],
                 role='student',
-                student_id=student.id
+                student_id=student.id,
+                email=(data.get('email') or '').strip() or None,
             )
-            user.set_password(password)
+            # Prefer standard student password {initials}{lunch} when lunch is available
+            db.session.flush()
+            share_password, _share_err = _default_share_password(user)
+            if share_password:
+                user.set_password(share_password)
+                password_for_email = share_password
+            else:
+                user.set_password(password)
+                password_for_email = password
             db.session.add(user)
+            created_user = user
+            created_user._password_for_email = password_for_email
         
         # Save team member info if provided
         team_roles = {
@@ -4328,8 +4577,23 @@ def students():
             details=f"Created student: {student.name}",
             ip_address=get_remote_address()
         )
-        
-        return jsonify({'id': student.id, 'name': student.name}), 201
+
+        email_warning = None
+        if created_user is not None:
+            result = _share_login_info_for_user(
+                created_user,
+                reset_password=False,
+                password_override=getattr(created_user, '_password_for_email', None),
+            )
+            if result.get('ok'):
+                db.session.commit()
+            else:
+                email_warning = result.get('error') or 'Login info email was not sent.'
+
+        payload = {'id': student.id, 'name': student.name}
+        if email_warning:
+            payload['email_warning'] = email_warning
+        return jsonify(payload), 201
     else:
         # Students and parents can only see their own/their child's data, staff/admin can see all
         if current_user.role == 'student':
@@ -11322,6 +11586,37 @@ def _import_users_payload(success, errors, warnings, updated_names, duplicate_co
     }
 
 
+def _email_login_info_after_import(success_rows, warnings):
+    """Send login-info emails for newly imported users. Appends warnings on skip/fail."""
+    if not success_rows:
+        return
+    for row in success_rows:
+        username = (row.get('username') or '').strip()
+        if not username:
+            continue
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            warnings.append(f"Login email skipped for {username}: user not found after import.")
+            continue
+        password = row.get('password')
+        result = _share_login_info_for_user(
+            user,
+            reset_password=False,
+            password_override=password,
+        )
+        if result.get('ok'):
+            continue
+        label = row.get('name') or row.get('initials') or username
+        warnings.append(
+            f"Login email not sent for {label} ({username}): {result.get('error') or 'unknown error'}"
+        )
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        warnings.append('Could not save login_info_sent_at after import emails.')
+
+
 @app.route('/api/import-users', methods=['POST'])
 @login_required
 def import_users():
@@ -11419,7 +11714,7 @@ def import_users():
                 return
 
             username = generate_staff_username(name)
-            password = f"{username}123"
+            password = f"{username}2149"
 
             normalized_grades = normalize_grades_taught(grades_taught) if role == 'Case Manager' and grades_taught else None
             user = User(
@@ -11478,6 +11773,7 @@ def import_users():
             db.session.rollback()
             app.logger.exception('Staff CSV import failed')
             return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
+        _email_login_info_after_import(success, warnings)
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'outside_staff':
@@ -11528,7 +11824,7 @@ def import_users():
                 continue
 
             username = generate_staff_username(name)
-            password = f"{username}123"
+            password = f"{username}2149"
 
             user = User(
                 name=name,
@@ -11558,6 +11854,7 @@ def import_users():
             db.session.rollback()
             app.logger.exception('Outside staff CSV import failed')
             return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
+        _email_login_info_after_import(success, warnings)
         return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
 
     elif import_type == 'student':
@@ -11709,6 +12006,7 @@ def import_users():
                     )
 
             db.session.commit()
+            _email_login_info_after_import(success, warnings)
             return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
         except Exception as e:
             db.session.rollback()
@@ -12888,6 +13186,7 @@ def manage_users():
                 'district': user.district if hasattr(user, 'district') else None,
                 'grades_taught': getattr(user, 'grades_taught', None),
                 'linked_case_manager_id': getattr(user, 'linked_case_manager_id', None),
+                'login_info_sent_at': utc_isoformat(getattr(user, 'login_info_sent_at', None)),
                 'created_at': utc_isoformat(user.created_at)
             }
             # Assigned students for Outside Staff (from batch)
@@ -12902,6 +13201,7 @@ def manage_users():
                 user_data['student_name'] = student.name
                 user_data['grade'] = student.grade
                 user_data['card_color'] = student.card_color
+                user_data['lunch_number'] = getattr(student, 'lunch_number', None)
                 user_data['parent_emails'] = getattr(student, 'parent_emails', None)
                 if not user_data['email'] and student.email:
                     user_data['email'] = student.email
@@ -12956,6 +13256,7 @@ def manage_users():
             return jsonify({'error': 'Username already exists'}), 400
         
         # Create user
+        email = (data.get('email') or '').strip() or None
         user = User(
             name=data.get('name', '').strip() if data.get('name') else None,
             username=username,
@@ -12965,9 +13266,28 @@ def manage_users():
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
             district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None,
             grades_taught=(normalize_grades_taught(data.get('grades_taught') or '') or None) if role == 'staff' else None,
-            linked_case_manager_id=data.get('linked_case_manager_id') if (role == 'staff' and data.get('designation') == 'Paraprofessional') else None
+            linked_case_manager_id=data.get('linked_case_manager_id') if (role == 'staff' and data.get('designation') == 'Paraprofessional') else None,
+            email=email,
         )
-        user.set_password(password)
+        # Staff/admin: always use {username}2149 for emailed credentials
+        share_password, share_err = _default_share_password(user)
+        if role == 'student':
+            # Student create via /api/users is rare; prefer scheme when possible
+            if share_password:
+                user.set_password(share_password)
+                password_for_email = share_password
+            else:
+                user.set_password(password)
+                password_for_email = password
+        else:
+            if share_password:
+                user.set_password(share_password)
+                password_for_email = share_password
+                if hasattr(user, 'must_change_password'):
+                    user.must_change_password = True
+            else:
+                user.set_password(password)
+                password_for_email = password
         
         db.session.add(user)
         db.session.commit()
@@ -12983,14 +13303,28 @@ def manage_users():
             details=f"Created {role} user: {username}",
             ip_address=get_remote_address()
         )
+
+        email_warning = None
+        share_result = _share_login_info_for_user(
+            user,
+            reset_password=False,
+            password_override=password_for_email,
+        )
+        if share_result.get('ok'):
+            db.session.commit()
+        else:
+            email_warning = share_result.get('error') or 'Login info email was not sent.'
         
-        return jsonify({
+        payload = {
             'id': user.id,
             'name': user.name,
             'username': user.username,
             'role': user.role,
             'message': 'User created successfully'
-        }), 201
+        }
+        if email_warning:
+            payload['email_warning'] = email_warning
+        return jsonify(payload), 201
     
     elif request.method == 'PUT':
         # Update user
@@ -13139,6 +13473,108 @@ def manage_users():
         db.session.delete(user)
         db.session.commit()
         return jsonify({'message': 'User deleted successfully'}), 200
+
+
+@app.route('/api/users/<int:user_id>/share-login', methods=['POST'])
+@login_required
+def share_user_login(user_id):
+    """Reset password to the role default and email login info to all emails on the row."""
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Permission denied'}), 403
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    if getattr(user, 'hidden_from_management', False):
+        return jsonify({'error': 'This account cannot be managed from User Management.'}), 403
+
+    result = _share_login_info_for_user(user, reset_password=True)
+    if not result.get('ok'):
+        # Password may already have been reset before send failed — commit hash if set
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'error': result.get('error') or 'Failed to share login information'}), 400
+
+    db.session.commit()
+    return jsonify({
+        'message': 'Login information shared successfully',
+        'sent_to': result.get('sent_to') or [],
+        'password': result.get('password'),
+    }), 200
+
+
+@app.route('/api/users/share-login-bulk', methods=['POST'])
+@login_required
+def share_user_login_bulk():
+    """Email login info to users who have never received it (login_info_sent_at is null)."""
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Permission denied'}), 403
+
+    data = request.json or {}
+    scope = (data.get('scope') or 'all').strip().lower()
+    valid_scopes = {'all', 'students', 'staff', 'outside_staff'}
+    if scope not in valid_scopes:
+        return jsonify({'error': 'Invalid scope. Use all, students, staff, or outside_staff.'}), 400
+
+    query = User.query.filter(
+        User.login_info_sent_at.is_(None),
+        or_(User.hidden_from_management.is_(False), User.hidden_from_management.is_(None)),
+    )
+    if scope == 'students':
+        query = query.filter(User.role == 'student')
+    elif scope == 'staff':
+        query = query.filter(User.role == 'staff', User.is_outside_staff.is_(False))
+    elif scope == 'outside_staff':
+        query = query.filter(User.role == 'staff', User.is_outside_staff.is_(True))
+    # scope == 'all': students + staff + outside + admin
+
+    users = query.order_by(User.id).all()
+    sent = 0
+    skipped = 0
+    failed = 0
+    details = []
+
+    for user in users:
+        result = _share_login_info_for_user(user, reset_password=True)
+        if result.get('ok'):
+            sent += 1
+            details.append({
+                'id': user.id,
+                'username': user.username,
+                'status': 'sent',
+                'sent_to': result.get('sent_to') or [],
+            })
+        else:
+            err = result.get('error') or 'Unknown error'
+            if 'No email' in err or 'missing' in err.lower():
+                skipped += 1
+                status = 'skipped'
+            else:
+                failed += 1
+                status = 'failed'
+            details.append({
+                'id': user.id,
+                'username': user.username,
+                'status': status,
+                'error': err,
+            })
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to save after bulk send: {e}'}), 500
+
+    return jsonify({
+        'scope': scope,
+        'total': len(users),
+        'sent': sent,
+        'skipped': skipped,
+        'failed': failed,
+        'details': details,
+    }), 200
 
 
 @app.route('/api/user/preferences', methods=['GET', 'POST'])

@@ -492,8 +492,6 @@
                                     <th>Email</th>
                                     <th>Parent/Guardian</th>
                                     <th>Username</th>
-                                    <th class="users-table-password-col">Password</th>
-                                    <th>Plan</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -531,7 +529,6 @@
                                     <th>Practitioner</th>
                                     <th>Professional</th>
                                     <th>Group Leader</th>
-                                    <th>Plan</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -566,7 +563,6 @@
                                     <th>Email</th>
                                     <th>Username</th>
                                     <th>Caseload</th>
-                                    <th>Password</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -600,7 +596,6 @@
                                     <th>Students Assigned</th>
                                     <th>Email</th>
                                     <th>Username</th>
-                                    <th>Password</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -633,7 +628,6 @@
                                     <th>Role</th>
                                     <th>Email</th>
                                     <th>Username</th>
-                                    <th>Password</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -645,7 +639,7 @@
                     </div>
                 </div>
                 
-                <div class="button-group" style="margin-top: 20px; display: flex; gap: 10px;">
+                <div class="button-group" style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                     {% if user.role in ['staff', 'admin'] and not (user.role == 'staff' and user.is_outside_staff) %}
                     <button id="add-student-btn" class="btn-primary">Add Student</button>
                     {% endif %}
@@ -653,6 +647,15 @@
                     <button id="add-staff-btn" class="btn-primary">Add Staff User</button>
                     <button id="add-outside-staff-btn" class="btn-primary">Add Outside Staff User</button>
                     <button id="add-admin-btn" class="btn-primary">Add Admin User</button>
+                    <div class="users-share-login-bulk-wrap">
+                        <button type="button" id="share-login-bulk-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false">Share login information ▾</button>
+                        <div id="share-login-bulk-menu" class="users-share-login-bulk-menu" role="menu" hidden>
+                            <button type="button" role="menuitem" data-share-scope="all">All new users</button>
+                            <button type="button" role="menuitem" data-share-scope="students">All new students</button>
+                            <button type="button" role="menuitem" data-share-scope="staff">All new staff</button>
+                            <button type="button" role="menuitem" data-share-scope="outside_staff">All new Outside Staff</button>
+                        </div>
+                    </div>
                     {% endif %}
                     <button id="refresh-users-btn" class="btn-secondary">Refresh List</button>
                 </div>
@@ -2308,7 +2311,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=parent-emails-on-students"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=users-actions-kebab-share-login"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
