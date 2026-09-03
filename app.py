@@ -4042,49 +4042,65 @@ def _send_smtp_email(to_addrs, subject, body):
         return False, 'Email is not configured. Set MAIL_SERVER and MAIL_FROM.'
     if not to_addrs:
         return False, 'No recipient email addresses.'
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = cfg['from_addr']
-    msg['To'] = ', '.join(to_addrs)
-    msg.set_content(body)
 
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        try:
-            with smtplib.SMTP(cfg['server'], cfg['port'], timeout=60) as smtp:
-                if cfg['use_tls']:
-                    smtp.starttls()
-                if cfg['username'] and cfg['password']:
-                    smtp.login(cfg['username'], cfg['password'])
-                smtp.send_message(msg)
-            return True, None
-        except Exception as e:
-            err_text = str(e)
-            transient = any(
-                token in err_text.lower()
-                for token in (
-                    'connection unexpectedly closed',
-                    'connection reset',
-                    'timed out',
-                    'temporary failure',
-                    'try again',
-                    '421',
-                    '450',
-                    '451',
-                    '452',
+    reply_to = (os.environ.get('MAIL_REPLY_TO') or '').strip() or cfg['from_addr']
+    errors = []
+    for addr in to_addrs:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = cfg['from_addr']
+        msg['To'] = addr
+        if reply_to:
+            msg['Reply-To'] = reply_to
+        msg.set_content(body)
+
+        max_attempts = 3
+        sent = False
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with smtplib.SMTP(cfg['server'], cfg['port'], timeout=60) as smtp:
+                    if cfg['use_tls']:
+                        smtp.starttls()
+                    if cfg['username'] and cfg['password']:
+                        smtp.login(cfg['username'], cfg['password'])
+                    smtp.send_message(msg)
+                sent = True
+                break
+            except Exception as e:
+                err_text = str(e)
+                transient = any(
+                    token in err_text.lower()
+                    for token in (
+                        'connection unexpectedly closed',
+                        'connection reset',
+                        'timed out',
+                        'temporary failure',
+                        'try again',
+                        '421',
+                        '450',
+                        '451',
+                        '452',
+                    )
                 )
-            )
-            if attempt < max_attempts and transient:
-                delay = 2 * attempt
-                app.logger.warning(
-                    'SMTP send attempt %s/%s failed (%s); retrying in %ss',
-                    attempt, max_attempts, err_text, delay,
-                )
-                time.sleep(delay)
-                continue
-            app.logger.exception('Failed to send login-info email')
-            return False, f'Failed to send email: {e}'
-    return False, 'Failed to send email after retries.'
+                if attempt < max_attempts and transient:
+                    delay = 2 * attempt
+                    app.logger.warning(
+                        'SMTP send attempt %s/%s to %s failed (%s); retrying in %ss',
+                        attempt, max_attempts, addr, err_text, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                app.logger.exception('Failed to send login-info email to %s', addr)
+                errors.append(f'{addr}: {e}')
+                break
+        if not sent and not errors:
+            errors.append(f'{addr}: Failed to send email after retries.')
+
+    if errors:
+        if len(errors) == len(to_addrs):
+            return False, '; '.join(errors)
+        return False, 'Some recipients failed: ' + '; '.join(errors)
+    return True, None
 
 
 def _share_login_info_for_user(user, *, reset_password=True, password_override=None):

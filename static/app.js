@@ -17219,7 +17219,10 @@ async function shareLoginInformation(userId, username) {
         }
         const sentTo = (data.sent_to || []).join(', ');
         showMessage(
-            `Login info sent to: ${sentTo || 'recipients'}${data.username ? ` (username: ${data.username}` : ''}${data.password ? `, password: ${data.password})` : (data.username ? ')' : '')}`,
+            `Login info handed off to mail server for: ${sentTo || 'recipients'}. ` +
+            'If families do not see it, check parent/guardian inboxes (not only @isd2149.org student mail) and spam. ' +
+            (data.username ? `(username: ${data.username}` : '') +
+            (data.password ? `, password: ${data.password})` : (data.username ? ')' : '')),
             'success'
         );
     } catch (error) {
