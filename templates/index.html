@@ -1832,6 +1832,19 @@
         </div>
     </div>
 
+    <!-- Bulk share login results (stays open until dismissed) -->
+    <div id="bulk-share-result-modal" class="modal">
+        <div class="modal-content" style="max-width: 680px;">
+            <span class="close" onclick="closeBulkShareResultModal()">&times;</span>
+            <h2 id="bulk-share-result-title">Share login information</h2>
+            <pre id="bulk-share-result-body" class="bulk-share-result-body" tabindex="0"></pre>
+            <div style="margin-top: 1rem; display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" id="bulk-share-result-copy-btn" class="btn-secondary">Copy report</button>
+                <button type="button" class="btn-primary" onclick="closeBulkShareResultModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Infractions Summary Modal -->
     <div id="infractions-summary-modal" class="modal">
         <div class="modal-content" style="max-width: 700px;">
@@ -2311,7 +2324,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=users-actions-kebab-share-login"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=bulk-share-result-modal"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
