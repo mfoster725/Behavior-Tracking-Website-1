@@ -17372,11 +17372,11 @@ function formatBulkShareReport(label, data, options = {}) {
     return lines.join('\n');
 }
 
-async function fetchBulkShareBatch(scope, limit, force = false) {
+async function fetchBulkShareBatch(scope, limit, force = false, afterId = 0) {
     const response = await fetch('/api/users/share-login-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, limit, force: !!force })
+        body: JSON.stringify({ scope, limit, force: !!force, after_id: afterId || 0 })
     });
     const rawText = await response.text();
     let data = {};
@@ -17417,7 +17417,8 @@ async function shareLoginInformationBulk(scope, options = {}) {
     if (!confirm(confirmText)) {
         return;
     }
-    const BATCH_SIZE = 8;
+    const BATCH_SIZE = 3;
+    const MAX_BATCHES = 200;
     const bulkBtn = document.getElementById('share-login-bulk-btn');
     const prevBtnText = bulkBtn ? bulkBtn.textContent : '';
     if (bulkBtn) {
@@ -17441,7 +17442,9 @@ async function shareLoginInformationBulk(scope, options = {}) {
 
     try {
         let batchNum = 0;
-        while (true) {
+        let afterId = 0;
+        let consecutiveNoProgress = 0;
+        while (batchNum < MAX_BATCHES) {
             batchNum += 1;
             if (bulkBtn) {
                 bulkBtn.textContent = `Sending… (batch ${batchNum})`;
@@ -17452,7 +17455,7 @@ async function shareLoginInformationBulk(scope, options = {}) {
                     `\n\nBatch ${batchNum} in progress…`
             );
 
-            const result = await fetchBulkShareBatch(scope, BATCH_SIZE, force);
+            const result = await fetchBulkShareBatch(scope, BATCH_SIZE, force, afterId);
             if (!result.ok) {
                 showBulkShareResultModal(
                     'Share login information — error',
@@ -17466,7 +17469,7 @@ async function shareLoginInformationBulk(scope, options = {}) {
             if (cumulative.pending_total == null) {
                 cumulative.pending_total = data.pending_total ?? data.total ?? 0;
             }
-            const prevRemaining = cumulative.remaining;
+            const prevSent = cumulative.sent || 0;
             mergeBulkShareBatchIntoCumulative(cumulative, data);
 
             updateBulkShareResultModal(
@@ -17475,27 +17478,35 @@ async function shareLoginInformationBulk(scope, options = {}) {
             );
 
             const processed = data.processed || 0;
-            if ((data.remaining || 0) === 0) break;
-            if (processed === 0) break;
-            // Safety: stop if the same unmailable users are blocking the queue
-            if (
-                prevRemaining != null &&
-                data.remaining === prevRemaining &&
-                (data.sent || 0) === 0 &&
-                (data.failed || 0) === 0
-            ) {
+            afterId = data.next_after_id ?? afterId;
+
+            if ((data.remaining || 0) === 0 || processed === 0) break;
+
+            if ((cumulative.sent || 0) === prevSent) {
+                consecutiveNoProgress += 1;
+            } else {
+                consecutiveNoProgress = 0;
+            }
+            // Stop after 2 batches with no successful sends (SMTP rate limit / outage)
+            if (consecutiveNoProgress >= 2) {
+                cumulative.stopped_early = true;
                 break;
             }
-            await new Promise((r) => setTimeout(r, 400));
+
+            await new Promise((r) => setTimeout(r, 3000));
         }
 
         const failed = cumulative.failed || 0;
         const skipped = cumulative.skipped || 0;
+        let finalReport = formatBulkShareReport(label, cumulative);
+        if (cumulative.stopped_early) {
+            finalReport += '\n\nStopped early: email server stopped accepting messages (rate limit or connection issue). Wait a few minutes and run again — already-sent students will be skipped unless you use Resend.';
+        }
         showBulkShareResultModal(
             failed > 0
                 ? 'Share login information — completed with errors'
                 : (skipped > 0 ? 'Share login information — complete (some skipped)' : 'Share login information — complete'),
-            formatBulkShareReport(label, cumulative)
+            finalReport
         );
         console.info('Bulk share login details:', cumulative);
         await loadUsers();

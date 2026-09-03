@@ -4047,17 +4047,44 @@ def _send_smtp_email(to_addrs, subject, body):
     msg['From'] = cfg['from_addr']
     msg['To'] = ', '.join(to_addrs)
     msg.set_content(body)
-    try:
-        with smtplib.SMTP(cfg['server'], cfg['port'], timeout=30) as smtp:
-            if cfg['use_tls']:
-                smtp.starttls()
-            if cfg['username'] and cfg['password']:
-                smtp.login(cfg['username'], cfg['password'])
-            smtp.send_message(msg)
-        return True, None
-    except Exception as e:
-        app.logger.exception('Failed to send login-info email')
-        return False, f'Failed to send email: {e}'
+
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with smtplib.SMTP(cfg['server'], cfg['port'], timeout=60) as smtp:
+                if cfg['use_tls']:
+                    smtp.starttls()
+                if cfg['username'] and cfg['password']:
+                    smtp.login(cfg['username'], cfg['password'])
+                smtp.send_message(msg)
+            return True, None
+        except Exception as e:
+            err_text = str(e)
+            transient = any(
+                token in err_text.lower()
+                for token in (
+                    'connection unexpectedly closed',
+                    'connection reset',
+                    'timed out',
+                    'temporary failure',
+                    'try again',
+                    '421',
+                    '450',
+                    '451',
+                    '452',
+                )
+            )
+            if attempt < max_attempts and transient:
+                delay = 2 * attempt
+                app.logger.warning(
+                    'SMTP send attempt %s/%s failed (%s); retrying in %ss',
+                    attempt, max_attempts, err_text, delay,
+                )
+                time.sleep(delay)
+                continue
+            app.logger.exception('Failed to send login-info email')
+            return False, f'Failed to send email: {e}'
+    return False, 'Failed to send email after retries.'
 
 
 def _share_login_info_for_user(user, *, reset_password=True, password_override=None):
@@ -13601,38 +13628,45 @@ def share_user_login_bulk():
         return jsonify({'error': 'Invalid scope. Use all, students, staff, or outside_staff.'}), 400
 
     try:
-        limit = int(data.get('limit', 8))
+        limit = int(data.get('limit', 3))
     except (TypeError, ValueError):
-        limit = 8
-    limit = max(1, min(limit, 20))
+        limit = 3
+    limit = max(1, min(limit, 10))
     force = bool(data.get('force'))
+    try:
+        after_id = int(data.get('after_id', 0) or 0)
+    except (TypeError, ValueError):
+        after_id = 0
 
-    query = User.query.filter(
+    base_query = User.query.filter(
         or_(User.hidden_from_management.is_(False), User.hidden_from_management.is_(None)),
     )
     if not force:
-        query = query.filter(
+        base_query = base_query.filter(
             User.login_info_sent_at.is_(None),
             User.login_info_skipped_at.is_(None),
         )
     else:
-        query = query.filter(User.login_info_skipped_at.is_(None))
+        base_query = base_query.filter(User.login_info_skipped_at.is_(None))
     if scope == 'students':
-        query = query.filter(User.role == 'student')
+        base_query = base_query.filter(User.role == 'student')
     elif scope == 'staff':
-        query = query.filter(User.role == 'staff', User.is_outside_staff.is_(False))
+        base_query = base_query.filter(User.role == 'staff', User.is_outside_staff.is_(False))
     elif scope == 'outside_staff':
-        query = query.filter(User.role == 'staff', User.is_outside_staff.is_(True))
+        base_query = base_query.filter(User.role == 'staff', User.is_outside_staff.is_(True))
     # scope == 'all': students + staff + outside + admin
 
-    pending_total = query.count()
+    pending_total = base_query.count()
+    query = base_query.filter(User.id > after_id)
     users = query.order_by(User.id).limit(limit).all()
     sent = 0
     skipped = 0
     failed = 0
     details = []
 
-    for user in users:
+    for idx, user in enumerate(users):
+        if idx > 0:
+            time.sleep(2)
         try:
             result = _share_login_info_for_user(user, reset_password=True)
             if result.get('ok'):
@@ -13702,13 +13736,16 @@ def share_user_login_bulk():
                 'error': str(e),
             })
 
-    remaining = query.count()
+    next_after_id = users[-1].id if users else after_id
+    remaining = base_query.filter(User.id > next_after_id).count()
 
     return jsonify({
         'scope': scope,
         'pending_total': pending_total,
         'processed': len(users),
         'remaining': remaining,
+        'after_id': after_id,
+        'next_after_id': next_after_id,
         'total': pending_total,
         'sent': sent,
         'skipped': skipped,
