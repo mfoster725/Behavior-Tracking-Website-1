@@ -17326,6 +17326,17 @@ function updateBulkShareResultModal(title, bodyText) {
     if (modal) modal.style.display = 'block';
 }
 
+function mergeBulkShareBatchIntoCumulative(cumulative, batch) {
+    const byId = new Map();
+    (cumulative.details || []).forEach((d) => byId.set(d.id, d));
+    (batch.details || []).forEach((d) => byId.set(d.id, d));
+    cumulative.details = Array.from(byId.values());
+    cumulative.sent = cumulative.details.filter((d) => d.status === 'sent').length;
+    cumulative.skipped = cumulative.details.filter((d) => d.status === 'skipped').length;
+    cumulative.failed = cumulative.details.filter((d) => d.status === 'failed').length;
+    cumulative.remaining = batch.remaining;
+}
+
 function formatBulkShareReport(label, data, options = {}) {
     const sent = data.sent || 0;
     const skipped = data.skipped || 0;
@@ -17449,11 +17460,8 @@ async function shareLoginInformationBulk(scope) {
             if (cumulative.pending_total == null) {
                 cumulative.pending_total = data.pending_total ?? data.total ?? 0;
             }
-            cumulative.sent += data.sent || 0;
-            cumulative.skipped += data.skipped || 0;
-            cumulative.failed += data.failed || 0;
-            cumulative.details = cumulative.details.concat(data.details || []);
-            cumulative.remaining = data.remaining;
+            const prevRemaining = cumulative.remaining;
+            mergeBulkShareBatchIntoCumulative(cumulative, data);
 
             updateBulkShareResultModal(
                 'Share login information — in progress',
@@ -17463,12 +17471,24 @@ async function shareLoginInformationBulk(scope) {
             const processed = data.processed || 0;
             if ((data.remaining || 0) === 0) break;
             if (processed === 0) break;
+            // Safety: stop if the same unmailable users are blocking the queue
+            if (
+                prevRemaining != null &&
+                data.remaining === prevRemaining &&
+                (data.sent || 0) === 0 &&
+                (data.failed || 0) === 0
+            ) {
+                break;
+            }
             await new Promise((r) => setTimeout(r, 400));
         }
 
         const failed = cumulative.failed || 0;
+        const skipped = cumulative.skipped || 0;
         showBulkShareResultModal(
-            failed > 0 ? 'Share login information — completed with errors' : 'Share login information — complete',
+            failed > 0
+                ? 'Share login information — completed with errors'
+                : (skipped > 0 ? 'Share login information — complete (some skipped)' : 'Share login information — complete'),
             formatBulkShareReport(label, cumulative)
         );
         console.info('Bulk share login details:', cumulative);

@@ -696,6 +696,8 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(200), nullable=True)
     # When login credentials were last emailed successfully
     login_info_sent_at = db.Column(db.DateTime, nullable=True)
+    # When login share was permanently skipped (e.g. no email on row)
+    login_info_skipped_at = db.Column(db.DateTime, nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -808,6 +810,38 @@ def ensure_login_info_sent_at_column():
 
 
 ensure_login_info_sent_at_column()
+
+
+def ensure_login_info_skipped_at_column():
+    """Add users.login_info_skipped_at on SQLite and Postgres if it is missing."""
+    try:
+        with app.app_context():
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'users' not in inspector.get_table_names():
+                return
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'login_info_skipped_at' in columns:
+                return
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+            with db.engine.connect() as conn:
+                if is_postgres:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_info_skipped_at TIMESTAMP"
+                    ))
+                else:
+                    conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN login_info_skipped_at DATETIME"
+                    ))
+                conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure login_info_skipped_at column exists: {e}")
+        except Exception:
+            print(f"Failed to ensure login_info_skipped_at column exists: {e}")
+
+
+ensure_login_info_skipped_at_column()
 
 
 def ensure_hidden_from_management_column():
@@ -3434,6 +3468,18 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add login_info_sent_at column (may already exist): {e}")
+
+                    if 'login_info_skipped_at' not in columns:
+                        print("Adding login_info_skipped_at column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                if is_postgres:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN login_info_skipped_at TIMESTAMP"))
+                                else:
+                                    conn.execute(text("ALTER TABLE users ADD COLUMN login_info_skipped_at DATETIME"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add login_info_skipped_at column (may already exist): {e}")
                 
                 # Verify columns exist in frenzy_events table
                 if 'frenzy_events' in table_names:
@@ -4038,6 +4084,20 @@ def _share_login_info_for_user(user, *, reset_password=True, password_override=N
         'password': password,
         'error': None,
     }
+
+
+def _is_permanent_login_share_skip(error_msg):
+    """Non-retryable reasons to stop bulk share for a user (missing email, password data, etc.)."""
+    err = (error_msg or '').lower()
+    if 'no email' in err:
+        return True
+    if 'missing' in err:
+        return True
+    if 'cannot build password' in err:
+        return True
+    if 'password must be' in err:
+        return True
+    return False
 
 
 def _stripe_get(obj, key, default=None):
@@ -13526,6 +13586,7 @@ def share_user_login_bulk():
 
     query = User.query.filter(
         User.login_info_sent_at.is_(None),
+        User.login_info_skipped_at.is_(None),
         or_(User.hidden_from_management.is_(False), User.hidden_from_management.is_(None)),
     )
     if scope == 'students':
@@ -13568,20 +13629,38 @@ def share_user_login_bulk():
                     'sent_to': result.get('sent_to') or [],
                 })
             else:
-                db.session.rollback()
                 err = result.get('error') or 'Unknown error'
-                if 'No email' in err or 'missing' in err.lower():
+                if _is_permanent_login_share_skip(err):
+                    user.login_info_skipped_at = datetime.utcnow()
+                    try:
+                        db.session.commit()
+                    except Exception as commit_err:
+                        db.session.rollback()
+                        app.logger.exception('Bulk share: skip commit failed for user %s', user.id)
+                        failed += 1
+                        details.append({
+                            'id': user.id,
+                            'username': user.username,
+                            'status': 'failed',
+                            'error': f'Could not record skip: {commit_err}',
+                        })
+                        continue
                     skipped += 1
-                    status = 'skipped'
+                    details.append({
+                        'id': user.id,
+                        'username': user.username,
+                        'status': 'skipped',
+                        'error': err,
+                    })
                 else:
+                    db.session.rollback()
                     failed += 1
-                    status = 'failed'
-                details.append({
-                    'id': user.id,
-                    'username': user.username,
-                    'status': status,
-                    'error': err,
-                })
+                    details.append({
+                        'id': user.id,
+                        'username': user.username,
+                        'status': 'failed',
+                        'error': err,
+                    })
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Bulk share failed for user %s', user.id)
