@@ -17290,16 +17290,59 @@ function showBulkShareResultModal(title, bodyText) {
     }
 }
 
-function formatBulkShareReport(label, data) {
+function showBulkShareResultModal(title, bodyText) {
+    const modal = document.getElementById('bulk-share-result-modal');
+    const titleEl = document.getElementById('bulk-share-result-title');
+    const bodyEl = document.getElementById('bulk-share-result-body');
+    const copyBtn = document.getElementById('bulk-share-result-copy-btn');
+    if (!modal || !titleEl || !bodyEl) {
+        showMessage(bodyText, 'error');
+        return;
+    }
+    titleEl.textContent = title || 'Share login information';
+    bodyEl.textContent = bodyText || '';
+    modal.style.display = 'block';
+    if (copyBtn && !copyBtn.dataset.bound) {
+        copyBtn.dataset.bound = '1';
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(bodyEl.textContent || '');
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy report'; }, 2000);
+            } catch (_) {
+                bodyEl.focus();
+                bodyEl.select?.();
+            }
+        });
+    }
+}
+
+function updateBulkShareResultModal(title, bodyText) {
+    const titleEl = document.getElementById('bulk-share-result-title');
+    const bodyEl = document.getElementById('bulk-share-result-body');
+    if (titleEl && title) titleEl.textContent = title;
+    if (bodyEl) bodyEl.textContent = bodyText || '';
+    const modal = document.getElementById('bulk-share-result-modal');
+    if (modal) modal.style.display = 'block';
+}
+
+function formatBulkShareReport(label, data, options = {}) {
     const sent = data.sent || 0;
     const skipped = data.skipped || 0;
     const failed = data.failed || 0;
-    const total = data.total || 0;
+    const total = data.pending_total ?? data.total ?? 0;
+    const remaining = data.remaining;
     const lines = [
         `Share login information — ${label}`,
-        `Sent: ${sent}  |  Skipped: ${skipped}  |  Failed: ${failed}  |  Total: ${total}`,
-        ''
+        `Sent: ${sent}  |  Skipped: ${skipped}  |  Failed: ${failed}  |  Started with: ${total}`,
     ];
+    if (remaining != null) {
+        lines[1] += `  |  Remaining: ${remaining}`;
+    }
+    if (options.inProgress) {
+        lines.push('', 'Working… sending in small batches to avoid server timeouts.');
+    }
+    lines.push('');
     (data.details || []).forEach((d) => {
         if (d.status === 'sent') {
             const to = (d.sent_to || []).join(', ');
@@ -17310,10 +17353,36 @@ function formatBulkShareReport(label, data) {
             lines.push(`✗ ${d.username}: failed — ${d.error || 'unknown error'}`);
         }
     });
-    if ((data.details || []).length === 0 && total === 0) {
+    if ((data.details || []).length === 0 && total === 0 && !options.inProgress) {
         lines.push('No users matched (everyone may have already been sent credentials).');
     }
     return lines.join('\n');
+}
+
+async function fetchBulkShareBatch(scope, limit) {
+    const response = await fetch('/api/users/share-login-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, limit })
+    });
+    const rawText = await response.text();
+    let data = {};
+    try {
+        data = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+        return {
+            ok: false,
+            error: humanizeApiErrorBody(rawText, response.status),
+            rawText
+        };
+    }
+    if (!response.ok) {
+        return {
+            ok: false,
+            error: data.error || data.message || humanizeApiErrorBody(rawText, response.status)
+        };
+    }
+    return { ok: true, data };
 }
 
 async function shareLoginInformationBulk(scope) {
@@ -17331,40 +17400,78 @@ async function shareLoginInformationBulk(scope) {
     if (!confirm(`Reset passwords and email login information to ${label} who have never been sent credentials?`)) {
         return;
     }
+    const BATCH_SIZE = 8;
     const bulkBtn = document.getElementById('share-login-bulk-btn');
     const prevBtnText = bulkBtn ? bulkBtn.textContent : '';
     if (bulkBtn) {
         bulkBtn.disabled = true;
         bulkBtn.textContent = 'Sending…';
     }
+
+    const cumulative = {
+        sent: 0,
+        skipped: 0,
+        failed: 0,
+        details: [],
+        pending_total: null,
+        remaining: null
+    };
+
+    showBulkShareResultModal(
+        'Share login information — in progress',
+        formatBulkShareReport(label, cumulative, { inProgress: true })
+    );
+
     try {
-        const response = await fetch('/api/users/share-login-bulk', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope })
-        });
-        const rawText = await response.text();
-        let data = {};
-        try {
-            data = rawText ? JSON.parse(rawText) : {};
-        } catch (_) {
-            const friendly = humanizeApiErrorBody(rawText, response.status);
-            showBulkShareResultModal('Share login information — error', friendly);
-            console.error('Bulk share non-JSON response:', rawText);
-            return;
+        let batchNum = 0;
+        while (true) {
+            batchNum += 1;
+            if (bulkBtn) {
+                bulkBtn.textContent = `Sending… (batch ${batchNum})`;
+            }
+            updateBulkShareResultModal(
+                'Share login information — in progress',
+                formatBulkShareReport(label, cumulative, { inProgress: true }) +
+                    `\n\nBatch ${batchNum} in progress…`
+            );
+
+            const result = await fetchBulkShareBatch(scope, BATCH_SIZE);
+            if (!result.ok) {
+                showBulkShareResultModal(
+                    'Share login information — error',
+                    formatBulkShareReport(label, cumulative) + '\n\n' + result.error
+                );
+                if (result.rawText) console.error('Bulk share non-JSON response:', result.rawText);
+                return;
+            }
+
+            const data = result.data;
+            if (cumulative.pending_total == null) {
+                cumulative.pending_total = data.pending_total ?? data.total ?? 0;
+            }
+            cumulative.sent += data.sent || 0;
+            cumulative.skipped += data.skipped || 0;
+            cumulative.failed += data.failed || 0;
+            cumulative.details = cumulative.details.concat(data.details || []);
+            cumulative.remaining = data.remaining;
+
+            updateBulkShareResultModal(
+                'Share login information — in progress',
+                formatBulkShareReport(label, cumulative, { inProgress: true })
+            );
+
+            const processed = data.processed || 0;
+            if ((data.remaining || 0) === 0) break;
+            if (processed === 0) break;
+            await new Promise((r) => setTimeout(r, 400));
         }
-        if (!response.ok) {
-            const detail = data.error || data.message || humanizeApiErrorBody(rawText, response.status);
-            showBulkShareResultModal('Share login information — error', detail);
-            return;
-        }
-        const report = formatBulkShareReport(label, data);
-        const failed = data.failed || 0;
+
+        const failed = cumulative.failed || 0;
         showBulkShareResultModal(
             failed > 0 ? 'Share login information — completed with errors' : 'Share login information — complete',
-            report
+            formatBulkShareReport(label, cumulative)
         );
-        console.info('Bulk share login details:', data);
+        console.info('Bulk share login details:', cumulative);
         await loadUsers();
     } catch (error) {
         console.error('Error bulk-sharing login information:', error);
@@ -17372,15 +17479,17 @@ async function shareLoginInformationBulk(scope) {
         if (msg === 'Failed to fetch' || msg.includes('NetworkError')) {
             showBulkShareResultModal(
                 'Share login information — connection error',
-                [
+                formatBulkShareReport(label, cumulative) + '\n\n' + [
                     'The browser lost contact with the server (timeout or network error).',
-                    '',
                     'Some users may have received emails before the connection dropped.',
-                    'Refresh User Management and run again — only users who have never been sent credentials will be included.'
+                    'Run again — only users who have never been sent credentials will be included.'
                 ].join('\n')
             );
         } else {
-            showBulkShareResultModal('Share login information — error', msg);
+            showBulkShareResultModal(
+                'Share login information — error',
+                formatBulkShareReport(label, cumulative) + '\n\n' + msg
+            );
         }
     } finally {
         if (bulkBtn) {

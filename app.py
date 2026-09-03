@@ -13518,6 +13518,12 @@ def share_user_login_bulk():
     if scope not in valid_scopes:
         return jsonify({'error': 'Invalid scope. Use all, students, staff, or outside_staff.'}), 400
 
+    try:
+        limit = int(data.get('limit', 8))
+    except (TypeError, ValueError):
+        limit = 8
+    limit = max(1, min(limit, 20))
+
     query = User.query.filter(
         User.login_info_sent_at.is_(None),
         or_(User.hidden_from_management.is_(False), User.hidden_from_management.is_(None)),
@@ -13530,7 +13536,8 @@ def share_user_login_bulk():
         query = query.filter(User.role == 'staff', User.is_outside_staff.is_(True))
     # scope == 'all': students + staff + outside + admin
 
-    users = query.order_by(User.id).all()
+    pending_total = query.count()
+    users = query.order_by(User.id).limit(limit).all()
     sent = 0
     skipped = 0
     failed = 0
@@ -13586,16 +13593,21 @@ def share_user_login_bulk():
                 'error': str(e),
             })
 
+    remaining = query.count()
+
     return jsonify({
         'scope': scope,
-        'total': len(users),
+        'pending_total': pending_total,
+        'processed': len(users),
+        'remaining': remaining,
+        'total': pending_total,
         'sent': sent,
         'skipped': skipped,
         'failed': failed,
         'details': details,
         'message': (
-            f'Sent {sent}, skipped {skipped}, failed {failed} of {len(users)}.'
-            if (skipped or failed) else f'Successfully sent to {sent} user(s).'
+            f'Sent {sent}, skipped {skipped}, failed {failed} in this batch ({len(users)} processed, {remaining} remaining).'
+            if remaining else f'Sent {sent}, skipped {skipped}, failed {failed} of {pending_total}.'
         ),
     }), 200
 
