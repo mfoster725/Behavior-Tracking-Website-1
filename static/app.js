@@ -17249,18 +17249,47 @@ async function shareLoginInformationBulk(scope) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ scope })
         });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(data.error || 'Bulk share failed');
+        let data = {};
+        const rawText = await response.text();
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch (_) {
+            data = { error: rawText || `Server returned HTTP ${response.status}` };
         }
-        showMessage(
-            `Share complete for ${label}: sent ${data.sent || 0}, skipped ${data.skipped || 0}, failed ${data.failed || 0} (of ${data.total || 0}).`,
-            (data.failed || 0) > 0 ? 'error' : 'success'
-        );
+        if (!response.ok) {
+            const detail = data.error || data.message || rawText || `HTTP ${response.status}`;
+            throw new Error(detail);
+        }
+        const sent = data.sent || 0;
+        const skipped = data.skipped || 0;
+        const failed = data.failed || 0;
+        const total = data.total || 0;
+        let summary = `Share complete for ${label}: sent ${sent}, skipped ${skipped}, failed ${failed} (of ${total}).`;
+        const problemRows = (data.details || []).filter((d) => d.status === 'skipped' || d.status === 'failed');
+        if (problemRows.length > 0) {
+            const lines = problemRows.slice(0, 12).map((d) => {
+                const reason = d.error || d.status;
+                return `${d.username || d.id}: ${reason}`;
+            });
+            if (problemRows.length > 12) {
+                lines.push(`…and ${problemRows.length - 12} more`);
+            }
+            summary += '\n\n' + lines.join('\n');
+        }
+        showMessage(summary, (failed > 0) ? 'error' : (skipped > 0 ? 'info' : 'success'));
+        console.info('Bulk share login details:', data);
         await loadUsers();
     } catch (error) {
         console.error('Error bulk-sharing login information:', error);
-        showMessage('Error: ' + error.message, 'error');
+        const msg = error && error.message ? error.message : String(error);
+        if (msg === 'Failed to fetch' || msg.includes('NetworkError')) {
+            showMessage(
+                'The request may have timed out. Some users may have received emails. Refresh User Management and run again — only users who have never been sent credentials will be included.',
+                'error'
+            );
+        } else {
+            showMessage('Error: ' + msg, 'error');
+        }
     }
 }
 

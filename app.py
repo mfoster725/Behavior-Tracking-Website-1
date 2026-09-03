@@ -13537,35 +13537,54 @@ def share_user_login_bulk():
     details = []
 
     for user in users:
-        result = _share_login_info_for_user(user, reset_password=True)
-        if result.get('ok'):
-            sent += 1
-            details.append({
-                'id': user.id,
-                'username': user.username,
-                'status': 'sent',
-                'sent_to': result.get('sent_to') or [],
-            })
-        else:
-            err = result.get('error') or 'Unknown error'
-            if 'No email' in err or 'missing' in err.lower():
-                skipped += 1
-                status = 'skipped'
+        try:
+            result = _share_login_info_for_user(user, reset_password=True)
+            if result.get('ok'):
+                try:
+                    db.session.commit()
+                except Exception as commit_err:
+                    db.session.rollback()
+                    app.logger.exception('Bulk share: commit failed after send for user %s', user.id)
+                    failed += 1
+                    details.append({
+                        'id': user.id,
+                        'username': user.username,
+                        'status': 'failed',
+                        'error': f'Email may have been sent, but could not save status: {commit_err}',
+                    })
+                    continue
+                sent += 1
+                details.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'status': 'sent',
+                    'sent_to': result.get('sent_to') or [],
+                })
             else:
-                failed += 1
-                status = 'failed'
+                db.session.rollback()
+                err = result.get('error') or 'Unknown error'
+                if 'No email' in err or 'missing' in err.lower():
+                    skipped += 1
+                    status = 'skipped'
+                else:
+                    failed += 1
+                    status = 'failed'
+                details.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'status': status,
+                    'error': err,
+                })
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception('Bulk share failed for user %s', user.id)
+            failed += 1
             details.append({
                 'id': user.id,
                 'username': user.username,
-                'status': status,
-                'error': err,
+                'status': 'failed',
+                'error': str(e),
             })
-
-    try:
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Failed to save after bulk send: {e}'}), 500
 
     return jsonify({
         'scope': scope,
@@ -13574,6 +13593,10 @@ def share_user_login_bulk():
         'skipped': skipped,
         'failed': failed,
         'details': details,
+        'message': (
+            f'Sent {sent}, skipped {skipped}, failed {failed} of {len(users)}.'
+            if (skipped or failed) else f'Successfully sent to {sent} user(s).'
+        ),
     }), 200
 
 
