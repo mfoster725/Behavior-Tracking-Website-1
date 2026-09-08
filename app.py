@@ -12505,15 +12505,37 @@ SHEET_TYPE_LABELS = {
 
 # Columns the website may write back, as 0-based positions in each tab. These mirror the CSV
 # import layout; column 0 is the key (User Number for staff, Lunch Number for students) and is
-# never written. Anything not listed here is left untouched.
+# never written. Every other import column is compared on preview/push.
 SHEET_PUSH_COLUMNS = {
-    'staff': ((1, 'name'), (2, 'role'), (3, 'grades_taught'), (STAFF_EMAIL_COL, 'email')),
+    'staff': (
+        (1, 'name'), (2, 'role'), (3, 'grades_taught'), (4, 'staff_case_manager'),
+        (STAFF_EMAIL_COL, 'email'),
+    ),
     'outside_staff': ((1, 'name'), (2, 'district'), (OUTSIDE_STAFF_EMAIL_COL, 'email')),
-    'student': ((1, 'name'), (2, 'grade'), (3, 'card_color'), (STUDENT_EMAIL_COL, 'email')),
+    'student': (
+        (1, 'name'), (2, 'grade'), (3, 'card_color'),
+        (4, 'team_case_manager_1'), (5, 'team_case_manager_2'),
+        (6, 'team_practitioner_1'), (7, 'team_practitioner_2'),
+        (8, 'team_professional'), (9, 'team_group_leader'),
+        (STUDENT_EMAIL_COL, 'email'),
+        (STUDENT_PARENT1_EMAIL_COL, 'parent_email_1'),
+        (STUDENT_PARENT2_EMAIL_COL, 'parent_email_2'),
+    ),
+}
+SHEET_PUSH_FIELD_LABELS = {
+    'staff_case_manager': 'Case Manager',
+    'team_case_manager_1': 'Case Manager',
+    'team_case_manager_2': 'Case Manager (2)',
+    'team_practitioner_1': 'Practitioner',
+    'team_practitioner_2': 'Practitioner (2)',
+    'team_professional': 'Professional',
+    'team_group_leader': 'Group Leader',
+    'parent_email_1': 'Parent 1 Email',
+    'parent_email_2': 'Parent 2 Email',
 }
 SHEET_KEY_COLUMN = 0
 # Request fields whose change means the record has to be written back to the sheet.
-SHEET_DIRTY_STUDENT_FIELDS = ('name', 'email', 'grade', 'card_color')
+SHEET_DIRTY_STUDENT_FIELDS = ('name', 'email', 'grade', 'card_color', 'parent_emails')
 SHEET_DIRTY_USER_FIELDS = ('name', 'email', 'role', 'designation', 'grades_taught', 'district')
 SHEET_KEY_LABELS = {
     'staff': 'User Number',
@@ -12600,11 +12622,99 @@ def mark_user_sheet_dirty(user):
 
 def _sheet_column_label(col, field):
     """Human label for a sheet column, e.g. "Grades Taught (D)"."""
-    return f'{field.replace("_", " ").title()} ({_col_index_to_a1(col)})'
+    label = SHEET_PUSH_FIELD_LABELS.get(field, field.replace('_', ' ').title())
+    return f'{label} ({_col_index_to_a1(col)})'
 
 
-def _sheet_record_value(record, field):
+def _sheet_team_member_display(name_or_username):
+    """Prefer a staff member's display name when writing support-team columns back to the sheet."""
+    value = (name_or_username or '').strip()
+    if not value:
+        return ''
+    staff = User.query.filter(
+        func.lower(User.username) == value.lower(),
+        User.role == 'staff',
+    ).first()
+    if staff and staff.name:
+        return staff.name.strip()
+    return value
+
+
+def _sheet_values_equal(desired, current, field):
+    """Whether a website value already matches what is in the sheet."""
+    if field in ('email', 'parent_email_1', 'parent_email_2'):
+        return _normalize_import_email(desired) == _normalize_import_email(current)
+    return (desired or '') == (current or '')
+
+
+def _sheet_staff_case_manager_value(user):
+    """Paraprofessional Case Manager column (E): comma-separated case manager display names."""
+    if user.role != 'staff' or getattr(user, 'is_outside_staff', False):
+        return ''
+    if (user.designation or '') != 'Paraprofessional':
+        return ''
+    names = []
+    for cm_id in get_linked_case_manager_ids(user):
+        cm = db.session.get(User, cm_id)
+        if cm and cm.name:
+            names.append(cm.name.strip())
+        elif cm and cm.username:
+            names.append(cm.username.strip())
+    return ', '.join(names)
+
+
+def _sheet_student_parent_email_values(student):
+    """Split stacked parent_emails into the two parent email columns (M/N)."""
+    emails = _parse_email_list(getattr(student, 'parent_emails', None))
+    return {
+        'parent_email_1': emails[0] if emails else '',
+        'parent_email_2': emails[1] if len(emails) > 1 else '',
+    }
+
+
+def _sheet_student_team_values(student_id, cache=None):
+    """Map team_members rows to the student tab's support-team columns (E through J)."""
+    if cache is not None and student_id in cache:
+        return cache[student_id]
+    members = TeamMember.query.filter_by(student_id=student_id).all()
+    by_role = {}
+    for tm in members:
+        role = tm.role or ''
+        by_role.setdefault(role, []).append(tm.name or '')
+
+    def slot(role, index):
+        names = by_role.get(role, [])
+        if index < len(names):
+            return _sheet_team_member_display(names[index])
+        return ''
+
+    values = {
+        'team_case_manager_1': slot('Case Manager', 0),
+        'team_case_manager_2': slot('Case Manager', 1),
+        'team_practitioner_1': slot('Practitioner', 0),
+        'team_practitioner_2': slot('Practitioner', 1),
+        'team_professional': slot('Professional', 0),
+        'team_group_leader': slot('Group Leader', 0),
+    }
+    if cache is not None:
+        cache[student_id] = values
+    return values
+
+
+def _sheet_record_value(record, field, team_values_cache=None):
     """The value the website believes belongs in the sheet, as a plain string."""
+    if field.startswith('team_'):
+        if not isinstance(record, Student):
+            return ''
+        return _sheet_student_team_values(record.id, cache=team_values_cache).get(field, '')
+    if field in ('parent_email_1', 'parent_email_2'):
+        if not isinstance(record, Student):
+            return ''
+        return _sheet_student_parent_email_values(record).get(field, '')
+    if field == 'staff_case_manager':
+        if not isinstance(record, User):
+            return ''
+        return _sheet_staff_case_manager_value(record)
     if field == 'role':
         # The staff tab's Role column holds "Admin" for admins and the designation otherwise.
         value = STAFF_IMPORT_ADMIN_ROLE if record.role == 'admin' else record.designation
@@ -12699,6 +12809,23 @@ def _pending_sheet_records(import_type):
         User.role.in_(('staff', 'admin')),
         or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
     ).all()
+
+
+def _sheet_records_for_push(import_type):
+    """Every website record with a sheet key, used to compare all import columns on push/preview."""
+    if import_type == 'student':
+        records = Student.query.all()
+    elif import_type == 'outside_staff':
+        records = User.query.filter(User.is_outside_staff.is_(True)).all()
+    else:
+        records = User.query.filter(
+            User.role.in_(('staff', 'admin')),
+            or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
+        ).all()
+    return [
+        record for record in records
+        if _sheet_key(_sheet_record_key(record, import_type))
+    ]
 
 
 def _sheet_record_key(record, import_type):
@@ -13041,11 +13168,11 @@ def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
 
 def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
     """
-    Write website edits back to the workbook, one tab per import type.
+    Write website data back to the workbook, one tab per import type.
 
-    Only records flagged dirty are considered, only the columns in SHEET_PUSH_COLUMNS are
-    written, and rows are never deleted or reordered. Records are matched to rows by their
-    key column; a flagged record whose key has no row is appended to the bottom of its tab.
+    Every website record with a sheet key is compared against its row using every column in
+    SHEET_PUSH_COLUMNS. Rows are never deleted or reordered. A dirty record whose key has no
+    row is appended to the bottom of its tab.
     """
     result = {
         'tabs': [],
@@ -13062,9 +13189,6 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
         result['errors'].append(
             'Writing to the sheet is disabled. Set GOOGLE_SHEETS_ENABLE_WRITE=1 to enable it.'
         )
-        return result
-
-    if not any(_pending_sheet_records(t) for t in (SHEET_IMPORT_TYPES if only_type is None else (only_type,))):
         return result
 
     workbook, err = _open_workbook(sheet_id, write=True)
@@ -13095,10 +13219,7 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
             'held_clears': [],
             'errors': [],
         }
-        pending = _pending_sheet_records(import_type)
-        if not pending:
-            result['tabs'].append(summary)
-            continue
+        records = _sheet_records_for_push(import_type)
         try:
             rows = worksheet.get_all_values()
         except Exception as e:
@@ -13113,6 +13234,7 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
             continue
 
         columns = SHEET_PUSH_COLUMNS[import_type]
+        team_values_cache = {} if import_type == 'student' else None
         # Sheet row numbers are 1-based and the header is row 1.
         rows_by_key = {}
         for offset, row in enumerate(rows[1:], start=2):
@@ -13124,39 +13246,43 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
         updates = []
         appends = []
         touched = []
-        for record in pending:
+        for record in records:
             key = _sheet_key(_sheet_record_key(record, import_type))
             who = record.name or f'#{record.id}'
-            if not key:
-                summary['unmatched'].append(who)
-                continue
             match = rows_by_key.get(key)
             if match is None:
+                if not getattr(record, 'sheet_dirty_at', None):
+                    continue
                 row_values = [''] * width
                 row_values[SHEET_KEY_COLUMN] = _sheet_record_key(record, import_type)
                 for col, field in columns:
-                    row_values[col] = _sheet_record_value(record, field)
+                    row_values[col] = _sheet_record_value(record, field, team_values_cache)
                 appends.append(row_values)
                 summary['additions'].append({
                     'who': who,
                     'key': _sheet_record_key(record, import_type),
                     'values': [
-                        {'column': _sheet_column_label(col, field), 'to': _sheet_record_value(record, field)}
+                        {
+                            'column': _sheet_column_label(col, field),
+                            'to': _sheet_record_value(record, field, team_values_cache),
+                        }
                         for col, field in columns
                     ],
                 })
-                touched.append((record, record.sheet_dirty_at))
+                touched.append((record, record.sheet_dirty_at, False))
                 continue
             row_number, row = match
             record_changed = False
+            pending_clears = False
             for col, field in columns:
-                desired = _sheet_record_value(record, field)
+                desired = _sheet_record_value(record, field, team_values_cache)
                 current = _sheet_cell(row, col)
-                if desired == current:
+                if _sheet_values_equal(desired, current, field):
                     continue
                 if not desired and current and not allow_clear:
                     # Refuse to blank a populated cell unless explicitly allowed.
                     summary['skipped_clears'] += 1
+                    pending_clears = True
                     summary['held_clears'].append({
                         'who': who,
                         'row': row_number,
@@ -13176,9 +13302,13 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                     'to': desired,
                 })
                 record_changed = True
-            touched.append((record, record.sheet_dirty_at))
+            touched.append((record, record.sheet_dirty_at, pending_clears))
             if record_changed:
                 summary['updated_records'] += 1
+
+        for record in _pending_sheet_records(import_type):
+            if not _sheet_key(_sheet_record_key(record, import_type)):
+                summary['unmatched'].append(record.name or f'#{record.id}')
 
         summary['updated_cells'] = len(updates)
         summary['appended'] = len(appends)
@@ -13195,9 +13325,9 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                 result['errors'].extend(summary['errors'])
                 continue
             now = datetime.utcnow()
-            for record, flagged_at in touched:
+            for record, flagged_at, pending_clears in touched:
                 # Only clear the flag we acted on, so an edit made mid-push is not lost.
-                if record.sheet_dirty_at == flagged_at:
+                if not pending_clears and record.sheet_dirty_at == flagged_at:
                     record.sheet_dirty_at = None
                 record.sheet_synced_at = now
 
@@ -14611,11 +14741,13 @@ def manage_users():
             case_manager_ids = parse_case_manager_ids_payload(data)
             if case_manager_ids is not None:
                 set_linked_case_manager_ids(user, case_manager_ids)
+                mark_user_sheet_dirty(user)
             elif user.linked_case_manager_id and (
                 user.role != 'staff' or (user.designation or '') != 'Paraprofessional'
             ):
                 # No longer a Paraprofessional, so the case manager links no longer apply.
-                set_linked_case_manager_ids(user, [])
+                if set_linked_case_manager_ids(user, []):
+                    mark_user_sheet_dirty(user)
             if 'email' in data:
                 email = (data.get('email') or '').strip() or None
                 user.email = email
@@ -15115,6 +15247,7 @@ def team_members(student_id):
                     )
                     db.session.add(team_member)
         
+        mark_student_sheet_dirty_by_id(student_id)
         db.session.commit()
         return jsonify({'message': 'Team members updated successfully'}), 200
 

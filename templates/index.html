@@ -766,9 +766,10 @@
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
                             <strong>Pull</strong> adds people who are in the sheet but not on the website, creating their accounts and
                             team assignments exactly like a CSV import. New accounts with an email on file are sent their login info once.
-                            <strong>Push</strong> writes website edits back: Name, Grade, Card Color, and Email for students;
-                            Name, Role, Grades Taught, District, and Email for staff.
-                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted and no other column is touched.
+                            <strong>Push</strong> writes every import column back (except column A): for students that is Name, Grade, Card Color, support team (E&ndash;J), Student Email (L), and Parent emails (M&ndash;N);
+                            for staff it is Name, Role, Grades Taught, Case Manager (E), and Email; for outside staff it is Name, District, and Email.
+                            <strong>Preview Push</strong> compares all keyed website records against the sheet and lists every cell that differs.
+                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted.
                         </p>
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
                             The two <strong>Preview</strong> buttons change nothing. They list every record that would be added and

@@ -6,7 +6,7 @@ three tabs of the workbook.
 - **Pull** (sheet → website): adds people who are in the sheet but not on the website. This runs
   through the same code as the CSV import, so it creates login accounts, resolves support-team
   assignments, and emails new users their credentials exactly like uploading a CSV would.
-- **Push** (website → sheet): writes website edits back into the sheet.
+- **Push** (website → sheet): writes every import column (except the key in column A) back into the sheet. Preview push compares all keyed website records against their sheet rows and lists every difference.
 
 Sync is manual or scheduled, not live. Nothing happens until you press a button or a cron job runs.
 
@@ -44,7 +44,7 @@ Both sides can be edited, so ownership is split rather than merged:
 | Who decides | What they decide |
 |---|---|
 | **The sheet** | Who exists. Only a pull creates people. |
-| **The website** | For students: Name, Grade, Card Color, Email. For staff: Name, Role, Grades Taught, District, Email. |
+| **The website** | For students: Name, Grade, Card Color, support team (E–J), Student Email (L), Parent emails (M–N). For staff: Name, Role, Grades Taught, Case Manager (E, Paraprofessionals), Email. For outside staff: Name, District, Email. |
 
 When you change one of those fields on the website, that person is flagged as having a pending
 edit. Until the next push:
@@ -58,8 +58,7 @@ edit. Until the next push:
 ### What the sync will never do
 
 - Delete a row, reorder rows, or clear a tab.
-- Touch any column other than the ones listed above (team member and parent email columns are read
-  during a pull but never written).
+- Touch column A (the key) or delete/reorder rows.
 - Blank a sheet cell that has a value, unless you set `GOOGLE_SHEETS_ALLOW_CLEAR=1`.
 - Write to the sheet at all, unless you set `GOOGLE_SHEETS_ENABLE_WRITE=1`.
 - Email anyone their login info twice. Sends are recorded in `users.login_info_sent_at`, and only
