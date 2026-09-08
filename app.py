@@ -12506,44 +12506,17 @@ def _sheet_record_value(record, field):
     return '' if value is None else str(value).strip()
 
 
-def _is_near_word(token, word):
-    """True when token equals word or is one typo away (insert, delete, replace, or swap)."""
-    if token == word:
-        return True
-    if abs(len(token) - len(word)) > 1:
-        return False
-    if len(token) == len(word):
-        diffs = [i for i, (a, b) in enumerate(zip(token, word)) if a != b]
-        if len(diffs) == 1:
-            return True
-        # Adjacent transposition, e.g. "outisde" for "outside".
-        if len(diffs) == 2 and diffs[1] == diffs[0] + 1:
-            i, j = diffs
-            return token[i] == word[j] and token[j] == word[i]
-        return False
-    shorter, longer = (token, word) if len(token) < len(word) else (word, token)
-    return any(longer[:i] + longer[i + 1:] == shorter for i in range(len(longer)))
-
-
 def _sheet_tab_type(title):
-    """
-    Infer which import type a tab holds from its name.
-
-    Matching tolerates a single typo per word, so a tab named "Outisde Staff Users" is still
-    recognised as outside staff rather than falling through to the plain staff layout.
-    """
-    words = ' '.join((title or '').lower().replace('-', ' ').split()).split()
-    if not words:
+    """Infer which import type a tab holds from its name. Unrecognised tabs are left alone."""
+    name = ' '.join((title or '').lower().split())
+    if not name:
         return None
-    has_staff = any(_is_near_word(w, 'staff') for w in words)
-    has_outside = any(_is_near_word(w, 'outside') for w in words)
-    has_student = any(_is_near_word(w, 'student') or _is_near_word(w, 'students') for w in words)
     # Check outside staff first: "Outside Staff Users" also contains "staff".
-    if has_outside and has_staff:
+    if 'outside' in name and 'staff' in name:
         return 'outside_staff'
-    if has_student:
+    if 'student' in name:
         return 'student'
-    if has_staff:
+    if 'staff' in name:
         return 'staff'
     return None
 

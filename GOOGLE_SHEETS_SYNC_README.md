@@ -23,9 +23,10 @@ Tabs are detected by name, and each one must use the **same column order as the 
 | **Outside Staff** | Outside staff | User Number | A User Number, B Name, C District, E Email |
 | **Students** | Students | Lunch Number | A Lunch Number, B Initials, C Grade, D Card Color, E–J team members, L Student Email, M/N Parent emails |
 
-Name matching tolerates a single typo per word, so `Outisde Staff Users` is still recognised as
-the outside staff tab. Any tab that doesn't match one of the three is ignored; **Check Setup**
-lists which tabs were ignored so you can spot a misnamed one.
+A tab is matched if its name contains "student", "staff", or both "outside" and "staff", so
+`Students`, `Staff`, and `Outside Staff Users` are all recognised. Any tab that doesn't match one
+of the three is ignored; **Check Setup** lists which tabs were ignored so you can spot a misnamed
+or misspelled one.
 
 If your tabs are named something else entirely, point the app at them explicitly with
 `GOOGLE_SHEET_TAB_STAFF`, `GOOGLE_SHEET_TAB_OUTSIDE_STAFF`, and `GOOGLE_SHEET_TAB_STUDENT`.
