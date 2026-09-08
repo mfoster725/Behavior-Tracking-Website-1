@@ -12625,6 +12625,21 @@ SHEET_PREVIEW_HIDDEN_FIELDS = frozenset({
 })
 
 
+def _preview_user_name(user_id):
+    """Name for a user id, for labelling link rows in a preview."""
+    if not user_id:
+        return '(unknown)'
+    user = db.session.get(User, user_id)
+    return (user.name or user.username or f'#{user_id}') if user else f'#{user_id}'
+
+
+def _preview_student_name(student_id):
+    if not student_id:
+        return '(unknown)'
+    student = db.session.get(Student, student_id)
+    return (student.name or f'#{student_id}') if student else f'#{student_id}'
+
+
 def _describe_preview_object(obj):
     """Short human label for a record touched by a preview run."""
     if isinstance(obj, Student):
@@ -12635,56 +12650,78 @@ def _describe_preview_object(obj):
         kind = 'Outside staff' if obj.is_outside_staff else ('Admin' if obj.role == 'admin' else 'Staff')
         return kind, f'{obj.name or "(no name)"} ({obj.user_number or "no user number"})'
     if isinstance(obj, TeamMember):
-        return 'Team assignment', f'{obj.role}: {obj.name}'
-    return type(obj).__name__, str(getattr(obj, 'id', '') or '')
+        return 'Support team', f'{_preview_student_name(obj.student_id)} — {obj.role}: {obj.name}'
+    if isinstance(obj, ParaprofessionalCaseManager):
+        return 'Paraprofessional assignment', (
+            f'{_preview_user_name(obj.user_id)} supports '
+            f'{_preview_user_name(obj.case_manager_id)}'
+        )
+    # Unknown model: at least split the class name into words rather than printing it raw.
+    kind = re.sub(r'(?<!^)(?=[A-Z])', ' ', type(obj).__name__)
+    return kind, str(getattr(obj, 'id', '') or '(new)')
 
 
 def _collect_preview_changes(session, collector):
-    """Record what a not-yet-committed session would create or change."""
+    """Record what a not-yet-committed session would create, change, or remove."""
     from sqlalchemy import inspect as sa_inspect
 
-    for obj in session.new:
-        if id(obj) in collector['seen_new']:
-            continue
-        collector['seen_new'].add(id(obj))
-        kind, label = _describe_preview_object(obj)
-        collector['created'].append({'kind': kind, 'label': label})
-    for obj in session.dirty:
-        if not session.is_modified(obj, include_collections=False):
-            continue
-        state = sa_inspect(obj)
-        fields = []
-        for attr in state.mapper.column_attrs:
-            if attr.key in SHEET_PREVIEW_HIDDEN_FIELDS:
+    # Labelling reads from the database; autoflush here would re-enter this listener.
+    with session.no_autoflush:
+        for obj in session.new:
+            if id(obj) in collector['seen_new']:
                 continue
-            history = state.attrs[attr.key].history
-            if not history.has_changes():
+            collector['seen_new'].add(id(obj))
+            kind, label = _describe_preview_object(obj)
+            collector['created'].append({'kind': kind, 'label': label})
+        for obj in session.deleted:
+            if id(obj) in collector['seen_removed']:
                 continue
-            old = history.deleted[0] if history.deleted else None
-            new = history.added[0] if history.added else None
-            fields.append({
-                'field': attr.key.replace('_', ' ').title(),
-                'from': '' if old is None else str(old),
-                'to': '' if new is None else str(new),
-            })
-        if not fields:
-            continue
-        kind, label = _describe_preview_object(obj)
-        existing = collector['seen_updated'].get(id(obj))
-        if existing:
-            existing['changes'].extend(fields)
-        else:
-            entry = {'kind': kind, 'label': label, 'changes': fields}
-            collector['seen_updated'][id(obj)] = entry
-            collector['updated'].append(entry)
+            collector['seen_removed'].add(id(obj))
+            kind, label = _describe_preview_object(obj)
+            collector['removed'].append({'kind': kind, 'label': label})
+        for obj in session.dirty:
+            if not session.is_modified(obj, include_collections=False):
+                continue
+            state = sa_inspect(obj)
+            fields = []
+            for attr in state.mapper.column_attrs:
+                if attr.key in SHEET_PREVIEW_HIDDEN_FIELDS:
+                    continue
+                history = state.attrs[attr.key].history
+                if not history.has_changes():
+                    continue
+                old = history.deleted[0] if history.deleted else None
+                new = history.added[0] if history.added else None
+                fields.append({
+                    'field': attr.key.replace('_', ' ').title(),
+                    'from': '' if old is None else str(old),
+                    'to': '' if new is None else str(new),
+                })
+            if not fields:
+                continue
+            kind, label = _describe_preview_object(obj)
+            existing = collector['seen_updated'].get(id(obj))
+            if existing:
+                existing['changes'].extend(fields)
+            else:
+                entry = {'kind': kind, 'label': label, 'changes': fields}
+                collector['seen_updated'][id(obj)] = entry
+                collector['updated'].append(entry)
 
 
 def _new_preview_collector():
-    return {'created': [], 'updated': [], 'seen_new': set(), 'seen_updated': {}}
+    return {
+        'created': [], 'updated': [], 'removed': [],
+        'seen_new': set(), 'seen_updated': {}, 'seen_removed': set(),
+    }
 
 
 def _preview_collector_result(collector):
-    return {'created': collector['created'], 'updated': collector['updated']}
+    return {
+        'created': collector['created'],
+        'updated': collector['updated'],
+        'removed': collector['removed'],
+    }
 
 
 def _pending_sheet_keys():

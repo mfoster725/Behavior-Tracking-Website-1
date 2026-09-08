@@ -12376,8 +12376,9 @@ function renderGoogleSheetPullDetail(tab) {
     if (!preview) return '';
     const created = preview.created || [];
     const updated = preview.updated || [];
+    const removed = preview.removed || [];
     const held = tab.held_back || [];
-    if (!created.length && !updated.length && !held.length) {
+    if (!created.length && !updated.length && !removed.length && !held.length) {
         return `<div class="import-results-info">${escapeHtml(tab.tab)}: nothing would change.</div>`;
     }
     let html = `<div class="import-results-info"><strong>${escapeHtml(tab.tab)}</strong></div>`;
@@ -12390,6 +12391,10 @@ function renderGoogleSheetPullDetail(tab) {
         const rows = [];
         updated.forEach(u => (u.changes || []).forEach(c => rows.push([u.kind, u.label, c.field, c.from, c.to])));
         html += renderGoogleSheetDetailTable(['Type', 'Who', 'Field', 'Now', 'Would become'], rows);
+    }
+    if (removed.length) {
+        html += '<div class="import-results-info">Would be removed:</div>';
+        html += renderGoogleSheetDetailTable(['Type', 'What'], removed.map(r => [r.kind, r.label]));
     }
     if (held.length) {
         html += '<div class="import-results-info">Held back (unpushed website edits):</div>';
