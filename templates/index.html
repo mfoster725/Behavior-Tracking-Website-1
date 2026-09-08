@@ -1552,6 +1552,11 @@
                         <label for="edit-user-email">Email:</label>
                         <input type="email" id="edit-user-email" placeholder="Enter email address" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
+                    <div class="form-group" id="edit-user-parent-emails-group" style="display: none;">
+                        <label>Parent/Guardian Email(s):</label>
+                        <div id="edit-user-parent-emails-container" class="team-member-container"></div>
+                        <small style="color: #666;">Use + to add another, &times; to remove. These addresses receive shared login information.</small>
+                    </div>
                     <div class="form-group" id="edit-user-role-group">
                         <label for="edit-user-role">Role: *</label>
                         <select id="edit-user-role">
@@ -2326,7 +2331,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=bulk-share-smtp-cursor"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=parent-emails-edit"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

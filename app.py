@@ -3950,6 +3950,33 @@ def _parse_email_list(raw):
     return result
 
 
+def _normalize_parent_emails(raw):
+    """Normalize a parent/guardian email payload (list or string) for storage.
+
+    Returns (stacked_value, invalid_entry). invalid_entry is set when an entry is
+    present but not email-like so callers can reject the request instead of
+    silently dropping a contact.
+    """
+    if isinstance(raw, list):
+        entries = [str(e) for e in raw if e is not None]
+    else:
+        entries = re.split(r'[\n,;]+', str(raw or ''))
+    stacked = []
+    seen = set()
+    for entry in entries:
+        email = entry.strip()
+        if not email:
+            continue
+        if '@' not in email or ' ' in email:
+            return None, email
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        stacked.append(email)
+    return ('\n'.join(stacked) or None), None
+
+
 def _collect_user_recipient_emails(user):
     """Emails on the user row: user.email (+ student email / parent_emails for students)."""
     emails = []
@@ -13513,6 +13540,15 @@ def manage_users():
                 student = Student.query.get(user.student_id)
                 if student:
                     student.card_color = data['card_color'] if data['card_color'] else None
+            
+            # Update parent/guardian emails if provided and user is a student
+            if 'parent_emails' in data and user.student_id:
+                stacked, invalid = _normalize_parent_emails(data['parent_emails'])
+                if invalid:
+                    return jsonify({'error': f'Invalid parent/guardian email: {invalid}'}), 400
+                student = Student.query.get(user.student_id)
+                if student:
+                    student.parent_emails = stacked
         
         elif current_user.role == 'staff' and user.role == 'student':
             # Staff can update student accounts (limited fields)
@@ -13543,6 +13579,15 @@ def manage_users():
                 student = Student.query.get(user.student_id)
                 if student:
                     student.card_color = data['card_color'] if data['card_color'] else None
+            
+            # Update parent/guardian emails if provided
+            if 'parent_emails' in data and user.student_id:
+                stacked, invalid = _normalize_parent_emails(data['parent_emails'])
+                if invalid:
+                    return jsonify({'error': f'Invalid parent/guardian email: {invalid}'}), 400
+                student = Student.query.get(user.student_id)
+                if student:
+                    student.parent_emails = stacked
         
         elif current_user.role == 'staff' and current_user.id == user_id:
             # Staff can only update their own password

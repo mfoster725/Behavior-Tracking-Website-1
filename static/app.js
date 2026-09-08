@@ -17027,7 +17027,8 @@ function createStudentRow(user) {
                 user.card_color || null,
                 null,
                 null,
-                user.email || null
+                user.email || null,
+                user.parent_emails || null
             )
         });
     }
@@ -17594,7 +17595,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId, email) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId, email, parentEmails) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -17677,6 +17678,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         if (cardColorSelect) {
             cardColorSelect.value = cardColor || '';
         }
+        populateParentEmailRows(PARENT_EMAILS_CONTAINER_ID, parentEmails || '');
     }
     
     // Check if staff is editing their own account
@@ -17713,6 +17715,9 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     // Show/hide grade field based on role
     const gradeGroup = document.getElementById('edit-user-grade-group');
     const cardColorGroup = document.getElementById('edit-user-card-color-group');
+    const parentEmailsGroup = document.getElementById('edit-user-parent-emails-group');
+    // Only admins and staff manage parent contacts, not students editing themselves
+    const canEditParentEmails = role === 'student' && (isAdmin() || isStaff());
     if (role === 'student') {
         gradeGroup.style.display = 'block';
         if (cardColorGroup) {
@@ -17723,6 +17728,9 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         if (cardColorGroup) {
             cardColorGroup.style.display = 'none';
         }
+    }
+    if (parentEmailsGroup) {
+        parentEmailsGroup.style.display = canEditParentEmails ? 'block' : 'none';
     }
     
     // Show/hide role field
@@ -18072,6 +18080,114 @@ function populateTeamMemberRows(containerId, usernames, roles) {
     });
 }
 
+const PARENT_EMAILS_CONTAINER_ID = 'edit-user-parent-emails-container';
+
+// One editable parent/guardian email, with + / × controls like team member rows
+function createParentEmailRow(containerId, email = '') {
+    const row = document.createElement('div');
+    row.className = 'form-group parent-email-group';
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '8px';
+    row.style.marginBottom = '10px';
+
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.className = 'parent-email-input';
+    input.placeholder = 'parent@example.com';
+    input.value = (email || '').trim();
+    input.autocomplete = 'off';
+    input.setAttribute('data-lpignore', 'true');
+    input.setAttribute('data-1p-ignore', 'true');
+    input.style.flex = '1';
+    input.style.minWidth = '0';
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn-schedule-field-add';
+    addBtn.title = 'Add another';
+    addBtn.textContent = '+';
+    addBtn.addEventListener('click', () => {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const newRow = createParentEmailRow(containerId, '');
+        if (row.nextSibling) {
+            container.insertBefore(newRow, row.nextSibling);
+        } else {
+            container.appendChild(newRow);
+        }
+        const newInput = newRow.querySelector('.parent-email-input');
+        if (newInput) {
+            requestAnimationFrame(() => newInput.focus());
+        }
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-schedule-field-remove';
+    removeBtn.title = 'Remove';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', () => {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            row.remove();
+            return;
+        }
+        const rows = container.querySelectorAll('.parent-email-group');
+        if (rows.length <= 1) {
+            input.value = '';
+            return;
+        }
+        row.remove();
+    });
+
+    row.appendChild(input);
+    row.appendChild(addBtn);
+    row.appendChild(removeBtn);
+
+    return row;
+}
+
+// Fill the parent email rows from the student's stored newline/comma separated list
+function populateParentEmailRows(containerId, parentEmails) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    const emails = (parentEmails || '')
+        .split(/[\n,;]+/)
+        .map(e => e.trim())
+        .filter(Boolean);
+
+    // Always leave one blank row so an email can be added without clicking +
+    if (emails.length === 0) {
+        emails.push('');
+    }
+
+    emails.forEach(email => {
+        container.appendChild(createParentEmailRow(containerId, email));
+    });
+}
+
+// Collect the entered parent emails, deduped case-insensitively
+function getParentEmails(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+
+    const emails = [];
+    const seen = new Set();
+    container.querySelectorAll('.parent-email-input').forEach(input => {
+        const email = input.value.trim();
+        if (!email) return;
+        const key = email.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        emails.push(email);
+    });
+    return emails;
+}
+
 // Set up team member add buttons (legacy no-op; + is now on each row)
 function setupTeamMemberButtons() {
     // Rows carry their own + / × controls (see createTeamMemberRow).
@@ -18207,6 +18323,18 @@ async function saveEditUser() {
     // Include card_color for student users
     if (systemRole === 'student') {
         updateData.card_color = cardColor || null;
+    }
+    
+    // Include parent/guardian emails for student users when the field is available
+    const parentEmailsGroup = document.getElementById('edit-user-parent-emails-group');
+    if (systemRole === 'student' && parentEmailsGroup && parentEmailsGroup.style.display !== 'none') {
+        const parentEmails = getParentEmails(PARENT_EMAILS_CONTAINER_ID);
+        const invalidEmail = parentEmails.find(e => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+        if (invalidEmail) {
+            alert(`"${invalidEmail}" is not a valid email address`);
+            return;
+        }
+        updateData.parent_emails = parentEmails;
     }
     
     // Only include password if provided
