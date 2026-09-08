@@ -11260,6 +11260,16 @@ STAFF_DESIGNATION_ALIASES = {
     'Admin': ('Admin',),
 }
 
+# Staff CSV role column: 'Admin' creates a full admin account instead of a staff designation.
+STAFF_IMPORT_ADMIN_ROLE = 'Admin'
+STAFF_IMPORT_ROLES = (
+    STAFF_IMPORT_ADMIN_ROLE,
+    'Case Manager',
+    'Practitioner',
+    'Paraprofessional',
+    'Professional',
+)
+
 
 def _import_name_tokens(name):
     if not name:
@@ -11416,11 +11426,11 @@ def _user_number_match_filter(user_number):
     return or_(User.user_number.in_(variants), func.trim(User.user_number) == user_number)
 
 
-def _find_staff_for_import(user_number, name, *, outside_staff=False, designation=None):
+def _find_staff_for_import(user_number, name, *, outside_staff=False, designation=None, role='staff'):
     """Match staff by user number; if none, unique first-name/partial name staff with no user number."""
     if user_number:
         by_number = User.query.filter(
-            User.role == 'staff',
+            User.role == role,
             User.is_outside_staff == outside_staff,
             _user_number_match_filter(user_number),
         ).first()
@@ -11428,14 +11438,14 @@ def _find_staff_for_import(user_number, name, *, outside_staff=False, designatio
             return by_number
         conflict = User.query.filter(
             _user_number_match_filter(user_number),
-            or_(User.role != 'staff', User.is_outside_staff != outside_staff),
+            or_(User.role != role, User.is_outside_staff != outside_staff),
         ).first()
         if conflict:
             return conflict
     if not name:
         return None
     unnamed = User.query.filter(
-        User.role == 'staff',
+        User.role == role,
         User.is_outside_staff == outside_staff,
         or_(User.user_number.is_(None), User.user_number == ''),
     ).all()
@@ -11446,10 +11456,10 @@ def _find_staff_for_import(user_number, name, *, outside_staff=False, designatio
     return matches[0] if len(matches) == 1 else None
 
 
-def _staff_import_conflict(existing, *, outside_staff=False):
+def _staff_import_conflict(existing, *, outside_staff=False, role='staff'):
     if existing is None:
         return None
-    if existing.role != 'staff' or bool(existing.is_outside_staff) != outside_staff:
+    if existing.role != role or bool(existing.is_outside_staff) != outside_staff:
         kind = 'an outside staff' if existing.is_outside_staff else existing.role
         return f"already exists as {kind} account"
     return None
@@ -11592,7 +11602,7 @@ def _resolve_case_manager_id(case_manager_name, staff_users=None):
 
 
 def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, email, warnings):
-    """Update an existing staff user from CSV. Returns True if any field changed."""
+    """Update an existing staff or admin user from CSV. Returns True if any field changed."""
     changed = False
     if not _import_str_eq(user.user_number, user_number):
         user.user_number = user_number
@@ -11601,8 +11611,9 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     if not _import_str_eq(user.name, preferred_name):
         user.name = preferred_name
         changed = True
-    if not _import_str_eq(user.designation, role):
-        user.designation = role
+    desired_designation = None if role == STAFF_IMPORT_ADMIN_ROLE else role
+    if not _import_str_eq(user.designation, desired_designation):
+        user.designation = desired_designation
         changed = True
     normalized_email = _normalize_import_email(email) or None
     if not _import_str_eq(user.email, normalized_email):
@@ -11807,7 +11818,7 @@ def import_users():
     seen_numbers = set()
 
     if import_type == 'staff':
-        valid_roles = {'Case Manager', 'Practitioner', 'Paraprofessional', 'Professional'}
+        valid_roles = set(STAFF_IMPORT_ROLES)
 
         # Two-pass: first non-Paraprofessionals, then Paraprofessionals
         staff_rows = rows[header_offset:]
@@ -11837,7 +11848,7 @@ def import_users():
             if role not in valid_roles:
                 errors.append(
                     f"{name} was not added: invalid role '{role}'. "
-                    "Role must be one of: Case Manager, Practitioner, Paraprofessional, Professional."
+                    f"Role must be one of: {', '.join(STAFF_IMPORT_ROLES)}."
                 )
                 return
 
@@ -11846,10 +11857,17 @@ def import_users():
                 return
             seen_numbers.add(user_number)
 
+            is_admin_row = role == STAFF_IMPORT_ADMIN_ROLE
+            system_role = 'admin' if is_admin_row else 'staff'
+
             existing = _find_staff_for_import(
-                user_number, name, outside_staff=False, designation=role or None
+                user_number,
+                name,
+                outside_staff=False,
+                designation=None if is_admin_row else (role or None),
+                role=system_role,
             )
-            conflict = _staff_import_conflict(existing, outside_staff=False)
+            conflict = _staff_import_conflict(existing, outside_staff=False, role=system_role)
             if conflict:
                 errors.append(
                     f"{name} was not added: User Number {user_number} {conflict}."
@@ -11880,8 +11898,8 @@ def import_users():
             user = User(
                 name=name,
                 username=username,
-                role='staff',
-                designation=role,
+                role=system_role,
+                designation=None if is_admin_row else role,
                 user_number=user_number,
                 must_change_password=True,
                 grades_taught=normalized_grades if normalized_grades else None,
@@ -11907,7 +11925,7 @@ def import_users():
                     'name': name,
                     'username': username,
                     'password': password,
-                    'role': 'staff',
+                    'role': system_role,
                     'user_number': user_number,
                 }
             )
