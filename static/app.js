@@ -4286,22 +4286,16 @@ function setupEventListeners() {
                     if (gradesTaughtGroup) {
                         gradesTaughtGroup.style.display = (selectedRole === 'Case Manager' || selectedRole === 'Teacher') ? 'block' : 'none';
                     }
-                    // Show Case Manager dropdown for Paraprofessional
+                    // Show Case Manager picker for Paraprofessional
                     const editCaseManagerGroup = document.getElementById('edit-user-case-manager-group');
                     const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
                     if (editCaseManagerGroup && editCaseManagerSelect) {
                         editCaseManagerGroup.style.display = selectedRole === 'Paraprofessional' ? 'block' : 'none';
                         if (selectedRole === 'Paraprofessional') {
-                            const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
-                                u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+                            populateCaseManagerSelect(
+                                editCaseManagerSelect,
+                                getSelectedCaseManagerIds(editCaseManagerSelect)
                             );
-                            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
-                            caseManagers.forEach(cm => {
-                                const opt = document.createElement('option');
-                                opt.value = cm.id;
-                                opt.textContent = cm.name || cm.username;
-                                editCaseManagerSelect.appendChild(opt);
-                            });
                         }
                     }
                 }
@@ -16750,18 +16744,15 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     const userName = user.name ? `'${user.name.replace(/'/g, "\\'")}'` : 'null';
     const gradesTaught = user.grades_taught ? `'${String(user.grades_taught).replace(/'/g, "\\'")}'` : 'null';
     const cardColorVal = user.card_color ? `'${user.card_color}'` : 'null';
-    const linkedCaseManagerId = user.linked_case_manager_id != null ? user.linked_case_manager_id : 'null';
     const userEmail = user.email ? `'${String(user.email).replace(/'/g, "\\'")}'` : 'null';
     const isTeacherOrCaseManager = user.role === 'staff' && (user.designation === 'Case Manager' || user.designation === 'Teacher');
     const gradesTaughtHtml = isTeacherOrCaseManager && user.grades_taught
         ? `<br><span class="grades-taught-text">${escapeHtml(String(user.grades_taught))}</span>`
         : '';
     const isParaprofessional = user.role === 'staff' && user.designation === 'Paraprofessional';
-    const linkedCaseManager = isParaprofessional && user.linked_case_manager_id
-        ? (typeof allStaffMembers !== 'undefined' ? allStaffMembers.find(s => s.id === user.linked_case_manager_id) : null)
-        : null;
-    const linkedCaseManagerHtml = linkedCaseManager
-        ? `<br><span class="grades-taught-text">${escapeHtml(linkedCaseManager.name || linkedCaseManager.username || '')}</span>`
+    const linkedCaseManagerNames = isParaprofessional ? getLinkedCaseManagerNames(user) : [];
+    const linkedCaseManagerHtml = linkedCaseManagerNames.length
+        ? `<br><span class="grades-taught-text">${escapeHtml(linkedCaseManagerNames.join(', '))}</span>`
         : '';
 
     row.innerHTML = `
@@ -16805,7 +16796,7 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
                 user.grade || null,
                 user.card_color || null,
                 user.grades_taught || null,
-                user.linked_case_manager_id || null,
+                user.linked_case_manager_ids || (user.linked_case_manager_id ? [user.linked_case_manager_id] : []),
                 user.email || null
             )
         });
@@ -17595,7 +17586,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerId, email, parentEmails) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerIds, email, parentEmails) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -17641,30 +17632,13 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         gradesTaughtGroup.style.display = isCaseManagerOrTeacher ? 'block' : 'none';
     }
     
-    // Set Case Manager dropdown if staff Paraprofessional
+    // Set Case Manager picker if staff Paraprofessional
     const editCaseManagerGroup = document.getElementById('edit-user-case-manager-group');
     const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
     const isParaprofessional = role === 'staff' && designation === 'Paraprofessional';
     if (editCaseManagerGroup && editCaseManagerSelect) {
         editCaseManagerGroup.style.display = isParaprofessional ? 'block' : 'none';
-        if (isParaprofessional) {
-            const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
-                u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
-            );
-            const currentVal = linkedCaseManagerId != null && linkedCaseManagerId !== '' ? String(linkedCaseManagerId) : '';
-            editCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
-            caseManagers.forEach(cm => {
-                const opt = document.createElement('option');
-                opt.value = cm.id;
-                opt.textContent = cm.name || cm.username;
-                editCaseManagerSelect.appendChild(opt);
-            });
-            if (currentVal && caseManagers.some(cm => String(cm.id) === currentVal)) {
-                editCaseManagerSelect.value = currentVal;
-            } else {
-                editCaseManagerSelect.value = '';
-            }
-        }
+        populateCaseManagerSelect(editCaseManagerSelect, isParaprofessional ? linkedCaseManagerIds : []);
     }
     
     // Set grade if student
@@ -18315,8 +18289,7 @@ async function saveEditUser() {
         }
         if (designation === 'Paraprofessional') {
             const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
-            const linkedId = editCaseManagerSelect ? editCaseManagerSelect.value : '';
-            updateData.linked_case_manager_id = linkedId ? parseInt(linkedId, 10) : null;
+            updateData.linked_case_manager_ids = getSelectedCaseManagerIds(editCaseManagerSelect);
         }
     }
     
@@ -18497,7 +18470,51 @@ function hideModalError(modalId) {
     }
 }
 
-/** Show/hide and populate the Case Manager dropdown in Add Staff modal when role is Paraprofessional. */
+/** Staff who can be picked as a Paraprofessional's case manager. */
+function getCaseManagerOptions() {
+    return (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
+        u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+    );
+}
+
+/** Fill a Case Manager multi-select, selecting the given ids. */
+function populateCaseManagerSelect(select, selectedIds) {
+    if (!select) return;
+    const selected = (Array.isArray(selectedIds) ? selectedIds : [selectedIds])
+        .filter(id => id !== null && id !== undefined && id !== '')
+        .map(id => String(id));
+    select.innerHTML = '';
+    getCaseManagerOptions().forEach(cm => {
+        const opt = document.createElement('option');
+        opt.value = cm.id;
+        opt.textContent = cm.name || cm.username;
+        opt.selected = selected.includes(String(cm.id));
+        select.appendChild(opt);
+    });
+}
+
+/** Case manager ids currently selected in a Case Manager multi-select. */
+function getSelectedCaseManagerIds(select) {
+    if (!select) return [];
+    return Array.from(select.selectedOptions || [])
+        .map(opt => parseInt(opt.value, 10))
+        .filter(id => !isNaN(id));
+}
+
+/** Names for a Paraprofessional's linked case managers, for the user table row. */
+function getLinkedCaseManagerNames(user) {
+    const ids = Array.isArray(user.linked_case_manager_ids) && user.linked_case_manager_ids.length
+        ? user.linked_case_manager_ids
+        : (user.linked_case_manager_id ? [user.linked_case_manager_id] : []);
+    const staff = typeof allStaffMembers !== 'undefined' ? allStaffMembers : [];
+    return ids
+        .map(id => staff.find(s => s.id === id))
+        .filter(Boolean)
+        .map(cm => cm.name || cm.username || '')
+        .filter(Boolean);
+}
+
+/** Show/hide and populate the Case Manager picker in Add Staff modal when role is Paraprofessional. */
 function updateStaffCaseManagerGroup() {
     const staffRoleSelect = document.getElementById('staff-role');
     const staffCaseManagerGroup = document.getElementById('staff-case-manager-group');
@@ -18506,20 +18523,10 @@ function updateStaffCaseManagerGroup() {
     const isParaprofessional = staffRoleSelect.value === 'Paraprofessional';
     staffCaseManagerGroup.style.display = isParaprofessional ? 'block' : 'none';
     if (!isParaprofessional) return;
-    const caseManagers = (typeof allStaffMembers !== 'undefined' ? allStaffMembers : []).filter(
-        u => u.role === 'staff' && !u.is_outside_staff && u.designation === 'Case Manager'
+    populateCaseManagerSelect(
+        staffCaseManagerSelect,
+        getSelectedCaseManagerIds(staffCaseManagerSelect)
     );
-    const currentValue = staffCaseManagerSelect.value;
-    staffCaseManagerSelect.innerHTML = '<option value="">— Select Case Manager (optional) —</option>';
-    caseManagers.forEach(cm => {
-        const opt = document.createElement('option');
-        opt.value = cm.id;
-        opt.textContent = cm.name || cm.username;
-        staffCaseManagerSelect.appendChild(opt);
-    });
-    if (currentValue && caseManagers.some(cm => String(cm.id) === currentValue)) {
-        staffCaseManagerSelect.value = currentValue;
-    }
 }
 
 async function saveStaffUser() {
@@ -18563,8 +18570,8 @@ async function saveStaffUser() {
         }
         if (role === 'Paraprofessional') {
             const staffCaseManagerSelect = document.getElementById('staff-case-manager-select');
-            const linkedId = staffCaseManagerSelect ? staffCaseManagerSelect.value : '';
-            if (linkedId) payload.linked_case_manager_id = parseInt(linkedId, 10);
+            const linkedIds = getSelectedCaseManagerIds(staffCaseManagerSelect);
+            if (linkedIds.length) payload.linked_case_manager_ids = linkedIds;
         }
         const response = await fetch('/api/users', {
             method: 'POST',
@@ -18594,7 +18601,7 @@ async function saveStaffUser() {
             const staffCaseManagerGrp = document.getElementById('staff-case-manager-group');
             if (staffCaseManagerGrp) staffCaseManagerGrp.style.display = 'none';
             const staffCaseManagerSel = document.getElementById('staff-case-manager-select');
-            if (staffCaseManagerSel) staffCaseManagerSel.value = '';
+            if (staffCaseManagerSel) populateCaseManagerSelect(staffCaseManagerSel, []);
             await loadUsers();
         } else {
             let data;

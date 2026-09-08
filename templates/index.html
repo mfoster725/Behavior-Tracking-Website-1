@@ -725,6 +725,7 @@
                                 Role must be one of: Admin, Case Manager, Practitioner, Paraprofessional, Professional. Admin creates an admin account.
                                 Grades Taught is used for Case Managers (e.g. <strong>7</strong> for 7th only, <strong>6-9</strong> for 6th through 9th). Case Manager column is used for Paraprofessionals.
                                 Names can be a first name or a partial match of at least 4 letters (e.g. <strong>Britt</strong> matches <strong>Brittany Roers</strong>), matched within the same role.
+                                List several case managers in column E by separating them with commas (e.g. <strong>Britt, Dan Meyer, Samantha</strong>) to link a Paraprofessional to all of them.
                             </p>
                             <input type="file" id="import-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
                         </div>
@@ -1413,11 +1414,9 @@
                     <small style="color: #666;">Which grade(s) they teach (for Case Managers/Teachers)</small>
                 </div>
                 <div class="form-group" id="staff-case-manager-group" style="display: none;">
-                    <label for="staff-case-manager-select">Case Manager:</label>
-                    <select id="staff-case-manager-select">
-                        <option value="">— Select Case Manager (optional) —</option>
-                    </select>
-                    <small style="color: #666;">When set, "Show students managed by me" will show this case manager's students</small>
+                    <label for="staff-case-manager-select">Case Manager(s):</label>
+                    <select id="staff-case-manager-select" multiple size="5"></select>
+                    <small style="color: #666;">Optional. Ctrl/Cmd-click to pick more than one. "Show students managed by me" will show every selected case manager's students</small>
                 </div>
             </div>
             
@@ -1575,11 +1574,9 @@
                         <small style="color: #666;">For teachers/case managers: which grade(s) they teach</small>
                     </div>
                     <div class="form-group" id="edit-user-case-manager-group" style="display: none;">
-                        <label for="edit-user-case-manager-select">Case Manager:</label>
-                        <select id="edit-user-case-manager-select">
-                            <option value="">— Select Case Manager (optional) —</option>
-                        </select>
-                        <small style="color: #666;">When set, "Show students managed by me" will show this case manager's students</small>
+                        <label for="edit-user-case-manager-select">Case Manager(s):</label>
+                        <select id="edit-user-case-manager-select" multiple size="5"></select>
+                        <small style="color: #666;">Optional. Ctrl/Cmd-click to pick more than one. "Show students managed by me" will show every selected case manager's students</small>
                     </div>
                     <div class="form-group" id="edit-user-grade-group" style="display: none;">
                         <label for="edit-user-grade">Grade:</label>
@@ -2331,7 +2328,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=parent-emails-edit"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=multi-case-manager"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>

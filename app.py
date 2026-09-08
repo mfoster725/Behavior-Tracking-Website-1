@@ -2518,6 +2518,115 @@ class OutsideStaffStudent(db.Model):
     
     __table_args__ = (db.UniqueConstraint('user_id', 'student_id', name='unique_outside_staff_student'),)
 
+
+class ParaprofessionalCaseManager(db.Model):
+    """Case managers a Paraprofessional supports. Paras often cover more than one caseload."""
+    __tablename__ = 'paraprofessional_case_managers'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    case_manager_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'case_manager_id', name='unique_paraprofessional_case_manager'),
+    )
+
+
+def get_linked_case_manager_ids(user):
+    """Case manager ids linked to a Paraprofessional, primary (users.linked_case_manager_id) first."""
+    if not user or getattr(user, 'id', None) is None:
+        return []
+    ids = []
+    primary_id = getattr(user, 'linked_case_manager_id', None)
+    if primary_id:
+        ids.append(primary_id)
+    links = ParaprofessionalCaseManager.query.filter_by(user_id=user.id).order_by(
+        ParaprofessionalCaseManager.id
+    ).all()
+    for link in links:
+        if link.case_manager_id and link.case_manager_id not in ids:
+            ids.append(link.case_manager_id)
+    return ids
+
+
+def set_linked_case_manager_ids(user, case_manager_ids):
+    """Replace a Paraprofessional's case manager links. Returns True if anything changed.
+
+    The first id is also stored on users.linked_case_manager_id so single-link readers keep working.
+    """
+    if not user:
+        return False
+    desired = []
+    for cm_id in case_manager_ids or []:
+        if cm_id and cm_id not in desired:
+            desired.append(cm_id)
+    if user.id is None:
+        if not desired:
+            return False
+        db.session.flush()
+    changed = False
+    existing = {
+        link.case_manager_id: link
+        for link in ParaprofessionalCaseManager.query.filter_by(user_id=user.id).all()
+    }
+    for cm_id, link in existing.items():
+        if cm_id not in desired:
+            db.session.delete(link)
+            changed = True
+    for cm_id in desired:
+        if cm_id not in existing:
+            db.session.add(ParaprofessionalCaseManager(user_id=user.id, case_manager_id=cm_id))
+            changed = True
+    primary_id = desired[0] if desired else None
+    if user.linked_case_manager_id != primary_id:
+        user.linked_case_manager_id = primary_id
+        changed = True
+    return changed
+
+
+def parse_case_manager_ids_payload(data):
+    """Read linked_case_manager_ids (list) or linked_case_manager_id (single) from a request body.
+
+    Returns None when neither field was sent, so callers can leave existing links alone.
+    """
+    if 'linked_case_manager_ids' in data:
+        raw = data.get('linked_case_manager_ids')
+    elif 'linked_case_manager_id' in data:
+        raw = data.get('linked_case_manager_id')
+    else:
+        return None
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raw = [raw]
+    ids = []
+    for value in raw:
+        try:
+            cm_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if cm_id and cm_id not in ids:
+            ids.append(cm_id)
+    return ids
+
+
+def get_linked_case_manager_ids_by_user(user_ids):
+    """Batch version of get_linked_case_manager_ids for list endpoints."""
+    if not user_ids:
+        return {}
+    links_by_user = {}
+    links = ParaprofessionalCaseManager.query.filter(
+        ParaprofessionalCaseManager.user_id.in_(list(user_ids))
+    ).order_by(ParaprofessionalCaseManager.id).all()
+    for link in links:
+        if not link.case_manager_id:
+            continue
+        ids = links_by_user.setdefault(link.user_id, [])
+        if link.case_manager_id not in ids:
+            ids.append(link.case_manager_id)
+    return links_by_user
+
+
 # Amendment Request
 class AmendmentRequest(db.Model):
     __tablename__ = 'amendment_requests'
@@ -4800,23 +4909,29 @@ def students():
                 query = Student.query
             
             if managed_by_me:
-                # Paraprofessional with a linked Case Manager: show that case manager's students
-                linked_cm_id = getattr(current_user, 'linked_case_manager_id', None)
-                if (
-                    current_user.role == 'staff'
-                    and getattr(current_user, 'designation', None) == 'Paraprofessional'
-                    and linked_cm_id
-                ):
-                    linked_cm = User.query.get(linked_cm_id)
-                    if linked_cm and linked_cm.designation == 'Case Manager':
-                        cm_name = linked_cm.name or linked_cm.username or ''
-                        cm_username = linked_cm.username or ''
+                # Paraprofessional with linked Case Managers: show every linked case manager's students
+                linked_cm_ids = (
+                    get_linked_case_manager_ids(current_user)
+                    if (
+                        current_user.role == 'staff'
+                        and getattr(current_user, 'designation', None) == 'Paraprofessional'
+                    )
+                    else []
+                )
+                if linked_cm_ids:
+                    linked_cms = [
+                        cm for cm in User.query.filter(User.id.in_(linked_cm_ids)).all()
+                        if cm.designation == 'Case Manager'
+                    ]
+                    if linked_cms:
+                        cm_identifiers = set()
+                        for linked_cm in linked_cms:
+                            for value in (linked_cm.name, linked_cm.username):
+                                if value and str(value).strip():
+                                    cm_identifiers.add(str(value).strip().lower())
                         team_members = TeamMember.query.filter(
                             TeamMember.role == 'Case Manager',
-                            db.or_(
-                                db.func.lower(TeamMember.name) == db.func.lower(cm_name),
-                                db.func.lower(TeamMember.name) == db.func.lower(cm_username),
-                            ),
+                            db.func.lower(TeamMember.name).in_(sorted(cm_identifiers)),
                         ).all()
                         student_ids = list({tm.student_id for tm in team_members if tm.student_id})
                         if student_ids:
@@ -11592,13 +11707,41 @@ def _sync_student_team_members(student_id, members, existing=None):
     return True
 
 
-def _resolve_case_manager_id(case_manager_name, staff_users=None):
-    user, _matches = _resolve_staff_user_by_name(
-        case_manager_name,
-        designation='Case Manager',
-        staff_users=staff_users,
+def _resolve_import_case_managers(raw_value, staff_users=None):
+    """Resolve the staff CSV Case Manager cell (column E) to case manager users.
+
+    The cell may list several case managers separated by commas, each of which can be a
+    partial name. Returns (matched users, messages for the entries that did not resolve).
+    """
+    raw_value = (raw_value or '').strip()
+    if not raw_value:
+        return [], []
+
+    # A single "Last, First" style entry still has to resolve as one name before splitting.
+    user, matches = _resolve_staff_user_by_name(
+        raw_value, designation='Case Manager', staff_users=staff_users
     )
-    return user
+    if user:
+        return [user], []
+
+    names = [part.strip() for part in raw_value.split(',') if part.strip()]
+    if len(names) < 2:
+        return [], [_unresolved_staff_name_message(raw_value, matches, 'Case Manager')]
+
+    resolved = []
+    resolved_ids = set()
+    problems = []
+    for name in names:
+        match, name_matches = _resolve_staff_user_by_name(
+            name, designation='Case Manager', staff_users=staff_users
+        )
+        if match:
+            if match.id not in resolved_ids:
+                resolved_ids.add(match.id)
+                resolved.append(match)
+        else:
+            problems.append(_unresolved_staff_name_message(name, name_matches, 'Case Manager'))
+    return resolved, problems
 
 
 def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, email, warnings):
@@ -11627,23 +11770,17 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
         user.grades_taught = desired_grades
         changed = True
 
-    desired_cm_id = None
+    desired_cm_ids = None  # None means leave the existing links alone
     if role == 'Paraprofessional':
         if case_manager_name:
-            cm, cm_matches = _resolve_staff_user_by_name(
-                case_manager_name, designation='Case Manager'
-            )
-            if cm:
-                desired_cm_id = cm.id
-            else:
-                desired_cm_id = user.linked_case_manager_id
-                warnings.append(
-                    f"{name}: {_unresolved_staff_name_message(case_manager_name, cm_matches, 'Case Manager')}"
-                )
-        else:
-            desired_cm_id = user.linked_case_manager_id
-    if user.linked_case_manager_id != desired_cm_id:
-        user.linked_case_manager_id = desired_cm_id
+            cms, cm_problems = _resolve_import_case_managers(case_manager_name)
+            if cms:
+                desired_cm_ids = [cm.id for cm in cms]
+            for problem in cm_problems:
+                warnings.append(f"{name}: {problem}")
+    else:
+        desired_cm_ids = []
+    if desired_cm_ids is not None and set_linked_case_manager_ids(user, desired_cm_ids):
         changed = True
     return changed
 
@@ -11906,20 +12043,16 @@ def import_users():
                 email=_normalize_import_email(email) or None,
             )
 
-            if role == 'Paraprofessional' and case_manager_name:
-                cm, cm_matches = _resolve_staff_user_by_name(
-                    case_manager_name, designation='Case Manager'
-                )
-                if cm:
-                    user.linked_case_manager_id = cm.id
-                else:
-                    warnings.append(
-                        f"{name} was created but their "
-                        f"{_unresolved_staff_name_message(case_manager_name, cm_matches, 'Case Manager')}"
-                    )
-
             _set_imported_password(user, password)
             db.session.add(user)
+
+            if role == 'Paraprofessional' and case_manager_name:
+                cms, cm_problems = _resolve_import_case_managers(case_manager_name)
+                if cms:
+                    set_linked_case_manager_ids(user, [cm.id for cm in cms])
+                for problem in cm_problems:
+                    warnings.append(f"{name} was created but their {problem}")
+
             success.append(
                 {
                     'name': name,
@@ -13346,12 +13479,20 @@ def manage_users():
             for oss in OutsideStaffStudent.query.filter(OutsideStaffStudent.user_id.in_(outside_staff_ids)).all():
                 assignments_by_user.setdefault(oss.user_id, []).append(oss.student_id)
                 assigned_student_ids.add(oss.student_id)
+        case_manager_links_by_user = get_linked_case_manager_ids_by_user(
+            [u.id for u in users if getattr(u, 'role', None) == 'staff']
+        )
         assigned_students_by_id = {}
         if assigned_student_ids:
             for s in Student.query.filter(Student.id.in_(assigned_student_ids)).all():
                 assigned_students_by_id[s.id] = {'id': s.id, 'name': s.name}
         result = []
         for user in users:
+            primary_case_manager_id = getattr(user, 'linked_case_manager_id', None)
+            linked_case_manager_ids = [primary_case_manager_id] if primary_case_manager_id else []
+            for cm_id in case_manager_links_by_user.get(user.id, []):
+                if cm_id not in linked_case_manager_ids:
+                    linked_case_manager_ids.append(cm_id)
             user_data = {
                 'id': user.id,
                 'name': user.name,
@@ -13363,7 +13504,8 @@ def manage_users():
                 'is_outside_staff': user.is_outside_staff if hasattr(user, 'is_outside_staff') else False,
                 'district': user.district if hasattr(user, 'district') else None,
                 'grades_taught': getattr(user, 'grades_taught', None),
-                'linked_case_manager_id': getattr(user, 'linked_case_manager_id', None),
+                'linked_case_manager_id': primary_case_manager_id,
+                'linked_case_manager_ids': linked_case_manager_ids,
                 'login_info_sent_at': utc_isoformat(getattr(user, 'login_info_sent_at', None)),
                 'created_at': utc_isoformat(user.created_at)
             }
@@ -13444,7 +13586,6 @@ def manage_users():
             is_outside_staff=data.get('is_outside_staff', False) if role == 'staff' else False,
             district=data.get('district') if (role == 'staff' and data.get('is_outside_staff')) else None,
             grades_taught=(normalize_grades_taught(data.get('grades_taught') or '') or None) if role == 'staff' else None,
-            linked_case_manager_id=data.get('linked_case_manager_id') if (role == 'staff' and data.get('designation') == 'Paraprofessional') else None,
             email=email,
         )
         # Staff/admin: always use {username}2149 for emailed credentials
@@ -13463,6 +13604,8 @@ def manage_users():
                 user.set_password(password)
         
         db.session.add(user)
+        if role == 'staff' and data.get('designation') == 'Paraprofessional':
+            set_linked_case_manager_ids(user, parse_case_manager_ids_payload(data) or [])
         db.session.commit()
         
         # Audit: Log user creation
@@ -13537,8 +13680,14 @@ def manage_users():
                 user.is_outside_staff = data['is_outside_staff']
             if 'district' in data:
                 user.district = data['district'] if data['district'] else None
-            if 'linked_case_manager_id' in data:
-                user.linked_case_manager_id = data['linked_case_manager_id'] if data['linked_case_manager_id'] else None
+            case_manager_ids = parse_case_manager_ids_payload(data)
+            if case_manager_ids is not None:
+                set_linked_case_manager_ids(user, case_manager_ids)
+            elif user.linked_case_manager_id and (
+                user.role != 'staff' or (user.designation or '') != 'Paraprofessional'
+            ):
+                # No longer a Paraprofessional, so the case manager links no longer apply.
+                set_linked_case_manager_ids(user, [])
             if 'email' in data:
                 email = (data.get('email') or '').strip() or None
                 user.email = email
@@ -13657,6 +13806,16 @@ def manage_users():
         if getattr(user, 'hidden_from_management', False):
             return jsonify({'error': 'This account cannot be deleted from User Management.'}), 403
         
+        # Drop case manager links pointing at this user so the row can be removed.
+        ParaprofessionalCaseManager.query.filter(
+            or_(
+                ParaprofessionalCaseManager.user_id == user_id,
+                ParaprofessionalCaseManager.case_manager_id == user_id,
+            )
+        ).delete(synchronize_session=False)
+        User.query.filter_by(linked_case_manager_id=user_id).update(
+            {'linked_case_manager_id': None}, synchronize_session=False
+        )
         db.session.delete(user)
         db.session.commit()
         return jsonify({'message': 'User deleted successfully'}), 200
