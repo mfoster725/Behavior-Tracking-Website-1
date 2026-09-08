@@ -12640,6 +12640,28 @@ def _preview_student_name(student_id):
     return (student.name or f'#{student_id}') if student else f'#{student_id}'
 
 
+# Id columns are meaningless in a preview, so show the record they point at instead.
+SHEET_PREVIEW_ID_FIELDS = {
+    'linked_case_manager_id': ('Primary Case Manager', _preview_user_name),
+    'case_manager_id': ('Case Manager', _preview_user_name),
+    'student_id': ('Student', _preview_student_name),
+    'user_id': ('User', _preview_user_name),
+}
+
+
+def _preview_field_label(field_key):
+    entry = SHEET_PREVIEW_ID_FIELDS.get(field_key)
+    return entry[0] if entry else field_key.replace('_', ' ').title()
+
+
+def _preview_field_display(field_key, value):
+    """Render a changed value, resolving id columns to the name they point at."""
+    if value is None or value == '':
+        return ''
+    entry = SHEET_PREVIEW_ID_FIELDS.get(field_key)
+    return entry[1](value) if entry else str(value)
+
+
 def _describe_preview_object(obj):
     """Short human label for a record touched by a preview run."""
     if isinstance(obj, Student):
@@ -12693,9 +12715,9 @@ def _collect_preview_changes(session, collector):
                 old = history.deleted[0] if history.deleted else None
                 new = history.added[0] if history.added else None
                 fields.append({
-                    'field': attr.key.replace('_', ' ').title(),
-                    'from': '' if old is None else str(old),
-                    'to': '' if new is None else str(new),
+                    'field': _preview_field_label(attr.key),
+                    'from': _preview_field_display(attr.key, old),
+                    'to': _preview_field_display(attr.key, new),
                 })
             if not fields:
                 continue
