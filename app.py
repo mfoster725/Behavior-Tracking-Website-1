@@ -11365,6 +11365,50 @@ def _import_row_is_placeholder(row, key_idx=0, name_idx=1):
     return not key and not name
 
 
+def _normalize_import_header_cell(value):
+    return str(value or '').strip().lower().replace(' ', '_').replace('-', '_')
+
+
+def _import_row_is_header_like(row, import_type):
+    """True when a row is the column header row (or a duplicate of it), not a person."""
+    if not row:
+        return False
+    if import_type == 'staff':
+        key = _normalize_import_header_cell(row[0] if len(row) > 0 else '')
+        name = _normalize_import_header_cell(row[1] if len(row) > 1 else '')
+        role = _normalize_import_header_cell(row[2] if len(row) > 2 else '')
+        if key in ('user_number', 'usernumber', 'id', 'staff_id'):
+            return True
+        if name == 'name' and role == 'role':
+            return True
+        if role == 'role' and not key and not name.replace('name', ''):
+            return True
+    elif import_type == 'outside_staff':
+        key = _normalize_import_header_cell(row[0] if len(row) > 0 else '')
+        name = _normalize_import_header_cell(row[1] if len(row) > 1 else '')
+        district = _normalize_import_header_cell(row[2] if len(row) > 2 else '')
+        if key in ('user_number', 'usernumber', 'id'):
+            return True
+        if name == 'name' and district == 'district':
+            return True
+    elif import_type == 'student':
+        key = _normalize_import_header_cell(row[0] if len(row) > 0 else '')
+        name = _normalize_import_header_cell(row[1] if len(row) > 1 else '')
+        if key in ('lunch_number', 'lunchnumber', 'lunch_id'):
+            return True
+        if name in ('initials', 'student_name', 'name') and key in ('lunch_number', 'lunchnumber', ''):
+            return True
+    return False
+
+
+def _find_import_header_index(rows, import_type):
+    """Locate the header row when the sheet has a title/instruction row above the columns."""
+    for i, row in enumerate(rows[:10]):
+        if _import_row_is_header_like(row, import_type):
+            return i
+    return 0
+
+
 def _clip_import_field(value, max_len):
     if value is None:
         return ''
@@ -12073,7 +12117,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
 
         def process_staff_row(row, row_index):
             nonlocal duplicate_count
-            if _import_row_is_placeholder(row):
+            if _import_row_is_placeholder(row) or _import_row_is_header_like(row, 'staff'):
                 return
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
@@ -12199,7 +12243,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
         # CSV columns: A=User Number, B=Name, C=District, E=Email
         outside_staff_rows = rows[header_offset:]
         for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
-            if _import_row_is_placeholder(row):
+            if _import_row_is_placeholder(row) or _import_row_is_header_like(row, 'outside_staff'):
                 continue
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
@@ -12307,7 +12351,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             new_student_items = []
             student_rows = rows[header_offset:]
             for idx, row in enumerate(student_rows, start=header_offset + 1):
-                if _import_row_is_placeholder(row):
+                if _import_row_is_placeholder(row) or _import_row_is_header_like(row, 'student'):
                     continue
                 lunch_number = _clip_import_field(normalize_import_identifier(row[0] if len(row) > 0 else ''), 50)
                 initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
@@ -12959,9 +13003,10 @@ def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
             result['tabs'].append(summary)
             continue
 
-        keep = [rows[0]]
+        header_idx = _find_import_header_index(rows, import_type)
+        keep = [rows[header_idx]]
         held = []
-        for row in rows[1:]:
+        for row in rows[header_idx + 1:]:
             key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
             if key and key in pending[import_type]:
                 summary['skipped_conflicts'] += 1
