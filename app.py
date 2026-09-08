@@ -11985,14 +11985,27 @@ def import_users():
     return jsonify(payload), status
 
 
-def _run_user_import(rows, import_type, send_login_emails=True):
+def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
     """
     Import staff, outside staff, or student rows.
 
     Shared by the CSV upload and the Google Sheet pull so both create accounts, resolve
     team members, and email new users identically. Columns are positional and follow the
     layout documented in the admin import panel. Returns (payload, status_code).
+
+    With dry_run the work is flushed but never committed, so a caller can inspect the
+    pending changes and roll them back. Nothing is emailed on a dry run.
     """
+    if dry_run:
+        send_login_emails = False
+
+    def _checkpoint():
+        """Persist progress: a real commit, or just a flush when previewing."""
+        if dry_run:
+            db.session.flush()
+        else:
+            db.session.commit()
+
     header_offset = 1  # skip header row
     success = []
     errors = []
@@ -12115,7 +12128,7 @@ def _run_user_import(rows, import_type, send_login_emails=True):
             process_staff_row(row, idx)
         # Commit so Case Managers exist
         try:
-            db.session.commit()
+            _checkpoint()
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Staff import failed on first pass')
@@ -12126,7 +12139,7 @@ def _run_user_import(rows, import_type, send_login_emails=True):
             process_staff_row(row, idx)
 
         try:
-            db.session.commit()
+            _checkpoint()
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Staff import failed')
@@ -12208,7 +12221,7 @@ def _run_user_import(rows, import_type, send_login_emails=True):
             )
 
         try:
-            db.session.commit()
+            _checkpoint()
         except Exception as e:
             db.session.rollback()
             app.logger.exception('Outside staff import failed')
@@ -12365,7 +12378,7 @@ def _run_user_import(rows, import_type, send_login_emails=True):
                         }
                     )
 
-            db.session.commit()
+            _checkpoint()
             if send_login_emails:
                 _email_login_info_after_import(success, warnings)
             return _import_users_payload(success, errors, warnings, updated_names, duplicate_count), 200
@@ -12496,6 +12509,11 @@ def mark_user_sheet_dirty(user):
         user.sheet_dirty_at = datetime.utcnow()
 
 
+def _sheet_column_label(col, field):
+    """Human label for a sheet column, e.g. "Grades Taught (D)"."""
+    return f'{field.replace("_", " ").title()} ({_col_index_to_a1(col)})'
+
+
 def _sheet_record_value(record, field):
     """The value the website believes belongs in the sheet, as a plain string."""
     if field == 'role':
@@ -12600,6 +12618,75 @@ def _sheet_record_key(record, import_type):
     return normalize_import_identifier(raw)
 
 
+# Columns that are bookkeeping rather than roster data; hidden from preview output.
+SHEET_PREVIEW_HIDDEN_FIELDS = frozenset({
+    'id', 'password_hash', 'must_change_password', 'created_at',
+    'sheet_dirty_at', 'sheet_synced_at', 'login_info_sent_at', 'login_info_skipped_at',
+})
+
+
+def _describe_preview_object(obj):
+    """Short human label for a record touched by a preview run."""
+    if isinstance(obj, Student):
+        return 'Student', f'{obj.name or "(no name)"} ({obj.lunch_number or "no lunch number"})'
+    if isinstance(obj, User):
+        if obj.role == 'student':
+            return 'Student login', obj.username or obj.name or '(unnamed)'
+        kind = 'Outside staff' if obj.is_outside_staff else ('Admin' if obj.role == 'admin' else 'Staff')
+        return kind, f'{obj.name or "(no name)"} ({obj.user_number or "no user number"})'
+    if isinstance(obj, TeamMember):
+        return 'Team assignment', f'{obj.role}: {obj.name}'
+    return type(obj).__name__, str(getattr(obj, 'id', '') or '')
+
+
+def _collect_preview_changes(session, collector):
+    """Record what a not-yet-committed session would create or change."""
+    from sqlalchemy import inspect as sa_inspect
+
+    for obj in session.new:
+        if id(obj) in collector['seen_new']:
+            continue
+        collector['seen_new'].add(id(obj))
+        kind, label = _describe_preview_object(obj)
+        collector['created'].append({'kind': kind, 'label': label})
+    for obj in session.dirty:
+        if not session.is_modified(obj, include_collections=False):
+            continue
+        state = sa_inspect(obj)
+        fields = []
+        for attr in state.mapper.column_attrs:
+            if attr.key in SHEET_PREVIEW_HIDDEN_FIELDS:
+                continue
+            history = state.attrs[attr.key].history
+            if not history.has_changes():
+                continue
+            old = history.deleted[0] if history.deleted else None
+            new = history.added[0] if history.added else None
+            fields.append({
+                'field': attr.key.replace('_', ' ').title(),
+                'from': '' if old is None else str(old),
+                'to': '' if new is None else str(new),
+            })
+        if not fields:
+            continue
+        kind, label = _describe_preview_object(obj)
+        existing = collector['seen_updated'].get(id(obj))
+        if existing:
+            existing['changes'].extend(fields)
+        else:
+            entry = {'kind': kind, 'label': label, 'changes': fields}
+            collector['seen_updated'][id(obj)] = entry
+            collector['updated'].append(entry)
+
+
+def _new_preview_collector():
+    return {'created': [], 'updated': [], 'seen_new': set(), 'seen_updated': {}}
+
+
+def _preview_collector_result(collector):
+    return {'created': collector['created'], 'updated': collector['updated']}
+
+
 def _pending_sheet_keys():
     """Keys of every record with unpushed website edits, so a pull can leave them alone."""
     keys = {import_type: set() for import_type in SHEET_IMPORT_TYPES}
@@ -12611,14 +12698,20 @@ def _pending_sheet_keys():
     return keys
 
 
-def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True):
+def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True, dry_run=False):
     """
     Pull every recognised tab into the database through the CSV import pipeline.
 
     Rows whose record has unpushed website edits are dropped before importing, so the sheet
     cannot overwrite an edit that has not gone out yet. Returns a per-tab summary.
+
+    With dry_run the import runs for real but is rolled back at the end, and each tab reports
+    exactly which records would be created and which fields would change. Running every tab
+    inside one transaction means the students tab still sees staff the staff tab would add.
     """
     result = {'tabs': [], 'created': 0, 'updated': 0, 'skipped_conflicts': 0, 'errors': []}
+    if dry_run:
+        result['dry_run'] = True
     workbook, err = _open_workbook(sheet_id, write=False)
     if err:
         result['errors'].append(err)
@@ -12630,6 +12723,25 @@ def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True
         )
         return result
 
+    if dry_run:
+        session = db.session()
+        active = {'collector': None}
+
+        def _preview_listener(sess, flush_context, instances):
+            if active['collector'] is not None:
+                _collect_preview_changes(sess, active['collector'])
+
+        event.listen(session, 'before_flush', _preview_listener)
+        try:
+            return _pull_tabs(result, tabs, active=active, dry_run=True, send_login_emails=False)
+        finally:
+            event.remove(session, 'before_flush', _preview_listener)
+            db.session.rollback()
+    return _pull_tabs(result, tabs, active=None, dry_run=False, send_login_emails=send_login_emails)
+
+
+def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
+    """Import each tab in turn, accumulating a per-tab summary into result."""
     pending = _pending_sheet_keys()
     for worksheet, import_type in tabs:
         label = SHEET_TYPE_LABELS[import_type]
@@ -12655,14 +12767,25 @@ def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True
             continue
 
         keep = [rows[0]]
+        held = []
         for row in rows[1:]:
             key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
             if key and key in pending[import_type]:
                 summary['skipped_conflicts'] += 1
+                held.append(f'{_sheet_cell(row, 1) or "(no name)"} ({key})')
                 continue
             keep.append(row)
+        if held:
+            summary['held_back'] = held
 
-        payload, status = _run_user_import(keep, import_type, send_login_emails=send_login_emails)
+        if active is not None:
+            active['collector'] = _new_preview_collector()
+        payload, status = _run_user_import(
+            keep, import_type, send_login_emails=send_login_emails, dry_run=dry_run
+        )
+        if active is not None:
+            summary['preview'] = _preview_collector_result(active['collector'])
+            active['collector'] = None
         if status != 200:
             summary['errors'].append(f'{label}: {payload.get("error") or "import failed"}')
         else:
@@ -12729,6 +12852,9 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
             'appended': 0,
             'unmatched': [],
             'skipped_clears': 0,
+            'changes': [],
+            'additions': [],
+            'held_clears': [],
             'errors': [],
         }
         pending = _pending_sheet_records(import_type)
@@ -12762,8 +12888,9 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
         touched = []
         for record in pending:
             key = _sheet_key(_sheet_record_key(record, import_type))
+            who = record.name or f'#{record.id}'
             if not key:
-                summary['unmatched'].append(record.name or f'#{record.id}')
+                summary['unmatched'].append(who)
                 continue
             match = rows_by_key.get(key)
             if match is None:
@@ -12772,6 +12899,14 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                 for col, field in columns:
                     row_values[col] = _sheet_record_value(record, field)
                 appends.append(row_values)
+                summary['additions'].append({
+                    'who': who,
+                    'key': _sheet_record_key(record, import_type),
+                    'values': [
+                        {'column': _sheet_column_label(col, field), 'to': _sheet_record_value(record, field)}
+                        for col, field in columns
+                    ],
+                })
                 touched.append((record, record.sheet_dirty_at))
                 continue
             row_number, row = match
@@ -12784,10 +12919,23 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                 if not desired and current and not allow_clear:
                     # Refuse to blank a populated cell unless explicitly allowed.
                     summary['skipped_clears'] += 1
+                    summary['held_clears'].append({
+                        'who': who,
+                        'row': row_number,
+                        'column': _sheet_column_label(col, field),
+                        'keeping': current,
+                    })
                     continue
                 updates.append({
                     'range': f'{_col_index_to_a1(col)}{row_number}',
                     'values': [[desired]],
+                })
+                summary['changes'].append({
+                    'who': who,
+                    'row': row_number,
+                    'column': _sheet_column_label(col, field),
+                    'from': current,
+                    'to': desired,
                 })
                 record_changed = True
             touched.append((record, record.sheet_dirty_at))
@@ -12885,8 +13033,7 @@ def google_sheet_sync_status(sheet_id=None):
             'label': SHEET_TYPE_LABELS[import_type],
             'key_column': f'{SHEET_KEY_LABELS[import_type]} (A)',
             'writes_columns': ', '.join(
-                f'{field.replace("_", " ").title()} ({_col_index_to_a1(col)})'
-                for col, field in SHEET_PUSH_COLUMNS[import_type]
+                _sheet_column_label(col, field) for col, field in SHEET_PUSH_COLUMNS[import_type]
             ),
             'data_rows': 0,
             'rows_missing_key': 0,
@@ -12950,8 +13097,13 @@ def api_google_sheet_status():
 @admin_required
 def api_sync_google_sheet():
     """Pull staff, outside staff, and students from the configured workbook. Admin only."""
-    sheet_id, only_type, _ = _sheet_request_args()
-    return jsonify(pull_from_google_sheet(sheet_id=sheet_id, only_type=only_type)), 200
+    sheet_id, only_type, payload = _sheet_request_args()
+    result = pull_from_google_sheet(
+        sheet_id=sheet_id,
+        only_type=only_type,
+        dry_run=bool(payload.get('dry_run')),
+    )
+    return jsonify(result), 200
 
 
 @app.route('/api/admin/push-google-sheet', methods=['POST'])

@@ -770,9 +770,14 @@
                             Name, Role, Grades Taught, District, and Email for staff.
                             <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted and no other column is touched.
                         </p>
+                        <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
+                            The two <strong>Preview</strong> buttons change nothing. They list every record that would be added and
+                            every field that would change, with its old and new value, so you can check the result before committing to it.
+                        </p>
                         <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" onclick="checkGoogleSheetStatus()">Check Setup</button>
-                            <button type="button" class="btn-secondary" onclick="pullFromGoogleSheet()">Pull From Sheet</button>
+                            <button type="button" class="btn-secondary" onclick="pullFromGoogleSheet(true)">Preview Pull</button>
+                            <button type="button" class="btn-secondary" onclick="pullFromGoogleSheet(false)">Pull From Sheet</button>
                             <button type="button" class="btn-secondary" onclick="pushToGoogleSheet(true)">Preview Push</button>
                             <button type="button" class="btn-primary" onclick="pushToGoogleSheet(false)">Push To Sheet</button>
                             <button type="button" class="btn-primary" onclick="syncGoogleSheetBothWays()">Sync Both Ways</button>

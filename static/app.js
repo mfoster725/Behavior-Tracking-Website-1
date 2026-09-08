@@ -12362,11 +12362,51 @@ function renderGoogleSheetTabTable(tabs, columns) {
         + '</tbody></table>';
 }
 
+function renderGoogleSheetDetailTable(headers, rows) {
+    if (!rows.length) return '';
+    return '<table class="import-results-table"><thead><tr>'
+        + headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + rows.map(cells => '<tr>' + cells.map(c => `<td>${escapeHtml(String(c === '' || c === null || c === undefined ? '(empty)' : c))}</td>`).join('') + '</tr>').join('')
+        + '</tbody></table>';
+}
+
+function renderGoogleSheetPullDetail(tab) {
+    const preview = tab.preview;
+    if (!preview) return '';
+    const created = preview.created || [];
+    const updated = preview.updated || [];
+    const held = tab.held_back || [];
+    if (!created.length && !updated.length && !held.length) {
+        return `<div class="import-results-info">${escapeHtml(tab.tab)}: nothing would change.</div>`;
+    }
+    let html = `<div class="import-results-info"><strong>${escapeHtml(tab.tab)}</strong></div>`;
+    if (created.length) {
+        html += '<div class="import-results-info">Would be added:</div>';
+        html += renderGoogleSheetDetailTable(['Type', 'Who'], created.map(c => [c.kind, c.label]));
+    }
+    if (updated.length) {
+        html += '<div class="import-results-info">Would be changed:</div>';
+        const rows = [];
+        updated.forEach(u => (u.changes || []).forEach(c => rows.push([u.kind, u.label, c.field, c.from, c.to])));
+        html += renderGoogleSheetDetailTable(['Type', 'Who', 'Field', 'Now', 'Would become'], rows);
+    }
+    if (held.length) {
+        html += '<div class="import-results-info">Held back (unpushed website edits):</div>';
+        html += renderGoogleSheetDetailTable(['Who'], held.map(h => [h]));
+    }
+    return html;
+}
+
 function renderGoogleSheetPull(pull) {
-    let html = `<div class="import-results-success"><strong>Pulled from the sheet:</strong> `
-        + `${pull.created} added, ${pull.updated} updated.</div>`;
+    const preview = !!pull.dry_run;
+    let html = `<div class="import-results-success"><strong>${preview ? 'Pull preview' : 'Pulled from the sheet'}:</strong> `
+        + `${pull.created} ${preview ? 'would be added' : 'added'}, ${pull.updated} ${preview ? 'would be updated' : 'updated'}.`
+        + `${preview ? ' Nothing has been changed.' : ''}</div>`;
     html += renderGoogleSheetTabTable(pull.tabs, [['Added', 'created'], ['Updated', 'updated'], ['Held back', 'skipped_conflicts']]);
-    if (pull.skipped_conflicts) {
+    if (preview) {
+        html += (pull.tabs || []).map(renderGoogleSheetPullDetail).join('');
+    } else if (pull.skipped_conflicts) {
         html += `<div class="import-results-info">${pull.skipped_conflicts} row`
             + `${pull.skipped_conflicts === 1 ? ' was' : 's were'} held back because the website has `
             + `edits that have not been pushed to the sheet yet. Push first, then pull again.</div>`;
@@ -12380,6 +12420,39 @@ function renderGoogleSheetPull(pull) {
     return html + renderGoogleSheetErrors(pull.errors);
 }
 
+function renderGoogleSheetPushDetail(tab) {
+    const changes = tab.changes || [];
+    const additions = tab.additions || [];
+    const heldClears = tab.held_clears || [];
+    if (!changes.length && !additions.length && !heldClears.length) return '';
+    let html = `<div class="import-results-info"><strong>${escapeHtml(tab.tab)}</strong></div>`;
+    if (changes.length) {
+        html += renderGoogleSheetDetailTable(
+            ['Row', 'Who', 'Column', 'Sheet has', 'Would become'],
+            changes.map(c => [c.row, c.who, c.column, c.from, c.to])
+        );
+    }
+    if (additions.length) {
+        html += '<div class="import-results-info">Would be added as new rows:</div>';
+        html += renderGoogleSheetDetailTable(
+            ['Who', 'Key', 'Values'],
+            additions.map(a => [
+                a.who,
+                a.key,
+                (a.values || []).filter(v => v.to !== '').map(v => `${v.column}: ${v.to}`).join(', ') || '(no values)',
+            ])
+        );
+    }
+    if (heldClears.length) {
+        html += '<div class="import-results-info">Left alone (website value is empty):</div>';
+        html += renderGoogleSheetDetailTable(
+            ['Row', 'Who', 'Column', 'Keeping'],
+            heldClears.map(c => [c.row, c.who, c.column, c.keeping])
+        );
+    }
+    return html;
+}
+
 function renderGoogleSheetPush(push) {
     const verb = push.dry_run ? 'would be' : 'were';
     let html = `<div class="import-results-success"><strong>${push.dry_run ? 'Push preview' : 'Pushed to the sheet'}:</strong> `
@@ -12387,6 +12460,7 @@ function renderGoogleSheetPush(push) {
         + `${push.updated_records} record${push.updated_records === 1 ? '' : 's'} ${verb} updated, `
         + `${push.appended} new row${push.appended === 1 ? '' : 's'} ${verb} added.</div>`;
     html += renderGoogleSheetTabTable(push.tabs, [['Cells', 'updated_cells'], ['Records', 'updated_records'], ['Rows added', 'appended']]);
+    html += (push.tabs || []).map(renderGoogleSheetPushDetail).join('');
     if (push.skipped_clears) {
         html += `<div class="import-results-info">${push.skipped_clears} cell`
             + `${push.skipped_clears === 1 ? ' was' : 's were'} left as-is because the website value is empty and `
@@ -12402,13 +12476,17 @@ function renderGoogleSheetPush(push) {
     return html + renderGoogleSheetErrors(push.errors);
 }
 
-async function pullFromGoogleSheet() {
-    if (!confirm('Pull all three tabs from the Google Sheet? New staff and students will get accounts, and anyone new with an email on file will be sent their login info once.')) return;
-    googleSheetResultsBox('<div class="loading">Pulling staff, outside staff, and students from the Google Sheet...</div>');
+async function pullFromGoogleSheet(dryRun) {
+    if (!dryRun && !confirm('Pull all three tabs from the Google Sheet? New staff and students will get accounts, and anyone new with an email on file will be sent their login info once.')) return;
+    googleSheetResultsBox(`<div class="loading">${dryRun ? 'Working out what a pull would change...' : 'Pulling staff, outside staff, and students from the Google Sheet...'}</div>`);
     try {
-        const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet', { method: 'POST' });
+        const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: !!dryRun })
+        });
         googleSheetResultsBox(renderGoogleSheetPull(data));
-        if (typeof loadStudents === 'function') await loadStudents();
+        if (!dryRun && typeof loadStudents === 'function') await loadStudents();
     } catch (err) {
         googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
     }

@@ -118,17 +118,21 @@ Optional:
 | Button | What it does |
 |---|---|
 | **Check Setup** | Reports credentials, which tabs were found and how they're being read, which tabs were ignored, and how many edits are waiting. Run this first. |
+| **Preview Pull** | Lists everyone a pull would add and every field it would change, with old and new values. Changes nothing and emails nobody. |
 | **Pull From Sheet** | Sheet → website, all three tabs. |
-| **Preview Push** | Shows exactly what a push would change without writing anything. |
+| **Preview Push** | Lists every cell a push would write, with the value the sheet holds now and what it would become, plus any rows that would be appended. Writes nothing. |
 | **Push To Sheet** | Website → sheet. |
 | **Sync Both Ways** | Push, then pull. |
+
+Both previews are exact rather than approximate: the pull preview runs the real import inside a
+transaction and rolls it back, so what it reports is what the import would actually do.
 
 **From the API** (admin session required):
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/admin/google-sheet-status` | Configuration and per-tab report |
-| `POST /api/admin/sync-google-sheet` | Pull |
+| `POST /api/admin/sync-google-sheet` | Pull. Body `{ "dry_run": true }` previews it. |
 | `POST /api/admin/push-google-sheet` | Push. Body `{ "dry_run": true }` previews it. |
 | `POST /api/admin/sync-google-sheet-two-way` | Push then pull |
 
