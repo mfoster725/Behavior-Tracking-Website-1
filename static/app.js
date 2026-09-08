@@ -5619,7 +5619,7 @@ async function filterDailyStudents() {
             dailyEntryStaffFilterName = null;
         } else {
             // No student name match — try staff name search (full name match only)
-            const matchingStaff = allStaffMembers.filter(staff => {
+            const matchingStaff = getSearchableStaffMembers().filter(staff => {
                 const staffName = (staff.name || staff.username || '').toLowerCase();
                 return staffName === query;
             });
@@ -14417,7 +14417,7 @@ function initStarbucksManagement() {
                     return;
                 }
 
-                let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+                let list = type === 'student' ? (allStudents || []) : getSearchableStaffMembers();
 
                 if (list.length === 0 && !attemptedLoadData) {
                     attemptedLoadData = true;
@@ -14427,7 +14427,7 @@ function initStarbucksManagement() {
                             list = allStudents || [];
                         } else if (type === 'staff' && typeof loadUsers === 'function') {
                             await loadUsers();
-                            list = allStaffMembers || [];
+                            list = getSearchableStaffMembers();
                         }
                     } catch (e) {
                         console.error('Error loading data for Starbucks search:', e);
@@ -15324,6 +15324,24 @@ function updateStaffDatalist() {
     // The custom autocomplete uses allStaffMembers directly
 }
 
+// Staff members offered by the caseload searches (Daily Overview, Reports).
+// Admin logins are left out and same-named entries collapse to one: a person who
+// holds both an admin and a staff account otherwise appeared twice.
+function getSearchableStaffMembers() {
+    const seen = new Set();
+    const searchable = [];
+    (allStaffMembers || []).forEach(staff => {
+        if (!staff || staff.role === 'admin') return;
+        const label = (staff.name || staff.username || '').trim();
+        if (!label) return;
+        const key = label.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        searchable.push(staff);
+    });
+    return searchable;
+}
+
 function setupDailySearchAutocomplete(input) {
     if (!input) return;
     
@@ -15350,7 +15368,7 @@ function setupDailySearchAutocomplete(input) {
         });
         
         // Add staff
-        allStaffMembers.forEach(staff => {
+        getSearchableStaffMembers().forEach(staff => {
             const staffName = staff.name || staff.username || '';
             if (staffName) {
                 options.push({
@@ -25857,7 +25875,7 @@ function setupDashboardSearch(prefix, type) {
                 updateContextBanner(pageKey);
                 return;
             }
-            let list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            let list = type === 'student' ? (allStudents || []) : getSearchableStaffMembers();
 
             // Fallback: if we have no data yet, try to load it once
             if (list.length === 0 && !attemptedLoadData) {
@@ -25868,7 +25886,7 @@ function setupDashboardSearch(prefix, type) {
                         list = allStudents || [];
                     } else if (type === 'staff' && typeof loadUsers === 'function') {
                         await loadUsers();
-                        list = allStaffMembers || [];
+                        list = getSearchableStaffMembers();
                     }
                 } catch (e) {
                     console.error('Error loading data for dashboard search:', e);
@@ -25973,7 +25991,7 @@ function setupDashboardSearch(prefix, type) {
             e.preventDefault();
             const q = input.value.trim().toLowerCase();
             if (!q) return;
-            const list = type === 'student' ? (allStudents || []) : (allStaffMembers || []);
+            const list = type === 'student' ? (allStudents || []) : getSearchableStaffMembers();
             const matches = list.filter(item => {
                 const name = (item.name || '').toLowerCase();
                 const uname = (item.username || '').toLowerCase();

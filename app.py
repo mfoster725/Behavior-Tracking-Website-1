@@ -510,6 +510,60 @@ def get_student_ids_for_staff_user(user):
     return {tm.student_id for tm in team_members if tm.student_id}
 
 
+def get_staff_name_keys(*values):
+    """
+    Return every lowercased name/username a staff member's team_members rows
+    could be stored under.
+
+    One person can hold more than one account (commonly an admin login next to a
+    staff login), and TeamMember.name is free text holding the display name of
+    one account or the username of another. Starting from the given values, pull
+    in the name and username of every staff/admin account that shares any of
+    them so all spellings resolve to the same caseload.
+    """
+    keys = {str(v).strip().lower() for v in values if v and str(v).strip()}
+    if not keys:
+        return set()
+    for _ in range(3):
+        matches = User.query.filter(
+            User.role.in_(['staff', 'admin']),
+            db.or_(
+                db.func.lower(db.func.trim(User.name)).in_(sorted(keys)),
+                db.func.lower(db.func.trim(User.username)).in_(sorted(keys)),
+            )
+        ).all()
+        expanded = set(keys)
+        for match in matches:
+            for val in (match.name, match.username):
+                if val and str(val).strip():
+                    expanded.add(str(val).strip().lower())
+        if expanded == keys:
+            break
+        keys = expanded
+    return keys
+
+
+def get_caseload_student_ids(*values):
+    """
+    Return sorted student_ids whose team_members include the staff member
+    identified by any of the given name/username values.
+    """
+    keys = get_staff_name_keys(*values)
+    if not keys:
+        return []
+    team_members = TeamMember.query.filter(
+        db.func.lower(db.func.trim(TeamMember.name)).in_(sorted(keys))
+    ).all()
+    return sorted({tm.student_id for tm in team_members if tm.student_id})
+
+
+def get_caseload_student_ids_for_user(user):
+    """Return sorted student_ids on the given user's caseload."""
+    if not user:
+        return []
+    return get_caseload_student_ids(user.name, user.username)
+
+
 def are_users_on_same_student_team(user_a, user_b):
     """
     Return True if two staff users share at least one student in common in the
@@ -5191,46 +5245,17 @@ def students_by_staff_name():
     # Debug: Log the search
     print(f"Searching for staff name: '{staff_name}'")
     
-    # First, try to find the User record to get both name and username
-    # This handles the case where TeamMember.name might store either name or username
-    user = User.query.filter(
-        (db.func.lower(User.name) == db.func.lower(staff_name)) |
-        (db.func.lower(User.username) == db.func.lower(staff_name))
-    ).first()
-    
-    if user:
-        user_name = user.name or ''
-        user_username = user.username or ''
-        print(f"Found user: name='{user_name}', username='{user_username}'")
-        
-        # Search TeamMember for both name and username (case-insensitive)
+    # Resolve the searched name against every account that person holds, so a
+    # duplicate admin/staff login for the same person returns the same caseload.
+    student_ids = get_caseload_student_ids(staff_name)
+
+    if not student_ids:
+        print(f"No exact match for '{staff_name}', trying partial match on TeamMember.name")
         team_members = TeamMember.query.filter(
-            (db.func.lower(TeamMember.name) == db.func.lower(user_name)) |
-            (db.func.lower(TeamMember.name) == db.func.lower(user_username))
+            TeamMember.name.ilike(f'%{staff_name}%')
         ).all()
-    else:
-        print(f"User not found, trying direct match on TeamMember.name")
-        # If user not found, try direct match on TeamMember.name
-        # Try exact match first (case-insensitive)
-        team_members = TeamMember.query.filter(
-            db.func.lower(TeamMember.name) == db.func.lower(staff_name)
-        ).all()
-        
-        # If no exact match, try partial match (case-insensitive)
-        if not team_members:
-            team_members = TeamMember.query.filter(
-                TeamMember.name.ilike(f'%{staff_name}%')
-            ).all()
-    
-    print(f"Found {len(team_members)} team member records")
-    
-    # Debug: Show what team members were found
-    if team_members:
-        print(f"Team member names found: {[tm.name for tm in team_members]}")
-    
-    # Get unique student IDs
-    student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
-    
+        student_ids = sorted({tm.student_id for tm in team_members if tm.student_id})
+
     print(f"Found {len(student_ids)} unique student IDs: {student_ids}")
     
     # Get student details
@@ -6410,13 +6435,7 @@ def daily_records():
         elif staff_id and current_user.role in ['staff', 'admin']:
             staff_user = User.query.get(staff_id)
             if staff_user:
-                staff_name = staff_user.name or ''
-                staff_username = staff_user.username or ''
-                team_members = TeamMember.query.filter(
-                    (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
-                    (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
-                ).all()
-                staff_student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+                staff_student_ids = get_caseload_student_ids_for_user(staff_user)
                 if not staff_student_ids:
                     return jsonify([])
                 query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
@@ -6558,13 +6577,7 @@ def _resolve_student_scope(student_id=None, student_ids_param='', staff_id=None,
         staff_user = User.query.get(staff_id)
         if not staff_user:
             return []
-        staff_name = staff_user.name or ''
-        staff_username = staff_user.username or ''
-        team_members = TeamMember.query.filter(
-            (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
-            (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
-        ).all()
-        return sorted({tm.student_id for tm in team_members if tm.student_id})
+        return get_caseload_student_ids_for_user(staff_user)
 
     if managed_by_me and current_user.role in ['staff', 'admin']:
         user_name = (current_user.name or current_user.username or '').strip()
@@ -7028,17 +7041,11 @@ def summary():
     lite_mode = request.args.get('lite', 'false').lower() in ('1', 'true', 'yes')
     
     # If staff_id is provided and the current user has permission, filter to that staff member's students
-    if staff_id and current_user.role in ['staff', 'admin']:
+    if staff_id and current_user.role in ['staff', 'admin'] and not current_user.is_outside_staff:
         staff_user = User.query.get(staff_id)
         if staff_user:
             staff_context_name = staff_user.name or staff_user.username
-            staff_name = staff_user.name or ''
-            staff_username = staff_user.username or ''
-            team_members = TeamMember.query.filter(
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
-            ).all()
-            staff_student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+            staff_student_ids = get_caseload_student_ids_for_user(staff_user)
             if staff_student_ids:
                 if student_id:
                     if student_id in staff_student_ids:
@@ -13583,17 +13590,11 @@ def frenzy_stats():
     }
     
     # If staff_id is provided and the current user has permission, filter to that staff member's students
-    if staff_id and current_user.role in ['staff', 'admin']:
+    if staff_id and current_user.role in ['staff', 'admin'] and not current_user.is_outside_staff:
         staff_user = User.query.get(staff_id)
         if staff_user:
             staff_context_name = staff_user.name or staff_user.username
-            staff_name = staff_user.name or ''
-            staff_username = staff_user.username or ''
-            team_members = TeamMember.query.filter(
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
-            ).all()
-            staff_student_ids = list(set([tm.student_id for tm in team_members if tm.student_id]))
+            staff_student_ids = get_caseload_student_ids_for_user(staff_user)
             if staff_student_ids:
                 if student_id:
                     if student_id in staff_student_ids:
@@ -18939,16 +18940,10 @@ def incentive_tracking():
     query = DailyRecord.query.join(Student)
 
     # Role-based access control (mirror summary rules at a high level)
-    if staff_id and current_user.role in ['staff', 'admin']:
+    if staff_id and current_user.role in ['staff', 'admin'] and not current_user.is_outside_staff:
         staff_user = User.query.get(staff_id)
         if staff_user:
-            staff_name = staff_user.name or ''
-            staff_username = staff_user.username or ''
-            team_members = TeamMember.query.filter(
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_name)) |
-                (db.func.lower(TeamMember.name) == db.func.lower(staff_username))
-            ).all()
-            staff_student_ids = list({tm.student_id for tm in team_members if tm.student_id})
+            staff_student_ids = get_caseload_student_ids_for_user(staff_user)
             if not staff_student_ids:
                 return jsonify({'yellow_students': [], 'green_students': [], 'blue_students': []})
             if student_id and student_id in staff_student_ids:
