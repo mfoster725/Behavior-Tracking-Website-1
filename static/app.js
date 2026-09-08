@@ -12318,18 +12318,32 @@ async function checkGoogleSheetStatus() {
             ['Google libraries installed', yesNo(data.libraries_installed)],
             ['Credentials configured', yesNo(data.credentials_configured)],
             ['Sheet ID configured', yesNo(data.sheet_id_configured)],
-            ['Sheet reachable', yesNo(data.sheet_reachable)],
-            ['Worksheet', String(data.worksheet)],
+            ['Workbook reachable', yesNo(data.workbook_reachable)],
             ['Writing to sheet enabled', yesNo(data.write_enabled)],
             ['Allowed to blank existing cells', yesNo(data.clear_enabled)],
-            ['Columns found', (data.columns_found || []).join(', ') || 'none'],
-            ['Columns missing', (data.columns_missing || []).join(', ') || 'none'],
             ['Edits waiting to be pushed', String(data.pending_edits)],
-            ['Waiting edits with no lunch number', String(data.pending_without_lunch_number)],
+            ['Waiting edits with no User/Lunch Number', String(data.pending_without_key)],
         ];
         let html = '<table class="import-results-table"><tbody>'
             + rows.map(([label, value]) => `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${escapeHtml(value)}</td></tr>`).join('')
             + '</tbody></table>';
+
+        const tabs = data.tabs || [];
+        if (tabs.length) {
+            html += '<table class="import-results-table"><thead><tr>'
+                + '<th>Tab</th><th>Treated as</th><th>Matched on</th><th>Writes back</th><th>Rows</th>'
+                + '</tr></thead><tbody>'
+                + tabs.map(t => `<tr><td>${escapeHtml(t.tab)}</td><td>${escapeHtml(t.label)}</td>`
+                    + `<td>${escapeHtml(t.key_column)}</td><td>${escapeHtml(t.writes_columns)}</td>`
+                    + `<td>${t.data_rows}</td></tr>`).join('')
+                + '</tbody></table>';
+        }
+        const ignored = data.unrecognized_tabs || [];
+        if (ignored.length) {
+            html += `<div class="import-results-info">Ignored tab${ignored.length === 1 ? '' : 's'}: `
+                + `${ignored.map(t => escapeHtml(String(t))).join(', ')}. `
+                + `Only tabs named like Staff, Outside Staff, or Students are synced.</div>`;
+        }
         html += renderGoogleSheetErrors(data.errors);
         googleSheetResultsBox(html);
     } catch (err) {
@@ -12337,14 +12351,31 @@ async function checkGoogleSheetStatus() {
     }
 }
 
+function renderGoogleSheetTabTable(tabs, columns) {
+    if (!tabs || !tabs.length) return '';
+    return '<table class="import-results-table"><thead><tr><th>Tab</th>'
+        + columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + tabs.map(t => `<tr><td>${escapeHtml(t.tab)}</td>`
+            + columns.map(([, key]) => `<td>${t[key] || 0}</td>`).join('')
+            + '</tr>').join('')
+        + '</tbody></table>';
+}
+
 function renderGoogleSheetPull(pull) {
     let html = `<div class="import-results-success"><strong>Pulled from the sheet:</strong> `
-        + `${pull.created} student${pull.created === 1 ? '' : 's'} added, `
-        + `${pull.updated} updated.</div>`;
+        + `${pull.created} added, ${pull.updated} updated.</div>`;
+    html += renderGoogleSheetTabTable(pull.tabs, [['Added', 'created'], ['Updated', 'updated'], ['Held back', 'skipped_conflicts']]);
     if (pull.skipped_conflicts) {
-        html += `<div class="import-results-info">${pull.skipped_conflicts} student`
-            + `${pull.skipped_conflicts === 1 ? ' was' : 's were'} left alone because the website has `
+        html += `<div class="import-results-info">${pull.skipped_conflicts} row`
+            + `${pull.skipped_conflicts === 1 ? ' was' : 's were'} held back because the website has `
             + `edits that have not been pushed to the sheet yet. Push first, then pull again.</div>`;
+    }
+    const warnings = (pull.tabs || []).flatMap(t => t.warnings || []);
+    if (warnings.length) {
+        html += '<div class="import-results-warning"><strong>Warnings:</strong><ul>'
+            + warnings.map(w => `<li>${escapeHtml(String(w))}</li>`).join('')
+            + '</ul></div>';
     }
     return html + renderGoogleSheetErrors(pull.errors);
 }
@@ -12353,8 +12384,9 @@ function renderGoogleSheetPush(push) {
     const verb = push.dry_run ? 'would be' : 'were';
     let html = `<div class="import-results-success"><strong>${push.dry_run ? 'Push preview' : 'Pushed to the sheet'}:</strong> `
         + `${push.updated_cells} cell${push.updated_cells === 1 ? '' : 's'} across `
-        + `${push.updated_students} student${push.updated_students === 1 ? '' : 's'} ${verb} updated, `
+        + `${push.updated_records} record${push.updated_records === 1 ? '' : 's'} ${verb} updated, `
         + `${push.appended} new row${push.appended === 1 ? '' : 's'} ${verb} added.</div>`;
+    html += renderGoogleSheetTabTable(push.tabs, [['Cells', 'updated_cells'], ['Records', 'updated_records'], ['Rows added', 'appended']]);
     if (push.skipped_clears) {
         html += `<div class="import-results-info">${push.skipped_clears} cell`
             + `${push.skipped_clears === 1 ? ' was' : 's were'} left as-is because the website value is empty and `
@@ -12362,17 +12394,17 @@ function renderGoogleSheetPush(push) {
     }
     const unmatched = push.unmatched || [];
     if (unmatched.length) {
-        html += `<div class="import-results-warning"><strong>${unmatched.length} student`
+        html += `<div class="import-results-warning"><strong>${unmatched.length} record`
             + `${unmatched.length === 1 ? '' : 's'} could not be written to the sheet</strong> because `
-            + `${unmatched.length === 1 ? 'it has' : 'they have'} no lunch number: `
-            + `${unmatched.map(n => escapeHtml(String(n))).join(', ')}. Add a lunch number to `
-            + `${unmatched.length === 1 ? 'that student' : 'those students'} and push again.</div>`;
+            + `${unmatched.length === 1 ? 'it has' : 'they have'} no User Number or Lunch Number: `
+            + `${unmatched.map(n => escapeHtml(String(n))).join(', ')}.</div>`;
     }
     return html + renderGoogleSheetErrors(push.errors);
 }
 
 async function pullFromGoogleSheet() {
-    googleSheetResultsBox('<div class="loading">Pulling students from the Google Sheet...</div>');
+    if (!confirm('Pull all three tabs from the Google Sheet? New staff and students will get accounts, and anyone new with an email on file will be sent their login info once.')) return;
+    googleSheetResultsBox('<div class="loading">Pulling staff, outside staff, and students from the Google Sheet...</div>');
     try {
         const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet', { method: 'POST' });
         googleSheetResultsBox(renderGoogleSheetPull(data));
@@ -12400,7 +12432,7 @@ async function pushToGoogleSheet(dryRun) {
 }
 
 async function syncGoogleSheetBothWays() {
-    if (!confirm('Push website edits to the Google Sheet, then pull any new students from it?')) return;
+    if (!confirm('Push website edits to the Google Sheet, then pull all three tabs back in? New accounts created by the pull will be emailed their login info once.')) return;
     googleSheetResultsBox('<div class="loading">Syncing with the Google Sheet...</div>');
     try {
         const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet-two-way', { method: 'POST' });

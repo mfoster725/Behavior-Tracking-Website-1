@@ -698,6 +698,10 @@ class User(UserMixin, db.Model):
     login_info_sent_at = db.Column(db.DateTime, nullable=True)
     # When login share was permanently skipped (e.g. no email on row)
     login_info_skipped_at = db.Column(db.DateTime, nullable=True)
+    # Google Sheet two-way sync: set when the website edits an app-owned field,
+    # cleared once the change has been written back to the sheet.
+    sheet_dirty_at = db.Column(db.DateTime, nullable=True)
+    sheet_synced_at = db.Column(db.DateTime, nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -3592,6 +3596,16 @@ def init_db():
                                 conn.commit()
                         except (OperationalError, ProgrammingError) as e:
                             print(f"Note: Could not add login_info_skipped_at column (may already exist): {e}")
+
+                    for sheet_col in ('sheet_dirty_at', 'sheet_synced_at'):
+                        if sheet_col not in columns:
+                            print(f"Adding {sheet_col} column to users table...")
+                            try:
+                                with db.engine.connect() as conn:
+                                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {sheet_col} TIMESTAMP"))
+                                    conn.commit()
+                            except (OperationalError, ProgrammingError) as e:
+                                print(f"Note: Could not add users.{sheet_col} column (may already exist): {e}")
                 
                 # Verify columns exist in frenzy_events table
                 if 'frenzy_events' in table_names:
@@ -11926,6 +11940,9 @@ def _email_login_info_after_import(success_rows, warnings):
         if not user:
             warnings.append(f"Login email skipped for {username}: user not found after import.")
             continue
+        if user.login_info_sent_at or user.login_info_skipped_at:
+            # Credentials already went out once; never send a second copy.
+            continue
         result = _share_login_info_for_user(
             user,
             reset_password=True,
@@ -11964,6 +11981,18 @@ def import_users():
     if not rows:
         return jsonify({'error': 'CSV file is empty'}), 400
 
+    payload, status = _run_user_import(rows, import_type)
+    return jsonify(payload), status
+
+
+def _run_user_import(rows, import_type, send_login_emails=True):
+    """
+    Import staff, outside staff, or student rows.
+
+    Shared by the CSV upload and the Google Sheet pull so both create accounts, resolve
+    team members, and email new users identically. Columns are positional and follow the
+    layout documented in the admin import panel. Returns (payload, status_code).
+    """
     header_offset = 1  # skip header row
     success = []
     errors = []
@@ -12089,8 +12118,8 @@ def import_users():
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            app.logger.exception('Staff CSV import failed on first pass')
-            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
+            app.logger.exception('Staff import failed on first pass')
+            return {'error': f'Import failed: {_import_exception_message(e)}'}, 500
 
         # Second pass: Paraprofessionals
         for idx, row in enumerate(para_rows, start=header_offset + 1):
@@ -12100,10 +12129,11 @@ def import_users():
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            app.logger.exception('Staff CSV import failed')
-            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
-        _email_login_info_after_import(success, warnings)
-        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
+            app.logger.exception('Staff import failed')
+            return {'error': f'Import failed: {_import_exception_message(e)}'}, 500
+        if send_login_emails:
+            _email_login_info_after_import(success, warnings)
+        return _import_users_payload(success, errors, warnings, updated_names, duplicate_count), 200
 
     elif import_type == 'outside_staff':
         # CSV columns: A=User Number, B=Name, C=District, E=Email
@@ -12181,10 +12211,11 @@ def import_users():
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            app.logger.exception('Outside staff CSV import failed')
-            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
-        _email_login_info_after_import(success, warnings)
-        return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
+            app.logger.exception('Outside staff import failed')
+            return {'error': f'Import failed: {_import_exception_message(e)}'}, 500
+        if send_login_emails:
+            _email_login_info_after_import(success, warnings)
+        return _import_users_payload(success, errors, warnings, updated_names, duplicate_count), 200
 
     elif import_type == 'student':
         try:
@@ -12335,39 +12366,57 @@ def import_users():
                     )
 
             db.session.commit()
-            _email_login_info_after_import(success, warnings)
-            return jsonify(_import_users_payload(success, errors, warnings, updated_names, duplicate_count)), 200
+            if send_login_emails:
+                _email_login_info_after_import(success, warnings)
+            return _import_users_payload(success, errors, warnings, updated_names, duplicate_count), 200
         except Exception as e:
             db.session.rollback()
-            app.logger.exception('Student CSV import failed')
-            return jsonify({'error': f'Import failed: {_import_exception_message(e)}'}), 500
+            app.logger.exception('Student import failed')
+            return {'error': f'Import failed: {_import_exception_message(e)}'}, 500
 
     else:
-        return jsonify({'error': 'Invalid import type'}), 400
+        return {'error': 'Invalid import type'}, 400
 
 
-# ----- Google Sheets sync (students) -----
-# Expected sheet columns (first row = headers): Name, Email, Grade, Card Color, Lunch Number
-# Lunch Number is the key that ties a sheet row to a Student row. See GOOGLE_SHEETS_SYNC_README.md.
+# ----- Google Sheets sync (staff, outside staff, students) -----
+# One workbook with one tab per import type. Tabs are matched by name ("Staff",
+# "Outside Staff Users", "Students") and each tab uses the same positional columns as the
+# CSV import documented in the admin panel, so a pull runs through _run_user_import and
+# creates accounts, resolves team members, and emails new users exactly like a CSV upload.
 #
-# Ownership rules for the two-way sync, chosen so neither side can silently clobber the other:
-#   * The sheet owns which students exist. Only a pull creates students; nothing ever deletes a row.
-#   * The website owns the fields in SHEET_APP_OWNED_FIELDS. A pull leaves those alone on any
-#     student with unpushed website edits, and a push writes them back to the sheet.
+# Ownership rules, chosen so neither side can silently clobber the other:
+#   * The sheet owns who exists. Only a pull creates records; nothing ever deletes a row.
+#   * The website owns the fields in SHEET_PUSH_COLUMNS. A pull skips any row whose record
+#     has unpushed website edits, and a push writes those fields back to the sheet.
 # Writing to the sheet is opt-in via GOOGLE_SHEETS_ENABLE_WRITE so a misconfigured deploy can
 # never touch the roster.
 
 GOOGLE_SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.readonly'
 GOOGLE_SHEETS_SCOPE_READWRITE = 'https://www.googleapis.com/auth/spreadsheets'
 
-# Student fields the website is authoritative for, mapped to the sheet headers that may hold them.
-SHEET_APP_OWNED_FIELDS = ('name', 'email', 'grade', 'card_color')
-SHEET_FIELD_HEADERS = {
-    'name': ('name', 'student_name', 'initials'),
-    'email': ('email', 'student_email'),
-    'grade': ('grade',),
-    'card_color': ('card_color', 'cardcolor'),
-    'lunch_number': ('lunch_number', 'lunchnumber'),
+SHEET_IMPORT_TYPES = ('staff', 'outside_staff', 'student')
+SHEET_TYPE_LABELS = {
+    'staff': 'Staff',
+    'outside_staff': 'Outside Staff',
+    'student': 'Students',
+}
+
+# Columns the website may write back, as 0-based positions in each tab. These mirror the CSV
+# import layout; column 0 is the key (User Number for staff, Lunch Number for students) and is
+# never written. Anything not listed here is left untouched.
+SHEET_PUSH_COLUMNS = {
+    'staff': ((1, 'name'), (2, 'role'), (3, 'grades_taught'), (STAFF_EMAIL_COL, 'email')),
+    'outside_staff': ((1, 'name'), (2, 'district'), (OUTSIDE_STAFF_EMAIL_COL, 'email')),
+    'student': ((1, 'name'), (2, 'grade'), (3, 'card_color'), (STUDENT_EMAIL_COL, 'email')),
+}
+SHEET_KEY_COLUMN = 0
+# Request fields whose change means the record has to be written back to the sheet.
+SHEET_DIRTY_STUDENT_FIELDS = ('name', 'email', 'grade', 'card_color')
+SHEET_DIRTY_USER_FIELDS = ('name', 'email', 'role', 'designation', 'grades_taught', 'district')
+SHEET_KEY_LABELS = {
+    'staff': 'User Number',
+    'outside_staff': 'User Number',
+    'student': 'Lunch Number',
 }
 
 # Google caps a single values.batchUpdate; stay well under it.
@@ -12408,51 +12457,6 @@ def _get_google_sheets_client(write=False):
     return None, 'Set GOOGLE_SHEETS_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS.'
 
 
-def _normalize_header(h):
-    """Normalize header for column mapping: strip, lower, replace spaces with underscores."""
-    if h is None:
-        return ''
-    return str(h).strip().lower().replace(' ', '_').replace('-', '_')
-
-
-def _resolve_sheet_target(sheet_id, worksheet_name_or_index):
-    """Resolve the configured workbook/tab, falling back to env vars."""
-    sheet_id = sheet_id or os.environ.get('GOOGLE_SHEET_ID')
-    if worksheet_name_or_index is None:
-        env_worksheet = (os.environ.get('GOOGLE_SHEET_WORKSHEET') or '').strip()
-        if env_worksheet:
-            worksheet_name_or_index = int(env_worksheet) if env_worksheet.isdigit() else env_worksheet
-    return sheet_id, worksheet_name_or_index
-
-
-def _open_student_worksheet(sheet_id=None, worksheet_name_or_index=None, write=False):
-    """Open the configured worksheet. Returns (worksheet, error_message)."""
-    sheet_id, worksheet_name_or_index = _resolve_sheet_target(sheet_id, worksheet_name_or_index)
-    if not sheet_id:
-        return None, 'GOOGLE_SHEET_ID not set.'
-    client, err = _get_google_sheets_client(write=write)
-    if err:
-        return None, err
-    try:
-        workbook = client.open_by_key(sheet_id)
-        if worksheet_name_or_index is None:
-            return workbook.sheet1, None
-        if isinstance(worksheet_name_or_index, int):
-            return workbook.get_worksheet(worksheet_name_or_index), None
-        return workbook.worksheet(worksheet_name_or_index), None
-    except Exception as e:
-        return None, f'Could not open sheet: {e}'
-
-
-def _sheet_column_map(header_row):
-    """Map each known field to its 0-based column index in the sheet."""
-    headers = [_normalize_header(h) for h in header_row]
-    columns = {}
-    for field, aliases in SHEET_FIELD_HEADERS.items():
-        columns[field] = next((i for i, h in enumerate(headers) if h in aliases), None)
-    return columns
-
-
 def _sheet_cell(row, index):
     """Read a cell defensively: sheet rows are ragged and columns may be absent."""
     if index is None or index < 0 or len(row) <= index:
@@ -12460,8 +12464,8 @@ def _sheet_cell(row, index):
     return (row[index] or '').strip()
 
 
-def _sheet_lunch_key(value):
-    """Canonical form of a lunch number for matching sheet rows to students."""
+def _sheet_key(value):
+    """Canonical form of a User Number / Lunch Number for matching sheet rows to records."""
     return normalize_import_identifier(value).lower()
 
 
@@ -12475,12 +12479,6 @@ def _col_index_to_a1(index):
     return letters
 
 
-def _student_sheet_value(student, field):
-    """The value the website believes belongs in the sheet, as a plain string."""
-    value = getattr(student, field, None)
-    return '' if value is None else str(value).strip()
-
-
 def mark_student_sheet_dirty(student):
     """Flag a student as having website edits that have not reached the Google Sheet yet."""
     if student is not None:
@@ -12492,270 +12490,457 @@ def mark_student_sheet_dirty_by_id(student_id):
         mark_student_sheet_dirty(Student.query.get(student_id))
 
 
-def sync_students_from_google_sheet(sheet_id=None, worksheet_name_or_index=None):
+def mark_user_sheet_dirty(user):
+    """Flag a staff or outside staff user as having unpushed website edits."""
+    if user is not None and user.role in ('staff', 'admin'):
+        user.sheet_dirty_at = datetime.utcnow()
+
+
+def _sheet_record_value(record, field):
+    """The value the website believes belongs in the sheet, as a plain string."""
+    if field == 'role':
+        # The staff tab's Role column holds "Admin" for admins and the designation otherwise.
+        value = STAFF_IMPORT_ADMIN_ROLE if record.role == 'admin' else record.designation
+    else:
+        value = getattr(record, field, None)
+    return '' if value is None else str(value).strip()
+
+
+def _is_near_word(token, word):
+    """True when token equals word or is one typo away (insert, delete, replace, or swap)."""
+    if token == word:
+        return True
+    if abs(len(token) - len(word)) > 1:
+        return False
+    if len(token) == len(word):
+        diffs = [i for i, (a, b) in enumerate(zip(token, word)) if a != b]
+        if len(diffs) == 1:
+            return True
+        # Adjacent transposition, e.g. "outisde" for "outside".
+        if len(diffs) == 2 and diffs[1] == diffs[0] + 1:
+            i, j = diffs
+            return token[i] == word[j] and token[j] == word[i]
+        return False
+    shorter, longer = (token, word) if len(token) < len(word) else (word, token)
+    return any(longer[:i] + longer[i + 1:] == shorter for i in range(len(longer)))
+
+
+def _sheet_tab_type(title):
     """
-    Pull students from the Google Sheet into the Student table.
+    Infer which import type a tab holds from its name.
 
-    The sheet decides which students exist, so rows create students that are not in the database
-    yet. Fields the website owns are only taken from the sheet when the student has no pending
-    website edits; otherwise they are left for the next push and counted in skipped_conflicts.
-    Returns: dict with created, updated, skipped_conflicts, errors.
+    Matching tolerates a single typo per word, so a tab named "Outisde Staff Users" is still
+    recognised as outside staff rather than falling through to the plain staff layout.
     """
-    empty = {'created': 0, 'updated': 0, 'skipped_conflicts': 0, 'errors': []}
-    worksheet, err = _open_student_worksheet(sheet_id, worksheet_name_or_index, write=False)
-    if err:
-        return {**empty, 'errors': [err]}
-    try:
-        rows = worksheet.get_all_values()
-    except Exception as e:
-        return {**empty, 'errors': [f'Could not read sheet: {e}']}
-    if not rows:
-        return {**empty, 'errors': ['Sheet is empty.']}
+    words = ' '.join((title or '').lower().replace('-', ' ').split()).split()
+    if not words:
+        return None
+    has_staff = any(_is_near_word(w, 'staff') for w in words)
+    has_outside = any(_is_near_word(w, 'outside') for w in words)
+    has_student = any(_is_near_word(w, 'student') or _is_near_word(w, 'students') for w in words)
+    # Check outside staff first: "Outside Staff Users" also contains "staff".
+    if has_outside and has_staff:
+        return 'outside_staff'
+    if has_student:
+        return 'student'
+    if has_staff:
+        return 'staff'
+    return None
 
-    columns = _sheet_column_map(rows[0])
-    if columns['name'] is None:
-        return {**empty, 'errors': ['Sheet must have a "Name" (or "Student Name"/"Initials") column.']}
 
-    created = 0
-    updated = 0
-    skipped_conflicts = 0
-    errors = []
-    for row_index, row in enumerate(rows[1:], start=2):
-        name = _sheet_cell(row, columns['name'])
-        if not name:
-            continue
-        lunch_number = normalize_import_identifier(_sheet_cell(row, columns['lunch_number'])) or None
+def _get_google_sheets_client(write=False):
+    """Build a gspread client from env: GOOGLE_SHEETS_CREDENTIALS_JSON (JSON string) or GOOGLE_APPLICATION_CREDENTIALS (path)."""
+    if not _GOOGLE_SHEETS_AVAILABLE:
+        return None, 'Google Sheets libraries not installed. Add gspread and google-auth to requirements.txt.'
+    scopes = [GOOGLE_SHEETS_SCOPE_READWRITE if write else GOOGLE_SHEETS_SCOPE_READONLY]
+    creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_JSON')
+    creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    if creds_json:
         try:
-            # Same matching the CSV import uses: lunch number first, then a unique name match
-            # among students that have no lunch number. Without this a keyless row would create a
-            # duplicate student on every single sync.
-            existing = _find_student_for_import(lunch_number, name)
-            if existing is None:
-                student = Student(
-                    name=name,
-                    email=_sheet_cell(row, columns['email']) or None,
-                    grade=_sheet_cell(row, columns['grade']) or None,
-                    card_color=_sheet_cell(row, columns['card_color']) or None,
-                    lunch_number=lunch_number,
-                    sheet_synced_at=datetime.utcnow(),
-                )
-                db.session.add(student)
-                created += 1
-                continue
-            if existing.sheet_dirty_at is not None:
-                # The website has edits waiting to go out; the next push is the authority here.
-                skipped_conflicts += 1
-                continue
-            changed = False
-            if lunch_number and not _import_str_eq(existing.lunch_number, lunch_number):
-                existing.lunch_number = lunch_number
-                changed = True
-            for field in SHEET_APP_OWNED_FIELDS:
-                if columns[field] is None:
-                    continue
-                value = _sheet_cell(row, columns[field]) or None
-                if field == 'name' and not value:
-                    continue
-                if not _import_str_eq(getattr(existing, field), value):
-                    setattr(existing, field, value)
-                    changed = True
-            if changed:
-                existing.sheet_synced_at = datetime.utcnow()
-                updated += 1
+            info = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(info, scopes=scopes)
+            return gspread.authorize(creds), None
         except Exception as e:
-            errors.append(f'Row {row_index} ({name}): {e}')
+            return None, f'Invalid GOOGLE_SHEETS_CREDENTIALS_JSON: {e}'
+    if creds_path and os.path.isfile(creds_path):
+        try:
+            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+            return gspread.authorize(creds), None
+        except Exception as e:
+            return None, f'Failed to load credentials from file: {e}'
+    return None, 'Set GOOGLE_SHEETS_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS.'
+
+
+def _open_workbook(sheet_id=None, write=False):
+    """Open the configured workbook. Returns (workbook, error_message)."""
+    sheet_id = sheet_id or os.environ.get('GOOGLE_SHEET_ID')
+    if not sheet_id:
+        return None, 'GOOGLE_SHEET_ID not set.'
+    client, err = _get_google_sheets_client(write=write)
+    if err:
+        return None, err
     try:
-        db.session.commit()
+        return client.open_by_key(sheet_id), None
     except Exception as e:
-        db.session.rollback()
-        errors.append(f'Commit failed: {e}')
-    return {
-        'created': created,
-        'updated': updated,
-        'skipped_conflicts': skipped_conflicts,
-        'errors': errors,
-    }
+        return None, f'Could not open sheet: {e}'
 
 
-def push_students_to_google_sheet(sheet_id=None, worksheet_name_or_index=None, dry_run=False):
+def _sheet_tabs_by_type(workbook, only_type=None):
+    """Pair each recognised worksheet with its import type. Env vars override tab names."""
+    overrides = {}
+    for import_type in SHEET_IMPORT_TYPES:
+        configured = (os.environ.get(f'GOOGLE_SHEET_TAB_{import_type.upper()}') or '').strip()
+        if configured:
+            overrides[configured.lower()] = import_type
+    tabs = []
+    try:
+        worksheets = workbook.worksheets()
+    except Exception:
+        return tabs
+    for worksheet in worksheets:
+        title = (worksheet.title or '').strip()
+        import_type = overrides.get(title.lower()) or _sheet_tab_type(title)
+        if import_type and (only_type is None or import_type == only_type):
+            tabs.append((worksheet, import_type))
+    return tabs
+
+
+def _pending_sheet_records(import_type):
+    """Records with website edits that have not been written back to the sheet yet."""
+    if import_type == 'student':
+        return Student.query.filter(Student.sheet_dirty_at.isnot(None)).all()
+    if import_type == 'outside_staff':
+        return User.query.filter(
+            User.sheet_dirty_at.isnot(None),
+            User.is_outside_staff.is_(True),
+        ).all()
+    return User.query.filter(
+        User.sheet_dirty_at.isnot(None),
+        User.role.in_(('staff', 'admin')),
+        or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
+    ).all()
+
+
+def _sheet_record_key(record, import_type):
+    """The sheet key (Lunch Number or User Number) a record should be matched on."""
+    raw = record.lunch_number if import_type == 'student' else record.user_number
+    return normalize_import_identifier(raw)
+
+
+def _pending_sheet_keys():
+    """Keys of every record with unpushed website edits, so a pull can leave them alone."""
+    keys = {import_type: set() for import_type in SHEET_IMPORT_TYPES}
+    for import_type in SHEET_IMPORT_TYPES:
+        for record in _pending_sheet_records(import_type):
+            key = _sheet_key(_sheet_record_key(record, import_type))
+            if key:
+                keys[import_type].add(key)
+    return keys
+
+
+def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True):
     """
-    Write website edits back to the Google Sheet.
+    Pull every recognised tab into the database through the CSV import pipeline.
 
-    Only students flagged by mark_student_sheet_dirty are considered, only the columns in
-    SHEET_APP_OWNED_FIELDS are written, and rows are never deleted or reordered. Students are
-    matched to rows by lunch number; a flagged student whose lunch number has no row is appended.
-    Returns: dict with updated_cells, updated_students, appended, unmatched, skipped_clears, errors.
+    Rows whose record has unpushed website edits are dropped before importing, so the sheet
+    cannot overwrite an edit that has not gone out yet. Returns a per-tab summary.
     """
-    empty = {
+    result = {'tabs': [], 'created': 0, 'updated': 0, 'skipped_conflicts': 0, 'errors': []}
+    workbook, err = _open_workbook(sheet_id, write=False)
+    if err:
+        result['errors'].append(err)
+        return result
+    tabs = _sheet_tabs_by_type(workbook, only_type)
+    if not tabs:
+        result['errors'].append(
+            'No tabs named like "Staff", "Outside Staff Users", or "Students" were found in this workbook.'
+        )
+        return result
+
+    pending = _pending_sheet_keys()
+    for worksheet, import_type in tabs:
+        label = SHEET_TYPE_LABELS[import_type]
+        summary = {
+            'tab': worksheet.title,
+            'type': import_type,
+            'label': label,
+            'created': 0,
+            'updated': 0,
+            'skipped_conflicts': 0,
+            'errors': [],
+            'warnings': [],
+        }
+        try:
+            rows = worksheet.get_all_values()
+        except Exception as e:
+            summary['errors'].append(f'Could not read tab "{worksheet.title}": {e}')
+            result['tabs'].append(summary)
+            result['errors'].extend(summary['errors'])
+            continue
+        if len(rows) < 2:
+            result['tabs'].append(summary)
+            continue
+
+        keep = [rows[0]]
+        for row in rows[1:]:
+            key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
+            if key and key in pending[import_type]:
+                summary['skipped_conflicts'] += 1
+                continue
+            keep.append(row)
+
+        payload, status = _run_user_import(keep, import_type, send_login_emails=send_login_emails)
+        if status != 200:
+            summary['errors'].append(f'{label}: {payload.get("error") or "import failed"}')
+        else:
+            summary['created'] = len(payload.get('success') or [])
+            summary['updated'] = payload.get('updated_count') or 0
+            summary['errors'] = [f'{label}: {e}' for e in (payload.get('errors') or [])]
+            summary['warnings'] = [f'{label}: {w}' for w in (payload.get('warnings') or [])]
+        result['tabs'].append(summary)
+        result['created'] += summary['created']
+        result['updated'] += summary['updated']
+        result['skipped_conflicts'] += summary['skipped_conflicts']
+        result['errors'].extend(summary['errors'])
+    return result
+
+
+def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
+    """
+    Write website edits back to the workbook, one tab per import type.
+
+    Only records flagged dirty are considered, only the columns in SHEET_PUSH_COLUMNS are
+    written, and rows are never deleted or reordered. Records are matched to rows by their
+    key column; a flagged record whose key has no row is appended to the bottom of its tab.
+    """
+    result = {
+        'tabs': [],
         'updated_cells': 0,
-        'updated_students': 0,
+        'updated_records': 0,
         'appended': 0,
         'unmatched': [],
         'skipped_clears': 0,
         'errors': [],
     }
-    if not _google_sheets_write_enabled():
-        return {**empty, 'errors': ['Writing to the sheet is disabled. Set GOOGLE_SHEETS_ENABLE_WRITE=1 to enable it.']}
-
-    pending = Student.query.filter(Student.sheet_dirty_at.isnot(None)).all()
-    if not pending:
-        return empty
-
-    worksheet, err = _open_student_worksheet(sheet_id, worksheet_name_or_index, write=True)
-    if err:
-        return {**empty, 'errors': [err]}
-    try:
-        rows = worksheet.get_all_values()
-    except Exception as e:
-        return {**empty, 'errors': [f'Could not read sheet: {e}']}
-    if not rows:
-        return {**empty, 'errors': ['Sheet is empty, so there is no header row to write against.']}
-
-    columns = _sheet_column_map(rows[0])
-    if columns['lunch_number'] is None:
-        return {**empty, 'errors': ['Sheet must have a "Lunch Number" column before the website can write to it.']}
-    writable = [f for f in SHEET_APP_OWNED_FIELDS if columns[f] is not None]
-    if not writable:
-        return {**empty, 'errors': ['Sheet has none of the Name/Email/Grade/Card Color columns, so there is nothing to write.']}
-
-    # Sheet row numbers are 1-based and the header is row 1.
-    rows_by_lunch = {}
-    for offset, row in enumerate(rows[1:], start=2):
-        key = _sheet_lunch_key(_sheet_cell(row, columns['lunch_number']))
-        if key and key not in rows_by_lunch:
-            rows_by_lunch[key] = (offset, row)
-
-    width = max(len(rows[0]), max((i for i in columns.values() if i is not None), default=0) + 1)
-    allow_clear = _google_sheets_allow_clear()
-    updates = []
-    appends = []
-    unmatched = []
-    skipped_clears = 0
-    updated_students = 0
-    # Remember the flag we acted on so an edit made mid-push is not lost when we clear it.
-    touched = []
-
-    for student in pending:
-        key = _sheet_lunch_key(student.lunch_number)
-        if not key:
-            unmatched.append(student.name)
-            continue
-        match = rows_by_lunch.get(key)
-        if match is None:
-            row_values = [''] * width
-            row_values[columns['lunch_number']] = normalize_import_identifier(student.lunch_number)
-            for field in writable:
-                row_values[columns[field]] = _student_sheet_value(student, field)
-            appends.append(row_values)
-            touched.append((student, student.sheet_dirty_at))
-            continue
-        row_number, row = match
-        student_changed = False
-        for field in writable:
-            desired = _student_sheet_value(student, field)
-            current = _sheet_cell(row, columns[field])
-            if desired == current:
-                continue
-            if not desired and current and not allow_clear:
-                # Refuse to blank a populated cell unless explicitly allowed.
-                skipped_clears += 1
-                continue
-            cell = f'{_col_index_to_a1(columns[field])}{row_number}'
-            updates.append({'range': cell, 'values': [[desired]]})
-            student_changed = True
-        touched.append((student, student.sheet_dirty_at))
-        if student_changed:
-            updated_students += 1
-
-    result = {
-        'updated_cells': len(updates),
-        'updated_students': updated_students,
-        'appended': len(appends),
-        'unmatched': unmatched,
-        'skipped_clears': skipped_clears,
-        'errors': [],
-    }
     if dry_run:
         result['dry_run'] = True
+    if not _google_sheets_write_enabled():
+        result['errors'].append(
+            'Writing to the sheet is disabled. Set GOOGLE_SHEETS_ENABLE_WRITE=1 to enable it.'
+        )
         return result
 
-    errors = []
-    try:
-        for start in range(0, len(updates), SHEET_BATCH_CHUNK):
-            # RAW so a name beginning with "=" is stored as text rather than evaluated as a formula.
-            worksheet.batch_update(updates[start:start + SHEET_BATCH_CHUNK], value_input_option='RAW')
-        if appends:
-            worksheet.append_rows(appends, value_input_option='RAW')
-    except Exception as e:
-        result['errors'] = [f'Sheet write failed: {e}']
+    if not any(_pending_sheet_records(t) for t in (SHEET_IMPORT_TYPES if only_type is None else (only_type,))):
         return result
 
-    now = datetime.utcnow()
-    for student, flagged_at in touched:
-        if student.sheet_dirty_at == flagged_at:
-            student.sheet_dirty_at = None
-        student.sheet_synced_at = now
-    try:
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        errors.append(f'Could not clear pending-edit flags: {e}')
-    result['errors'] = errors
+    workbook, err = _open_workbook(sheet_id, write=True)
+    if err:
+        result['errors'].append(err)
+        return result
+    tabs = _sheet_tabs_by_type(workbook, only_type)
+    if not tabs:
+        result['errors'].append(
+            'No tabs named like "Staff", "Outside Staff Users", or "Students" were found in this workbook.'
+        )
+        return result
+
+    allow_clear = _google_sheets_allow_clear()
+    for worksheet, import_type in tabs:
+        label = SHEET_TYPE_LABELS[import_type]
+        summary = {
+            'tab': worksheet.title,
+            'type': import_type,
+            'label': label,
+            'updated_cells': 0,
+            'updated_records': 0,
+            'appended': 0,
+            'unmatched': [],
+            'skipped_clears': 0,
+            'errors': [],
+        }
+        pending = _pending_sheet_records(import_type)
+        if not pending:
+            result['tabs'].append(summary)
+            continue
+        try:
+            rows = worksheet.get_all_values()
+        except Exception as e:
+            summary['errors'].append(f'Could not read tab "{worksheet.title}": {e}')
+            result['tabs'].append(summary)
+            result['errors'].extend(summary['errors'])
+            continue
+        if not rows:
+            summary['errors'].append(f'Tab "{worksheet.title}" is empty, so it has no header row to write against.')
+            result['tabs'].append(summary)
+            result['errors'].extend(summary['errors'])
+            continue
+
+        columns = SHEET_PUSH_COLUMNS[import_type]
+        # Sheet row numbers are 1-based and the header is row 1.
+        rows_by_key = {}
+        for offset, row in enumerate(rows[1:], start=2):
+            key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
+            if key and key not in rows_by_key:
+                rows_by_key[key] = (offset, row)
+
+        width = max(len(rows[0]), max(col for col, _ in columns) + 1)
+        updates = []
+        appends = []
+        touched = []
+        for record in pending:
+            key = _sheet_key(_sheet_record_key(record, import_type))
+            if not key:
+                summary['unmatched'].append(record.name or f'#{record.id}')
+                continue
+            match = rows_by_key.get(key)
+            if match is None:
+                row_values = [''] * width
+                row_values[SHEET_KEY_COLUMN] = _sheet_record_key(record, import_type)
+                for col, field in columns:
+                    row_values[col] = _sheet_record_value(record, field)
+                appends.append(row_values)
+                touched.append((record, record.sheet_dirty_at))
+                continue
+            row_number, row = match
+            record_changed = False
+            for col, field in columns:
+                desired = _sheet_record_value(record, field)
+                current = _sheet_cell(row, col)
+                if desired == current:
+                    continue
+                if not desired and current and not allow_clear:
+                    # Refuse to blank a populated cell unless explicitly allowed.
+                    summary['skipped_clears'] += 1
+                    continue
+                updates.append({
+                    'range': f'{_col_index_to_a1(col)}{row_number}',
+                    'values': [[desired]],
+                })
+                record_changed = True
+            touched.append((record, record.sheet_dirty_at))
+            if record_changed:
+                summary['updated_records'] += 1
+
+        summary['updated_cells'] = len(updates)
+        summary['appended'] = len(appends)
+        if not dry_run:
+            try:
+                for start in range(0, len(updates), SHEET_BATCH_CHUNK):
+                    # RAW so a name beginning with "=" is stored as text, not evaluated as a formula.
+                    worksheet.batch_update(updates[start:start + SHEET_BATCH_CHUNK], value_input_option='RAW')
+                if appends:
+                    worksheet.append_rows(appends, value_input_option='RAW')
+            except Exception as e:
+                summary['errors'].append(f'{label}: sheet write failed: {e}')
+                result['tabs'].append(summary)
+                result['errors'].extend(summary['errors'])
+                continue
+            now = datetime.utcnow()
+            for record, flagged_at in touched:
+                # Only clear the flag we acted on, so an edit made mid-push is not lost.
+                if record.sheet_dirty_at == flagged_at:
+                    record.sheet_dirty_at = None
+                record.sheet_synced_at = now
+
+        result['tabs'].append(summary)
+        result['updated_cells'] += summary['updated_cells']
+        result['updated_records'] += summary['updated_records']
+        result['appended'] += summary['appended']
+        result['skipped_clears'] += summary['skipped_clears']
+        result['unmatched'].extend(f'{label}: {n}' for n in summary['unmatched'])
+        result['errors'].extend(summary['errors'])
+
+    if not dry_run:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            result['errors'].append(f'Could not clear pending-edit flags: {e}')
     return result
 
 
-def sync_students_two_way(sheet_id=None, worksheet_name_or_index=None):
-    """Push website edits out first so they win, then pull the sheet for new students."""
-    push = push_students_to_google_sheet(sheet_id, worksheet_name_or_index)
-    pull = sync_students_from_google_sheet(sheet_id, worksheet_name_or_index)
+def sync_google_sheet_two_way(sheet_id=None, only_type=None, send_login_emails=True):
+    """Push website edits out first so they win, then pull the sheet for new people."""
+    push = push_to_google_sheet(sheet_id, only_type=only_type)
+    pull = pull_from_google_sheet(sheet_id, only_type=only_type, send_login_emails=send_login_emails)
     return {'push': push, 'pull': pull, 'errors': push.get('errors', []) + pull.get('errors', [])}
 
 
-def google_sheet_sync_status(sheet_id=None, worksheet_name_or_index=None):
+def google_sheet_sync_status(sheet_id=None):
     """Report how the sheet sync is configured and what a push would have to work with."""
-    resolved_id, resolved_worksheet = _resolve_sheet_target(sheet_id, worksheet_name_or_index)
-    pending = Student.query.filter(Student.sheet_dirty_at.isnot(None)).count()
-    keyless = Student.query.filter(
-        Student.sheet_dirty_at.isnot(None),
-        or_(Student.lunch_number.is_(None), Student.lunch_number == ''),
-    ).count()
     status = {
         'libraries_installed': _GOOGLE_SHEETS_AVAILABLE,
         'credentials_configured': bool(
             os.environ.get('GOOGLE_SHEETS_CREDENTIALS_JSON')
             or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         ),
-        'sheet_id_configured': bool(resolved_id),
-        'worksheet': resolved_worksheet if resolved_worksheet is not None else 'first tab',
+        'sheet_id_configured': bool(sheet_id or os.environ.get('GOOGLE_SHEET_ID')),
         'write_enabled': _google_sheets_write_enabled(),
         'clear_enabled': _google_sheets_allow_clear(),
-        'pending_edits': pending,
-        'pending_without_lunch_number': keyless,
-        'sheet_reachable': False,
-        'columns_found': [],
-        'columns_missing': [],
+        'workbook_reachable': False,
+        'tabs': [],
+        'unrecognized_tabs': [],
+        'pending_edits': 0,
+        'pending_without_key': 0,
         'errors': [],
     }
-    worksheet, err = _open_student_worksheet(sheet_id, worksheet_name_or_index, write=False)
+    for import_type in SHEET_IMPORT_TYPES:
+        for record in _pending_sheet_records(import_type):
+            status['pending_edits'] += 1
+            if not _sheet_record_key(record, import_type):
+                status['pending_without_key'] += 1
+
+    workbook, err = _open_workbook(sheet_id, write=False)
     if err:
         status['errors'].append(err)
         return status
+    status['workbook_reachable'] = True
     try:
-        header = worksheet.row_values(1)
+        worksheets = workbook.worksheets()
     except Exception as e:
-        status['errors'].append(f'Could not read the header row: {e}')
+        status['errors'].append(f'Could not list the tabs in this workbook: {e}')
         return status
-    status['sheet_reachable'] = True
-    status['worksheet'] = worksheet.title
-    columns = _sheet_column_map(header)
-    for field in ('lunch_number',) + SHEET_APP_OWNED_FIELDS:
-        label = field.replace('_', ' ').title()
-        if columns[field] is None:
-            status['columns_missing'].append(label)
-        else:
-            status['columns_found'].append(f'{label} ({_col_index_to_a1(columns[field])})')
-    if columns['lunch_number'] is None:
-        status['errors'].append('A "Lunch Number" column is required before the website can write back.')
+
+    matched = {ws.title for ws, _ in _sheet_tabs_by_type(workbook)}
+    for worksheet in worksheets:
+        if worksheet.title not in matched:
+            status['unrecognized_tabs'].append(worksheet.title)
+    for worksheet, import_type in _sheet_tabs_by_type(workbook):
+        entry = {
+            'tab': worksheet.title,
+            'type': import_type,
+            'label': SHEET_TYPE_LABELS[import_type],
+            'key_column': f'{SHEET_KEY_LABELS[import_type]} (A)',
+            'writes_columns': ', '.join(
+                f'{field.replace("_", " ").title()} ({_col_index_to_a1(col)})'
+                for col, field in SHEET_PUSH_COLUMNS[import_type]
+            ),
+            'data_rows': 0,
+            'rows_missing_key': 0,
+        }
+        try:
+            rows = worksheet.get_all_values()
+            for row in rows[1:]:
+                if not row or all(not (c or '').strip() for c in row):
+                    continue
+                entry['data_rows'] += 1
+                if not _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN)):
+                    entry['rows_missing_key'] += 1
+        except Exception as e:
+            status['errors'].append(f'Could not read tab "{worksheet.title}": {e}')
+        if entry['rows_missing_key']:
+            status['errors'].append(
+                f'{entry["label"]} tab: {entry["rows_missing_key"]} row(s) have no '
+                f'{SHEET_KEY_LABELS[import_type]} in column A and cannot be synced.'
+            )
+        status['tabs'].append(entry)
+
+    for import_type in SHEET_IMPORT_TYPES:
+        if not any(t['type'] == import_type for t in status['tabs']):
+            status['errors'].append(
+                f'No {SHEET_TYPE_LABELS[import_type]} tab was found. Name a tab '
+                f'"{SHEET_TYPE_LABELS[import_type]}" or set GOOGLE_SHEET_TAB_{import_type.upper()}.'
+            )
     return status
 
 
@@ -12773,38 +12958,37 @@ def _cron_secret_ok():
 
 
 def _sheet_request_args():
+    """Read the optional sheet_id / type overrides from a request body."""
     payload = request.get_json(silent=True) or {}
-    return payload.get('sheet_id'), payload.get('worksheet')
+    only_type = payload.get('type')
+    if only_type not in SHEET_IMPORT_TYPES:
+        only_type = None
+    return payload.get('sheet_id'), only_type, payload
 
 
 @app.route('/api/admin/google-sheet-status', methods=['GET'])
 @admin_required
 def api_google_sheet_status():
     """Report Google Sheet sync configuration so setup problems are visible before syncing."""
-    return jsonify(google_sheet_sync_status(
-        sheet_id=request.args.get('sheet_id'),
-        worksheet_name_or_index=request.args.get('worksheet'),
-    )), 200
+    return jsonify(google_sheet_sync_status(sheet_id=request.args.get('sheet_id'))), 200
 
 
 @app.route('/api/admin/sync-google-sheet', methods=['POST'])
 @admin_required
 def api_sync_google_sheet():
-    """Pull students from the configured Google Sheet. Admin only."""
-    sheet_id, worksheet = _sheet_request_args()
-    result = sync_students_from_google_sheet(sheet_id=sheet_id, worksheet_name_or_index=worksheet)
-    return jsonify(result), 200
+    """Pull staff, outside staff, and students from the configured workbook. Admin only."""
+    sheet_id, only_type, _ = _sheet_request_args()
+    return jsonify(pull_from_google_sheet(sheet_id=sheet_id, only_type=only_type)), 200
 
 
 @app.route('/api/admin/push-google-sheet', methods=['POST'])
 @admin_required
 def api_push_google_sheet():
-    """Write pending website edits back to the configured Google Sheet. Admin only."""
-    sheet_id, worksheet = _sheet_request_args()
-    payload = request.get_json(silent=True) or {}
-    result = push_students_to_google_sheet(
+    """Write pending website edits back to the configured workbook. Admin only."""
+    sheet_id, only_type, payload = _sheet_request_args()
+    result = push_to_google_sheet(
         sheet_id=sheet_id,
-        worksheet_name_or_index=worksheet,
+        only_type=only_type,
         dry_run=bool(payload.get('dry_run')),
     )
     return jsonify(result), 200
@@ -12813,9 +12997,9 @@ def api_push_google_sheet():
 @app.route('/api/admin/sync-google-sheet-two-way', methods=['POST'])
 @admin_required
 def api_sync_google_sheet_two_way():
-    """Push website edits out, then pull the sheet for new students. Admin only."""
-    sheet_id, worksheet = _sheet_request_args()
-    return jsonify(sync_students_two_way(sheet_id=sheet_id, worksheet_name_or_index=worksheet)), 200
+    """Push website edits out, then pull the workbook for new people. Admin only."""
+    sheet_id, only_type, _ = _sheet_request_args()
+    return jsonify(sync_google_sheet_two_way(sheet_id=sheet_id, only_type=only_type)), 200
 
 
 @app.route('/api/admin/sync-google-sheet-cron', methods=['GET', 'POST'])
@@ -12828,7 +13012,7 @@ def api_sync_google_sheet_cron():
     if not ok:
         return failure
     try:
-        return jsonify(sync_students_two_way()), 200
+        return jsonify(sync_google_sheet_two_way()), 200
     except Exception as e:
         app.logger.exception('google sheet cron error')
         return jsonify({'error': str(e)}), 500
@@ -13985,8 +14169,10 @@ def manage_users():
         db.session.add(user)
         if role == 'staff' and data.get('designation') == 'Paraprofessional':
             set_linked_case_manager_ids(user, parse_case_manager_ids_payload(data) or [])
+        # Staff added on the website belong in the sheet too, so queue them for the next push.
+        mark_user_sheet_dirty(user)
         db.session.commit()
-        
+
         # Audit: Log user creation
         log_phi_access(
             action='CREATE',
@@ -14165,8 +14351,10 @@ def manage_users():
             return jsonify({'error': 'Permission denied'}), 403
         
         # Queue the change for the next Google Sheet push.
-        if user.student_id and any(field in data for field in SHEET_APP_OWNED_FIELDS):
+        if user.student_id and any(field in data for field in SHEET_DIRTY_STUDENT_FIELDS):
             mark_student_sheet_dirty_by_id(user.student_id)
+        if any(field in data for field in SHEET_DIRTY_USER_FIELDS):
+            mark_user_sheet_dirty(user)
 
         db.session.commit()
         return jsonify({'message': 'User updated successfully'}), 200

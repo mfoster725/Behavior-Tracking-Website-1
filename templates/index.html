@@ -758,14 +758,17 @@
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                         <h3>Google Sheet Sync</h3>
                         <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-                            Keeps the import spreadsheet and the website in step. Students are matched by
-                            <strong>Lunch Number</strong>, so the sheet needs that column.
+                            Keeps the import spreadsheet and the website in step. All three tabs are synced &mdash; tabs named like
+                            <strong>Staff</strong>, <strong>Outside Staff</strong>, and <strong>Students</strong> are detected automatically,
+                            and each one uses the same columns as the CSV import above. Staff are matched by <strong>User Number</strong>
+                            and students by <strong>Lunch Number</strong>, both in column A.
                         </p>
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
-                            <strong>Pull</strong> adds students that are in the sheet but not on the website.
-                            <strong>Push</strong> writes website edits to Name, Email, Grade, and Card Color back into the sheet.
-                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted and columns other than
-                            those four are never touched.
+                            <strong>Pull</strong> adds people who are in the sheet but not on the website, creating their accounts and
+                            team assignments exactly like a CSV import. New accounts with an email on file are sent their login info once.
+                            <strong>Push</strong> writes website edits back: Name, Grade, Card Color, and Email for students;
+                            Name, Role, Grades Taught, District, and Email for staff.
+                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted and no other column is touched.
                         </p>
                         <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" onclick="checkGoogleSheetStatus()">Check Setup</button>
