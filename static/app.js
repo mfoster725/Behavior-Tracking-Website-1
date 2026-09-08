@@ -12314,6 +12314,9 @@ async function checkGoogleSheetStatus() {
     try {
         const data = await callGoogleSheetEndpoint('/api/admin/google-sheet-status');
         const yesNo = (ok) => ok ? 'Yes' : 'No';
+        const autoPush = data.auto_push_enabled
+            ? `On, every ${data.auto_push_interval_seconds}s (waits ${data.auto_push_quiet_seconds}s after an edit)`
+            : 'Off';
         const rows = [
             ['Google libraries installed', yesNo(data.libraries_installed)],
             ['Credentials configured', yesNo(data.credentials_configured)],
@@ -12321,6 +12324,8 @@ async function checkGoogleSheetStatus() {
             ['Workbook reachable', yesNo(data.workbook_reachable)],
             ['Writing to sheet enabled', yesNo(data.write_enabled)],
             ['Allowed to blank existing cells', yesNo(data.clear_enabled)],
+            ['Automatic push (website to sheet)', autoPush],
+            ['A sync is running right now', yesNo(data.sync_running)],
             ['Edits waiting to be pushed', String(data.pending_edits)],
             ['Waiting edits with no User/Lunch Number', String(data.pending_without_key)],
         ];
@@ -12331,12 +12336,19 @@ async function checkGoogleSheetStatus() {
         const tabs = data.tabs || [];
         if (tabs.length) {
             html += '<table class="import-results-table"><thead><tr>'
-                + '<th>Tab</th><th>Treated as</th><th>Matched on</th><th>Writes back</th><th>Rows</th>'
+                + '<th>Tab</th><th>Treated as</th><th>Matched on</th><th>Writes back</th><th>Rows</th><th>Not on the website</th>'
                 + '</tr></thead><tbody>'
                 + tabs.map(t => `<tr><td>${escapeHtml(t.tab)}</td><td>${escapeHtml(t.label)}</td>`
                     + `<td>${escapeHtml(t.key_column)}</td><td>${escapeHtml(t.writes_columns)}</td>`
-                    + `<td>${t.data_rows}</td></tr>`).join('')
+                    + `<td>${t.data_rows}</td><td>${t.rows_not_on_website || 0}</td></tr>`).join('')
                 + '</tbody></table>';
+            const waiting = tabs.reduce((sum, t) => sum + (t.rows_not_on_website || 0), 0);
+            if (waiting) {
+                html += `<div class="import-results-info"><strong>${waiting} sheet row`
+                    + `${waiting === 1 ? ' is' : 's are'} not on the website yet.</strong> `
+                    + `Pull From Sheet adds ${waiting === 1 ? 'it' : 'them'}, creating accounts and `
+                    + `emailing login info once. Preview Pull first if you want to check the rows.</div>`;
+            }
         }
         const ignored = data.unrecognized_tabs || [];
         if (ignored.length) {
@@ -12344,11 +12356,36 @@ async function checkGoogleSheetStatus() {
                 + `${ignored.map(t => escapeHtml(String(t))).join(', ')}. `
                 + `Only tabs named like Staff, Outside Staff, or Students are synced.</div>`;
         }
+        html += renderGoogleSheetRunHistory(data.recent_runs);
         html += renderGoogleSheetErrors(data.errors);
         googleSheetResultsBox(html);
     } catch (err) {
         googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
     }
+}
+
+function renderGoogleSheetRunHistory(runs) {
+    if (!runs || !runs.length) return '';
+    const when = (iso) => {
+        if (!iso) return '';
+        const parsed = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
+        return isNaN(parsed) ? iso : parsed.toLocaleString();
+    };
+    const what = (r) => {
+        const parts = [];
+        if (r.updated_cells) parts.push(`${r.updated_cells} cell${r.updated_cells === 1 ? '' : 's'} written`);
+        if (r.appended) parts.push(`${r.appended} row${r.appended === 1 ? '' : 's'} added to the sheet`);
+        if (r.sheet_wins) parts.push(`${r.sheet_wins} left for the sheet`);
+        if (r.created) parts.push(`${r.created} added to the website`);
+        if (r.updated) parts.push(`${r.updated} updated on the website`);
+        if (r.errors) parts.push('had errors');
+        return parts.join(', ') || 'nothing to do';
+    };
+    return '<div class="import-results-info">Recent syncs:</div>'
+        + renderGoogleSheetDetailTable(
+            ['When', 'Started by', 'Direction', 'What happened'],
+            runs.map(r => [when(r.ran_at), r.trigger, r.direction.replace('_', ' '), what(r)])
+        );
 }
 
 function renderGoogleSheetTabTable(tabs, columns) {
@@ -12378,7 +12415,8 @@ function renderGoogleSheetPullDetail(tab) {
     const updated = preview.updated || [];
     const removed = preview.removed || [];
     const held = tab.held_back || [];
-    if (!created.length && !updated.length && !removed.length && !held.length) {
+    const sheetWon = tab.sheet_won || [];
+    if (!created.length && !updated.length && !removed.length && !held.length && !sheetWon.length) {
         return `<div class="import-results-info">${escapeHtml(tab.tab)}: nothing would change.</div>`;
     }
     let html = `<div class="import-results-info"><strong>${escapeHtml(tab.tab)}</strong></div>`;
@@ -12400,6 +12438,10 @@ function renderGoogleSheetPullDetail(tab) {
         html += '<div class="import-results-info">Held back (unpushed website edits):</div>';
         html += renderGoogleSheetDetailTable(['Who'], held.map(h => [h]));
     }
+    if (sheetWon.length) {
+        html += '<div class="import-results-info">Pulled anyway, dropping the pending website edit:</div>';
+        html += renderGoogleSheetDetailTable(['Who'], sheetWon.map(h => [h]));
+    }
     return html;
 }
 
@@ -12414,7 +12456,8 @@ function renderGoogleSheetPull(pull) {
     } else if (pull.skipped_conflicts) {
         html += `<div class="import-results-info">${pull.skipped_conflicts} row`
             + `${pull.skipped_conflicts === 1 ? ' was' : 's were'} held back because the website has `
-            + `edits that have not been pushed to the sheet yet. Push first, then pull again.</div>`;
+            + `edits that have not been pushed to the sheet yet. Push first, then pull again, or tick `
+            + `"Let the sheet win" to take the sheet's version.</div>`;
     }
     const warnings = (pull.tabs || []).flatMap(t => t.warnings || []);
     if (warnings.length) {
@@ -12429,7 +12472,8 @@ function renderGoogleSheetPushDetail(tab) {
     const changes = tab.changes || [];
     const additions = tab.additions || [];
     const heldClears = tab.held_clears || [];
-    if (!changes.length && !additions.length && !heldClears.length) return '';
+    const sheetChanged = tab.sheet_changed || [];
+    if (!changes.length && !additions.length && !heldClears.length && !sheetChanged.length) return '';
     let html = `<div class="import-results-info"><strong>${escapeHtml(tab.tab)}</strong></div>`;
     if (changes.length) {
         html += renderGoogleSheetDetailTable(
@@ -12448,6 +12492,13 @@ function renderGoogleSheetPushDetail(tab) {
             ])
         );
     }
+    if (sheetChanged.length) {
+        html += '<div class="import-results-info">Left alone (changed in the sheet, not here):</div>';
+        html += renderGoogleSheetDetailTable(
+            ['Row', 'Who', 'Column', 'Sheet has', 'Website has'],
+            sheetChanged.map(c => [c.row, c.who, c.column, c.sheet_has, c.website_has])
+        );
+    }
     if (heldClears.length) {
         html += '<div class="import-results-info">Left alone (website value is empty):</div>';
         html += renderGoogleSheetDetailTable(
@@ -12464,8 +12515,17 @@ function renderGoogleSheetPush(push) {
         + `${push.updated_cells} cell${push.updated_cells === 1 ? '' : 's'} across `
         + `${push.updated_records} record${push.updated_records === 1 ? '' : 's'} ${verb} updated, `
         + `${push.appended} new row${push.appended === 1 ? '' : 's'} ${verb} added.</div>`;
-    html += renderGoogleSheetTabTable(push.tabs, [['Cells', 'updated_cells'], ['Records', 'updated_records'], ['Rows added', 'appended']]);
+    html += renderGoogleSheetTabTable(push.tabs, [
+        ['Cells', 'updated_cells'], ['Records', 'updated_records'],
+        ['Rows added', 'appended'], ['Sheet keeps', 'sheet_wins'],
+    ]);
     html += (push.tabs || []).map(renderGoogleSheetPushDetail).join('');
+    if (push.sheet_wins) {
+        html += `<div class="import-results-info">${push.sheet_wins} cell`
+            + `${push.sheet_wins === 1 ? ' was' : 's were'} left as the sheet has ${push.sheet_wins === 1 ? 'it' : 'them'}, `
+            + `because ${push.sheet_wins === 1 ? 'it was' : 'they were'} edited in the sheet and not here. `
+            + `Pull From Sheet brings ${push.sheet_wins === 1 ? 'that change' : 'those changes'} in.</div>`;
+    }
     if (push.skipped_clears) {
         html += `<div class="import-results-info">${push.skipped_clears} cell`
             + `${push.skipped_clears === 1 ? ' was' : 's were'} left as-is because the website value is empty and `
@@ -12482,13 +12542,15 @@ function renderGoogleSheetPush(push) {
 }
 
 async function pullFromGoogleSheet(dryRun) {
+    const includeHeld = !!document.getElementById('google-sheet-include-held')?.checked;
     if (!dryRun && !confirm('Pull all three tabs from the Google Sheet? New staff and students will get accounts, and anyone new with an email on file will be sent their login info once.')) return;
+    if (!dryRun && includeHeld && !confirm('Rows held back by website edits will be overwritten with the sheet\'s version, and those pending edits will be dropped. Continue?')) return;
     googleSheetResultsBox(`<div class="loading">${dryRun ? 'Working out what a pull would change...' : 'Pulling staff, outside staff, and students from the Google Sheet...'}</div>`);
     try {
         const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dry_run: !!dryRun })
+            body: JSON.stringify({ dry_run: !!dryRun, include_held: includeHeld })
         });
         googleSheetResultsBox(renderGoogleSheetPull(data));
         if (!dryRun && typeof loadStudents === 'function') await loadStudents();
@@ -12498,7 +12560,7 @@ async function pullFromGoogleSheet(dryRun) {
 }
 
 async function pushToGoogleSheet(dryRun) {
-    if (!dryRun && !confirm('Write website edits into the Google Sheet? Existing rows are updated in place and nothing is deleted.')) {
+    if (!dryRun && !confirm('Write website edits into the Google Sheet? Cells that were edited in the sheet are left alone, existing rows are updated in place, and nothing is deleted.')) {
         return;
     }
     googleSheetResultsBox(`<div class="loading">${dryRun ? 'Checking what would change...' : 'Writing to the Google Sheet...'}</div>`);

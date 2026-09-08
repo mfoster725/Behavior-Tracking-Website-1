@@ -756,6 +756,9 @@ class User(UserMixin, db.Model):
     # cleared once the change has been written back to the sheet.
     sheet_dirty_at = db.Column(db.DateTime, nullable=True)
     sheet_synced_at = db.Column(db.DateTime, nullable=True)
+    # JSON of the value each synced column last agreed on, so a push can tell which side
+    # of a disagreement actually moved.
+    sheet_synced_values = db.Column(db.Text, nullable=True)
     
     # Relationship to student (for student users)
     student = db.relationship('Student', backref='user_account', foreign_keys=[student_id])
@@ -2427,6 +2430,8 @@ class Student(db.Model):
     # cleared once the change has been written back to the sheet.
     sheet_dirty_at = db.Column(db.DateTime, nullable=True)
     sheet_synced_at = db.Column(db.DateTime, nullable=True)
+    # JSON of the value each synced column last agreed on. See User.sheet_synced_values.
+    sheet_synced_values = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -3201,6 +3206,38 @@ class SchoolCalendarConfig(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SheetSyncState(db.Model):
+    """
+    Singleton row that keeps Google Sheet syncs one-at-a-time.
+
+    The automatic push, the admin buttons and the cron endpoint can all fire at once, and
+    two syncs running together would duplicate appended rows and race each other's writes.
+    rerun_requested is how a caller that loses the race asks for one more pass afterwards
+    instead of being dropped.
+    """
+    __tablename__ = 'sheet_sync_state'
+    id = db.Column(db.Integer, primary_key=True)
+    running_since = db.Column(db.DateTime, nullable=True)
+    running_holder = db.Column(db.String(40), nullable=True)
+    rerun_requested = db.Column(db.Boolean, default=False, nullable=False)
+
+
+class SheetSyncRun(db.Model):
+    """One finished sync, so admins can see what ran while nobody was watching."""
+    __tablename__ = 'sheet_sync_runs'
+    id = db.Column(db.Integer, primary_key=True)
+    ran_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    trigger = db.Column(db.String(20), nullable=False)
+    direction = db.Column(db.String(20), nullable=False)
+    updated_cells = db.Column(db.Integer, default=0, nullable=False)
+    updated_records = db.Column(db.Integer, default=0, nullable=False)
+    appended = db.Column(db.Integer, default=0, nullable=False)
+    sheet_wins = db.Column(db.Integer, default=0, nullable=False)
+    created = db.Column(db.Integer, default=0, nullable=False)
+    updated = db.Column(db.Integer, default=0, nullable=False)
+    errors = db.Column(db.Text, nullable=True)
+
+
 def ensure_site_subscription_columns():
     """Add build-fee columns on existing site_subscription tables."""
     try:
@@ -3669,6 +3706,15 @@ def init_db():
                                     conn.commit()
                             except (OperationalError, ProgrammingError) as e:
                                 print(f"Note: Could not add users.{sheet_col} column (may already exist): {e}")
+
+                    if 'sheet_synced_values' not in columns:
+                        print("Adding sheet_synced_values column to users table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE users ADD COLUMN sheet_synced_values TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add users.sheet_synced_values column (may already exist): {e}")
                 
                 # Verify columns exist in frenzy_events table
                 if 'frenzy_events' in table_names:
@@ -3747,6 +3793,14 @@ def init_db():
                                     conn.commit()
                             except (OperationalError, ProgrammingError) as e:
                                 print(f"Note: Could not add {sheet_col} column (may already exist): {e}")
+                    if 'sheet_synced_values' not in columns:
+                        print("Adding sheet_synced_values column to students table...")
+                        try:
+                            with db.engine.connect() as conn:
+                                conn.execute(text("ALTER TABLE students ADD COLUMN sheet_synced_values TEXT"))
+                                conn.commit()
+                        except (OperationalError, ProgrammingError) as e:
+                            print(f"Note: Could not add students.sheet_synced_values column (may already exist): {e}")
 
                 # Parent/Guardian users are not used yet — drop link table and remove leftover accounts
                 if 'parent_students' in table_names:
@@ -11832,41 +11886,60 @@ def _sync_student_team_members(student_id, members, existing=None):
     return True
 
 
+# These cells are typed by hand, so accept every separator people actually use between
+# names: commas, semicolons, slashes, ampersands, "and", line breaks, and a stray period
+# ("Allyson, Amanda. Minette"). A period only separates when it follows at least two
+# letters and precedes a space, so initials like "A. Gagner" stay in one piece.
+IMPORT_NAME_LIST_SEPARATOR_RE = re.compile(
+    r'\s*(?:[,;/&\r\n]+|\band\b|(?<=[a-z]{2})\.(?=\s))\s*',
+    re.IGNORECASE,
+)
+
+
+def _split_import_name_list(raw_value):
+    """Split a hand-typed list of staff names into its individual entries."""
+    parts = IMPORT_NAME_LIST_SEPARATOR_RE.split(raw_value or '')
+    return [name for name in (part.strip(' .') for part in parts) if name]
+
+
 def _resolve_import_case_managers(raw_value, staff_users=None):
     """Resolve the staff CSV Case Manager cell (column E) to case manager users.
 
-    The cell may list several case managers separated by commas, each of which can be a
-    partial name. Returns (matched users, messages for the entries that did not resolve).
+    The cell may list several case managers, each of which can be a partial name.
+    Returns (matched users, messages for the entries that did not resolve).
     """
     raw_value = (raw_value or '').strip()
     if not raw_value:
         return [], []
 
-    # A single "Last, First" style entry still has to resolve as one name before splitting.
+    names = _split_import_name_list(raw_value)
+    resolved = []
+    resolved_ids = set()
+    problems = []
+    if len(names) > 1:
+        for name in names:
+            match, name_matches = _resolve_staff_user_by_name(
+                name, designation='Case Manager', staff_users=staff_users
+            )
+            if match:
+                if match.id not in resolved_ids:
+                    resolved_ids.add(match.id)
+                    resolved.append(match)
+            else:
+                problems.append(_unresolved_staff_name_message(name, name_matches, 'Case Manager'))
+        if not problems:
+            return resolved, []
+
+    # Nothing was split off, or an entry did not resolve: the cell may be one name after all,
+    # e.g. "Last, First".
     user, matches = _resolve_staff_user_by_name(
         raw_value, designation='Case Manager', staff_users=staff_users
     )
     if user:
         return [user], []
-
-    names = [part.strip() for part in raw_value.split(',') if part.strip()]
-    if len(names) < 2:
-        return [], [_unresolved_staff_name_message(raw_value, matches, 'Case Manager')]
-
-    resolved = []
-    resolved_ids = set()
-    problems = []
-    for name in names:
-        match, name_matches = _resolve_staff_user_by_name(
-            name, designation='Case Manager', staff_users=staff_users
-        )
-        if match:
-            if match.id not in resolved_ids:
-                resolved_ids.add(match.id)
-                resolved.append(match)
-        else:
-            problems.append(_unresolved_staff_name_message(name, name_matches, 'Case Manager'))
-    return resolved, problems
+    if len(names) > 1:
+        return resolved, problems
+    return [], [_unresolved_staff_name_message(raw_value, matches, 'Case Manager')]
 
 
 def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, email, warnings):
@@ -12495,10 +12568,14 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
 #
 # Ownership rules, chosen so neither side can silently clobber the other:
 #   * The sheet owns who exists. Only a pull creates records; nothing ever deletes a row.
-#   * The website owns the fields in SHEET_PUSH_COLUMNS. A pull skips any row whose record
-#     has unpushed website edits, and a push writes those fields back to the sheet.
+#   * Each synced field belongs to whoever edited it last. A push compares the website value
+#     and the sheet cell against sheet_synced_values, the value the two sides last agreed on:
+#     a cell that moved on the sheet but not on the website is left for the next pull, and a
+#     cell that moved on the website is written out. If both moved, the website wins.
+#   * A pull skips any row whose record still has unpushed website edits.
 # Writing to the sheet is opt-in via GOOGLE_SHEETS_ENABLE_WRITE so a misconfigured deploy can
-# never touch the roster.
+# never touch the roster. Pushing also runs on a timer (see run_sheet_auto_push); pulling is
+# always deliberate, because it creates accounts and emails people their logins.
 
 GOOGLE_SHEETS_SCOPE_READONLY = 'https://www.googleapis.com/auth/spreadsheets.readonly'
 GOOGLE_SHEETS_SCOPE_READWRITE = 'https://www.googleapis.com/auth/spreadsheets'
@@ -12553,9 +12630,56 @@ SHEET_KEY_LABELS = {
 # Google caps a single values.batchUpdate; stay well under it.
 SHEET_BATCH_CHUNK = 500
 
+# Automatic push tuning. The interval is how often pending edits are flushed; the quiet
+# period holds a record back until it has stopped changing, so saving a person and then
+# their team members is one push rather than two.
+SHEET_AUTO_PUSH_INTERVAL_DEFAULT = 60
+SHEET_AUTO_PUSH_QUIET_DEFAULT = 20
+# A lock older than this belonged to a worker that died mid-sync.
+SHEET_SYNC_STALE_LOCK_SECONDS = 900
+# How many extra passes one automatic run will make to absorb edits that landed while it
+# was working. Bounded so a busy afternoon cannot keep a single run going forever.
+SHEET_SYNC_MAX_COALESCED_RUNS = 3
+# Runs kept in the log for the admin panel.
+SHEET_SYNC_RUN_HISTORY = 25
+
+
+def _env_flag(name, default=False):
+    raw = (os.environ.get(name) or '').strip().lower()
+    if not raw:
+        return default
+    return raw in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name, default, minimum=1):
+    try:
+        return max(minimum, int((os.environ.get(name) or '').strip()))
+    except (TypeError, ValueError):
+        return default
+
 
 def _google_sheets_write_enabled():
     return (os.environ.get('GOOGLE_SHEETS_ENABLE_WRITE') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _sheet_auto_push_enabled():
+    """
+    Whether website edits should be flushed to the sheet on a timer.
+
+    On by default wherever pushing is already configured, since it only ever writes fields
+    the website itself changed. GOOGLE_SHEETS_AUTO_PUSH=0 turns it off.
+    """
+    if not _env_flag('GOOGLE_SHEETS_AUTO_PUSH', default=True):
+        return False
+    return _google_sheets_write_enabled() and bool(os.environ.get('GOOGLE_SHEET_ID'))
+
+
+def _sheet_auto_push_interval_seconds():
+    return _env_int('GOOGLE_SHEETS_AUTO_PUSH_SECONDS', SHEET_AUTO_PUSH_INTERVAL_DEFAULT, minimum=15)
+
+
+def _sheet_auto_push_quiet_seconds():
+    return _env_int('GOOGLE_SHEETS_AUTO_PUSH_QUIET_SECONDS', SHEET_AUTO_PUSH_QUIET_DEFAULT, minimum=0)
 
 
 def _google_sheets_allow_clear():
@@ -12625,6 +12749,29 @@ def mark_user_sheet_dirty(user):
     """Flag a staff or outside staff user as having unpushed website edits."""
     if user is not None and user.role in ('staff', 'admin'):
         user.sheet_dirty_at = datetime.utcnow()
+
+
+def sheet_dirty_user_signature(user):
+    """
+    The staff fields a push writes, as they stand right now.
+
+    A save that re-sends the same values is not an edit. Comparing this before and after a
+    save keeps such a save from flagging the record, because a flagged record is held back
+    from every pull until a push clears it.
+    """
+    if user is None or user.role not in ('staff', 'admin'):
+        return None
+    values = {field: getattr(user, field, None) for field in SHEET_DIRTY_USER_FIELDS}
+    values['case_manager_ids'] = tuple(get_linked_case_manager_ids(user))
+    return values
+
+
+def sheet_dirty_student_signature(student_id):
+    """The student fields a push writes, for the same before/after comparison."""
+    student = Student.query.get(student_id) if student_id else None
+    if student is None:
+        return None
+    return {field: getattr(student, field, None) for field in SHEET_DIRTY_STUDENT_FIELDS}
 
 
 def _sheet_column_label(col, field):
@@ -12802,25 +12949,59 @@ def _sheet_tabs_by_type(workbook, only_type=None):
     return tabs
 
 
-def _pending_sheet_records(import_type):
-    """Records with website edits that have not been written back to the sheet yet."""
+def _pending_sheet_query(import_type, quiet_seconds=0):
+    """
+    Records with website edits that have not been written back to the sheet yet.
+
+    quiet_seconds holds back anything edited very recently, so a record still being worked
+    on is pushed once it settles instead of once per save.
+    """
     if import_type == 'student':
-        return Student.query.filter(Student.sheet_dirty_at.isnot(None)).all()
-    if import_type == 'outside_staff':
-        return User.query.filter(
+        query = Student.query.filter(Student.sheet_dirty_at.isnot(None))
+        column = Student.sheet_dirty_at
+    elif import_type == 'outside_staff':
+        query = User.query.filter(
             User.sheet_dirty_at.isnot(None),
             User.is_outside_staff.is_(True),
-        ).all()
-    return User.query.filter(
-        User.sheet_dirty_at.isnot(None),
-        User.role.in_(('staff', 'admin')),
-        or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
-    ).all()
+        )
+        column = User.sheet_dirty_at
+    else:
+        query = User.query.filter(
+            User.sheet_dirty_at.isnot(None),
+            User.role.in_(('staff', 'admin')),
+            or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
+        )
+        column = User.sheet_dirty_at
+    if quiet_seconds:
+        query = query.filter(column <= datetime.utcnow() - timedelta(seconds=quiet_seconds))
+    return query
 
 
-def _sheet_records_for_push(import_type):
-    """Every website record with a sheet key, used to compare all import columns on push/preview."""
-    if import_type == 'student':
+def _pending_sheet_records(import_type, quiet_seconds=0):
+    return _pending_sheet_query(import_type, quiet_seconds).all()
+
+
+def _pending_sheet_count(quiet_seconds=0):
+    """How many records are waiting to be pushed, without loading any of them."""
+    total = 0
+    for import_type in SHEET_IMPORT_TYPES:
+        try:
+            total += _pending_sheet_query(import_type, quiet_seconds).count()
+        except Exception:
+            app.logger.exception('could not count pending sheet edits')
+    return total
+
+
+def _sheet_records_for_push(import_type, dirty_only=False, quiet_seconds=0):
+    """
+    The website records a push should consider, filtered to those with a sheet key.
+
+    dirty_only narrows it to records the website has actually edited, which is what the
+    automatic push uses: it never looks at, and so can never rewrite, anyone else's row.
+    """
+    if dirty_only:
+        records = _pending_sheet_records(import_type, quiet_seconds)
+    elif import_type == 'student':
         records = Student.query.all()
     elif import_type == 'outside_staff':
         records = User.query.filter(User.is_outside_staff.is_(True)).all()
@@ -12833,6 +13014,48 @@ def _sheet_records_for_push(import_type):
         record for record in records
         if _sheet_key(_sheet_record_key(record, import_type))
     ]
+
+
+def _sheet_snapshot_load(record):
+    """The value each synced column held the last time the website and the sheet agreed."""
+    raw = getattr(record, 'sheet_synced_values', None)
+    if not raw:
+        return {}
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def _sheet_snapshot_store(record, values):
+    record.sheet_synced_values = json.dumps(values, sort_keys=True) if values else None
+
+
+def _sheet_snapshot_current(record, import_type, team_values_cache=None):
+    """What the website currently believes every synced column should say."""
+    return {
+        field: _sheet_record_value(record, field, team_values_cache)
+        for _, field in SHEET_PUSH_COLUMNS[import_type]
+    }
+
+
+def _sheet_push_action(field, desired, current, base, allow_clear):
+    """
+    Decide what a push should do with one cell.
+
+    Returns 'agreed', 'write', 'sheet_changed' (only the sheet moved, so it keeps its value
+    until someone pulls) or 'blocked_clear' (the website would empty a populated cell and
+    GOOGLE_SHEETS_ALLOW_CLEAR is off). Without a recorded base the website value wins, which
+    is right for a record it has just edited and matches how push behaved before snapshots.
+    """
+    if _sheet_values_equal(desired, current, field):
+        return 'agreed'
+    if base is not None and _sheet_values_equal(desired, base, field):
+        return 'sheet_changed'
+    if not desired and current and not allow_clear:
+        return 'blocked_clear'
+    return 'write'
 
 
 def _sheet_record_key(record, import_type):
@@ -13069,12 +13292,50 @@ def _pending_sheet_keys():
     return keys
 
 
-def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True, dry_run=False):
+def _refresh_sheet_snapshots(import_type, keys):
+    """
+    After a pull, record that the two sides now agree on the rows that were imported.
+
+    The snapshot holds the website's values rather than the raw cells, so the harmless
+    differences the import introduces on purpose — a team member typed as "Britt" becoming
+    "Brittany Roers" — are not mistaken for an edit and pushed back over the sheet. Rows held
+    back for unpushed website edits are not in keys, so their pending edits still go out.
+    """
+    if not keys:
+        return
+    cache = {} if import_type == 'student' else None
+    for record in _sheet_records_for_push(import_type):
+        if _sheet_key(_sheet_record_key(record, import_type)) in keys:
+            _sheet_snapshot_store(record, _sheet_snapshot_current(record, import_type, cache))
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not record what the pull agreed on')
+
+
+def _release_pulled_records(import_type, keys):
+    """
+    Drop the pending-edit flag on rows the sheet was allowed to win.
+
+    The sheet's values have just replaced the website's, so nothing is waiting to go out.
+    Leaving the flag set would hold the row back from every later pull as well.
+    """
+    if not keys:
+        return
+    for record in _pending_sheet_records(import_type):
+        if _sheet_key(_sheet_record_key(record, import_type)) in keys:
+            record.sheet_dirty_at = None
+
+
+def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True, dry_run=False,
+                           include_held=False):
     """
     Pull every recognised tab into the database through the CSV import pipeline.
 
     Rows whose record has unpushed website edits are dropped before importing, so the sheet
-    cannot overwrite an edit that has not gone out yet. Returns a per-tab summary.
+    cannot overwrite an edit that has not gone out yet. include_held pulls those rows too,
+    for when the sheet is the version worth keeping. Returns a per-tab summary.
 
     With dry_run the import runs for real but is rolled back at the end, and each tab reports
     exactly which records would be created and which fields would change. Running every tab
@@ -13104,14 +13365,20 @@ def pull_from_google_sheet(sheet_id=None, only_type=None, send_login_emails=True
 
         event.listen(session, 'before_flush', _preview_listener)
         try:
-            return _pull_tabs(result, tabs, active=active, dry_run=True, send_login_emails=False)
+            return _pull_tabs(
+                result, tabs, active=active, dry_run=True, send_login_emails=False,
+                include_held=include_held,
+            )
         finally:
             event.remove(session, 'before_flush', _preview_listener)
             db.session.rollback()
-    return _pull_tabs(result, tabs, active=None, dry_run=False, send_login_emails=send_login_emails)
+    return _pull_tabs(
+        result, tabs, active=None, dry_run=False, send_login_emails=send_login_emails,
+        include_held=include_held,
+    )
 
 
-def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
+def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails, include_held=False):
     """Import each tab in turn, accumulating a per-tab summary into result."""
     pending = _pending_sheet_keys()
     for worksheet, import_type in tabs:
@@ -13140,15 +13407,26 @@ def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
         header_idx = _find_import_header_index(rows, import_type)
         keep = [rows[header_idx]]
         held = []
+        sheet_won = []
+        released_keys = set()
+        imported_keys = set()
         for row in rows[header_idx + 1:]:
             key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
             if key and key in pending[import_type]:
-                summary['skipped_conflicts'] += 1
-                held.append(f'{_sheet_cell(row, 1) or "(no name)"} ({key})')
-                continue
+                who = f'{_sheet_cell(row, 1) or "(no name)"} ({key})'
+                if not include_held:
+                    summary['skipped_conflicts'] += 1
+                    held.append(who)
+                    continue
+                sheet_won.append(who)
+                released_keys.add(key)
+            if key:
+                imported_keys.add(key)
             keep.append(row)
         if held:
             summary['held_back'] = held
+        if sheet_won:
+            summary['sheet_won'] = sheet_won
 
         if active is not None:
             active['collector'] = _new_preview_collector()
@@ -13161,6 +13439,9 @@ def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
         if status != 200:
             summary['errors'].append(f'{label}: {payload.get("error") or "import failed"}')
         else:
+            if not dry_run:
+                _release_pulled_records(import_type, released_keys)
+                _refresh_sheet_snapshots(import_type, imported_keys)
             summary['created'] = len(payload.get('success') or [])
             summary['updated'] = payload.get('updated_count') or 0
             summary['errors'] = [f'{label}: {e}' for e in (payload.get('errors') or [])]
@@ -13173,13 +13454,18 @@ def _pull_tabs(result, tabs, *, active, dry_run, send_login_emails):
     return result
 
 
-def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
+def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False, dirty_only=False, quiet_seconds=0):
     """
     Write website data back to the workbook, one tab per import type.
 
-    Every website record with a sheet key is compared against its row using every column in
-    SHEET_PUSH_COLUMNS. Rows are never deleted or reordered. A dirty record whose key has no
-    row is appended to the bottom of its tab.
+    Each column in SHEET_PUSH_COLUMNS is compared three ways — website value, sheet cell, and
+    the value the two last agreed on — so only cells the website actually changed are written
+    and a sheet-side edit is left for the next pull. Rows are never deleted or reordered. A
+    record whose key has no row is appended to the bottom of its tab.
+
+    dirty_only restricts the run to records with unpushed website edits (what the automatic
+    push uses); quiet_seconds ignores edits made in the last few seconds so a record that is
+    still being changed is pushed once it settles.
     """
     result = {
         'tabs': [],
@@ -13188,8 +13474,11 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
         'appended': 0,
         'unmatched': [],
         'skipped_clears': 0,
+        'sheet_wins': 0,
         'errors': [],
     }
+    if dirty_only:
+        result['dirty_only'] = True
     if dry_run:
         result['dry_run'] = True
     if not _google_sheets_write_enabled():
@@ -13221,12 +13510,18 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
             'appended': 0,
             'unmatched': [],
             'skipped_clears': 0,
+            'sheet_wins': 0,
             'changes': [],
             'additions': [],
             'held_clears': [],
+            'sheet_changed': [],
             'errors': [],
         }
-        records = _sheet_records_for_push(import_type)
+        records = _sheet_records_for_push(import_type, dirty_only=dirty_only, quiet_seconds=quiet_seconds)
+        if dirty_only and not records:
+            # Nothing to say to this tab, so don't spend a read on it.
+            result['tabs'].append(summary)
+            continue
         try:
             rows = worksheet.get_all_values()
         except Exception as e:
@@ -13264,6 +13559,7 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                 row_values[SHEET_KEY_COLUMN] = _sheet_record_key(record, import_type)
                 for col, field in columns:
                     row_values[col] = _sheet_record_value(record, field, team_values_cache)
+                snapshot = _sheet_snapshot_current(record, import_type, team_values_cache)
                 appends.append(row_values)
                 summary['additions'].append({
                     'who': who,
@@ -13276,17 +13572,32 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                         for col, field in columns
                     ],
                 })
-                touched.append((record, record.sheet_dirty_at, False))
+                touched.append((record, record.sheet_dirty_at, False, snapshot))
                 continue
             row_number, row = match
             record_changed = False
             pending_clears = False
+            snapshot = _sheet_snapshot_load(record)
             for col, field in columns:
                 desired = _sheet_record_value(record, field, team_values_cache)
                 current = _sheet_cell(row, col)
-                if _sheet_values_equal(desired, current, field):
+                action = _sheet_push_action(field, desired, current, snapshot.get(field), allow_clear)
+                if action == 'agreed':
+                    snapshot[field] = desired
                     continue
-                if not desired and current and not allow_clear:
+                if action == 'sheet_changed':
+                    # Someone edited this cell in the sheet and nobody edited it here, so it
+                    # is theirs. Leaving the base value alone keeps that true until a pull.
+                    summary['sheet_wins'] += 1
+                    summary['sheet_changed'].append({
+                        'who': who,
+                        'row': row_number,
+                        'column': _sheet_column_label(col, field),
+                        'sheet_has': current,
+                        'website_has': desired,
+                    })
+                    continue
+                if action == 'blocked_clear':
                     # Refuse to blank a populated cell unless explicitly allowed.
                     summary['skipped_clears'] += 1
                     pending_clears = True
@@ -13308,8 +13619,9 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                     'from': current,
                     'to': desired,
                 })
+                snapshot[field] = desired
                 record_changed = True
-            touched.append((record, record.sheet_dirty_at, pending_clears))
+            touched.append((record, record.sheet_dirty_at, pending_clears, snapshot))
             if record_changed:
                 summary['updated_records'] += 1
 
@@ -13332,17 +13644,21 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
                 result['errors'].extend(summary['errors'])
                 continue
             now = datetime.utcnow()
-            for record, flagged_at, pending_clears in touched:
-                # Only clear the flag we acted on, so an edit made mid-push is not lost.
+            for record, flagged_at, pending_clears, snapshot in touched:
+                # Only clear the flag we acted on, so an edit made mid-push is not lost. A
+                # cell the sheet owns does not hold the flag: the record's own edits went
+                # out, and the pull that resolves the cell needs the row to be released.
                 if not pending_clears and record.sheet_dirty_at == flagged_at:
                     record.sheet_dirty_at = None
                 record.sheet_synced_at = now
+                _sheet_snapshot_store(record, snapshot)
 
         result['tabs'].append(summary)
         result['updated_cells'] += summary['updated_cells']
         result['updated_records'] += summary['updated_records']
         result['appended'] += summary['appended']
         result['skipped_clears'] += summary['skipped_clears']
+        result['sheet_wins'] += summary['sheet_wins']
         result['unmatched'].extend(f'{label}: {n}' for n in summary['unmatched'])
         result['errors'].extend(summary['errors'])
 
@@ -13351,15 +13667,224 @@ def push_to_google_sheet(sheet_id=None, only_type=None, dry_run=False):
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            result['errors'].append(f'Could not clear pending-edit flags: {e}')
+            result['errors'].append(f'Could not record what was pushed: {e}')
     return result
 
 
 def sync_google_sheet_two_way(sheet_id=None, only_type=None, send_login_emails=True):
-    """Push website edits out first so they win, then pull the sheet for new people."""
+    """Push pending website edits out, then pull the sheet for new people and sheet edits."""
     push = push_to_google_sheet(sheet_id, only_type=only_type)
     pull = pull_from_google_sheet(sheet_id, only_type=only_type, send_login_emails=send_login_emails)
     return {'push': push, 'pull': pull, 'errors': push.get('errors', []) + pull.get('errors', [])}
+
+
+# ----- Running syncs one at a time -----
+
+
+def _sheet_sync_state():
+    """The singleton lock row, created on first use."""
+    try:
+        state = db.session.get(SheetSyncState, 1)
+        if state is None:
+            db.session.add(SheetSyncState(id=1, rerun_requested=False))
+            db.session.commit()
+            state = db.session.get(SheetSyncState, 1)
+        return state
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not read the sheet sync lock')
+        return None
+
+
+def _acquire_sheet_sync_lock(holder):
+    """
+    Take the sync lock, or report that somebody else has it.
+
+    A single conditional UPDATE decides the winner, so two workers cannot both believe they
+    hold it. Bookkeeping trouble is never allowed to block a sync: if the lock row cannot be
+    read or written, the caller is told to go ahead.
+    """
+    if _sheet_sync_state() is None:
+        return True
+    now = datetime.utcnow()
+    stale_before = now - timedelta(seconds=SHEET_SYNC_STALE_LOCK_SECONDS)
+    try:
+        won = db.session.query(SheetSyncState).filter(
+            SheetSyncState.id == 1,
+            or_(
+                SheetSyncState.running_since.is_(None),
+                SheetSyncState.running_since < stale_before,
+            ),
+        ).update(
+            {'running_since': now, 'running_holder': holder},
+            synchronize_session=False,
+        )
+        db.session.commit()
+        return bool(won)
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not take the sheet sync lock')
+        return True
+
+
+def _release_sheet_sync_lock():
+    try:
+        db.session.query(SheetSyncState).filter(SheetSyncState.id == 1).update(
+            {'running_since': None, 'running_holder': None},
+            synchronize_session=False,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not release the sheet sync lock')
+
+
+def _request_sheet_sync_rerun():
+    """Ask the run in flight for one more pass, rather than starting a second one."""
+    try:
+        db.session.query(SheetSyncState).filter(SheetSyncState.id == 1).update(
+            {'rerun_requested': True}, synchronize_session=False
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _take_sheet_sync_rerun():
+    """Consume the rerun request, if one arrived while we were working."""
+    try:
+        state = db.session.get(SheetSyncState, 1)
+        if state is None or not state.rerun_requested:
+            return False
+        state.rerun_requested = False
+        db.session.commit()
+        return True
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _record_sheet_sync_run(direction, trigger, push=None, pull=None):
+    """Log a finished sync so the admin panel can show what ran unattended."""
+    push = push or {}
+    pull = pull or {}
+    errors = (push.get('errors') or []) + (pull.get('errors') or [])
+    try:
+        db.session.add(SheetSyncRun(
+            trigger=trigger,
+            direction=direction,
+            updated_cells=push.get('updated_cells') or 0,
+            updated_records=push.get('updated_records') or 0,
+            appended=push.get('appended') or 0,
+            sheet_wins=push.get('sheet_wins') or 0,
+            created=pull.get('created') or 0,
+            updated=pull.get('updated') or 0,
+            errors='\n'.join(str(e) for e in errors) or None,
+        ))
+        db.session.commit()
+        cutoff = db.session.query(SheetSyncRun.id).order_by(
+            SheetSyncRun.id.desc()
+        ).offset(SHEET_SYNC_RUN_HISTORY).first()
+        if cutoff:
+            db.session.query(SheetSyncRun).filter(SheetSyncRun.id <= cutoff[0]).delete(
+                synchronize_session=False
+            )
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not log the sheet sync run')
+
+
+def run_sheet_sync_job(direction, trigger, sheet_id=None, only_type=None,
+                       send_login_emails=True, dirty_only=False, quiet_seconds=0,
+                       include_held=False):
+    """
+    Run one sync under the lock and log it.
+
+    Returns None if another sync already holds the lock, so the caller can say so rather
+    than starting a second run that would duplicate appended rows and race its writes.
+    """
+    if not _acquire_sheet_sync_lock(trigger):
+        _request_sheet_sync_rerun()
+        return None
+    try:
+        if direction == 'push':
+            result = push_to_google_sheet(
+                sheet_id, only_type=only_type, dirty_only=dirty_only, quiet_seconds=quiet_seconds
+            )
+            _record_sheet_sync_run('push', trigger, push=result)
+        elif direction == 'pull':
+            result = pull_from_google_sheet(
+                sheet_id, only_type=only_type, send_login_emails=send_login_emails,
+                include_held=include_held,
+            )
+            _record_sheet_sync_run('pull', trigger, pull=result)
+        else:
+            result = sync_google_sheet_two_way(
+                sheet_id, only_type=only_type, send_login_emails=send_login_emails
+            )
+            _record_sheet_sync_run('two_way', trigger, push=result.get('push'), pull=result.get('pull'))
+        return result
+    finally:
+        _release_sheet_sync_lock()
+
+
+def run_sheet_auto_push(trigger='auto', force=False):
+    """
+    Flush pending website edits to the sheet.
+
+    Free when idle: with nothing flagged it returns before opening the workbook, so a quiet
+    site spends no Google API quota. Only one run happens at a time, and edits that arrive
+    mid-run are folded into one extra pass instead of interrupting or duplicating it.
+    """
+    if not force and not _sheet_auto_push_enabled():
+        return {'skipped': 'Automatic push is turned off.'}
+    quiet = _sheet_auto_push_quiet_seconds()
+    if not _pending_sheet_count(quiet):
+        return {'skipped': 'Nothing is waiting to be pushed.'}
+    result = None
+    for _ in range(SHEET_SYNC_MAX_COALESCED_RUNS):
+        result = run_sheet_sync_job('push', trigger, dirty_only=True, quiet_seconds=quiet)
+        if result is None:
+            return {'skipped': 'Another sync is running; queued behind it.'}
+        if not _take_sheet_sync_rerun() or not _pending_sheet_count(quiet):
+            break
+    return result
+
+
+_sheet_auto_push_thread_started = False
+_sheet_auto_push_thread_lock = threading.Lock()
+
+
+def _sheet_auto_push_loop():
+    interval = _sheet_auto_push_interval_seconds()
+    while True:
+        time.sleep(interval)
+        try:
+            with app.app_context():
+                run_sheet_auto_push('auto')
+        except Exception:
+            app.logger.exception('automatic Google Sheet push failed')
+
+
+def start_sheet_auto_push_thread():
+    """Start the timer that writes website edits out to the sheet."""
+    global _sheet_auto_push_thread_started
+    if not _sheet_auto_push_enabled():
+        return
+    with _sheet_auto_push_thread_lock:
+        if _sheet_auto_push_thread_started:
+            return
+        _sheet_auto_push_thread_started = True
+    threading.Thread(
+        target=_sheet_auto_push_loop,
+        name='sheet-auto-push',
+        daemon=True,
+    ).start()
+    print(
+        f'Google Sheet auto-push thread started (every {_sheet_auto_push_interval_seconds()}s)',
+        flush=True,
+    )
 
 
 def google_sheet_sync_status(sheet_id=None):
@@ -13373,11 +13898,16 @@ def google_sheet_sync_status(sheet_id=None):
         'sheet_id_configured': bool(sheet_id or os.environ.get('GOOGLE_SHEET_ID')),
         'write_enabled': _google_sheets_write_enabled(),
         'clear_enabled': _google_sheets_allow_clear(),
+        'auto_push_enabled': _sheet_auto_push_enabled(),
+        'auto_push_interval_seconds': _sheet_auto_push_interval_seconds(),
+        'auto_push_quiet_seconds': _sheet_auto_push_quiet_seconds(),
+        'sync_running': False,
         'workbook_reachable': False,
         'tabs': [],
         'unrecognized_tabs': [],
         'pending_edits': 0,
         'pending_without_key': 0,
+        'recent_runs': [],
         'errors': [],
     }
     for import_type in SHEET_IMPORT_TYPES:
@@ -13385,6 +13915,26 @@ def google_sheet_sync_status(sheet_id=None):
             status['pending_edits'] += 1
             if not _sheet_record_key(record, import_type):
                 status['pending_without_key'] += 1
+
+    state = _sheet_sync_state()
+    status['sync_running'] = bool(state is not None and state.running_since)
+    try:
+        for run in SheetSyncRun.query.order_by(SheetSyncRun.ran_at.desc()).limit(10).all():
+            status['recent_runs'].append({
+                'ran_at': run.ran_at.isoformat() if run.ran_at else None,
+                'trigger': run.trigger,
+                'direction': run.direction,
+                'updated_cells': run.updated_cells,
+                'updated_records': run.updated_records,
+                'appended': run.appended,
+                'sheet_wins': run.sheet_wins,
+                'created': run.created,
+                'updated': run.updated,
+                'errors': run.errors,
+            })
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('could not read the sheet sync history')
 
     workbook, err = _open_workbook(sheet_id, write=False)
     if err:
@@ -13412,6 +13962,12 @@ def google_sheet_sync_status(sheet_id=None):
             ),
             'data_rows': 0,
             'rows_missing_key': 0,
+            'rows_not_on_website': 0,
+        }
+        # Pulling is a button, so tell the admin when there is something worth pulling.
+        known_keys = {
+            _sheet_key(_sheet_record_key(record, import_type))
+            for record in _sheet_records_for_push(import_type)
         }
         try:
             rows = worksheet.get_all_values()
@@ -13419,8 +13975,11 @@ def google_sheet_sync_status(sheet_id=None):
                 if not row or all(not (c or '').strip() for c in row):
                     continue
                 entry['data_rows'] += 1
-                if not _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN)):
+                key = _sheet_key(_sheet_cell(row, SHEET_KEY_COLUMN))
+                if not key:
                     entry['rows_missing_key'] += 1
+                elif key not in known_keys:
+                    entry['rows_not_on_website'] += 1
         except Exception as e:
             status['errors'].append(f'Could not read tab "{worksheet.title}": {e}')
         if entry['rows_missing_key']:
@@ -13468,29 +14027,50 @@ def api_google_sheet_status():
     return jsonify(google_sheet_sync_status(sheet_id=request.args.get('sheet_id'))), 200
 
 
+SHEET_SYNC_BUSY_ERROR = (
+    'A Google Sheet sync is already running. Give it a few seconds and try again.'
+)
+
+
 @app.route('/api/admin/sync-google-sheet', methods=['POST'])
 @admin_required
 def api_sync_google_sheet():
     """Pull staff, outside staff, and students from the configured workbook. Admin only."""
     sheet_id, only_type, payload = _sheet_request_args()
-    result = pull_from_google_sheet(
-        sheet_id=sheet_id,
-        only_type=only_type,
-        dry_run=bool(payload.get('dry_run')),
+    include_held = bool(payload.get('include_held'))
+    if payload.get('dry_run'):
+        # A preview writes nothing, so it never has to wait for the lock.
+        return jsonify(pull_from_google_sheet(
+            sheet_id=sheet_id, only_type=only_type, dry_run=True, include_held=include_held
+        )), 200
+    result = run_sheet_sync_job(
+        'pull', 'manual', sheet_id=sheet_id, only_type=only_type, include_held=include_held
     )
+    if result is None:
+        return jsonify({'error': SHEET_SYNC_BUSY_ERROR}), 409
     return jsonify(result), 200
 
 
 @app.route('/api/admin/push-google-sheet', methods=['POST'])
 @admin_required
 def api_push_google_sheet():
-    """Write pending website edits back to the configured workbook. Admin only."""
+    """
+    Write website edits back to the configured workbook. Admin only.
+
+    The automatic push covers day-to-day edits; this is the full pass, which also examines
+    records nobody has touched since the last sync.
+    """
     sheet_id, only_type, payload = _sheet_request_args()
-    result = push_to_google_sheet(
-        sheet_id=sheet_id,
-        only_type=only_type,
-        dry_run=bool(payload.get('dry_run')),
+    dirty_only = bool(payload.get('dirty_only'))
+    if payload.get('dry_run'):
+        return jsonify(push_to_google_sheet(
+            sheet_id=sheet_id, only_type=only_type, dry_run=True, dirty_only=dirty_only
+        )), 200
+    result = run_sheet_sync_job(
+        'push', 'manual', sheet_id=sheet_id, only_type=only_type, dirty_only=dirty_only
     )
+    if result is None:
+        return jsonify({'error': SHEET_SYNC_BUSY_ERROR}), 409
     return jsonify(result), 200
 
 
@@ -13499,20 +14079,35 @@ def api_push_google_sheet():
 def api_sync_google_sheet_two_way():
     """Push website edits out, then pull the workbook for new people. Admin only."""
     sheet_id, only_type, _ = _sheet_request_args()
-    return jsonify(sync_google_sheet_two_way(sheet_id=sheet_id, only_type=only_type)), 200
+    result = run_sheet_sync_job('two_way', 'manual', sheet_id=sheet_id, only_type=only_type)
+    if result is None:
+        return jsonify({'error': SHEET_SYNC_BUSY_ERROR}), 409
+    return jsonify(result), 200
 
 
 @app.route('/api/admin/sync-google-sheet-cron', methods=['GET', 'POST'])
 def api_sync_google_sheet_cron():
     """
-    Two-way sheet sync for external schedulers (e.g. cron-job.org).
+    Scheduled sheet sync for external schedulers (e.g. cron-job.org).
     Secured by CRON_SECRET env var. No login required.
+
+    Pushes pending website edits. A pull creates accounts and emails people their logins, so
+    it only runs when the caller asks for it with pull=1.
     """
     ok, failure = _cron_secret_ok()
     if not ok:
         return failure
+    payload = request.get_json(silent=True) or {}
+    want_pull = str(
+        request.args.get('pull') or payload.get('pull') or ''
+    ).strip().lower() in ('1', 'true', 'yes', 'on')
     try:
-        return jsonify(sync_google_sheet_two_way()), 200
+        if want_pull:
+            result = run_sheet_sync_job('two_way', 'cron')
+            if result is None:
+                return jsonify({'error': SHEET_SYNC_BUSY_ERROR}), 409
+            return jsonify(result), 200
+        return jsonify(run_sheet_auto_push('cron', force=True)), 200
     except Exception as e:
         app.logger.exception('google sheet cron error')
         return jsonify({'error': str(e)}), 500
@@ -14717,7 +15312,11 @@ def manage_users():
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
+
+        # What the sheet holds for this person before anything is touched.
+        sheet_user_before = sheet_dirty_user_signature(user)
+        sheet_student_before = sheet_dirty_student_signature(user.student_id)
+
         # Permission check and field updates
         if current_user.role == 'admin':
             # Admin can update anyone and any field
@@ -14754,13 +15353,11 @@ def manage_users():
             case_manager_ids = parse_case_manager_ids_payload(data)
             if case_manager_ids is not None:
                 set_linked_case_manager_ids(user, case_manager_ids)
-                mark_user_sheet_dirty(user)
             elif user.linked_case_manager_id and (
                 user.role != 'staff' or (user.designation or '') != 'Paraprofessional'
             ):
                 # No longer a Paraprofessional, so the case manager links no longer apply.
-                if set_linked_case_manager_ids(user, []):
-                    mark_user_sheet_dirty(user)
+                set_linked_case_manager_ids(user, [])
             if 'email' in data:
                 email = (data.get('email') or '').strip() or None
                 user.email = email
@@ -14858,10 +15455,11 @@ def manage_users():
         else:
             return jsonify({'error': 'Permission denied'}), 403
         
-        # Queue the change for the next Google Sheet push.
-        if user.student_id and any(field in data for field in SHEET_DIRTY_STUDENT_FIELDS):
+        # Queue the change for the next Google Sheet push, but only when a value the sheet
+        # holds actually moved.
+        if sheet_student_before != sheet_dirty_student_signature(user.student_id):
             mark_student_sheet_dirty_by_id(user.student_id)
-        if any(field in data for field in SHEET_DIRTY_USER_FIELDS):
+        if sheet_user_before != sheet_dirty_user_signature(user):
             mark_user_sheet_dirty(user)
 
         db.session.commit()
@@ -19222,6 +19820,15 @@ def check_users():
         }), 200
     except Exception as e:
         return jsonify({'error': f'Error checking users: {str(e)}'}), 500
+
+# Started here rather than in init_db() because it is defined further down the file, and at
+# module scope so gunicorn workers get it too. The loop sleeps before its first pass, so
+# importing this module never touches Google.
+try:
+    start_sheet_auto_push_thread()
+except Exception as sheet_thread_error:
+    print(f"Note: Google Sheet auto-push thread not started: {sheet_thread_error}", flush=True)
+
 
 if __name__ == '__main__':
     print("Starting development server (schema checks)...", flush=True)

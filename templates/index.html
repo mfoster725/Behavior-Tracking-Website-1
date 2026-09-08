@@ -764,16 +764,24 @@
                             and students by <strong>Lunch Number</strong>, both in column A.
                         </p>
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
-                            <strong>Pull</strong> adds people who are in the sheet but not on the website, creating their accounts and
-                            team assignments exactly like a CSV import. New accounts with an email on file are sent their login info once.
-                            <strong>Push</strong> writes every import column back (except column A): for students that is Name, Grade, Card Color, support team (E&ndash;J), Student Email (L), and Parent emails (M&ndash;N);
-                            for staff it is Name, Role, Grades Taught, Case Manager (E), and Email; for outside staff it is Name, District, and Email.
-                            <strong>Preview Push</strong> compares all keyed website records against the sheet and lists every cell that differs.
-                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted.
+                            <strong>Website edits push themselves.</strong> When you change someone here, that change is written to
+                            the sheet on its own within about a minute &mdash; there is no button to press. The columns it keeps up to
+                            date are, for students, Name, Grade, Card Color, support team (E&ndash;J), Student Email (L), and Parent
+                            emails (M&ndash;N); for staff, Name, Role, Grades Taught, Case Manager (E), and Email; for outside staff,
+                            Name, District, and Email.
                         </p>
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
-                            The two <strong>Preview</strong> buttons change nothing. They list every record that would be added and
-                            every field that would change, with its old and new value, so you can check the result before committing to it.
+                            <strong>Sheet edits wait for you.</strong> Editing a cell in the sheet never gets overwritten &mdash; a push
+                            only writes cells the website itself changed, and reports the rest as left alone. Those changes come in when
+                            you press <strong>Pull From Sheet</strong>, which is also what creates accounts for new people and emails
+                            them their login info once, so it is deliberate rather than automatic.
+                            <strong>Check Setup</strong> tells you how many sheet rows are not on the website yet.
+                        </p>
+                        <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
+                            <strong>Push To Sheet</strong> runs the full pass by hand, including people nobody has edited since the last
+                            sync. <strong>Sync Both Ways</strong> pushes, then pulls. Rows are never deleted or reordered.
+                            The two <strong>Preview</strong> buttons change nothing: they list every record that would be added and
+                            every field that would change, with its old and new value, so you can check the result first.
                         </p>
                         <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
                             <button type="button" class="btn-secondary" onclick="checkGoogleSheetStatus()">Check Setup</button>
@@ -783,6 +791,11 @@
                             <button type="button" class="btn-primary" onclick="pushToGoogleSheet(false)">Push To Sheet</button>
                             <button type="button" class="btn-primary" onclick="syncGoogleSheetBothWays()">Sync Both Ways</button>
                         </div>
+                        <label style="display: block; font-size: 12px; color: #999; margin-bottom: 12px;">
+                            <input type="checkbox" id="google-sheet-include-held">
+                            Let the sheet win for rows held back by website edits. A pull normally skips those rows;
+                            tick this when the sheet has the version worth keeping, and the pending edit is dropped.
+                        </label>
                         <div id="google-sheet-results" style="display: none; margin-top: 15px;"></div>
                     </div>
                     
