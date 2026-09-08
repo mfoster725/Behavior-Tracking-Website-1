@@ -7010,7 +7010,8 @@ def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
     # Deep-copy new frenzy card aggregation fields
     for key in ('frenzies_by_severity', 'frenzies_by_time', 'frenzies_by_day',
                 'frenzies_by_location', 'frenzies_by_purpose', 'frenzies_by_duration_bucket',
-                'frenzies_duration_summary', 'infractions_for_frenzies', 'frenzies_severity_totals'):
+                'frenzies_duration_summary', 'infractions_for_frenzies', 'frenzies_severity_totals',
+                'infractions_by_type'):
         val = (stats_behavior or {}).get(key)
         if val is not None:
             out[key] = copy.deepcopy(val)
@@ -7020,6 +7021,74 @@ def _merge_30day_behavior_and_star_stats(stats_behavior, stats_star):
 def _chunked_id_list(seq, size=900):
     for i in range(0, len(seq), size):
         yield seq[i:i + size]
+
+
+def _period_infraction_type_counts(period, info_data=None):
+    """Aggregate infraction type -> count from Infraction rows and period.info JSON.
+
+    Staff daily-entry infractions are saved on period.info (infractions array and
+    legacy infraction1/2). The Infraction table is only populated by full point-card
+    snapshots, so reports must read both sources.
+    """
+    counts = {}
+
+    def _add(inf_type, count):
+        inf_type = str(inf_type or '').strip()
+        if not inf_type:
+            return
+        try:
+            cnt = int(count if count is not None else 1)
+        except (TypeError, ValueError):
+            cnt = 1
+        counts[inf_type] = counts.get(inf_type, 0) + cnt
+
+    for inf in (getattr(period, 'infractions', None) or []):
+        _add(
+            getattr(inf, 'infraction_type', None) or getattr(inf, 'type', None),
+            getattr(inf, 'count', 1),
+        )
+
+    if info_data is None:
+        raw_info = getattr(period, 'info', None)
+        if isinstance(raw_info, dict):
+            info_data = raw_info
+        elif raw_info:
+            try:
+                info_data = json.loads(raw_info)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                info_data = {}
+        else:
+            info_data = {}
+    elif not isinstance(info_data, dict):
+        info_data = {}
+
+    inf_arr = info_data.get('infractions')
+    if isinstance(inf_arr, list):
+        for inf_item in inf_arr:
+            if not isinstance(inf_item, dict):
+                continue
+            _add(inf_item.get('type'), inf_item.get('count', 1))
+
+    for key, count_key in (('infraction1', 'infraction1Count'), ('infraction2', 'infraction2Count')):
+        legacy = info_data.get(key)
+        if legacy and str(legacy).strip():
+            _add(legacy, info_data.get(count_key, 1))
+
+    return counts
+
+
+def _build_infractions_by_type(by_time, by_day_of_week):
+    """Per-type breakdowns by time of day and day of week for the reports card."""
+    infractions_by_type = {}
+    for time_label, time_data in (by_time or {}).items():
+        for itype, cnt in (time_data.get('infractions') or {}).items():
+            entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
+            entry['by_time'][time_label] = entry['by_time'].get(time_label, 0) + cnt
+    for day_label, day_data in (by_day_of_week or {}).items():
+        for itype, cnt in (day_data.get('infractions') or {}).items():
+            entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
+            entry['by_day_of_week'][day_label] = entry['by_day_of_week'].get(day_label, 0) + cnt
+    return infractions_by_type
 
 
 @app.route('/api/summary', methods=['GET'])
@@ -7635,39 +7704,7 @@ def summary():
 
     def _period_infraction_counts_for_frenzy(period, info_data):
         """Aggregate infraction type->count from period.infractions + info.infractions + legacy infraction1/2."""
-        counts = {}
-        for inf in (getattr(period, 'infractions', None) or []):
-            inf_type = (getattr(inf, 'type', None) or '').strip()
-            if inf_type:
-                inf_count = getattr(inf, 'count', 1) or 1
-                try:
-                    inf_count = int(inf_count)
-                except (TypeError, ValueError):
-                    inf_count = 1
-                counts[inf_type] = counts.get(inf_type, 0) + inf_count
-        inf_arr = (info_data or {}).get('infractions')
-        if isinstance(inf_arr, list):
-            for inf_item in inf_arr:
-                if not isinstance(inf_item, dict):
-                    continue
-                inf_type = (inf_item.get('type') or '').strip()
-                if inf_type:
-                    try:
-                        inf_count = int(inf_item.get('count', 1))
-                    except (ValueError, TypeError):
-                        inf_count = 1
-                    counts[inf_type] = counts.get(inf_type, 0) + inf_count
-        legacy1 = (info_data or {}).get('infraction1')
-        if legacy1:
-            legacy1 = (str(legacy1 or '')).strip()
-            if legacy1:
-                counts[legacy1] = counts.get(legacy1, 0) + 1
-        legacy2 = (info_data or {}).get('infraction2')
-        if legacy2:
-            legacy2 = (str(legacy2 or '')).strip()
-            if legacy2:
-                counts[legacy2] = counts.get(legacy2, 0) + 1
-        return counts
+        return _period_infraction_type_counts(period, info_data)
 
     def _build_frenzy_card_aggregates(record_list):
         """Build comprehensive frenzy card statistics from FrenzyEvents and info-period frenzies."""
@@ -8058,10 +8095,17 @@ def summary():
                         dt_bucket['_unique_dates'].add(record.date)
                         dt_bucket['total_days'] += 1
 
-                period_infraction_counts = {}
-                for infraction in period.infractions:
-                    itype = infraction.infraction_type
-                    cnt = int(infraction.count or 0)
+                info_data = {}
+                if period.info:
+                    try:
+                        parsed_info = json.loads(period.info)
+                        info_data = parsed_info if isinstance(parsed_info, dict) else {}
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        info_data = {}
+
+                period_infraction_counts = _period_infraction_type_counts(period, info_data)
+                for itype, cnt in period_infraction_counts.items():
+                    cnt = int(cnt or 0)
                     total_infractions[itype] = total_infractions.get(itype, 0) + cnt
                     additional_info['infractions'][itype] = additional_info['infractions'].get(itype, 0) + cnt
                     cls['infractions'][itype] = cls['infractions'].get(itype, 0) + cnt
@@ -8085,15 +8129,10 @@ def summary():
                             }
                         dt_bucket = day_time_map[time_label]
                         dt_bucket['infractions'][itype] = dt_bucket['infractions'].get(itype, 0) + cnt
-                    period_infraction_counts[itype] = period_infraction_counts.get(itype, 0) + cnt
 
                 has_reminder_for_period = False
                 has_reset_for_period = False
-                if period.info:
-                    try:
-                        info_data = json.loads(period.info)
-                    except (json.JSONDecodeError, ValueError, TypeError):
-                        info_data = {}
+                if info_data:
 
                     for reminder_key in ('reminder1', 'reminder2', 'reminder3'):
                         rv = info_data.get(reminder_key, False)
@@ -8281,7 +8320,7 @@ def summary():
             'by_time_by_day': by_time_by_day_formatted,
             'frenzy_severity_by_time_by_day': frenzy_severity_by_time_by_day_formatted,
             'frenzy_cell_details_by_time_by_day': frenzy_cell_details_by_time_by_day,
-            'infractions_by_type': {},
+            'infractions_by_type': _build_infractions_by_type(by_time, by_day_of_week),
             'frenzies_by_severity': frenzy_card['frenzies_by_severity'],
             'frenzies_by_time': frenzy_card['frenzies_by_time'],
             'frenzies_by_day': frenzy_card['frenzies_by_day'],
@@ -9081,18 +9120,7 @@ def summary():
             frenzy_severity_by_time_by_day_formatted[day] = formatted_sev
             frenzy_cell_details_by_time_by_day[day] = formatted_details
 
-        # Build per-infraction breakdowns by time of day and day of week
-        infractions_by_type = {}
-        # From time-of-day buckets
-        for time_label, time_data in by_time.items():
-            for itype, cnt in (time_data.get('infractions') or {}).items():
-                entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
-                entry['by_time'][time_label] = entry['by_time'].get(time_label, 0) + cnt
-        # From day-of-week buckets
-        for day_label, day_data in by_day_of_week.items():
-            for itype, cnt in (day_data.get('infractions') or {}).items():
-                entry = infractions_by_type.setdefault(itype, {'by_time': {}, 'by_day_of_week': {}})
-                entry['by_day_of_week'][day_label] = entry['by_day_of_week'].get(day_label, 0) + cnt
+        infractions_by_type = _build_infractions_by_type(by_time, by_day_of_week)
 
         frenzy_card = _build_frenzy_card_aggregates(record_list)
 
