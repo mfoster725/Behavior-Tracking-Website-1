@@ -14543,6 +14543,13 @@ def manage_users():
         if assigned_student_ids:
             for s in Student.query.filter(Student.id.in_(assigned_student_ids)).all():
                 assigned_students_by_id[s.id] = {'id': s.id, 'name': s.name}
+        # Names students actually list on their support teams, so the caseload
+        # searches can leave out accounts that carry no students.
+        caseload_names = {
+            name.strip().lower()
+            for (name,) in db.session.query(TeamMember.name).distinct().all()
+            if name and name.strip()
+        }
         result = []
         for user in users:
             primary_case_manager_id = getattr(user, 'linked_case_manager_id', None)
@@ -14550,6 +14557,10 @@ def manage_users():
             for cm_id in case_manager_links_by_user.get(user.id, []):
                 if cm_id not in linked_case_manager_ids:
                     linked_case_manager_ids.append(cm_id)
+            has_caseload = user.role in ('staff', 'admin') and any(
+                (value or '').strip().lower() in caseload_names
+                for value in (user.name, user.username)
+            )
             user_data = {
                 'id': user.id,
                 'name': user.name,
@@ -14557,6 +14568,7 @@ def manage_users():
                 'email': getattr(user, 'email', None),
                 'role': user.role,
                 'designation': user.designation,
+                'has_caseload': has_caseload,
                 'student_id': user.student_id,
                 'is_outside_staff': user.is_outside_staff if hasattr(user, 'is_outside_staff') else False,
                 'district': user.district if hasattr(user, 'district') else None,

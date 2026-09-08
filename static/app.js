@@ -15325,21 +15325,24 @@ function updateStaffDatalist() {
 }
 
 // Staff members offered by the caseload searches (Daily Overview, Reports).
-// Admin logins are left out and same-named entries collapse to one: a person who
-// holds both an admin and a staff account otherwise appeared twice.
+// One entry per person: someone who holds both a staff and an admin login is
+// listed under the staff account, since that is the one carrying their
+// designation. A lone admin login shows up only when students actually name it
+// on their support team, so plain administrators stay out of a caseload search.
 function getSearchableStaffMembers() {
-    const seen = new Set();
-    const searchable = [];
+    const byPerson = new Map();
     (allStaffMembers || []).forEach(staff => {
-        if (!staff || staff.role === 'admin') return;
+        if (!staff) return;
         const label = (staff.name || staff.username || '').trim();
         if (!label) return;
         const key = label.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        searchable.push(staff);
+        const chosen = byPerson.get(key);
+        if (!chosen || (chosen.role === 'admin' && staff.role !== 'admin')) {
+            byPerson.set(key, staff);
+        }
     });
-    return searchable;
+    return Array.from(byPerson.values())
+        .filter(staff => staff.role !== 'admin' || staff.has_caseload);
 }
 
 function setupDailySearchAutocomplete(input) {
