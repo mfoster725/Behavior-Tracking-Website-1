@@ -753,6 +753,29 @@
                         <button type="button" class="btn-primary" onclick="importUsersFromCsv()">Import</button>
                         <div id="import-results" style="display: none; margin-top: 15px;"></div>
                     </div>
+
+                    <!-- Google Sheet Sync -->
+                    <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                        <h3>Google Sheet Sync</h3>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+                            Keeps the import spreadsheet and the website in step. Students are matched by
+                            <strong>Lunch Number</strong>, so the sheet needs that column.
+                        </p>
+                        <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
+                            <strong>Pull</strong> adds students that are in the sheet but not on the website.
+                            <strong>Push</strong> writes website edits to Name, Email, Grade, and Card Color back into the sheet.
+                            <strong>Sync Both Ways</strong> pushes first, then pulls. Rows are never deleted and columns other than
+                            those four are never touched.
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <button type="button" class="btn-secondary" onclick="checkGoogleSheetStatus()">Check Setup</button>
+                            <button type="button" class="btn-secondary" onclick="pullFromGoogleSheet()">Pull From Sheet</button>
+                            <button type="button" class="btn-secondary" onclick="pushToGoogleSheet(true)">Preview Push</button>
+                            <button type="button" class="btn-primary" onclick="pushToGoogleSheet(false)">Push To Sheet</button>
+                            <button type="button" class="btn-primary" onclick="syncGoogleSheetBothWays()">Sync Both Ways</button>
+                        </div>
+                        <div id="google-sheet-results" style="display: none; margin-top: 15px;"></div>
+                    </div>
                     
                     <!-- Quarter Configuration -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
@@ -1291,6 +1314,11 @@
                     <div class="form-group">
                         <label for="student-name">Student Initials: *</label>
                         <input type="text" id="student-name" required placeholder="Example: Jane Doe = JD">
+                    </div>
+                    <div class="form-group">
+                        <label for="student-lunch-number">Lunch Number:</label>
+                        <input type="text" id="student-lunch-number" placeholder="Used to match this student to the import sheet">
+                        <small style="color: #666; font-size: 12px;">Recommended. Without it, this student cannot be matched to a row in the Google Sheet or a CSV import.</small>
                     </div>
                     <div class="form-group">
                         <label for="student-grade">Grade:</label>

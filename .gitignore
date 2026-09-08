@@ -44,6 +44,13 @@ Thumbs.db
 .env
 .env.local
 
+# Service account / credential keys - never commit these
+keys/
+*service-account*.json
+*service_account*.json
+*credentials*.json
+client_secret*.json
+
 # Logs
 *.log
 

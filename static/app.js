@@ -8011,6 +8011,7 @@ async function saveDailyRecord() {
 
 async function saveStudent() {
     const name = document.getElementById('student-name').value;
+    const lunchNumber = document.getElementById('student-lunch-number')?.value || '';
     const grade = document.getElementById('student-grade').value;
     const cardColor = document.getElementById('student-card-color')?.value || '';
     const username = document.getElementById('student-username').value;
@@ -8055,6 +8056,7 @@ async function saveStudent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name.trim(),
+                lunch_number: lunchNumber.trim(),
                 grade: grade,
                 card_color: cardColor || null,
                 username: username.trim(),
@@ -8075,6 +8077,8 @@ async function saveStudent() {
             }
             // Clear all fields
             document.getElementById('student-name').value = '';
+            const lunchInput = document.getElementById('student-lunch-number');
+            if (lunchInput) lunchInput.value = '';
             document.getElementById('student-grade').value = '';
             document.getElementById('student-card-color').value = '';
             document.getElementById('student-username').value = '';
@@ -12272,6 +12276,138 @@ async function importStudentCSV() {
     } catch (err) {
         console.error('Error importing student CSV:', err);
         container.innerHTML = '<div class="import-results-error">Error importing student CSV. Please try again.</div>';
+    }
+}
+
+function googleSheetResultsBox(html) {
+    const container = document.getElementById('google-sheet-results');
+    if (!container) return null;
+    container.style.display = 'block';
+    if (html !== undefined) container.innerHTML = html;
+    return container;
+}
+
+function renderGoogleSheetErrors(errors) {
+    if (!errors || !errors.length) return '';
+    return '<div class="import-results-error"><strong>Problems:</strong><ul>'
+        + errors.map(e => `<li>${escapeHtml(String(e))}</li>`).join('')
+        + '</ul></div>';
+}
+
+async function callGoogleSheetEndpoint(url, options) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let data = {};
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch (parseErr) {
+        throw new Error(`Server returned an unexpected response (${response.status}).`);
+    }
+    if (!response.ok) {
+        throw new Error(data.error || `Request failed (${response.status}).`);
+    }
+    return data;
+}
+
+async function checkGoogleSheetStatus() {
+    googleSheetResultsBox('<div class="loading">Checking Google Sheet setup...</div>');
+    try {
+        const data = await callGoogleSheetEndpoint('/api/admin/google-sheet-status');
+        const yesNo = (ok) => ok ? 'Yes' : 'No';
+        const rows = [
+            ['Google libraries installed', yesNo(data.libraries_installed)],
+            ['Credentials configured', yesNo(data.credentials_configured)],
+            ['Sheet ID configured', yesNo(data.sheet_id_configured)],
+            ['Sheet reachable', yesNo(data.sheet_reachable)],
+            ['Worksheet', String(data.worksheet)],
+            ['Writing to sheet enabled', yesNo(data.write_enabled)],
+            ['Allowed to blank existing cells', yesNo(data.clear_enabled)],
+            ['Columns found', (data.columns_found || []).join(', ') || 'none'],
+            ['Columns missing', (data.columns_missing || []).join(', ') || 'none'],
+            ['Edits waiting to be pushed', String(data.pending_edits)],
+            ['Waiting edits with no lunch number', String(data.pending_without_lunch_number)],
+        ];
+        let html = '<table class="import-results-table"><tbody>'
+            + rows.map(([label, value]) => `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${escapeHtml(value)}</td></tr>`).join('')
+            + '</tbody></table>';
+        html += renderGoogleSheetErrors(data.errors);
+        googleSheetResultsBox(html);
+    } catch (err) {
+        googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
+    }
+}
+
+function renderGoogleSheetPull(pull) {
+    let html = `<div class="import-results-success"><strong>Pulled from the sheet:</strong> `
+        + `${pull.created} student${pull.created === 1 ? '' : 's'} added, `
+        + `${pull.updated} updated.</div>`;
+    if (pull.skipped_conflicts) {
+        html += `<div class="import-results-info">${pull.skipped_conflicts} student`
+            + `${pull.skipped_conflicts === 1 ? ' was' : 's were'} left alone because the website has `
+            + `edits that have not been pushed to the sheet yet. Push first, then pull again.</div>`;
+    }
+    return html + renderGoogleSheetErrors(pull.errors);
+}
+
+function renderGoogleSheetPush(push) {
+    const verb = push.dry_run ? 'would be' : 'were';
+    let html = `<div class="import-results-success"><strong>${push.dry_run ? 'Push preview' : 'Pushed to the sheet'}:</strong> `
+        + `${push.updated_cells} cell${push.updated_cells === 1 ? '' : 's'} across `
+        + `${push.updated_students} student${push.updated_students === 1 ? '' : 's'} ${verb} updated, `
+        + `${push.appended} new row${push.appended === 1 ? '' : 's'} ${verb} added.</div>`;
+    if (push.skipped_clears) {
+        html += `<div class="import-results-info">${push.skipped_clears} cell`
+            + `${push.skipped_clears === 1 ? ' was' : 's were'} left as-is because the website value is empty and `
+            + `the sheet cell has something in it. Set GOOGLE_SHEETS_ALLOW_CLEAR=1 if you want the website to blank them.</div>`;
+    }
+    const unmatched = push.unmatched || [];
+    if (unmatched.length) {
+        html += `<div class="import-results-warning"><strong>${unmatched.length} student`
+            + `${unmatched.length === 1 ? '' : 's'} could not be written to the sheet</strong> because `
+            + `${unmatched.length === 1 ? 'it has' : 'they have'} no lunch number: `
+            + `${unmatched.map(n => escapeHtml(String(n))).join(', ')}. Add a lunch number to `
+            + `${unmatched.length === 1 ? 'that student' : 'those students'} and push again.</div>`;
+    }
+    return html + renderGoogleSheetErrors(push.errors);
+}
+
+async function pullFromGoogleSheet() {
+    googleSheetResultsBox('<div class="loading">Pulling students from the Google Sheet...</div>');
+    try {
+        const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet', { method: 'POST' });
+        googleSheetResultsBox(renderGoogleSheetPull(data));
+        if (typeof loadStudents === 'function') await loadStudents();
+    } catch (err) {
+        googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
+    }
+}
+
+async function pushToGoogleSheet(dryRun) {
+    if (!dryRun && !confirm('Write website edits into the Google Sheet? Existing rows are updated in place and nothing is deleted.')) {
+        return;
+    }
+    googleSheetResultsBox(`<div class="loading">${dryRun ? 'Checking what would change...' : 'Writing to the Google Sheet...'}</div>`);
+    try {
+        const data = await callGoogleSheetEndpoint('/api/admin/push-google-sheet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: !!dryRun })
+        });
+        googleSheetResultsBox(renderGoogleSheetPush(data));
+    } catch (err) {
+        googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
+    }
+}
+
+async function syncGoogleSheetBothWays() {
+    if (!confirm('Push website edits to the Google Sheet, then pull any new students from it?')) return;
+    googleSheetResultsBox('<div class="loading">Syncing with the Google Sheet...</div>');
+    try {
+        const data = await callGoogleSheetEndpoint('/api/admin/sync-google-sheet-two-way', { method: 'POST' });
+        googleSheetResultsBox(renderGoogleSheetPush(data.push || {}) + renderGoogleSheetPull(data.pull || {}));
+        if (typeof loadStudents === 'function') await loadStudents();
+    } catch (err) {
+        googleSheetResultsBox(`<div class="import-results-error">${escapeHtml(err.message)}</div>`);
     }
 }
 
