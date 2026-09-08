@@ -16754,6 +16754,8 @@ async function loadUsers() {
         
         if (!adminTbody || !staffTbody || !studentTbody) return;
         
+        closeAllUsersActionsKebabMenus();
+
         adminTbody.innerHTML = '';
         staffTbody.innerHTML = '';
         studentTbody.innerHTML = '';
@@ -16984,13 +16986,87 @@ async function loadUsers() {
     }
 }
 
+// Gap between the kebab button and its menu, and the minimum breathing room
+// kept between the menu and the edges of the viewport.
+const USERS_ACTIONS_KEBAB_GAP = 4;
+const USERS_ACTIONS_KEBAB_MARGIN = 8;
+
+// The kebab menu lives inside `.user-table-scroll`, which clips overflow so the
+// sticky header/first column work. While open the menu is moved to <body> and
+// positioned with fixed coordinates so it can never be cut off by that clipping.
+function positionUsersActionsKebabMenu(menu) {
+    const btn = menu.__kebabBtn;
+    if (!btn || !btn.isConnected) return;
+
+    const anchor = btn.getBoundingClientRect();
+    const gap = USERS_ACTIONS_KEBAB_GAP;
+    const margin = USERS_ACTIONS_KEBAB_MARGIN;
+    const spaceBelow = Math.max(window.innerHeight - anchor.bottom - gap - margin, 0);
+    const spaceAbove = Math.max(anchor.top - gap - margin, 0);
+
+    menu.style.maxHeight = '';
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+
+    let top;
+    if (height <= spaceBelow || spaceBelow >= spaceAbove) {
+        if (height > spaceBelow) menu.style.maxHeight = `${spaceBelow}px`;
+        top = anchor.bottom + gap;
+    } else {
+        const visibleHeight = Math.min(height, spaceAbove);
+        if (height > spaceAbove) menu.style.maxHeight = `${visibleHeight}px`;
+        top = anchor.top - gap - visibleHeight;
+    }
+
+    const maxLeft = Math.max(window.innerWidth - width - margin, margin);
+    const left = Math.min(Math.max(anchor.right - width, margin), maxLeft);
+
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(Math.max(top, margin))}px`;
+}
+
+// True while the kebab button is still visible inside its scrolling table, so a
+// menu anchored to a row scrolled out of view can be dismissed instead of
+// hovering over unrelated content.
+function isUsersActionsKebabAnchorVisible(btn) {
+    const scroller = btn.closest('.user-table-scroll');
+    if (!scroller) return true;
+    const anchor = btn.getBoundingClientRect();
+    const bounds = scroller.getBoundingClientRect();
+    return anchor.bottom > bounds.top
+        && anchor.top < bounds.bottom
+        && anchor.right > bounds.left
+        && anchor.left < bounds.right;
+}
+
+function openUsersActionsKebabMenu(menu) {
+    document.body.appendChild(menu);
+    menu.classList.add('users-actions-kebab-menu-floating', 'open');
+    positionUsersActionsKebabMenu(menu);
+}
+
+function detachUsersActionsKebabMenu(menu) {
+    const wrap = menu.__kebabWrap;
+    menu.classList.remove('users-actions-kebab-menu-floating');
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.maxHeight = '';
+    if (!wrap || !wrap.isConnected) {
+        menu.remove();
+        return;
+    }
+    if (menu.parentElement !== wrap) wrap.appendChild(menu);
+}
+
 function closeAllUsersActionsKebabMenus(exceptMenu = null) {
     document.querySelectorAll('.users-actions-kebab-menu.open').forEach((menu) => {
         if (exceptMenu && menu === exceptMenu) return;
         menu.classList.remove('open');
+        detachUsersActionsKebabMenu(menu);
+        if (menu.__kebabBtn) menu.__kebabBtn.setAttribute('aria-expanded', 'false');
     });
     document.querySelectorAll('.users-actions-kebab-btn[aria-expanded="true"]').forEach((btn) => {
-        if (exceptMenu && btn.nextElementSibling === exceptMenu) return;
+        if (exceptMenu && btn.__kebabMenu === exceptMenu) return;
         btn.setAttribute('aria-expanded', 'false');
     });
 }
@@ -16999,8 +17075,24 @@ if (!window.__usersActionsKebabDocClickBound) {
     window.__usersActionsKebabDocClickBound = true;
     document.addEventListener('click', (e) => {
         if (e.target.closest('.users-actions-kebab-wrap')) return;
+        if (e.target.closest('.users-actions-kebab-menu')) return;
         closeAllUsersActionsKebabMenus();
     });
+
+    const repositionOpenMenus = () => {
+        document.querySelectorAll('.users-actions-kebab-menu.open').forEach((menu) => {
+            const btn = menu.__kebabBtn;
+            if (!btn || !btn.isConnected || !isUsersActionsKebabAnchorVisible(btn)) {
+                menu.classList.remove('open');
+                detachUsersActionsKebabMenu(menu);
+                if (btn) btn.setAttribute('aria-expanded', 'false');
+                return;
+            }
+            positionUsersActionsKebabMenu(menu);
+        });
+    };
+    window.addEventListener('scroll', repositionOpenMenus, true);
+    window.addEventListener('resize', repositionOpenMenus);
 }
 
 function buildUsersActionsKebab(items) {
@@ -17017,6 +17109,9 @@ function buildUsersActionsKebab(items) {
     const menu = document.createElement('div');
     menu.className = 'users-actions-kebab-menu';
     menu.setAttribute('role', 'menu');
+    menu.__kebabBtn = btn;
+    menu.__kebabWrap = wrap;
+    btn.__kebabMenu = menu;
 
     (items || []).forEach((item) => {
         if (!item) return;
@@ -17038,8 +17133,8 @@ function buildUsersActionsKebab(items) {
         e.preventDefault();
         e.stopPropagation();
         const willOpen = !menu.classList.contains('open');
-        closeAllUsersActionsKebabMenus(willOpen ? menu : null);
-        menu.classList.toggle('open', willOpen);
+        closeAllUsersActionsKebabMenus();
+        if (willOpen) openUsersActionsKebabMenu(menu);
         btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
     });
 
@@ -17070,8 +17165,8 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
     const canDelete = isAdmin() && user.id !== window.currentUser.id;
     const canEdit = isAdmin() || user.id === window.currentUser.id;
     
-    // Password visibility: Admin sees all, staff/admin see their own
-    const canSeePassword = isAdmin() || user.id === window.currentUser.id;
+    // Password visibility: admins only. Staff cannot reset their own password here.
+    const canSeePassword = isAdmin();
     
     const userDesignation = user.designation ? `'${user.designation.replace(/'/g, "\\'")}'` : 'null';
     const grade = user.grade ? `'${user.grade}'` : 'null';
@@ -17142,7 +17237,9 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
             onClick: () => deleteUser(user.id, user.username, user.role)
         });
     }
-    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    if (menuItems.length) {
+        row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    }
     
     return row;
 }
@@ -17364,7 +17461,9 @@ function createStudentRow(user) {
             onClick: () => deleteUser(user.id, user.username, user.role)
         });
     }
-    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    if (menuItems.length) {
+        row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    }
     
     return row;
 }
@@ -17469,7 +17568,9 @@ function createOutsideStaffRow(user) {
             onClick: () => deleteUser(user.id, user.username, user.role)
         });
     }
-    row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    if (menuItems.length) {
+        row.querySelector('.actions-cell').appendChild(buildUsersActionsKebab(menuItems));
+    }
     
     return row;
 }

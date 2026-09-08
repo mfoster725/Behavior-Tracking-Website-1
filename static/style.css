@@ -3845,6 +3845,18 @@ table tbody tr:hover {
     display: block;
 }
 
+/* Open menus are moved to <body> so the table's scroll container cannot clip
+   them; JS supplies the fixed coordinates. */
+.users-actions-kebab-menu-floating {
+    position: fixed;
+    top: auto;
+    right: auto;
+    z-index: 1500;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    overflow-y: auto;
+}
+
 .users-actions-kebab-menu button {
     display: block;
     width: 100%;
