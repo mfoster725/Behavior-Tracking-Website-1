@@ -2557,10 +2557,12 @@ def get_linked_case_manager_ids(user):
     return ids
 
 
-def set_linked_case_manager_ids(user, case_manager_ids):
+def set_linked_case_manager_ids(user, case_manager_ids, *, assume_primary=True):
     """Replace a Paraprofessional's case manager links. Returns True if anything changed.
 
-    The first id is also stored on users.linked_case_manager_id so single-link readers keep working.
+    The first id is also stored on users.linked_case_manager_id so single-link readers keep working,
+    but only when a primary is clearly identified. Sheet/CSV imports pass assume_primary=False so
+    multiple case managers are not ranked by list order.
     """
     if not user:
         return False
@@ -2585,7 +2587,14 @@ def set_linked_case_manager_ids(user, case_manager_ids):
         if cm_id not in existing:
             db.session.add(ParaprofessionalCaseManager(user_id=user.id, case_manager_id=cm_id))
             changed = True
-    primary_id = desired[0] if desired else None
+    if assume_primary:
+        primary_id = desired[0] if desired else None
+    elif len(desired) == 1:
+        primary_id = desired[0]
+    elif user.linked_case_manager_id in desired:
+        primary_id = user.linked_case_manager_id
+    else:
+        primary_id = None
     if user.linked_case_manager_id != primary_id:
         user.linked_case_manager_id = primary_id
         changed = True
@@ -11343,6 +11352,19 @@ def normalize_import_identifier(value):
     return s
 
 
+def _import_row_is_placeholder(row, key_idx=0, name_idx=1):
+    """True for prefilled template rows (dropdown chips, empty identity columns).
+
+    Google Sheets data-validation chips can leave a Role/type cell non-empty on otherwise
+    blank roster rows. Those are not people and must not be reported as import errors.
+    """
+    if not row:
+        return True
+    key = normalize_import_identifier(row[key_idx] if len(row) > key_idx else '')
+    name = (row[name_idx] or '').strip() if len(row) > name_idx else ''
+    return not key and not name
+
+
 def _clip_import_field(value, max_len):
     if value is None:
         return ''
@@ -11583,6 +11605,15 @@ def _find_staff_for_import(user_number, name, *, outside_staff=False, designatio
         ).first()
         if by_number:
             return by_number
+        # Same person moving between staff and admin in the sheet is an update, not a conflict.
+        if not outside_staff and role in ('staff', 'admin'):
+            by_number = User.query.filter(
+                User.role.in_(('staff', 'admin')),
+                or_(User.is_outside_staff.is_(False), User.is_outside_staff.is_(None)),
+                _user_number_match_filter(user_number),
+            ).first()
+            if by_number:
+                return by_number
         conflict = User.query.filter(
             _user_number_match_filter(user_number),
             or_(User.role != role, User.is_outside_staff != outside_staff),
@@ -11606,7 +11637,13 @@ def _find_staff_for_import(user_number, name, *, outside_staff=False, designatio
 def _staff_import_conflict(existing, *, outside_staff=False, role='staff'):
     if existing is None:
         return None
-    if existing.role != role or bool(existing.is_outside_staff) != outside_staff:
+    if bool(existing.is_outside_staff) != outside_staff:
+        kind = 'an outside staff' if existing.is_outside_staff else existing.role
+        return f"already exists as {kind} account"
+    if existing.role != role:
+        # Staff ↔ admin is a role update from the sheet. Any other mismatch is a conflict.
+        if not outside_staff and existing.role in ('staff', 'admin') and role in ('staff', 'admin'):
+            return None
         kind = 'an outside staff' if existing.is_outside_staff else existing.role
         return f"already exists as {kind} account"
     return None
@@ -11708,34 +11745,39 @@ def _resolve_team_member_to_username(name_or_username, staff_by_username=None, s
 
 
 def _sync_student_team_members(student_id, members, existing=None):
-    """Replace a student's team members when the CSV set differs. Returns True if changed."""
+    """Add and remove only the team members that actually differ. Returns True if changed."""
     if existing is None:
         existing = TeamMember.query.filter_by(student_id=student_id).all()
     existing_pairs = sorted((tm.role or '', tm.name or '') for tm in existing)
-    new_pairs = sorted(members)
+    new_pairs = sorted((role or '', name or '') for role, name in members)
     if existing_pairs == new_pairs:
         return False
-    keep_by_key = {}
-    for tm in existing:
-        key = (tm.role or '', tm.name or '')
-        keep_by_key.setdefault(key, []).append(tm)
-    for tm in existing:
-        db.session.delete(tm)
+    used = [False] * len(existing)
+    to_add = []
     for role_name, name in members:
-        key = (role_name, name)
-        email = None
-        email_status = None
-        if keep_by_key.get(key):
-            old = keep_by_key[key].pop(0)
-            email = old.email
-            email_status = old.email_status
+        key = (role_name or '', name or '')
+        found = False
+        for i, tm in enumerate(existing):
+            if used[i]:
+                continue
+            if (tm.role or '', tm.name or '') == key:
+                used[i] = True
+                found = True
+                break
+        if not found:
+            to_add.append((role_name, name))
+    changed = False
+    for i, tm in enumerate(existing):
+        if not used[i]:
+            db.session.delete(tm)
+            changed = True
+    for role_name, name in to_add:
         db.session.add(TeamMember(
             student_id=student_id,
             role=role_name,
             name=name,
-            email=email,
-            email_status=email_status,
         ))
+        changed = True
     return True
 
 
@@ -11786,7 +11828,12 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     if not _import_str_eq(user.name, preferred_name):
         user.name = preferred_name
         changed = True
-    desired_designation = None if role == STAFF_IMPORT_ADMIN_ROLE else role
+    is_admin_row = role == STAFF_IMPORT_ADMIN_ROLE
+    desired_role = 'admin' if is_admin_row else 'staff'
+    if user.role != desired_role:
+        user.role = desired_role
+        changed = True
+    desired_designation = None if is_admin_row else role
     if not _import_str_eq(user.designation, desired_designation):
         user.designation = desired_designation
         changed = True
@@ -11812,7 +11859,9 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
                 warnings.append(f"{name}: {problem}")
     else:
         desired_cm_ids = []
-    if desired_cm_ids is not None and set_linked_case_manager_ids(user, desired_cm_ids):
+    if desired_cm_ids is not None and set_linked_case_manager_ids(
+        user, desired_cm_ids, assume_primary=False
+    ):
         changed = True
     return changed
 
@@ -12024,7 +12073,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
 
         def process_staff_row(row, row_index):
             nonlocal duplicate_count
-            if not row or all(not (c or '').strip() for c in row):
+            if _import_row_is_placeholder(row):
                 return
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
@@ -12034,9 +12083,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             email = _clip_import_field(row[STAFF_EMAIL_COL] if len(row) > STAFF_EMAIL_COL else '', 200)
 
             if not user_number or not name:
-                if not user_number and not name:
-                    errors.append(_import_missing_required_message(row_index, '', 'User Number and Name'))
-                elif not user_number:
+                if not user_number:
                     errors.append(_import_missing_required_message(row_index, name, 'User Number'))
                 else:
                     errors.append(_import_missing_required_message(row_index, '', 'Name'))
@@ -12109,7 +12156,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             if role == 'Paraprofessional' and case_manager_name:
                 cms, cm_problems = _resolve_import_case_managers(case_manager_name)
                 if cms:
-                    set_linked_case_manager_ids(user, [cm.id for cm in cms])
+                    set_linked_case_manager_ids(user, [cm.id for cm in cms], assume_primary=False)
                 for problem in cm_problems:
                     warnings.append(f"{name} was created but their {problem}")
 
@@ -12152,7 +12199,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
         # CSV columns: A=User Number, B=Name, C=District, E=Email
         outside_staff_rows = rows[header_offset:]
         for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
-            if not row or all(not (c or '').strip() for c in row):
+            if _import_row_is_placeholder(row):
                 continue
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
@@ -12160,9 +12207,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             email = _clip_import_field(row[OUTSIDE_STAFF_EMAIL_COL] if len(row) > OUTSIDE_STAFF_EMAIL_COL else '', 200)
 
             if not user_number or not name:
-                if not user_number and not name:
-                    errors.append(_import_missing_required_message(idx, '', 'User Number and Name'))
-                elif not user_number:
+                if not user_number:
                     errors.append(_import_missing_required_message(idx, name, 'User Number'))
                 else:
                     errors.append(_import_missing_required_message(idx, '', 'Name'))
@@ -12262,7 +12307,7 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             new_student_items = []
             student_rows = rows[header_offset:]
             for idx, row in enumerate(student_rows, start=header_offset + 1):
-                if not row or all(not (c or '').strip() for c in row):
+                if _import_row_is_placeholder(row):
                     continue
                 lunch_number = _clip_import_field(normalize_import_identifier(row[0] if len(row) > 0 else ''), 50)
                 initials = _clip_import_field(row[1] if len(row) > 1 else '', 100)
@@ -12662,6 +12707,54 @@ def _preview_field_display(field_key, value):
     return entry[1](value) if entry else str(value)
 
 
+def _user_sheet_role_label(role, designation):
+    """Human-facing role for previews: Admin, or the staff designation."""
+    designation = (designation or '').strip() or None
+    if role == 'admin':
+        # Leftover staff designation on an admin account is the confusing "now" value.
+        if designation and designation != STAFF_IMPORT_ADMIN_ROLE:
+            return designation
+        return 'Admin'
+    return designation or 'Staff'
+
+
+def _preview_history_pair(state, key):
+    """Old and new values of a column, even if this flush did not change it."""
+    history = state.attrs[key].history
+    current = getattr(state.object, key, None)
+    if not history.has_changes():
+        return current, current
+    old = history.deleted[0] if history.deleted else None
+    new = history.added[0] if history.added else current
+    return old, new
+
+
+def _preview_team_line(tm):
+    staff = User.query.filter_by(username=tm.name).first() if tm.name else None
+    who = (staff.name if staff and staff.name else None) or tm.name or '(unnamed)'
+    return f'{tm.role}: {who}'
+
+
+def _preview_support_team_lines(student_id, session):
+    current = TeamMember.query.filter_by(student_id=student_id).all()
+    deleted_ids = {
+        id(obj) for obj in session.deleted
+        if isinstance(obj, TeamMember) and obj.student_id == student_id
+    }
+    old_lines = sorted(_preview_team_line(tm) for tm in current)
+    new_lines = sorted(
+        _preview_team_line(tm) for tm in current if id(tm) not in deleted_ids
+    )
+    new_lines.extend(
+        sorted(
+            _preview_team_line(obj) for obj in session.new
+            if isinstance(obj, TeamMember) and obj.student_id == student_id
+        )
+    )
+    new_lines.sort()
+    return '; '.join(old_lines) or '(none)', '; '.join(new_lines) or '(none)'
+
+
 def _describe_preview_object(obj):
     """Short human label for a record touched by a preview run."""
     if isinstance(obj, Student):
@@ -12689,13 +12782,22 @@ def _collect_preview_changes(session, collector):
 
     # Labelling reads from the database; autoflush here would re-enter this listener.
     with session.no_autoflush:
+        team_student_ids = set()
         for obj in session.new:
+            if isinstance(obj, TeamMember):
+                if obj.student_id:
+                    team_student_ids.add(obj.student_id)
+                continue
             if id(obj) in collector['seen_new']:
                 continue
             collector['seen_new'].add(id(obj))
             kind, label = _describe_preview_object(obj)
             collector['created'].append({'kind': kind, 'label': label})
         for obj in session.deleted:
+            if isinstance(obj, TeamMember):
+                if obj.student_id:
+                    team_student_ids.add(obj.student_id)
+                continue
             if id(obj) in collector['seen_removed']:
                 continue
             collector['seen_removed'].add(id(obj))
@@ -12706,8 +12808,21 @@ def _collect_preview_changes(session, collector):
                 continue
             state = sa_inspect(obj)
             fields = []
+            skip_keys = set(SHEET_PREVIEW_HIDDEN_FIELDS)
+            if isinstance(obj, User) and obj.role != 'student':
+                skip_keys.update(('role', 'designation'))
+                role_old, role_new = _preview_history_pair(state, 'role')
+                des_old, des_new = _preview_history_pair(state, 'designation')
+                old_label = _user_sheet_role_label(role_old, des_old)
+                new_label = _user_sheet_role_label(role_new, des_new)
+                if old_label != new_label:
+                    fields.append({
+                        'field': 'Role',
+                        'from': old_label,
+                        'to': new_label,
+                    })
             for attr in state.mapper.column_attrs:
-                if attr.key in SHEET_PREVIEW_HIDDEN_FIELDS:
+                if attr.key in skip_keys:
                     continue
                 history = state.attrs[attr.key].history
                 if not history.has_changes():
@@ -12728,6 +12843,25 @@ def _collect_preview_changes(session, collector):
             else:
                 entry = {'kind': kind, 'label': label, 'changes': fields}
                 collector['seen_updated'][id(obj)] = entry
+                collector['updated'].append(entry)
+
+        for student_id in team_student_ids:
+            old_lines, new_lines = _preview_support_team_lines(student_id, session)
+            if old_lines == new_lines:
+                continue
+            student = db.session.get(Student, student_id)
+            if student:
+                kind, label = _describe_preview_object(student)
+            else:
+                kind, label = 'Student', f'#{student_id}'
+            fields = [{'field': 'Support team', 'from': old_lines, 'to': new_lines}]
+            existing = collector['seen_updated'].get(id(student) if student else student_id)
+            if existing:
+                existing['changes'].extend(fields)
+            else:
+                key = id(student) if student else student_id
+                entry = {'kind': kind, 'label': label, 'changes': fields}
+                collector['seen_updated'][key] = entry
                 collector['updated'].append(entry)
 
 
