@@ -11006,6 +11006,8 @@ async function saveEditedPointCard(recordId, studentId, date) {
         showMessage('Error: Invalid student selected', 'error');
         return;
     }
+
+    await loadStudentSchedulesForIds([normalizedStudentId]);
     
     // Collect updated values from the form
     const defaultLocations = ['Studio', 'Reflection Room', 'Professional', 'Hallway', 'Calming Room', 'Outside', 'Off Campus'];
@@ -11046,7 +11048,11 @@ async function saveEditedPointCard(recordId, studentId, date) {
             frenzy: period.frenzy || false,
             notes: period.notes || '',
             reminders: period.reminders || '',
-            info: normalizeInfoStringFromNotes(period.info || '', knownLocationsForEditSave),
+            info: normalizeInfoStringFromNotes(
+                period.info || '',
+                knownLocationsForEditSave,
+                getScheduledLocationForStudentPeriod(normalizedStudentId, time_range, date)
+            ),
             infractions: period.infractions || []
         };
     });
@@ -13089,6 +13095,17 @@ async function showInfoModal(event) {
     } else {
         populateAlternateLocationOptions(DEFAULT_ALTERNATE_LOCATIONS);
     }
+    await loadStudentSchedulesForIds([studentId]);
+    const infoContextDate = (button.dataset.isEditPointCard === 'true' && window.editingPointCardRecord?.date)
+        ? window.editingPointCardRecord.date
+        : (currentDate || null);
+    const scheduledLocation = getScheduledLocationForStudentPeriod(studentId, period, infoContextDate);
+    if (!isAlternateLocationManual() && isDetectedLocationScheduled(alternateLocationInput.value, scheduledLocation)) {
+        alternateLocationInput.value = '';
+        if (infoData.auto_from_notes && typeof infoData.auto_from_notes === 'object') {
+            infoData.auto_from_notes.alternate_location = false;
+        }
+    }
     syncAlternateLocationSelectFromInput();
     
     // Reminders
@@ -13504,7 +13521,39 @@ function countExactPhraseMatches(haystack, phrase) {
     return matches ? matches.length : 0;
 }
 
-function normalizeInfoFromTextFields(infoData, knownLocations = []) {
+function getInfoContextDate(modal = document.getElementById('info-modal')) {
+    if (modal?.dataset?.isEditPointCard === 'true' && window.editingPointCardRecord?.date) {
+        return window.editingPointCardRecord.date;
+    }
+    return currentDate || null;
+}
+
+function getScheduledLocationForStudentPeriod(studentId, periodTime, onDate = null) {
+    if (studentId == null || studentId === '' || !periodTime) return '';
+    return getStudentScheduleLocationForPeriod(studentId, periodTime, onDate || currentDate || null) || '';
+}
+
+function getInfoModalScheduledLocation() {
+    const modal = document.getElementById('info-modal');
+    if (!modal) return '';
+    return getScheduledLocationForStudentPeriod(
+        modal.dataset.studentId,
+        modal.dataset.period,
+        getInfoContextDate(modal)
+    );
+}
+
+function isDetectedLocationScheduled(detectedLocation, scheduledLocation) {
+    const detected = String(detectedLocation || '').trim().toLowerCase();
+    if (!detected || !scheduledLocation) return false;
+    const parts = String(scheduledLocation)
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+    return parts.some((part) => part === detected || countExactPhraseMatches(part, detected) > 0);
+}
+
+function normalizeInfoFromTextFields(infoData, knownLocations = [], scheduledLocation = '') {
     const clone = JSON.parse(JSON.stringify(infoData || {}));
     const autoFromNotes = {};
     const textFields = [
@@ -13573,27 +13622,33 @@ function normalizeInfoFromTextFields(infoData, knownLocations = []) {
     }
 
     // Alternate location: known locations only, conflict-safe.
+    // Skip the student's scheduled class — being where they belong is not an alternate location.
     const normalizedKnownLocations = (knownLocations || [])
         .map((loc) => String(loc || '').trim())
         .filter(Boolean);
     let detectedLocation = null;
     normalizedKnownLocations.forEach((location) => {
         if (detectedLocation) return;
+        if (isDetectedLocationScheduled(location, scheduledLocation)) return;
         if (countExactPhraseMatches(corpus, location.toLowerCase())) {
             detectedLocation = location;
         }
     });
+    const existingAlt = String(clone.alternate_location || '').trim();
+    const existingIsScheduled = isDetectedLocationScheduled(existingAlt, scheduledLocation);
     if (detectedLocation) {
         if (clone.alternate_location_manual) {
-            if (String(clone.alternate_location || '').trim().toLowerCase() === detectedLocation.toLowerCase()) {
+            if (existingAlt.toLowerCase() === detectedLocation.toLowerCase()) {
                 autoFromNotes.alternate_location = true;
             }
-        } else if (!String(clone.alternate_location || '').trim()) {
+        } else if (!existingAlt || existingIsScheduled) {
             clone.alternate_location = detectedLocation;
             autoFromNotes.alternate_location = true;
-        } else if (String(clone.alternate_location).trim().toLowerCase() === detectedLocation.toLowerCase()) {
+        } else if (existingAlt.toLowerCase() === detectedLocation.toLowerCase()) {
             autoFromNotes.alternate_location = true;
         }
+    } else if (!clone.alternate_location_manual && existingIsScheduled) {
+        clone.alternate_location = '';
     }
 
     // Highest level of staff called is frenzy-only and is never inferred from notes or locations.
@@ -13722,7 +13777,7 @@ function refreshInfoModalAutoPreview() {
     const draft = collectInfoModalDraftData();
     syncInfoSeverityVisibility(!!draft.frenzy);
     const knownLocations = getKnownLocationsFromInfoModal();
-    const normalized = normalizeInfoFromTextFields(draft, knownLocations);
+    const normalized = normalizeInfoFromTextFields(draft, knownLocations, getInfoModalScheduledLocation());
     renderInfoModalAutoPreview(normalized);
 }
 
@@ -13735,7 +13790,7 @@ function bindInfoModalAutoPreview() {
     modal.dataset.autoPreviewBound = 'true';
 }
 
-function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
+function normalizeInfoStringFromNotes(infoString, knownLocations = [], scheduledLocation = '') {
     if (!infoString || !String(infoString).trim()) return infoString || '';
     let parsed;
     try {
@@ -13743,7 +13798,7 @@ function normalizeInfoStringFromNotes(infoString, knownLocations = []) {
     } catch (e) {
         parsed = { notes: String(infoString) };
     }
-    const normalized = normalizeInfoFromTextFields(parsed, knownLocations);
+    const normalized = normalizeInfoFromTextFields(parsed, knownLocations, scheduledLocation);
     return JSON.stringify(normalized);
 }
 
@@ -13813,7 +13868,7 @@ function saveInfoModal() {
 
     // Parse text fields for exact keyword matches and auto-fill related Info values.
     const knownLocations = getKnownLocationsFromInfoModal();
-    infoData = normalizeInfoFromTextFields(infoData, knownLocations);
+    infoData = normalizeInfoFromTextFields(infoData, knownLocations, getInfoModalScheduledLocation());
     updateInfoModalAutoBadges(infoData.auto_from_notes);
 
     const periodIndex = modal.dataset.periodIndex === undefined || modal.dataset.periodIndex === ''
