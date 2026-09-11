@@ -4795,6 +4795,9 @@ async function switchView(viewName) {
             loadSchoolYearConfig();
         });
         loadSchoolBilling();
+        if (typeof window.loadEconomyAdminSettings === 'function') {
+            window.loadEconomyAdminSettings();
+        }
     }
     
     // If switching to schedules view, initialize schedules
@@ -4888,6 +4891,18 @@ async function switchView(viewName) {
             }
         }
         handleMarketplaceView();
+    }
+    if (viewName === 'bills') {
+        const billsManagedByMeCheckbox = document.getElementById('bills-managed-by-me-checkbox');
+        if (billsManagedByMeCheckbox && window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+            const shouldCheck = window.currentUser.role === 'staff';
+            if (billsManagedByMeCheckbox.checked !== shouldCheck) {
+                billsManagedByMeCheckbox.checked = shouldCheck;
+            }
+        }
+        if (typeof window.loadBillsView === 'function') {
+            window.loadBillsView();
+        }
     }
 }
 
@@ -17623,7 +17638,9 @@ function createAdminStaffRow(user, displayRole, isStaffTable) {
                 user.card_color || null,
                 user.grades_taught || null,
                 user.linked_case_manager_ids || (user.linked_case_manager_id ? [user.linked_case_manager_id] : []),
-                user.email || null
+                user.email || null,
+                user.parent_emails || null,
+                user.pay_track || 'simple'
             )
         });
     }
@@ -17847,7 +17864,8 @@ function createStudentRow(user) {
                 null,
                 null,
                 user.email || null,
-                user.parent_emails || null
+                user.parent_emails || null,
+                user.pay_track || 'simple'
             )
         });
     }
@@ -18418,7 +18436,7 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
-async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerIds, email, parentEmails) {
+async function editUser(userId, name, username, role, studentId, designation, grade, cardColor, gradesTaught, linkedCaseManagerIds, email, parentEmails, payTrack) {
     // Check permissions
     if (!isAdmin() && role !== 'student' && userId !== window.currentUser.id) {
         alert('You can only edit student accounts or your own account');
@@ -18484,6 +18502,10 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         if (cardColorSelect) {
             cardColorSelect.value = cardColor || '';
         }
+        const payTrackSelect = document.getElementById('edit-user-pay-track');
+        if (payTrackSelect) {
+            payTrackSelect.value = payTrack || 'simple';
+        }
         populateParentEmailRows(PARENT_EMAILS_CONTAINER_ID, parentEmails || '');
     }
     
@@ -18521,6 +18543,7 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     // Show/hide grade field based on role
     const gradeGroup = document.getElementById('edit-user-grade-group');
     const cardColorGroup = document.getElementById('edit-user-card-color-group');
+    const payTrackGroup = document.getElementById('edit-user-pay-track-group');
     const parentEmailsGroup = document.getElementById('edit-user-parent-emails-group');
     // Only admins and staff manage parent contacts, not students editing themselves
     const canEditParentEmails = role === 'student' && (isAdmin() || isStaff());
@@ -18529,10 +18552,16 @@ async function editUser(userId, name, username, role, studentId, designation, gr
         if (cardColorGroup) {
             cardColorGroup.style.display = 'block';
         }
+        if (payTrackGroup) {
+            payTrackGroup.style.display = 'block';
+        }
     } else {
         gradeGroup.style.display = 'none';
         if (cardColorGroup) {
             cardColorGroup.style.display = 'none';
+        }
+        if (payTrackGroup) {
+            payTrackGroup.style.display = 'none';
         }
     }
     if (parentEmailsGroup) {
@@ -19020,6 +19049,7 @@ async function saveEditUser() {
     const passwordConfirm = document.getElementById('edit-user-password-confirm').value;
     const grade = document.getElementById('edit-user-grade').value;
     const cardColor = document.getElementById('edit-user-card-color')?.value || '';
+    const payTrack = document.getElementById('edit-user-pay-track')?.value || 'simple';
     const emailValue = document.getElementById('edit-user-email')?.value.trim() || '';
     
     // Map display role to system role and designation
@@ -19128,6 +19158,7 @@ async function saveEditUser() {
     // Include card_color for student users
     if (systemRole === 'student') {
         updateData.card_color = cardColor || null;
+        updateData.pay_track = payTrack || 'simple';
     }
     
     // Include parent/guardian emails for student users when the field is available
@@ -19781,6 +19812,8 @@ function editOutsideStaffUser(userId, name, username, district) {
         if (gradeGroup) gradeGroup.style.display = 'none';
         const cardColorGroup = document.getElementById('edit-user-card-color-group');
         if (cardColorGroup) cardColorGroup.style.display = 'none';
+        const payTrackGroup = document.getElementById('edit-user-pay-track-group');
+        if (payTrackGroup) payTrackGroup.style.display = 'none';
         const teamSection = document.getElementById('edit-user-team-members-section');
         if (teamSection) teamSection.style.display = 'none';
         
@@ -25046,6 +25079,37 @@ function renderPaycheckWorksheet(paycheck) {
     
     worksheetDiv.style.display = 'block';
     document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(2);
+
+    const isComplex = paycheck.pay_track === 'complex';
+    const complexFields = document.getElementById('complex-paycheck-fields');
+    if (complexFields) complexFields.style.display = isComplex ? 'block' : 'none';
+    worksheetDiv.dataset.payTrack = isComplex ? 'complex' : 'simple';
+
+    const baseLabel = document.getElementById('worksheet-base-label');
+    const baseFormula = document.getElementById('worksheet-base-formula');
+    const finalFormula = document.getElementById('worksheet-final-formula');
+    const complexHint = document.getElementById('worksheet-complex-hint');
+    if (isComplex) {
+        if (baseLabel) baseLabel.textContent = 'Gross pay:';
+        if (baseFormula) {
+            const hourly = paycheck.hourly_rate != null ? Number(paycheck.hourly_rate).toFixed(2) : '0.00';
+            const hours = paycheck.hours_worked != null ? Number(paycheck.hours_worked).toFixed(0) : '30';
+            baseFormula.innerHTML = `Hourly $${hourly} × ${hours} hours × <span id="worksheet-avg-percent">${paycheck.average_star_percent.toFixed(2)}</span>% =`;
+        }
+        if (finalFormula) finalFormula.textContent = 'Gross − Social Security − Medicare − federal − citation deduction =';
+        if (complexHint) {
+            const std = paycheck.standard_deduction != null ? Number(paycheck.standard_deduction).toFixed(2) : '16100.00';
+            const fed = paycheck.federal_tax != null ? Number(paycheck.federal_tax).toFixed(2) : '0.00';
+            complexHint.textContent = `Annual standard deduction is $${std} (teaching text). This week’s federal withholding to type is $${fed}.`;
+        }
+    } else {
+        if (baseLabel) baseLabel.textContent = 'Base Pay:';
+        if (baseFormula) {
+            baseFormula.innerHTML = `Calculate your base pay: $100 × <span id="worksheet-avg-percent">${paycheck.average_star_percent.toFixed(2)}</span>% =`;
+        }
+        if (finalFormula) finalFormula.textContent = 'Base Pay - Citation Deduction =';
+        if (complexHint) complexHint.textContent = '';
+    }
     
     // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
     const citationListEl = document.getElementById('worksheet-citation-list');
@@ -25079,12 +25143,24 @@ function renderPaycheckWorksheet(paycheck) {
         document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
         document.getElementById('worksheet-calculated-deduction').value = formatCurrency(paycheck.student_calculated_deduction);
         document.getElementById('worksheet-calculated-final').value = formatCurrency(paycheck.student_calculated_final);
+        if (isComplex) {
+            const ssEl = document.getElementById('worksheet-calculated-ss');
+            const medEl = document.getElementById('worksheet-calculated-medicare');
+            const fedEl = document.getElementById('worksheet-calculated-federal');
+            if (ssEl) ssEl.value = paycheck.student_calculated_ss != null ? formatCurrency(paycheck.student_calculated_ss) : '';
+            if (medEl) medEl.value = paycheck.student_calculated_medicare != null ? formatCurrency(paycheck.student_calculated_medicare) : '';
+            if (fedEl) fedEl.value = paycheck.student_calculated_federal != null ? formatCurrency(paycheck.student_calculated_federal) : '';
+        }
     } else {
         // Clear inputs for new worksheet
         document.getElementById('worksheet-calculated-pay').value = '';
         document.getElementById('worksheet-calculated-citations').value = '';
         document.getElementById('worksheet-calculated-deduction').value = '';
         document.getElementById('worksheet-calculated-final').value = '';
+        ['worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
     }
     
     // Clear error/success messages
@@ -25104,23 +25180,35 @@ async function submitPaycheckWorksheet() {
     const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value, 10);
     const calculatedDeduction = parseCurrency(document.getElementById('worksheet-calculated-deduction').value);
     const calculatedFinal = parseCurrency(document.getElementById('worksheet-calculated-final').value);
+    const isComplex = worksheetDiv.dataset.payTrack === 'complex';
+    const calculatedSs = parseCurrency(document.getElementById('worksheet-calculated-ss')?.value);
+    const calculatedMedicare = parseCurrency(document.getElementById('worksheet-calculated-medicare')?.value);
+    const calculatedFederal = parseCurrency(document.getElementById('worksheet-calculated-federal')?.value);
     
-    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal)) {
+    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal) ||
+        (isComplex && (isNaN(calculatedSs) || isNaN(calculatedMedicare) || isNaN(calculatedFederal)))) {
         document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
         document.getElementById('worksheet-error').style.display = 'block';
         return;
     }
     
     try {
+        const payload = {
+            calculated_pay: calculatedPay,
+            calculated_citations: calculatedCitations,
+            calculated_deduction: calculatedDeduction,
+            calculated_final: calculatedFinal
+        };
+        if (isComplex) {
+            payload.calculated_gross = calculatedPay;
+            payload.calculated_ss = calculatedSs;
+            payload.calculated_medicare = calculatedMedicare;
+            payload.calculated_federal = calculatedFederal;
+        }
         const response = await fetch(`/api/paycheck/${paycheckId}/complete-worksheet`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                calculated_pay: calculatedPay,
-                calculated_citations: calculatedCitations,
-                calculated_deduction: calculatedDeduction,
-                calculated_final: calculatedFinal
-            })
+            body: JSON.stringify(payload)
         });
         
         const data = await response.json();
@@ -25681,7 +25769,7 @@ function handleBankAccountView() {
     }
     
     // Currency format on blur for worksheet inputs
-    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final'].forEach(function (id) {
+    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('blur', function () {
@@ -25692,7 +25780,7 @@ function handleBankAccountView() {
     });
     
     // Enter = Tab in worksheet (move to next field)
-    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'submit-worksheet-btn'];
+    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal', 'worksheet-calculated-final', 'submit-worksheet-btn'];
     const worksheetDiv = document.getElementById('current-paycheck-worksheet');
     if (worksheetDiv) {
         worksheetDiv.addEventListener('keydown', function (e) {
@@ -25703,8 +25791,13 @@ function handleBankAccountView() {
             e.preventDefault();
             const nextId = worksheetFocusOrder[idx + 1];
             if (nextId) {
-                const nextEl = document.getElementById(nextId);
-                if (nextEl) nextEl.focus();
+                for (let i = idx + 1; i < worksheetFocusOrder.length; i++) {
+                    const nextEl = document.getElementById(worksheetFocusOrder[i]);
+                    if (nextEl && nextEl.offsetParent !== null) {
+                        nextEl.focus();
+                        break;
+                    }
+                }
             }
         });
     }
@@ -31995,20 +32088,25 @@ function attachOverviewCardInteractions(container, data) {
 
         let dayGraphBlock = dayEmptyMsg;
         if (daySlots.length) {
+            // Scale bar fill to shared axis max (same idea as time h-bars). A single-segment
+            // layout with data-ib-t === count always painted 100% of the fixed stack height.
+            const dayMaxTotal = Math.max(...daySlots.map((s) => s.count), 1);
+            const dayAxisMax = niceCeilingAxisMax(dayMaxTotal);
             const dayColsHtml = daySlots
                 .map((slot) => {
                     const dbTotal = slot.count;
+                    const barPct = dayAxisMax > 0 ? Math.min(100, (dbTotal / dayAxisMax) * 100) : 0;
                     const tipRaw = `${label}: ${dbTotal} on ${slot.dayLabel}`;
-                    const hitEntries = [{ n: dbTotal, dataEnc: encodeInfractionsChartTipDataAttr(tipRaw) }];
-                    const segMetaV = ` data-infraction-bar="v" data-ib-t="${dbTotal}" data-ib-ns="${dbTotal}" data-ib-cs="${barColorEnc}"`;
-                    const segsInner = `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--layers" aria-hidden="true"></div>${infractionBarVerticalHitsHtml(hitEntries)}`;
+                    const tipEnc = encodeInfractionsChartTipDataAttr(tipRaw);
+                    // Solid fill anchored to the bottom of the track; height encodes count.
+                    const segsInner = `<div class="infractions-vbar-barsheet infractions-vbar-barsheet--interactive" style="top:auto;height:${barPct}%;background:${barColor};border-radius:10px 10px 0 0" data-ictip="${tipEnc}"></div>`;
                     return `
                 <div class="infractions-vbar-col">
                     <div class="infractions-vbar-count infractions-vbar-count--stacked">
                         <span class="infractions-vbar-count-num">${dbTotal}</span>
                         ${formatInfractionCountDeltaHtml(getDayDelta(slot.dayLabel, dbTotal))}
                     </div>
-                    <div class="infractions-vbar-stack"${segMetaV}>${segsInner}</div>
+                    <div class="infractions-vbar-stack">${segsInner}</div>
                     <div class="infractions-vbar-label-slot" title="${escapeHtml(slot.dayLabel)}"><span class="infractions-vbar-label">${escapeHtml(formatVbarDayLabel(slot.dayLabel))}</span></div>
                 </div>`;
                 })

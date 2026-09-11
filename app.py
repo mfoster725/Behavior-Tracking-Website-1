@@ -2420,6 +2420,8 @@ class Student(db.Model):
     parent_emails = db.Column(db.Text, nullable=True)
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
     card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
+    # simple = $100 × STAR%; complex = card-color wages + tax worksheet
+    pay_track = db.Column(db.String(20), nullable=False, default='simple')
     # When set, only school days with data after this date count toward the next level-up window.
     card_level_reset_at = db.Column(db.Date, nullable=True)
     # Directory information opt-out
@@ -2942,6 +2944,17 @@ class Paycheck(db.Model):
     student_calculated_citations = db.Column(db.Integer, nullable=True)
     student_calculated_deduction = db.Column(db.Numeric(10, 2), nullable=True)
     student_calculated_final = db.Column(db.Numeric(10, 2), nullable=True)
+    pay_track = db.Column(db.String(20), nullable=False, default='simple')  # simple | complex
+    hourly_rate = db.Column(db.Numeric(10, 2), nullable=True)
+    hours_worked = db.Column(db.Numeric(10, 2), nullable=True)
+    gross_pay = db.Column(db.Numeric(10, 2), nullable=True)
+    ss_tax = db.Column(db.Numeric(10, 2), nullable=True)
+    medicare_tax = db.Column(db.Numeric(10, 2), nullable=True)
+    federal_tax = db.Column(db.Numeric(10, 2), nullable=True)
+    student_calculated_gross = db.Column(db.Numeric(10, 2), nullable=True)
+    student_calculated_ss = db.Column(db.Numeric(10, 2), nullable=True)
+    student_calculated_medicare = db.Column(db.Numeric(10, 2), nullable=True)
+    student_calculated_federal = db.Column(db.Numeric(10, 2), nullable=True)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
     deposited_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -3168,16 +3181,135 @@ class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
     bank_account_id = db.Column(db.Integer, db.ForeignKey('bank_accounts.id'), nullable=False)
-    transaction_type = db.Column(db.String(20), nullable=False)  # 'deposit' or 'purchase'
+    transaction_type = db.Column(db.String(20), nullable=False)  # deposit, purchase, refund, bill, fee, late_fee
     amount = db.Column(db.Numeric(10, 2), nullable=False)  # Positive for deposits, negative for purchases
     paycheck_id = db.Column(db.Integer, db.ForeignKey('paychecks.id'), nullable=True)
     purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True)
+    student_bill_id = db.Column(db.Integer, db.ForeignKey('student_bills.id'), nullable=True)
     balance_after = db.Column(db.Numeric(10, 2), nullable=False)
     description = db.Column(db.String(500), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
     student = db.relationship('Student', backref='transactions')
+    student_bill = db.relationship('StudentBill', backref='transactions')
+
+
+class EconomySettings(db.Model):
+    """Singleton row for school-wide Manny's Market economy settings."""
+    __tablename__ = 'economy_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    default_pay_track = db.Column(db.String(20), nullable=False, default='simple')
+    late_fee_per_day = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('20.00'))
+    tax_table_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WageRate(db.Model):
+    __tablename__ = 'wage_rates'
+    id = db.Column(db.Integer, primary_key=True)
+    card_color = db.Column(db.String(20), nullable=False, unique=True)
+    hourly_rate = db.Column(db.Numeric(10, 2), nullable=False)
+    education_label = db.Column(db.String(100), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BillProduct(db.Model):
+    __tablename__ = 'bill_products'
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(50), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    category = db.Column(db.String(40), nullable=False, default='other')
+    is_base = db.Column(db.Boolean, default=False, nullable=False)
+    formula_kind = db.Column(db.String(40), nullable=False, default='flat')
+    amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    options_json = db.Column(db.Text, nullable=True)
+    prompt = db.Column(db.Text, nullable=True)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StudentBudget(db.Model):
+    __tablename__ = 'student_budgets'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    enrolled = db.Column(db.Boolean, default=False, nullable=False)
+    choices_json = db.Column(db.Text, nullable=True)
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    student = db.relationship('Student', backref=db.backref('budget', uselist=False))
+    updated_by = db.relationship('User', foreign_keys=[updated_by_user_id])
+
+
+class MissFeeClass(db.Model):
+    __tablename__ = 'miss_fee_classes'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    match_text = db.Column(db.String(100), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('50.00'))
+    skip_to_location = db.Column(db.String(100), nullable=False, default='Studio')
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+
+
+class StudentPtoBalance(db.Model):
+    __tablename__ = 'student_pto_balances'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
+    days_remaining = db.Column(db.Numeric(6, 2), nullable=False, default=Decimal('0.00'))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    student = db.relationship('Student', backref=db.backref('pto_balance', uselist=False))
+
+
+class StudentPtoUse(db.Model):
+    __tablename__ = 'student_pto_uses'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    use_date = db.Column(db.Date, nullable=False)
+    days = db.Column(db.Numeric(6, 2), nullable=False, default=Decimal('1.00'))
+    granted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship('Student', backref='pto_uses')
+    granted_by = db.relationship('User', foreign_keys=[granted_by_user_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'use_date', name='unique_student_pto_use_date'),
+    )
+
+
+class StudentBill(db.Model):
+    __tablename__ = 'student_bills'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    bill_product_id = db.Column(db.Integer, db.ForeignKey('bill_products.id'), nullable=True)
+    miss_fee_class_id = db.Column(db.Integer, db.ForeignKey('miss_fee_classes.id'), nullable=True)
+    kind = db.Column(db.String(20), nullable=False, default='bill')  # bill | fee
+    period_key = db.Column(db.String(20), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    fee_date = db.Column(db.Date, nullable=True)
+    description = db.Column(db.String(500), nullable=True)
+    prompt = db.Column(db.Text, nullable=True)
+    steps_json = db.Column(db.Text, nullable=True)
+    base_amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    late_fee_amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    status = db.Column(db.String(20), nullable=False, default='unpaid')  # unpaid | paid | waived
+    paid_at = db.Column(db.DateTime, nullable=True)
+    paid_amount = db.Column(db.Numeric(10, 2), nullable=True)
+    waived_reason = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship('Student', backref='bills')
+    product = db.relationship('BillProduct', backref='student_bills')
+    miss_fee_class = db.relationship('MissFeeClass', backref='student_bills')
+
+    __table_args__ = (
+        db.Index('ix_student_bills_student_period', 'student_id', 'period_key'),
+    )
 
 
 class SiteSubscription(db.Model):
@@ -3338,6 +3470,183 @@ def ensure_curriculum_schema():
             app.logger.warning(f"Failed to ensure curriculum schema: {e}")
         except Exception:
             print(f"Failed to ensure curriculum schema: {e}")
+
+
+def _economy_add_column(conn, is_postgres, table, column, col_type):
+    if is_postgres:
+        conn.execute(text(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"
+        ))
+        return
+    rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+    cols = {row[1] for row in rows}
+    if rows and column not in cols:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+
+
+def ensure_economy_schema():
+    """Add economy columns on existing databases. New tables come from create_all."""
+    try:
+        is_postgres = 'postgresql' in str(db.engine.url).lower()
+        with db.engine.connect() as conn:
+            _economy_add_column(conn, is_postgres, 'students', 'pay_track', "VARCHAR(20) DEFAULT 'simple'")
+            for col, typ in [
+                ('pay_track', "VARCHAR(20) DEFAULT 'simple'"),
+                ('hourly_rate', 'NUMERIC(10, 2)'),
+                ('hours_worked', 'NUMERIC(10, 2)'),
+                ('gross_pay', 'NUMERIC(10, 2)'),
+                ('ss_tax', 'NUMERIC(10, 2)'),
+                ('medicare_tax', 'NUMERIC(10, 2)'),
+                ('federal_tax', 'NUMERIC(10, 2)'),
+                ('student_calculated_gross', 'NUMERIC(10, 2)'),
+                ('student_calculated_ss', 'NUMERIC(10, 2)'),
+                ('student_calculated_medicare', 'NUMERIC(10, 2)'),
+                ('student_calculated_federal', 'NUMERIC(10, 2)'),
+            ]:
+                _economy_add_column(conn, is_postgres, 'paychecks', col, typ)
+            _economy_add_column(conn, is_postgres, 'transactions', 'student_bill_id', 'INTEGER')
+            conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure economy schema: {e}")
+        except Exception:
+            print(f"Failed to ensure economy schema: {e}")
+
+
+def _economy_settings_row():
+    from economy_lib import DEFAULT_PAY_TRACK, DEFAULT_LATE_FEE_PER_DAY, DEFAULT_TAX_TABLE, dump_json
+    row = EconomySettings.query.first()
+    if not row:
+        row = EconomySettings(
+            default_pay_track=DEFAULT_PAY_TRACK,
+            late_fee_per_day=DEFAULT_LATE_FEE_PER_DAY,
+            tax_table_json=dump_json(DEFAULT_TAX_TABLE),
+        )
+        db.session.add(row)
+        db.session.flush()
+    return row
+
+
+def _apply_student_pay_track(student, track):
+    """Set simple vs complex depositing track. Complex auto-enrolls in monthly bills."""
+    if not student or track not in ('simple', 'complex'):
+        return
+    student.pay_track = track
+    from economy_lib import DEFAULT_BUDGET_CHOICES, dump_json
+    budget = StudentBudget.query.filter_by(student_id=student.id).first()
+    if not budget:
+        budget = StudentBudget(
+            student_id=student.id,
+            enrolled=(track == 'complex'),
+            choices_json=dump_json(DEFAULT_BUDGET_CHOICES),
+        )
+        db.session.add(budget)
+        return
+    if track == 'complex':
+        budget.enrolled = True
+
+
+def seed_economy(commit=True):
+    """Insert default wage rates, bill products, miss-fee classes, and market catalog."""
+    from economy_lib import (
+        BILL_PRODUCT_SEEDS,
+        DEFAULT_TAX_TABLE,
+        MARKETPLACE_CATEGORY_SEEDS,
+        MARKETPLACE_ITEM_SEEDS,
+        MARKETPLACE_TYPE_SEEDS,
+        MISS_FEE_CLASS_SEEDS,
+        WAGE_RATE_SEEDS,
+        dump_json,
+    )
+    try:
+        _economy_settings_row()
+        for spec in WAGE_RATE_SEEDS:
+            row = WageRate.query.filter_by(card_color=spec['card_color']).first()
+            if row:
+                continue
+            db.session.add(WageRate(
+                card_color=spec['card_color'],
+                hourly_rate=Decimal(spec['hourly_rate']),
+                education_label=spec.get('education_label'),
+            ))
+        for spec in BILL_PRODUCT_SEEDS:
+            row = BillProduct.query.filter_by(slug=spec['slug']).first()
+            options = dump_json(spec.get('options_json') or {})
+            if row:
+                if not row.options_json:
+                    row.options_json = options
+                continue
+            db.session.add(BillProduct(
+                slug=spec['slug'],
+                name=spec['name'],
+                category=spec['category'],
+                is_base=spec.get('is_base', False),
+                formula_kind=spec.get('formula_kind') or 'flat',
+                amount=Decimal(str(spec.get('amount') or '0')),
+                options_json=options,
+                prompt=spec.get('prompt'),
+                sort_order=spec.get('sort_order') or 0,
+                is_active=True,
+            ))
+        for spec in MISS_FEE_CLASS_SEEDS:
+            existing = MissFeeClass.query.filter_by(match_text=spec['match_text']).first()
+            if existing:
+                continue
+            db.session.add(MissFeeClass(
+                name=spec['name'],
+                match_text=spec['match_text'],
+                amount=Decimal(spec['amount']),
+                skip_to_location=spec.get('skip_to_location') or 'Studio',
+                is_active=spec.get('is_active', True),
+                sort_order=spec.get('sort_order') or 0,
+            ))
+        type_ids = {}
+        for name, sort_order in MARKETPLACE_TYPE_SEEDS:
+            row = MarketplaceItemType.query.filter_by(name=name).first()
+            if not row:
+                row = MarketplaceItemType(name=name, sort_order=sort_order)
+                db.session.add(row)
+                db.session.flush()
+            type_ids[name] = row.id
+        cat_ids = {}
+        for name, sort_order in MARKETPLACE_CATEGORY_SEEDS:
+            row = MarketplaceCategory.query.filter_by(name=name).first()
+            if not row:
+                row = MarketplaceCategory(name=name, sort_order=sort_order)
+                db.session.add(row)
+                db.session.flush()
+            cat_ids[name] = row.id
+        creator = User.query.filter_by(role='admin').order_by(User.id).first()
+        if not creator:
+            creator = User.query.order_by(User.id).first()
+        if creator:
+            for spec in MARKETPLACE_ITEM_SEEDS:
+                if spec.get('skip') or Decimal(str(spec.get('price') or 0)) <= 0:
+                    continue
+                existing = MarketplaceItem.query.filter_by(name=spec['name']).first()
+                if existing:
+                    continue
+                db.session.add(MarketplaceItem(
+                    name=spec['name'],
+                    description=spec.get('description') or '',
+                    price=Decimal(str(spec['price'])),
+                    created_by_user_id=creator.id,
+                    is_global=True,
+                    is_approved_for_global=True,
+                    is_active=True,
+                    grade_range='school_wide',
+                    item_type_id=type_ids.get(spec.get('type_name')),
+                    category_id=cat_ids.get(spec.get('category_name')),
+                ))
+        if commit:
+            db.session.commit()
+    except Exception as e:
+        if commit:
+            db.session.rollback()
+        try:
+            app.logger.warning(f"seed_economy failed: {e}")
+        except Exception:
+            print(f"seed_economy failed: {e}")
 
 
 def _chunked_ids(ids, size=500):
@@ -3530,6 +3839,11 @@ def init_db():
                 seed_curriculum_lessons()
             except Exception as seed_err:
                 print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
+            try:
+                ensure_economy_schema()
+                seed_economy()
+            except Exception as seed_err:
+                print(f"Note: economy seed skipped: {seed_err}", flush=True)
             print("Database tables created/verified", flush=True)
             
             # Ensure OutsideStaffStudent table exists and run migrations
@@ -15213,6 +15527,7 @@ def manage_users():
                 user_data['student_name'] = student.name
                 user_data['grade'] = student.grade
                 user_data['card_color'] = student.card_color
+                user_data['pay_track'] = getattr(student, 'pay_track', None) or 'simple'
                 user_data['lunch_number'] = getattr(student, 'lunch_number', None)
                 user_data['parent_emails'] = getattr(student, 'parent_emails', None)
                 if not user_data['email'] and student.email:
@@ -15405,6 +15720,10 @@ def manage_users():
                 student = Student.query.get(user.student_id)
                 if student:
                     student.card_color = data['card_color'] if data['card_color'] else None
+            if 'pay_track' in data and user.student_id and data.get('pay_track') in ('simple', 'complex'):
+                student = Student.query.get(user.student_id)
+                if student:
+                    _apply_student_pay_track(student, data['pay_track'])
             
             # Update parent/guardian emails if provided and user is a student
             if 'parent_emails' in data and user.student_id:
@@ -15444,6 +15763,10 @@ def manage_users():
                 student = Student.query.get(user.student_id)
                 if student:
                     student.card_color = data['card_color'] if data['card_color'] else None
+            if 'pay_track' in data and user.student_id and data.get('pay_track') in ('simple', 'complex'):
+                student = Student.query.get(user.student_id)
+                if student:
+                    _apply_student_pay_track(student, data['pay_track'])
             
             # Update parent/guardian emails if provided
             if 'parent_emails' in data and user.student_id:
@@ -16378,6 +16701,164 @@ def list_weekly_citations(student_id, start_date, end_date):
     return result
 
 
+def _economy_tax_table():
+    import economy_lib as eco
+    row = EconomySettings.query.first()
+    if not row:
+        return eco.DEFAULT_TAX_TABLE
+    return eco.load_json(row.tax_table_json, eco.DEFAULT_TAX_TABLE)
+
+
+def _student_hourly_rate(student):
+    import economy_lib as eco
+    color = eco.card_color_key(student)
+    row = WageRate.query.filter_by(card_color=color).first()
+    if not row:
+        row = WageRate.query.filter_by(card_color='yellow').first()
+    return eco.money(row.hourly_rate if row else '20.00')
+
+
+def _paycheck_track(paycheck, student=None):
+    import economy_lib as eco
+    track = (getattr(paycheck, 'pay_track', None) or '').strip().lower()
+    if track in ('simple', 'complex'):
+        return track
+    student = student or Student.query.get(paycheck.student_id)
+    settings = EconomySettings.query.first()
+    default = settings.default_pay_track if settings else eco.DEFAULT_PAY_TRACK
+    return eco.student_pay_track(student, default) if student else eco.DEFAULT_PAY_TRACK
+
+
+def fill_paycheck_amounts(paycheck, student, avg_star, citation_count):
+    import economy_lib as eco
+    track = _paycheck_track(paycheck, student)
+    paycheck.pay_track = track
+    paycheck.average_star_percent = avg_star
+    paycheck.citation_count = citation_count
+    if track == 'complex':
+        computed = eco.compute_complex_paycheck(
+            _student_hourly_rate(student), avg_star, citation_count, _economy_tax_table()
+        )
+        paycheck.hourly_rate = computed['hourly_rate']
+        paycheck.hours_worked = computed['hours']
+        paycheck.gross_pay = computed['gross']
+        paycheck.ss_tax = computed['ss_tax']
+        paycheck.medicare_tax = computed['medicare_tax']
+        paycheck.federal_tax = computed['federal_tax']
+        paycheck.base_pay = computed['gross']
+        paycheck.citation_deduction = computed['citation_deduction']
+        paycheck.final_pay = computed['final_pay']
+        return computed
+    computed = eco.compute_simple_paycheck(avg_star, citation_count)
+    paycheck.base_pay = computed['base_pay']
+    paycheck.citation_deduction = computed['citation_deduction']
+    paycheck.final_pay = computed['final_pay']
+    return computed
+
+
+def live_paycheck_amounts(paycheck):
+    import economy_lib as eco
+    student = Student.query.get(paycheck.student_id)
+    citation_list = list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+    live_count = len(citation_list)
+    live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
+    track = _paycheck_track(paycheck, student)
+    if not paycheck.is_verified and paycheck.deposited_at is None:
+        if track == 'complex':
+            computed = eco.compute_complex_paycheck(
+                _student_hourly_rate(student), live_avg, live_count, _economy_tax_table()
+            )
+        else:
+            computed = eco.compute_simple_paycheck(live_avg, live_count)
+            computed = {
+                'gross': computed['base_pay'],
+                'base_pay': computed['base_pay'],
+                'citation_deduction': computed['citation_deduction'],
+                'final_pay': computed['final_pay'],
+                'ss_tax': None,
+                'medicare_tax': None,
+                'federal_tax': None,
+                'hourly_rate': None,
+                'hours': None,
+            }
+        avg_pct = live_avg
+        base_pay = computed.get('base_pay', computed.get('gross'))
+        final_pay = computed['final_pay']
+        deduction = computed['citation_deduction']
+        extra = computed
+    else:
+        avg_pct = paycheck.average_star_percent
+        base_pay = paycheck.base_pay
+        deduction = Decimal(str(live_count * 2))
+        if track == 'complex' and paycheck.gross_pay is not None:
+            extra = {
+                'gross': paycheck.gross_pay,
+                'ss_tax': paycheck.ss_tax,
+                'medicare_tax': paycheck.medicare_tax,
+                'federal_tax': paycheck.federal_tax,
+                'hourly_rate': paycheck.hourly_rate,
+                'hours': paycheck.hours_worked,
+            }
+            final_pay = paycheck.final_pay
+            base_pay = paycheck.gross_pay or paycheck.base_pay
+            deduction = paycheck.citation_deduction
+        else:
+            extra = {}
+            final_pay = (paycheck.base_pay or Decimal('0')) - deduction
+    return {
+        'track': track,
+        'avg_pct': avg_pct,
+        'base_pay': base_pay,
+        'final_pay': final_pay,
+        'citation_count': live_count,
+        'citation_list': citation_list,
+        'citation_deduction': deduction,
+        'live_avg': live_avg,
+        **extra,
+    }
+
+
+def serialize_paycheck_payload(p, include_student_calcs=False):
+    import economy_lib as eco
+    live = live_paycheck_amounts(p)
+    payload = {
+        'id': p.id,
+        'student_id': p.student_id,
+        'pay_period_start': p.pay_period_start.isoformat(),
+        'pay_period_end': p.pay_period_end.isoformat(),
+        'average_star_percent': float(live['avg_pct'] or 0),
+        'base_pay': float(eco.money(live['base_pay'])),
+        'citation_count': live['citation_count'],
+        'citation_list': live['citation_list'],
+        'citation_deduction': float(eco.money(live['citation_deduction'])),
+        'final_pay': float(eco.money(live['final_pay'])),
+        'worksheet_completed': p.worksheet_completed,
+        'is_verified': p.is_verified,
+        'deposited_at': utc_isoformat(p.deposited_at),
+        'created_at': utc_isoformat(p.created_at),
+        'pay_track': live['track'],
+        'hourly_rate': float(live['hourly_rate']) if live.get('hourly_rate') is not None else None,
+        'hours_worked': float(live['hours']) if live.get('hours') is not None else None,
+        'gross_pay': float(live['gross']) if live.get('gross') is not None else None,
+        'ss_tax': float(live['ss_tax']) if live.get('ss_tax') is not None else None,
+        'medicare_tax': float(live['medicare_tax']) if live.get('medicare_tax') is not None else None,
+        'federal_tax': float(live['federal_tax']) if live.get('federal_tax') is not None else None,
+        'standard_deduction': float(eco.STANDARD_DEDUCTION_2026),
+    }
+    if include_student_calcs:
+        payload.update({
+            'student_calculated_pay': float(p.student_calculated_pay) if p.student_calculated_pay is not None else None,
+            'student_calculated_citations': p.student_calculated_citations,
+            'student_calculated_deduction': float(p.student_calculated_deduction) if p.student_calculated_deduction is not None else None,
+            'student_calculated_final': float(p.student_calculated_final) if p.student_calculated_final is not None else None,
+            'student_calculated_gross': float(p.student_calculated_gross) if p.student_calculated_gross is not None else None,
+            'student_calculated_ss': float(p.student_calculated_ss) if p.student_calculated_ss is not None else None,
+            'student_calculated_medicare': float(p.student_calculated_medicare) if p.student_calculated_medicare is not None else None,
+            'student_calculated_federal': float(p.student_calculated_federal) if p.student_calculated_federal is not None else None,
+        })
+    return payload
+
+
 def get_or_create_starbucks_balance(student_id):
     """Get or create the Starbucks balance record for a student"""
     balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
@@ -16429,40 +16910,7 @@ def get_paychecks(student_id):
         return jsonify({'error': 'Access denied'}), 403
     
     paychecks = Paycheck.query.filter_by(student_id=student_id).order_by(Paycheck.created_at.desc()).all()
-    
-    def paycheck_item(p):
-        citation_list = list_weekly_citations(p.student_id, p.pay_period_start, p.pay_period_end)
-        live_count = len(citation_list)
-        live_deduction = float(Decimal(str(live_count * 2)))
-        # For undeposited paychecks, use live STAR percent so popup shows current data (e.g. 100% not stale 0%)
-        if not p.is_verified and p.deposited_at is None:
-            live_avg = calculate_weekly_star_percent(p.student_id, p.pay_period_start, p.pay_period_end)
-            live_base = float((live_avg / 100) * Decimal('100'))
-            live_final = live_base - live_deduction
-            avg_pct = float(live_avg)
-            base_pay_val = live_base
-            final_pay_val = live_final
-        else:
-            avg_pct = float(p.average_star_percent)
-            base_pay_val = float(p.base_pay)
-            live_final = base_pay_val - live_deduction
-            final_pay_val = live_final
-        return {
-            'id': p.id,
-            'pay_period_start': p.pay_period_start.isoformat(),
-            'pay_period_end': p.pay_period_end.isoformat(),
-            'average_star_percent': avg_pct,
-            'base_pay': base_pay_val,
-            'citation_count': live_count,
-            'citation_list': citation_list,
-            'citation_deduction': live_deduction,
-            'final_pay': final_pay_val,
-            'worksheet_completed': p.worksheet_completed,
-            'is_verified': p.is_verified,
-            'deposited_at': utc_isoformat(p.deposited_at),
-            'created_at': utc_isoformat(p.created_at)
-        }
-    return jsonify([paycheck_item(p) for p in paychecks])
+    return jsonify([serialize_paycheck_payload(p, include_student_calcs=True) for p in paychecks])
 
 @app.route('/api/paycheck/<int:paycheck_id>', methods=['GET'])
 @login_required
@@ -16472,42 +16920,7 @@ def get_paycheck(paycheck_id):
     
     if not has_student_access(current_user, paycheck.student_id):
         return jsonify({'error': 'Access denied'}), 403
-    
-    # Use live citation list/count so worksheet shows current infractions (not stale paycheck record)
-    citation_list = list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
-    live_citation_count = len(citation_list)
-    live_citation_deduction = Decimal(str(live_citation_count * 2))
-    # For undeposited paychecks, use live STAR percent so worksheet shows current data (e.g. 100% not stale 0%)
-    if not paycheck.is_verified and paycheck.deposited_at is None:
-        live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
-        live_base_pay = (live_avg / 100) * Decimal('100')
-        live_final_pay = live_base_pay - live_citation_deduction
-        avg_pct = float(live_avg)
-        base_pay_val = float(live_base_pay)
-    else:
-        avg_pct = float(paycheck.average_star_percent)
-        base_pay_val = float(paycheck.base_pay)
-        live_final_pay = paycheck.base_pay - live_citation_deduction
-    return jsonify({
-        'id': paycheck.id,
-        'student_id': paycheck.student_id,
-        'pay_period_start': paycheck.pay_period_start.isoformat(),
-        'pay_period_end': paycheck.pay_period_end.isoformat(),
-        'average_star_percent': avg_pct,
-        'base_pay': base_pay_val,
-        'citation_count': live_citation_count,
-        'citation_list': citation_list,
-        'citation_deduction': float(live_citation_deduction),
-        'final_pay': float(live_final_pay),
-        'worksheet_completed': paycheck.worksheet_completed,
-        'student_calculated_pay': float(paycheck.student_calculated_pay) if paycheck.student_calculated_pay else None,
-        'student_calculated_citations': paycheck.student_calculated_citations,
-        'student_calculated_deduction': float(paycheck.student_calculated_deduction) if paycheck.student_calculated_deduction else None,
-        'student_calculated_final': float(paycheck.student_calculated_final) if paycheck.student_calculated_final else None,
-        'is_verified': paycheck.is_verified,
-        'deposited_at': utc_isoformat(paycheck.deposited_at),
-        'created_at': utc_isoformat(paycheck.created_at)
-    })
+    return jsonify(serialize_paycheck_payload(paycheck, include_student_calcs=True))
 
 
 def _curriculum_lesson(slug):
@@ -16700,16 +17113,10 @@ def run_paycheck_generation(target_date=None):
     for paycheck in existing_pending:
         if paycheck.student_id not in active_student_ids:
             continue
+        student = Student.query.get(paycheck.student_id)
         avg_star_percent = calculate_weekly_star_percent(paycheck.student_id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(paycheck.student_id, pay_period_start, pay_period_end)
-        base_pay = (avg_star_percent / 100) * Decimal('100')
-        citation_deduction = Decimal(str(citation_count * 2))
-        final_pay = base_pay - citation_deduction
-        paycheck.average_star_percent = avg_star_percent
-        paycheck.base_pay = base_pay
-        paycheck.citation_count = citation_count
-        paycheck.citation_deduction = citation_deduction
-        paycheck.final_pay = final_pay
+        fill_paycheck_amounts(paycheck, student, avg_star_percent, citation_count)
         generated_count += 1
         ensure_paycheck_curriculum_assignment(paycheck, notify=False)
 
@@ -16727,19 +17134,18 @@ def run_paycheck_generation(target_date=None):
             continue  # Already updated in step 1 if not deposited; if deposited, leave as-is
         avg_star_percent = calculate_weekly_star_percent(student.id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(student.id, pay_period_start, pay_period_end)
-        base_pay = (avg_star_percent / 100) * Decimal('100')
-        citation_deduction = Decimal(str(citation_count * 2))
-        final_pay = base_pay - citation_deduction
         paycheck = Paycheck(
             student_id=student.id,
             pay_period_start=pay_period_start,
             pay_period_end=pay_period_end,
             average_star_percent=avg_star_percent,
-            base_pay=base_pay,
+            base_pay=Decimal('0.00'),
             citation_count=citation_count,
-            citation_deduction=citation_deduction,
-            final_pay=final_pay
+            citation_deduction=Decimal('0.00'),
+            final_pay=Decimal('0.00'),
+            pay_track=(getattr(student, 'pay_track', None) or 'simple'),
         )
+        fill_paycheck_amounts(paycheck, student, avg_star_percent, citation_count)
         db.session.add(paycheck)
         db.session.flush()
         ensure_paycheck_curriculum_assignment(paycheck, notify=True)
@@ -16758,11 +17164,20 @@ def generate_paychecks():
     target_date = data.get('date')
     try:
         count, start, end = run_paycheck_generation(target_date)
+        economy = {}
+        try:
+            if hasattr(app, 'run_economy_maintenance'):
+                when = end if isinstance(end, date) else date.today()
+                economy = app.run_economy_maintenance(when=when) or {}
+        except Exception as eco_err:
+            app.logger.exception('economy maintenance during manual paycheck generate failed: %s', eco_err)
+            economy = {'error': str(eco_err)}
         return jsonify({
             'message': f'Generated {count} paychecks',
             'count': count,
             'pay_period_start': start.isoformat(),
             'pay_period_end': end.isoformat(),
+            'economy': economy,
         })
     except Exception as e:
         app.logger.exception('manual paycheck generation error')
@@ -16809,11 +17224,20 @@ def generate_paychecks_cron():
         target_date = request.args.get('date')
     try:
         count, start, end = run_paycheck_generation(target_date)
+        economy = {}
+        try:
+            if hasattr(app, 'run_economy_maintenance'):
+                when = end if isinstance(end, date) else date.today()
+                economy = app.run_economy_maintenance(when=when) or {}
+        except Exception as eco_err:
+            app.logger.exception('economy maintenance during paycheck cron failed: %s', eco_err)
+            economy = {'error': str(eco_err)}
         return jsonify({
             'message': f'Generated {count} paychecks',
             'count': count,
             'pay_period_start': start.isoformat(),
             'pay_period_end': end.isoformat(),
+            'economy': economy,
         })
     except Exception as e:
         app.logger.exception('paycheck cron error')
@@ -16905,17 +17329,20 @@ def complete_paycheck_worksheet(paycheck_id):
     if paycheck.is_verified:
         return jsonify({'error': 'This paycheck has already been verified and deposited'}), 400
     
-    data = request.json
-    student_calculated_pay = Decimal(str(data.get('calculated_pay', 0)))
-    student_calculated_citations = int(data.get('calculated_citations', 0))
-    student_calculated_deduction = Decimal(str(data.get('calculated_deduction', 0)))
-    student_calculated_final = Decimal(str(data.get('calculated_final', 0)))
-    
-    # Update paycheck with student calculations (allows resubmission)
-    paycheck.student_calculated_pay = student_calculated_pay
-    paycheck.student_calculated_citations = student_calculated_citations
-    paycheck.student_calculated_deduction = student_calculated_deduction
-    paycheck.student_calculated_final = student_calculated_final
+    data = request.json or {}
+    import economy_lib as eco
+    paycheck.student_calculated_pay = eco.parse_money(data.get('calculated_pay')) or Decimal('0')
+    paycheck.student_calculated_citations = int(data.get('calculated_citations', 0) or 0)
+    paycheck.student_calculated_deduction = eco.parse_money(data.get('calculated_deduction')) or Decimal('0')
+    paycheck.student_calculated_final = eco.parse_money(data.get('calculated_final')) or Decimal('0')
+    if data.get('calculated_gross') is not None:
+        paycheck.student_calculated_gross = eco.parse_money(data.get('calculated_gross'))
+    if data.get('calculated_ss') is not None:
+        paycheck.student_calculated_ss = eco.parse_money(data.get('calculated_ss'))
+    if data.get('calculated_medicare') is not None:
+        paycheck.student_calculated_medicare = eco.parse_money(data.get('calculated_medicare'))
+    if data.get('calculated_federal') is not None:
+        paycheck.student_calculated_federal = eco.parse_money(data.get('calculated_federal'))
     paycheck.worksheet_completed = True
     
     db.session.commit()
@@ -16931,36 +17358,44 @@ def verify_paycheck(paycheck_id):
     
     if not paycheck.worksheet_completed:
         return jsonify({'error': 'Worksheet not completed'}), 400
-    
-    # Use live citation count so verification matches current infractions (not stale paycheck record)
-    live_citation_count = count_weekly_infractions(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
-    live_citation_deduction = Decimal(str(live_citation_count * 2))
-    # Use live STAR percent for undeposited paychecks so verification matches worksheet display (e.g. 100% not stale 0%)
-    live_avg = None
-    if not paycheck.is_verified and paycheck.deposited_at is None:
-        live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
-        live_base_pay = (live_avg / 100) * Decimal('100')
-        live_final_pay = live_base_pay - live_citation_deduction
-    else:
-        live_base_pay = paycheck.base_pay
-        live_final_pay = paycheck.base_pay - live_citation_deduction
 
-    # Verify calculations
-    tolerance = Decimal('0.01')  # Allow small rounding differences
-    
-    pay_correct = abs(paycheck.student_calculated_pay - live_base_pay) <= tolerance
+    import economy_lib as eco
+    student = Student.query.get(paycheck.student_id)
+    live = live_paycheck_amounts(paycheck)
+    track = live['track']
+    live_avg = live.get('live_avg')
+    live_citation_count = live['citation_count']
+    live_citation_deduction = eco.money(live['citation_deduction'])
+    live_base_pay = eco.money(live['base_pay'])
+    live_final_pay = eco.money(live['final_pay'])
+    tolerance = Decimal('0.01')
+
     citations_correct = paycheck.student_calculated_citations == live_citation_count
-    deduction_correct = abs(paycheck.student_calculated_deduction - live_citation_deduction) <= tolerance
-    final_correct = abs(paycheck.student_calculated_final - live_final_pay) <= tolerance
-    
-    if pay_correct and citations_correct and deduction_correct and final_correct:
-        # Sync paycheck record with live values before depositing so ledger is correct
-        if live_avg is not None:
-            paycheck.average_star_percent = live_avg
-            paycheck.base_pay = (live_avg / 100) * Decimal('100')
-        paycheck.citation_count = live_citation_count
-        paycheck.citation_deduction = live_citation_deduction
-        paycheck.final_pay = live_final_pay
+    deduction_correct = paycheck.student_calculated_deduction is not None and abs(paycheck.student_calculated_deduction - live_citation_deduction) <= tolerance
+    final_correct = paycheck.student_calculated_final is not None and abs(paycheck.student_calculated_final - live_final_pay) <= tolerance
+    pay_correct = paycheck.student_calculated_pay is not None and abs(paycheck.student_calculated_pay - live_base_pay) <= tolerance
+    extra_ok = True
+    extra_errors = []
+    if track == 'complex':
+        gross = eco.money(live.get('gross') or live_base_pay)
+        ss = eco.money(live.get('ss_tax') or 0)
+        medicare = eco.money(live.get('medicare_tax') or 0)
+        federal = eco.money(live.get('federal_tax') or 0)
+        if paycheck.student_calculated_gross is None or abs(paycheck.student_calculated_gross - gross) > tolerance:
+            extra_ok = False
+            extra_errors.append('Please correct gross pay.')
+        if paycheck.student_calculated_ss is None or abs(paycheck.student_calculated_ss - ss) > tolerance:
+            extra_ok = False
+            extra_errors.append('Please correct Social Security (6.2%).')
+        if paycheck.student_calculated_medicare is None or abs(paycheck.student_calculated_medicare - medicare) > tolerance:
+            extra_ok = False
+            extra_errors.append('Please correct Medicare (1.45%).')
+        if paycheck.student_calculated_federal is None or abs(paycheck.student_calculated_federal - federal) > tolerance:
+            extra_ok = False
+            extra_errors.append('Please correct federal income tax.')
+
+    if pay_correct and citations_correct and deduction_correct and final_correct and extra_ok:
+        fill_paycheck_amounts(paycheck, student, live_avg if live_avg is not None else paycheck.average_star_percent, live_citation_count)
         paycheck.is_verified = True
         paycheck.deposited_at = datetime.utcnow()
         
@@ -16990,13 +17425,14 @@ def verify_paycheck(paycheck_id):
     else:
         errors = []
         if not pay_correct:
-            errors.append('Please correct base pay calculation.')
+            errors.append('Please correct base pay calculation.' if track != 'complex' else 'Please correct gross / base pay.')
         if not citations_correct:
             errors.append('Please correct citation count.')
         if not deduction_correct:
             errors.append('Please correct citation deduction.')
         if not final_correct:
             errors.append('Please correct final pay calculation.')
+        errors.extend(extra_errors)
         
         return jsonify({
             'verified': False,
@@ -19857,6 +20293,12 @@ try:
 except Exception as sheet_thread_error:
     print(f"Note: Google Sheet auto-push thread not started: {sheet_thread_error}", flush=True)
 
+try:
+    from economy_routes import register_economy_routes
+    register_economy_routes(app)
+except Exception as economy_route_error:
+    print(f"Note: economy routes not registered: {economy_route_error}", flush=True)
+
 
 if __name__ == '__main__':
     print("Starting development server (schema checks)...", flush=True)
@@ -19868,6 +20310,11 @@ if __name__ == '__main__':
             seed_curriculum_lessons()
         except Exception as seed_err:
             print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
+        try:
+            ensure_economy_schema()
+            seed_economy()
+        except Exception as seed_err:
+            print(f"Note: economy seed skipped: {seed_err}", flush=True)
         # Ensure OutsideStaffStudent table exists
         try:
             from sqlalchemy import inspect, text
