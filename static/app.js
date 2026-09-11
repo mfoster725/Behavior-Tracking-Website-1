@@ -1452,8 +1452,15 @@ function applyUnifiedChartTooltipStyle() {
     Object.assign(Chart.defaults.plugins.tooltip, UNIFIED_CHART_TOOLTIP_STYLE);
 }
 
+function getLocalDateStr(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 let currentStudentId = null;
-let currentDate = new Date().toISOString().split('T')[0];
+let currentDate = getLocalDateStr();
 let currentPeriod = null;
 let currentClass = ''; // Track selected class for period entry
 const PERIOD_ENTRY_ALL_CLASSES = '__ALL__'; // Combined multi-class selection for a period
@@ -1720,6 +1727,16 @@ let pointCardNightlySubmitTimer = null;
 let pointCardNightlySubmitInterval = null;
 let pointCardAutoSubmitInFlight = false;
 let pointCardNightlySubmitSchedulerStarted = false;
+const POINT_CARD_LIVE_SYNC_MS = 20000;
+let pointCardLiveSyncTimer = null;
+let pointCardLiveSyncInFlight = false;
+let pointCardLiveSyncStarted = false;
+const POINT_CARD_STAR_FIELD_MAP = {
+    s: 'safety_points',
+    t: 'teamwork_points',
+    a: 'accountability_points',
+    r: 'relationships_points'
+};
 
 function isPastPointCardSubmitTime(dateStr) {
     if (!dateStr || typeof dateStr !== 'string') {
@@ -1751,6 +1768,18 @@ function markStudentSubmitted(dateStr, studentId) {
 function isStudentSubmittedForDate(dateStr, studentId) {
     const id = parseInt(studentId, 10);
     return !!(dateStr && submittedStudents[dateStr] && submittedStudents[dateStr].has(id));
+}
+
+function unmarkStudentSubmitted(dateStr, studentId) {
+    if (!dateStr || studentId == null || !submittedStudents[dateStr]) {
+        return;
+    }
+    const id = parseInt(studentId, 10);
+    if (!Number.isFinite(id) || !submittedStudents[dateStr].has(id)) {
+        return;
+    }
+    submittedStudents[dateStr].delete(id);
+    saveSubmittedStudents(submittedStudents);
 }
 
 function periodHasEnteredStarPoints(periodOrCell) {
@@ -1998,6 +2027,8 @@ async function flushPendingPointCardSaves() {
     }
 }
 
+window.flushPendingPointCardSaves = flushPendingPointCardSaves;
+
 function periodRecordHasInput(period) {
     if (!period) {
         return false;
@@ -2087,6 +2118,312 @@ function invalidateDailyLoadCache(dateKey) {
             dailyLoadCache.delete(key);
         }
     }
+}
+
+function shouldUseKeepaliveForPointCardSave() {
+    try {
+        return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    } catch (e) {
+        return false;
+    }
+}
+
+function canLiveSyncPointCards() {
+    return !!(typeof canEdit === 'function' && canEdit())
+        || !!(typeof isOutsideStaff === 'function' && isOutsideStaff());
+}
+
+function isPointCardLiveSyncViewActive() {
+    if (!canLiveSyncPointCards()) return false;
+    return !!(document.getElementById('period-entry-view')?.classList.contains('active')
+        || document.getElementById('entry-view')?.classList.contains('active'));
+}
+
+function lookupDirtyStudentMap(map, studentId) {
+    if (!map) return undefined;
+    if (Object.prototype.hasOwnProperty.call(map, studentId)) return map[studentId];
+    const asStr = String(studentId);
+    if (Object.prototype.hasOwnProperty.call(map, asStr)) return map[asStr];
+    const asNum = parseInt(studentId, 10);
+    if (Number.isFinite(asNum) && Object.prototype.hasOwnProperty.call(map, asNum)) {
+        return map[asNum];
+    }
+    return undefined;
+}
+
+function isPeriodStarFieldDirty(studentId, field) {
+    const fields = lookupDirtyStudentMap(dirtyPeriodFields, studentId) || {};
+    return !!fields[field];
+}
+
+function isDailyStarFieldDirty(studentId, period, field) {
+    const byPeriod = lookupDirtyStudentMap(dirtyDailyFields, studentId) || {};
+    return !!(byPeriod[period] && byPeriod[period][field]);
+}
+
+function isAttendanceFieldDirty(studentId) {
+    return !!lookupDirtyStudentMap(dirtyAttendanceIds, studentId);
+}
+
+function isInfoModalOpenFor(studentId, period) {
+    const modal = document.getElementById('info-modal');
+    if (!modal || modal.style.display !== 'block') return false;
+    return String(modal.dataset.studentId || '') === String(studentId)
+        && String(modal.dataset.period || '') === String(period || '');
+}
+
+function isFocusedPointCardControl(el) {
+    if (!el) return false;
+    const active = document.activeElement;
+    return active === el || !!(el.contains && el.contains(active));
+}
+
+function studentHasFocusedPointCardControl(studentId) {
+    const active = document.activeElement;
+    if (!active || !active.dataset) return false;
+    if (String(active.dataset.studentId || '') !== String(studentId)) return false;
+    return active.classList.contains('daily-input') || active.classList.contains('attendance-select');
+}
+
+function findPointCardStarSelect(studentId, period, category) {
+    return document.querySelector(
+        `select.daily-input[data-student-id="${studentId}"][data-period="${period}"][data-category="${category}"]`
+    );
+}
+
+function findPointCardInfoButton(studentId, period) {
+    return document.querySelector(
+        `.info-btn[data-student-id="${studentId}"][data-period="${period}"]`
+    );
+}
+
+function starSelectValue(value) {
+    const normalized = normalizeStarValue(value);
+    return normalized === null ? '' : normalized;
+}
+
+function infoStringsEquivalent(left, right) {
+    const a = left == null ? '' : String(left);
+    const b = right == null ? '' : String(right);
+    if (a === b) return true;
+    const empty = (value) => !value || value === '{}' || value === 'null';
+    return empty(a) && empty(b);
+}
+
+function parseInfoObjectForHighlight(infoValue) {
+    if (!infoValue) return {};
+    if (typeof infoValue === 'object') return infoValue;
+    try {
+        const parsed = JSON.parse(infoValue);
+        return parsed && typeof parsed === 'object' ? parsed : { notes: String(infoValue) };
+    } catch (e) {
+        return { notes: String(infoValue) };
+    }
+}
+
+function patchInfoButtonFromServer(studentId, period, infoValue) {
+    const button = findPointCardInfoButton(studentId, period);
+    if (!button) return;
+    const infoString = infoValue || '';
+    button.dataset.info = infoString;
+    const parsed = parseInfoObjectForHighlight(infoString);
+    button.classList.toggle('has-data', typeof hasInfoData === 'function' && !!hasInfoData(parsed));
+}
+
+function applyPeriodServerSnapshot(items) {
+    if (!Array.isArray(items) || !currentPeriod) return false;
+    const changedStudentIds = new Set();
+    items.forEach((item) => {
+        const studentId = parseInt(item && item.student_id, 10);
+        if (!Number.isFinite(studentId)) return;
+        const hasInput = periodRecordHasInput(item);
+        if (item.submitted || (hasInput && isPastPointCardSubmitTime(currentDate))) {
+            markStudentSubmitted(currentDate, studentId);
+        } else {
+            unmarkStudentSubmitted(currentDate, studentId);
+        }
+        if (!periodData[studentId]) {
+            periodData[studentId] = { student_id: studentId };
+        }
+        const target = periodData[studentId];
+        if (!isAttendanceStarLocked(studentId)) {
+            Object.keys(POINT_CARD_STAR_FIELD_MAP).forEach((shortCat) => {
+                const field = POINT_CARD_STAR_FIELD_MAP[shortCat];
+                if (isPeriodStarFieldDirty(studentId, field)) return;
+                const select = findPointCardStarSelect(studentId, currentPeriod, shortCat);
+                if (isFocusedPointCardControl(select)) return;
+                const incoming = normalizeStarValue(item[field]);
+                if (starValuesEquivalent(target[field], incoming)) {
+                    target[field] = incoming;
+                    return;
+                }
+                target[field] = incoming;
+                if (select) {
+                    select.value = starSelectValue(incoming);
+                }
+                changedStudentIds.add(studentId);
+            });
+        }
+        if (!isPeriodStarFieldDirty(studentId, 'info') && !isInfoModalOpenFor(studentId, currentPeriod)) {
+            const incomingInfo = item.info || '';
+            if (!infoStringsEquivalent(target.info, incomingInfo)) {
+                target.info = incomingInfo;
+                patchInfoButtonFromServer(studentId, currentPeriod, incomingInfo);
+                changedStudentIds.add(studentId);
+            }
+        }
+    });
+    if (!changedStudentIds.size) return false;
+    changedStudentIds.forEach((studentId) => updateInfoButtonHighlight(studentId, currentPeriod));
+    updatePeriodPercentageRow();
+    return true;
+}
+
+function applyDailyServerSnapshot(records) {
+    if (!Array.isArray(records) || !currentDate) return false;
+    const changedStudentIds = new Set();
+    const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
+    if (!attendanceData[currentDate]) {
+        attendanceData[currentDate] = {};
+    }
+
+    records.forEach((record) => {
+        const studentId = parseInt(record && record.student_id, 10);
+        if (!Number.isFinite(studentId)) return;
+        const hasInput = Array.isArray(record.periods) && record.periods.some(periodRecordHasInput);
+        if (record.submitted || (hasInput && pastSubmitTime)) {
+            markStudentSubmitted(currentDate, studentId);
+        } else {
+            unmarkStudentSubmitted(currentDate, studentId);
+        }
+        if (!dailyData[studentId]) {
+            dailyData[studentId] = {};
+        }
+
+        let attendanceStatus = record.attendance_status;
+        if (!attendanceStatus && record.present !== undefined) {
+            attendanceStatus = record.present ? 'present' : 'unexcused';
+        }
+        if (attendanceStatus && !isAttendanceFieldDirty(studentId) && !studentHasFocusedPointCardControl(studentId)) {
+            const previous = attendanceData[currentDate][studentId];
+            if (previous !== attendanceStatus) {
+                attendanceData[currentDate][studentId] = attendanceStatus;
+                const attendanceSelect = document.querySelector(
+                    `.attendance-select[data-student-id="${studentId}"]`
+                );
+                if (attendanceSelect && !isFocusedPointCardControl(attendanceSelect)) {
+                    attendanceSelect.value = attendanceStatus;
+                }
+                applyAttendanceStarCellState(studentId);
+                changedStudentIds.add(studentId);
+            }
+        }
+
+        const starLocked = isAttendanceStarLocked(studentId);
+        (record.periods || []).forEach((period) => {
+            const periodTime = period && period.time_range;
+            if (!periodTime) return;
+            if (!dailyData[studentId][periodTime]) {
+                dailyData[studentId][periodTime] = { s: null, t: null, a: null, r: null, info: '' };
+            }
+            const target = dailyData[studentId][periodTime];
+            if (!starLocked) {
+                Object.keys(POINT_CARD_STAR_FIELD_MAP).forEach((shortCat) => {
+                    const field = POINT_CARD_STAR_FIELD_MAP[shortCat];
+                    if (isDailyStarFieldDirty(studentId, periodTime, shortCat)) return;
+                    const select = findPointCardStarSelect(studentId, periodTime, shortCat);
+                    if (isFocusedPointCardControl(select)) return;
+                    const incoming = normalizeStarValue(period[field]);
+                    if (starValuesEquivalent(target[shortCat], incoming)) {
+                        target[shortCat] = incoming;
+                        return;
+                    }
+                    target[shortCat] = incoming;
+                    if (select) {
+                        select.value = starSelectValue(incoming);
+                    }
+                    changedStudentIds.add(studentId);
+                });
+            }
+            if (!isDailyStarFieldDirty(studentId, periodTime, 'info') && !isInfoModalOpenFor(studentId, periodTime)) {
+                const incomingInfo = period.info || '';
+                if (!infoStringsEquivalent(target.info, incomingInfo)) {
+                    target.info = incomingInfo;
+                    patchInfoButtonFromServer(studentId, periodTime, incomingInfo);
+                    changedStudentIds.add(studentId);
+                }
+            }
+            updateInfoButtonHighlight(studentId, periodTime);
+        });
+    });
+
+    if (!changedStudentIds.size) return false;
+    updateDailyPercentageRow();
+    return true;
+}
+
+async function refreshPointCardFromServer() {
+    if (pointCardLiveSyncInFlight || document.hidden || !isPointCardLiveSyncViewActive() || !currentDate) {
+        return;
+    }
+    const periodActive = document.getElementById('period-entry-view')?.classList.contains('active');
+    const dailyActive = document.getElementById('entry-view')?.classList.contains('active');
+    pointCardLiveSyncInFlight = true;
+    try {
+        if (periodActive && currentPeriod) {
+            const response = await fetch(
+                `/api/period-data?date=${encodeURIComponent(currentDate)}&period=${encodeURIComponent(currentPeriod)}`
+            );
+            if (!response.ok) return;
+            const data = await response.json();
+            if (document.hidden || !document.getElementById('period-entry-view')?.classList.contains('active')) {
+                return;
+            }
+            applyPeriodServerSnapshot(data);
+            return;
+        }
+        if (!dailyActive) return;
+        const students = typeof getVisibleDailyStudents === 'function' ? getVisibleDailyStudents() : [];
+        if (!students.length) return;
+        const params = new URLSearchParams({
+            start_date: currentDate,
+            end_date: currentDate,
+            student_ids: students.map((student) => student.id).join(','),
+            include_details: 'false'
+        });
+        const response = await fetch(`/api/daily-records?${params.toString()}`);
+        if (!response.ok) return;
+        const records = await response.json();
+        if (document.hidden || !document.getElementById('entry-view')?.classList.contains('active')) {
+            return;
+        }
+        applyDailyServerSnapshot(records);
+    } catch (error) {
+        // Background sync stays silent so a blip does not interrupt data entry.
+    } finally {
+        pointCardLiveSyncInFlight = false;
+    }
+}
+
+function startPointCardLiveSync() {
+    if (pointCardLiveSyncStarted || !canLiveSyncPointCards()) {
+        return;
+    }
+    pointCardLiveSyncStarted = true;
+    if (!pointCardLiveSyncTimer) {
+        pointCardLiveSyncTimer = setInterval(() => {
+            if (document.hidden || !isPointCardLiveSyncViewActive()) return;
+            refreshPointCardFromServer();
+        }, POINT_CARD_LIVE_SYNC_MS);
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            refreshPointCardFromServer();
+        }
+    });
+    window.addEventListener('focus', () => {
+        refreshPointCardFromServer();
+    });
 }
 
 function handleDailyAttendanceChange(e) {
@@ -3642,20 +3979,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Set default date if not already set
         const dateInput = document.getElementById('date-input');
         if (dateInput && !dateInput.value) {
-            dateInput.value = new Date().toISOString().split('T')[0];
+            dateInput.value = getLocalDateStr();
         }
         
         // Set default date for period entry if not already set
         const entryDateInput = document.getElementById('entry-date-input');
         if (entryDateInput && !entryDateInput.value) {
-            entryDateInput.value = new Date().toISOString().split('T')[0];
+            entryDateInput.value = getLocalDateStr();
             currentDate = entryDateInput.value;
         }
         
         // Set default date for daily entry if not already set
         const dailyDateInput = document.getElementById('daily-date-input');
         if (dailyDateInput && !dailyDateInput.value) {
-            dailyDateInput.value = new Date().toISOString().split('T')[0];
+            dailyDateInput.value = getLocalDateStr();
         }
         
         // Initialize submitted students tracking for current date if not already loaded
@@ -3695,6 +4032,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadPeriodEntrySchedule();
         
         startPointCardNightlySubmitScheduler();
+        startPointCardLiveSync();
         
         console.log('Initialization complete');
     } catch (error) {
@@ -5013,10 +5351,9 @@ async function loadPeriodData() {
                 const hasInput = periodRecordHasInput(item);
                 if (item.submitted || (hasInput && pastSubmitTime)) {
                     markStudentSubmitted(currentDate, studentId);
-                }
-                if (isStudentSubmittedForDate(currentDate, studentId)) {
                     return;
                 }
+                unmarkStudentSubmitted(currentDate, studentId);
                 periodData[studentId] = item;
             });
         }
@@ -5551,7 +5888,8 @@ async function savePeriodData(options = {}) {
                 period: currentPeriod,
                 merge: true,
                 students: studentsMap
-            })
+            }),
+            keepalive: shouldUseKeepaliveForPointCardSave()
         });
 
         if (response.ok) {
@@ -5560,6 +5898,7 @@ async function savePeriodData(options = {}) {
             } else {
                 updatePointCardSaveStatus('saved');
             }
+            invalidateDailyLoadCache(currentDate);
             if (!skipReload) {
                 loadPeriodData();
             }
@@ -5659,7 +5998,8 @@ async function filterDailyStudents() {
     filteredDailyStudents = studentsToFilter;
 }
 
-async function loadDailyData() {
+async function loadDailyData(options = {}) {
+    const forceRefresh = !!options.forceRefresh;
     const requestToken = ++dailyLoadRequestToken;
 
     if (dailyLoadAbortController) {
@@ -5721,26 +6061,21 @@ async function loadDailyData() {
     try {
         // Build a set of visible student IDs for this view
         const visibleStudentIds = new Set(filteredDailyStudents.map(s => s.id));
-        // Determine which visible students still need data loaded (not yet submitted)
-        const nonSubmittedVisibleIds = new Set(
-            Array.from(visibleStudentIds).filter(id => !submittedStudents[currentDate].has(id))
-        );
 
-        // If all visible students have already been submitted, we don't need to load anything
-        if (nonSubmittedVisibleIds.size === 0) {
+        if (visibleStudentIds.size === 0) {
             if (requestToken === dailyLoadRequestToken) {
                 renderDailyGrid();
             }
             return;
         }
 
-        const studentIdsCsv = Array.from(nonSubmittedVisibleIds).join(',');
+        const studentIdsCsv = Array.from(visibleStudentIds).join(',');
         const cacheKey = `${currentDate}|${studentIdsCsv}`;
         const now = Date.now();
         let allRecords;
 
         const cached = dailyLoadCache.get(cacheKey);
-        if (cached && (now - cached.timestamp) < DAILY_LOAD_CACHE_TTL_MS) {
+        if (!forceRefresh && cached && (now - cached.timestamp) < DAILY_LOAD_CACHE_TTL_MS) {
             allRecords = cached.records;
         } else {
             // Request only visible students and lightweight period fields for faster daily-grid loads.
@@ -5780,10 +6115,9 @@ async function loadDailyData() {
             const hasInput = Array.isArray(record.periods) && record.periods.some(periodRecordHasInput);
             if (record.submitted || (hasInput && pastSubmitTime)) {
                 markStudentSubmitted(currentDate, studentId);
-            }
-            if (isStudentSubmittedForDate(currentDate, studentId)) {
                 return;
             }
+            unmarkStudentSubmitted(currentDate, studentId);
 
             nextDailyData[studentId] = {};
 
@@ -7492,7 +7826,8 @@ async function saveDailyAllData(options = {}) {
                 attendance_status: attendance,
                 merge: true,
                 periods: periods
-            })
+            }),
+            keepalive: shouldUseKeepaliveForPointCardSave()
         }));
     });
 
@@ -7657,10 +7992,16 @@ async function autoSubmitPointCardsIfDue() {
             }
         }
 
+        let submitTriggered = false;
         try {
-            await fetch(`/api/daily-records?start_date=${encodeURIComponent(currentDate)}&end_date=${encodeURIComponent(currentDate)}&include_details=false`);
+            const response = await fetch(`/api/daily-records?start_date=${encodeURIComponent(currentDate)}&end_date=${encodeURIComponent(currentDate)}&include_details=false`);
+            submitTriggered = !!(response && response.ok);
         } catch (error) {
             console.error('Error triggering nightly point-card submit:', error);
+        }
+
+        if (!submitTriggered) {
+            return;
         }
 
         const studentIds = [...new Set([...dailyIds, ...periodIds])];
@@ -9667,7 +10008,7 @@ function getPointCardDataContainer() {
 
 function isSubmittedPointCardRecord(record) {
     if (!record || !record.date) return false;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     if (record.date >= today) return false;
     if (record.submitted) return true;
     const periods = record.periods || [];
@@ -14817,6 +15158,7 @@ window.showInfoModal = showInfoModal;
 window.closeInfoModal = closeInfoModal;
 window.saveInfoModal = saveInfoModal;
 window.saveEditedPointCard = saveEditedPointCard;
+window.flushPendingPointCardSaves = flushPendingPointCardSaves;
 window.showInfoViewPopup = showInfoViewPopup;
 window.openPastPointCardsModal = openPastPointCardsModal;
 window.closePastPointCardsModal = closePastPointCardsModal;
