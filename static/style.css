@@ -1902,11 +1902,19 @@ table tbody tr:hover {
 
 .daily-info-cell {
     background: rgba(241, 239, 233, 0.75);
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.info-btn {
+    pointer-events: auto;
+    z-index: 3;
 }
 
 /* Info modal */
 #info-modal {
-    z-index: 4000 !important;
+    z-index: 20000 !important;
 }
 
 #info-modal .modal-content {

@@ -2615,18 +2615,77 @@ function bindStarSelectEntryGuards() {
     }, true);
 }
 
+function resolveInfoButtonFromEvent(event) {
+    const path = (event && typeof event.composedPath === 'function')
+        ? event.composedPath()
+        : [];
+    for (let i = 0; i < path.length; i++) {
+        const node = path[i];
+        if (!node || !node.classList) continue;
+        if (node.classList.contains('info-btn')) return node;
+        if (node.classList.contains('daily-info-cell')) {
+            const nested = node.querySelector('button.info-btn');
+            if (nested) return nested;
+        }
+    }
+    const raw = event && (event.currentTarget || event.target);
+    if (!raw) return null;
+    if (raw.classList && raw.classList.contains('info-btn')) return raw;
+    if (typeof raw.closest === 'function') {
+        const button = raw.closest('button.info-btn');
+        if (button) return button;
+        const cell = raw.closest('.daily-info-cell');
+        if (cell) return cell.querySelector('button.info-btn');
+    }
+    return raw.dataset ? raw : null;
+}
+
+function handleInfoButtonClick(event) {
+    const button = resolveInfoButtonFromEvent(event);
+    if (!button || !button.classList || !button.classList.contains('info-btn') || button.disabled) {
+        return;
+    }
+    if (event) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    }
+    if (window.__infoModalOpenInProgress) return;
+    window.__infoModalOpenInProgress = true;
+    try {
+        showInfoModal({ currentTarget: button, target: button });
+    } finally {
+        queueMicrotask(() => {
+            window.__infoModalOpenInProgress = false;
+        });
+    }
+}
+
+function wirePointCardInfoButton(infoButton) {
+    if (!infoButton || infoButton.dataset.infoClickBound === 'true') return;
+    infoButton.dataset.infoClickBound = 'true';
+    infoButton.addEventListener('click', handleInfoButtonClick);
+}
+
+function relocateModalsToBody() {
+    document.querySelectorAll('.modal').forEach((modal) => {
+        if (modal.parentElement && modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+    });
+}
+
 function bindInfoButtonClickDelegation() {
     if (window.__infoBtnClickBound) return;
     window.__infoBtnClickBound = true;
+    relocateModalsToBody();
     document.addEventListener('click', (e) => {
-        const btn = e.target && e.target.closest
-            ? e.target.closest('button.info-btn')
-            : null;
-        if (!btn || btn.disabled) return;
-        e.preventDefault();
-        showInfoModal({ currentTarget: btn, target: btn });
+        const btn = resolveInfoButtonFromEvent(e);
+        if (!btn || !btn.classList || !btn.classList.contains('info-btn') || btn.disabled) return;
+        handleInfoButtonClick(e);
     }, true);
 }
+
+bindInfoButtonClickDelegation();
 
 function ensureDailyGridDelegatedListeners() {
     bindStarSelectEntryGuards();
@@ -4903,6 +4962,7 @@ function setupEventListeners() {
                 document.getElementById('student-modal').style.display = 'none';
             }
             if (e.target.id === 'info-modal') {
+                if (Date.now() < (window.__infoModalIgnoreBackdropUntil || 0)) return;
                 closeInfoModal();
             }
             if (e.target.id === 'staff-modal') {
@@ -5943,7 +6003,9 @@ function renderStudentsGrid() {
                 if (data.info.trim()) infoButton.classList.add('has-data');
             }
         }
-        
+
+        wirePointCardInfoButton(infoButton);
+        infoCell.addEventListener('click', handleInfoButtonClick);
         infoCell.appendChild(infoButton);
         grid.appendChild(infoCell);
         
@@ -6823,6 +6885,8 @@ function renderDailyGrid() {
                 }
             }
 
+            wirePointCardInfoButton(infoButton);
+            infoCell.addEventListener('click', handleInfoButtonClick);
             infoCell.appendChild(infoButton);
             body.appendChild(infoCell);
             
@@ -13974,9 +14038,12 @@ function bindAlternateLocationInput() {
 
 async function showInfoModal(event) {
     const rawTarget = event && (event.currentTarget || event.target);
-    const button = (rawTarget && typeof rawTarget.closest === 'function')
-        ? (rawTarget.closest('.info-btn, .info-btn-small') || rawTarget)
-        : rawTarget;
+    let button = resolveInfoButtonFromEvent(event);
+    if (!button || !button.dataset) {
+        button = (rawTarget && typeof rawTarget.closest === 'function')
+            ? (rawTarget.closest('.info-btn, .info-btn-small') || rawTarget)
+            : rawTarget;
+    }
     if (!button || !button.dataset) {
         console.error('Info button context missing');
         return;
@@ -13993,10 +14060,19 @@ async function showInfoModal(event) {
         return;
     }
 
-    const viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
+    let viewOnly = '';
+    try {
+        viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
+    } catch (err) {
+        console.warn('Info modal view-only check failed:', err);
+    }
     modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
-    modal.style.zIndex = '4000';
-    modal.style.display = 'block';
+    if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
+    }
+    window.__infoModalIgnoreBackdropUntil = Date.now() + 500;
+    modal.style.setProperty('z-index', '20000', 'important');
+    modal.style.setProperty('display', 'block', 'important');
 
     try {
     // Parse existing info (stored as JSON string)
@@ -14310,11 +14386,11 @@ async function showInfoModal(event) {
     if (button.dataset.isEditPointCard === 'true') {
         modal.dataset.isEditPointCard = 'true';
         modal.dataset.periodIndex = button.dataset.periodIndex ?? '';
-        modal.style.zIndex = '4000';
+        modal.style.setProperty('z-index', '20000', 'important');
     } else {
         delete modal.dataset.isEditPointCard;
         delete modal.dataset.periodIndex;
-        modal.style.zIndex = '4000';
+        modal.style.setProperty('z-index', '20000', 'important');
     }
 
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
@@ -14761,7 +14837,7 @@ function normalizeInfoStringFromNotes(infoString, knownLocations = [], scheduled
 function closeInfoModal() {
     const modal = document.getElementById('info-modal');
     clearInfoModalStarHighlights();
-    modal.style.display = 'none';
+    if (modal) modal.style.setProperty('display', 'none', 'important');
     onInfoModalClosedForNav();
 }
 
