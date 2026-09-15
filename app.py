@@ -1319,29 +1319,6 @@ def _student_has_filled_schedule_for_period(student_id, time_period, schedule_ro
     return False
 
 
-def _serialized_period_has_entered_content(period):
-    """True when a serialized period has STAR points or info worth keeping visible."""
-    if not isinstance(period, dict):
-        return False
-    for field in (
-        'safety_points',
-        'teamwork_points',
-        'accountability_points',
-        'relationships_points',
-    ):
-        value = period.get(field)
-        if value is None or value == '':
-            continue
-        return True
-    info = period.get('info')
-    if info is None:
-        return False
-    if isinstance(info, dict):
-        return bool(info)
-    text = str(info).strip()
-    return bool(text) and text not in ('{}', 'null')
-
-
 def _should_include_bus_period_on_point_card(
     time_range,
     *,
@@ -1353,29 +1330,10 @@ def _should_include_bus_period_on_point_card(
     if not _is_bus_period(time_range):
         return True
     if student_id is None:
-        return True
-    if _student_has_filled_schedule_for_period(
+        return False
+    return _student_has_filled_schedule_for_period(
         student_id, time_range, schedule_rows=schedule_rows, on_date=on_date
-    ):
-        return True
-    if existing_period is None:
-        return False
-    if isinstance(existing_period, dict):
-        return _serialized_period_has_entered_content(existing_period)
-    for field in (
-        'safety_points',
-        'teamwork_points',
-        'accountability_points',
-        'relationships_points',
-    ):
-        value = getattr(existing_period, field, None)
-        if value is not None and value != '':
-            return True
-    info = getattr(existing_period, 'info', None)
-    if info is None:
-        return False
-    text = str(info).strip()
-    return bool(text) and text not in ('{}', 'null')
+    )
 
 # School-day clock helpers for student transitions (arrive/leave split).
 # AM Bus ends at first bell; PM Bus starts at last bell. 1:00–6:59 on the

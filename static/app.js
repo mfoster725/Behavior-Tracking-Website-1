@@ -1824,30 +1824,10 @@ function studentHasFilledScheduleForPeriod(studentId, timePeriod, onDate = null)
     });
 }
 
-function pointCardPeriodHasEnteredContent(period) {
-    if (periodHasEnteredStarPoints(period)) return true;
-    if (!period) return false;
-    const info = period.info;
-    if (info == null || info === '') return false;
-    if (typeof info === 'object') {
-        return typeof hasInfoData === 'function' && hasInfoData(info);
-    }
-    try {
-        const parsed = JSON.parse(info);
-        if (parsed && typeof parsed === 'object') {
-            return typeof hasInfoData === 'function' && hasInfoData(parsed);
-        }
-    } catch (e) {
-        // plain text info
-    }
-    return String(info).trim().length > 0;
-}
-
-function shouldShowBusPeriodOnPointCard(studentId, timePeriod, onDate = null, existingPeriod = null) {
+function shouldShowBusPeriodOnPointCard(studentId, timePeriod, onDate = null) {
     if (!isBusPeriodTime(timePeriod)) return true;
-    if (studentId == null) return true;
-    if (studentHasFilledScheduleForPeriod(studentId, timePeriod, onDate)) return true;
-    return pointCardPeriodHasEnteredContent(existingPeriod);
+    if (studentId == null) return false;
+    return studentHasFilledScheduleForPeriod(studentId, timePeriod, onDate);
 }
 
 function getStandardPeriodsForStudent(studentId, onDate = null) {
@@ -1909,7 +1889,7 @@ function expandPointCardPeriods(periods, options = {}) {
     const expanded = [];
     STANDARD_PERIODS.forEach((sp) => {
         const existing = byTime.get(sp.time);
-        if (!shouldShowBusPeriodOnPointCard(studentId, sp.time, onDate, existing)) {
+        if (!shouldShowBusPeriodOnPointCard(studentId, sp.time, onDate)) {
             return;
         }
         if (!existing) {
@@ -1992,9 +1972,8 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
     });
     Object.keys(studentData).forEach((periodTime) => {
         if (used.has(periodTime)) return;
-        // Keep already-entered bus data even if schedule no longer has bus.
         if (isBusPeriodTime(periodTime)
-            && !shouldShowBusPeriodOnPointCard(studentId, periodTime, currentDate || null, studentData[periodTime])) {
+            && !shouldShowBusPeriodOnPointCard(studentId, periodTime, currentDate || null)) {
             return;
         }
         const payload = buildMergePeriodPayload(studentId, periodTime, studentData[periodTime]);
@@ -2650,13 +2629,6 @@ function ensureDailyGridDelegatedListeners() {
     gridContainer.addEventListener('keydown', (e) => {
         if (e.target && e.target.classList.contains('daily-input')) {
             handleDailyInputKeydown(e);
-        }
-    });
-
-    gridContainer.addEventListener('click', (e) => {
-        const infoBtn = e.target && e.target.closest('.info-btn');
-        if (infoBtn) {
-            showInfoModal({ target: infoBtn });
         }
     });
 
@@ -5934,6 +5906,7 @@ function renderStudentsGrid() {
         infoCell.style.alignItems = 'center';
         
         const infoButton = document.createElement('button');
+        infoButton.type = 'button';
         infoButton.className = 'info-btn';
         infoButton.textContent = 'I';
         infoButton.dataset.studentId = student.id;
@@ -6802,6 +6775,7 @@ function renderDailyGrid() {
             }
             
             const infoButton = document.createElement('button');
+            infoButton.type = 'button';
             infoButton.className = 'info-btn';
             infoButton.textContent = 'I';
             infoButton.dataset.studentId = student.id;
@@ -6828,7 +6802,8 @@ function renderDailyGrid() {
                     }
                 }
             }
-            
+
+            infoButton.addEventListener('click', showInfoModal);
             infoCell.appendChild(infoButton);
             body.appendChild(infoCell);
             
@@ -13979,7 +13954,14 @@ function bindAlternateLocationInput() {
 }
 
 async function showInfoModal(event) {
-    const button = event.target;
+    const rawTarget = event && (event.currentTarget || event.target);
+    const button = (rawTarget && typeof rawTarget.closest === 'function')
+        ? (rawTarget.closest('.info-btn, .info-btn-small') || rawTarget)
+        : rawTarget;
+    if (!button || !button.dataset) {
+        console.error('Info button context missing');
+        return;
+    }
     const studentId = button.dataset.studentId;
     const period = button.dataset.period;
     const studentName = button.dataset.studentName;
@@ -13987,6 +13969,10 @@ async function showInfoModal(event) {
     
     const modal = document.getElementById('info-modal');
     const modalTitle = document.getElementById('info-modal-title');
+    if (!modal || !modalTitle) {
+        console.error('Info modal elements missing');
+        return;
+    }
     
     const viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
     modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
