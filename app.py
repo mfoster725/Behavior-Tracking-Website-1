@@ -3366,7 +3366,38 @@ class SchoolCalendarConfig(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quarters_json = db.Column(db.Text, nullable=True)
     school_year_json = db.Column(db.Text, nullable=True)
+    # JSON list of {date: "YYYY-MM-DD", label?: str} — holidays / no-school weekdays.
+    non_school_dates_json = db.Column(db.Text, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+def ensure_school_calendar_schema():
+    """Ensure school_calendar_config.non_school_dates_json exists."""
+    try:
+        from sqlalchemy import inspect
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+
+        inspector = inspect(db.engine)
+        if 'school_calendar_config' not in inspector.get_table_names():
+            return
+        columns = {col['name'] for col in inspector.get_columns('school_calendar_config')}
+        if 'non_school_dates_json' in columns:
+            return
+        is_postgres = 'postgresql' in str(db.engine.url).lower()
+        print("Adding non_school_dates_json column to school_calendar_config...")
+        with db.engine.connect() as conn:
+            if is_postgres:
+                conn.execute(text(
+                    "ALTER TABLE school_calendar_config "
+                    "ADD COLUMN IF NOT EXISTS non_school_dates_json TEXT"
+                ))
+            else:
+                conn.execute(text(
+                    "ALTER TABLE school_calendar_config ADD COLUMN non_school_dates_json TEXT"
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"Note: school_calendar_config schema ensure skipped: {e}", flush=True)
 
 
 class SheetSyncState(db.Model):
@@ -7084,24 +7115,46 @@ def api_trends():
             entry['relationships'] += _star_point_sum_value(period.relationships_points)
             entry['possible'] += _period_points_possible(period)
 
+    # Axis = official school days only (weekdays minus holidays). Missing cards
+    # still occupy a slot with 0 frenzies / null STAR so weekends never appear.
+    range_start = start_date
+    range_end = end_date
+    if range_start is None or range_end is None:
+        record_dates = [record.date for record in records if record.attendance_status != 'excused']
+        if record_dates:
+            range_start = range_start or min(record_dates)
+            range_end = range_end or max(record_dates)
+        else:
+            sy_start, sy_end = get_configured_school_year_bounds()
+            range_start = range_start or sy_start
+            range_end = range_end or sy_end
+
     series = []
-    for date_key in sorted(by_date.keys()):
-        day = by_date[date_key]
-        avg_star_percent = None
-        if day['possible'] > 0:
-            num_periods = day['possible'] / 4
-            max_per_category = num_periods * 2 if num_periods > 0 else 0
-            if max_per_category > 0:
-                safety_pct = (day['safety'] / max_per_category) * 100
-                teamwork_pct = (day['teamwork'] / max_per_category) * 100
-                accountability_pct = (day['accountability'] / max_per_category) * 100
-                relationships_pct = (day['relationships'] / max_per_category) * 100
-                avg_star_percent = round((safety_pct + teamwork_pct + accountability_pct + relationships_pct) / 4, 2)
-        series.append({
-            'date': date_key,
-            'frenzy_count': day['frenzy_count'],
-            'average_star_percent': avg_star_percent,
-        })
+    if range_start and range_end:
+        for school_day in list_school_days(range_start, range_end):
+            date_key = school_day.isoformat()
+            day = by_date.get(date_key)
+            avg_star_percent = None
+            frenzy_count = 0
+            if day:
+                frenzy_count = day['frenzy_count']
+                if day['possible'] > 0:
+                    num_periods = day['possible'] / 4
+                    max_per_category = num_periods * 2 if num_periods > 0 else 0
+                    if max_per_category > 0:
+                        safety_pct = (day['safety'] / max_per_category) * 100
+                        teamwork_pct = (day['teamwork'] / max_per_category) * 100
+                        accountability_pct = (day['accountability'] / max_per_category) * 100
+                        relationships_pct = (day['relationships'] / max_per_category) * 100
+                        avg_star_percent = round(
+                            (safety_pct + teamwork_pct + accountability_pct + relationships_pct) / 4,
+                            2,
+                        )
+            series.append({
+                'date': date_key,
+                'frenzy_count': frenzy_count,
+                'average_star_percent': avg_star_percent,
+            })
 
     return jsonify({'series': series, 'student_ids': selected_ids})
 
@@ -11043,6 +11096,158 @@ def _parse_flexible_date(raw_date: str):
     return None
 
 
+def _extract_non_school_dates_from_calendar_text(text, school_start_year=None, school_end_year=None, first_day=None, last_day=None):
+    """
+    Best-effort extraction of holiday / no-school dates from calendar PDF text.
+    Returns [{date: YYYY-MM-DD, label: str}, ...] sorted unique.
+    """
+    if not text:
+        return []
+
+    month_lookup = _month_lookup()
+    month_alt = '|'.join(month_lookup.keys())
+    lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
+    if not lines:
+        return []
+
+    keyword_specs = [
+        (r'\bno\s*school\b', 'No school'),
+        (r'\bholiday\b', 'Holiday'),
+        (r'\bclosed\b', 'Closed'),
+        (r'\bteacher\s*work\s*day\b', 'Teacher work day'),
+        (r'\btwd\b', 'Teacher work day'),
+        (r'\bprofessional\s*development\b', 'Professional development'),
+        (r'\bpd\s*day\b', 'PD day'),
+        (r'\bwinter\s*break\b', 'Winter break'),
+        (r'\bspring\s*break\b', 'Spring break'),
+        (r'\bthanksgiving\b', 'Thanksgiving'),
+        (r'\blabor\s*day\b', 'Labor Day'),
+        (r'\bmemorial\s*day\b', 'Memorial Day'),
+        (r'\bmlk\b|\bmartin\s*luther\s*king\b', 'MLK Day'),
+        (r'\bpresidents?\s*day\b', 'Presidents Day'),
+        (r'\bgood\s*friday\b', 'Good Friday'),
+    ]
+
+    by_date = {}
+    current_month = None
+    current_year = None
+
+    def _add_day(day_num, label, month=None, year=None):
+        m = month if month is not None else current_month
+        y = year if year is not None else current_year
+        if m is None or y is None or day_num is None:
+            return
+        try:
+            d = date(int(y), int(m), int(day_num))
+        except ValueError:
+            return
+        if first_day and d < first_day:
+            return
+        if last_day and d > last_day:
+            return
+        if d.weekday() >= 5:
+            return
+        key = d.isoformat()
+        if key not in by_date or (label and not by_date[key].get('label')):
+            by_date[key] = {'date': key, 'label': label or 'No school'}
+
+    def _add_date_obj(d, label):
+        if not d:
+            return
+        if first_day and d < first_day:
+            return
+        if last_day and d > last_day:
+            return
+        if d.weekday() >= 5:
+            return
+        key = d.isoformat()
+        if key not in by_date or (label and not by_date[key].get('label')):
+            by_date[key] = {'date': key, 'label': label or 'No school'}
+
+    def _expand_range(start_d, end_d, label):
+        if not start_d or not end_d:
+            return
+        if end_d < start_d:
+            start_d, end_d = end_d, start_d
+        cursor = start_d
+        while cursor <= end_d:
+            _add_date_obj(cursor, label)
+            cursor += timedelta(days=1)
+
+    for i, line in enumerate(lines):
+        header = re.match(
+            rf'^({month_alt})\b(?:\s*\'(\d{{2,4}})|\s+(20\d{{2}}))?',
+            line.upper()
+        )
+        if header:
+            current_month = month_lookup[header.group(1)]
+            parsed_year = _parse_month_header_year(header.group(2), header.group(3))
+            if parsed_year and _is_plausible_calendar_year(parsed_year, school_start_year, school_end_year):
+                current_year = parsed_year
+            elif school_start_year is not None and school_end_year is not None:
+                current_year = _year_for_school_month(current_month, school_start_year, school_end_year)
+
+        matched_label = None
+        for pattern, label in keyword_specs:
+            if re.search(pattern, line, flags=re.IGNORECASE):
+                matched_label = label
+                break
+        if not matched_label:
+            continue
+
+        # Explicit full dates on the line
+        for candidate in re.findall(
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2}(?:,\s*|\s+)\d{2,4})',
+            line
+        ):
+            parsed = _parse_flexible_date(candidate)
+            if parsed:
+                _add_date_obj(parsed, matched_label)
+
+        # Month Day – Month Day range (e.g. Dec 23 - Jan 3)
+        range_match = re.search(
+            rf'\b({month_alt})\s+(\d{{1,2}})\s*[-–—to]+\s*({month_alt})?\s*(\d{{1,2}})\b',
+            line,
+            flags=re.IGNORECASE
+        )
+        if range_match and current_year is not None:
+            m1 = month_lookup[range_match.group(1).upper()]
+            d1 = int(range_match.group(2))
+            m2_name = range_match.group(3)
+            d2 = int(range_match.group(4))
+            m2 = month_lookup[m2_name.upper()] if m2_name else m1
+            y1 = current_year
+            y2 = current_year
+            if school_start_year is not None and school_end_year is not None:
+                y1 = _year_for_school_month(m1, school_start_year, school_end_year)
+                y2 = _year_for_school_month(m2, school_start_year, school_end_year)
+            try:
+                start_d = date(y1, m1, d1)
+                end_d = date(y2, m2, d2)
+                _expand_range(start_d, end_d, matched_label)
+            except ValueError:
+                pass
+
+        # Day numbers with current month context (e.g. "4 No School", "No School 4")
+        day_candidates = []
+        leading = re.match(r'^(\d{1,2})\b', line)
+        if leading:
+            day_candidates.append(int(leading.group(1)))
+        for day_tok in re.findall(r'\b([0-2]?\d|3[01])\b', line):
+            day_num = int(day_tok)
+            if day_num not in day_candidates:
+                day_candidates.append(day_num)
+        if not day_candidates and i > 0 and re.fullmatch(r'\d{1,2}', lines[i - 1]):
+            day_candidates.append(int(lines[i - 1]))
+        if not day_candidates and i + 1 < len(lines) and re.fullmatch(r'\d{1,2}', lines[i + 1]):
+            day_candidates.append(int(lines[i + 1]))
+
+        for day_num in day_candidates:
+            _add_day(day_num, matched_label)
+
+    return [by_date[k] for k in sorted(by_date.keys())]
+
+
 def _extract_date_after_keyword(text: str, keyword_pattern: str):
     if not text:
         return None
@@ -11480,6 +11685,153 @@ def get_school_calendar_config_row():
     return row
 
 
+def _normalize_non_school_dates(raw_list):
+    """Normalize to sorted unique [{date: YYYY-MM-DD, label: str}, ...]."""
+    if not isinstance(raw_list, list):
+        return []
+    by_date = {}
+    for item in raw_list:
+        if isinstance(item, str):
+            date_str = item.strip()
+            label = ''
+        elif isinstance(item, dict):
+            date_str = str(item.get('date') or '').strip()
+            label = str(item.get('label') or '').strip()
+        else:
+            continue
+        parsed = None
+        for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m-%d-%Y'):
+            try:
+                parsed = datetime.strptime(date_str, fmt).date()
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            continue
+        key = parsed.isoformat()
+        if key not in by_date or (label and not by_date[key].get('label')):
+            by_date[key] = {'date': key, 'label': label}
+    return [by_date[k] for k in sorted(by_date.keys())]
+
+
+def _load_non_school_dates_from_row(row):
+    if not row or not row.non_school_dates_json:
+        return []
+    try:
+        raw = json.loads(row.non_school_dates_json)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return _normalize_non_school_dates(raw)
+
+
+def _parse_school_year_bounds(school_year):
+    """Return (start_date, end_date) from school_year config dict, or (None, None)."""
+    if not isinstance(school_year, dict):
+        return None, None
+    start_raw = str(school_year.get('start') or '').strip()
+    end_raw = str(school_year.get('end') or '').strip()
+    start = end = None
+    for fmt in ('%m/%d/%Y', '%Y-%m-%d'):
+        if start is None:
+            try:
+                start = datetime.strptime(start_raw, fmt).date()
+            except ValueError:
+                pass
+        if end is None:
+            try:
+                end = datetime.strptime(end_raw, fmt).date()
+            except ValueError:
+                pass
+    if start and end and end >= start:
+        return start, end
+    return None, None
+
+
+def get_configured_school_year_bounds():
+    """Official school-year start/end from SchoolCalendarConfig, or (None, None)."""
+    row = SchoolCalendarConfig.query.order_by(SchoolCalendarConfig.id.asc()).first()
+    if not row or not row.school_year_json:
+        return None, None
+    try:
+        school_year = json.loads(row.school_year_json)
+    except (TypeError, json.JSONDecodeError):
+        return None, None
+    return _parse_school_year_bounds(school_year)
+
+
+def get_non_school_date_set():
+    """Set of date objects marked as holidays / no-school."""
+    row = SchoolCalendarConfig.query.order_by(SchoolCalendarConfig.id.asc()).first()
+    return {
+        datetime.strptime(item['date'], '%Y-%m-%d').date()
+        for item in _load_non_school_dates_from_row(row)
+    }
+
+
+_YEAR_BOUNDS_UNSET = object()
+
+
+def is_school_day(d, *, non_school_dates=None, year_start=_YEAR_BOUNDS_UNSET, year_end=_YEAR_BOUNDS_UNSET):
+    """
+    True when d is an official instructional day:
+    Mon–Fri, inside the school year (when configured), and not a holiday/no-school date.
+    If the calendar is not configured, falls back to weekdays only.
+    Pass year_start=None, year_end=None to skip year-bound checks without loading config.
+    """
+    if d is None:
+        return False
+    if d.weekday() >= 5:
+        return False
+    if year_start is _YEAR_BOUNDS_UNSET and year_end is _YEAR_BOUNDS_UNSET:
+        year_start, year_end = get_configured_school_year_bounds()
+    else:
+        if year_start is _YEAR_BOUNDS_UNSET:
+            year_start = None
+        if year_end is _YEAR_BOUNDS_UNSET:
+            year_end = None
+    if year_start and year_end and (d < year_start or d > year_end):
+        return False
+    if non_school_dates is None:
+        non_school_dates = get_non_school_date_set()
+    if d in non_school_dates:
+        return False
+    return True
+
+
+def list_school_days(
+    start_date,
+    end_date,
+    *,
+    non_school_dates=None,
+    year_start=_YEAR_BOUNDS_UNSET,
+    year_end=_YEAR_BOUNDS_UNSET,
+):
+    """Ordered official school days in [start_date, end_date] (inclusive)."""
+    if not start_date or not end_date or end_date < start_date:
+        return []
+    if non_school_dates is None:
+        non_school_dates = get_non_school_date_set()
+    if year_start is _YEAR_BOUNDS_UNSET and year_end is _YEAR_BOUNDS_UNSET:
+        year_start, year_end = get_configured_school_year_bounds()
+    else:
+        if year_start is _YEAR_BOUNDS_UNSET:
+            year_start = None
+        if year_end is _YEAR_BOUNDS_UNSET:
+            year_end = None
+    days = []
+    cursor = start_date
+    while cursor <= end_date:
+        if is_school_day(
+            cursor,
+            non_school_dates=non_school_dates,
+            year_start=year_start,
+            year_end=year_end,
+        ):
+            days.append(cursor)
+        cursor += timedelta(days=1)
+    return days
+
+
 def _school_calendar_config_payload():
     row = get_school_calendar_config_row()
     quarters = None
@@ -11494,16 +11846,34 @@ def _school_calendar_config_payload():
             school_year = json.loads(row.school_year_json)
         except (TypeError, json.JSONDecodeError):
             school_year = None
+    non_school_dates = _load_non_school_dates_from_row(row)
     configured = bool(
         quarters
         and school_year
         and school_year.get('start')
         and school_year.get('end')
     )
+    school_day_count = None
+    sy_start, sy_end = _parse_school_year_bounds(school_year or {})
+    if sy_start and sy_end:
+        school_day_count = len(
+            list_school_days(
+                sy_start,
+                sy_end,
+                non_school_dates={
+                    datetime.strptime(item['date'], '%Y-%m-%d').date()
+                    for item in non_school_dates
+                },
+                year_start=sy_start,
+                year_end=sy_end,
+            )
+        )
     return {
         'configured': configured,
         'quarters': quarters,
         'school_year': school_year,
+        'non_school_dates': non_school_dates,
+        'school_day_count': school_day_count,
         'updated_at': row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -11530,6 +11900,7 @@ def save_school_calendar_config():
     data = request.json or {}
     quarters = data.get('quarters')
     school_year = data.get('school_year')
+    non_school_dates_raw = data.get('non_school_dates', [])
 
     if not isinstance(quarters, dict) or not isinstance(school_year, dict):
         return jsonify({'error': 'quarters and school_year are required.'}), 400
@@ -11559,20 +11930,18 @@ def save_school_calendar_config():
         'end': sy_end,
         'label': school_year.get('label') or f'{sy_start} - {sy_end}',
     }
+    normalized_non_school = _normalize_non_school_dates(non_school_dates_raw)
 
     row = get_school_calendar_config_row()
     row.quarters_json = json.dumps(normalized_quarters)
     row.school_year_json = json.dumps(normalized_school_year)
+    row.non_school_dates_json = json.dumps(normalized_non_school)
     row.updated_at = datetime.utcnow()
     db.session.commit()
 
-    return jsonify({
-        'success': True,
-        'configured': True,
-        'quarters': normalized_quarters,
-        'school_year': normalized_school_year,
-        'updated_at': row.updated_at.isoformat(),
-    })
+    payload = _school_calendar_config_payload()
+    payload['success'] = True
+    return jsonify(payload)
 
 
 @app.route('/api/calendar/extract-school-year', methods=['POST'])
@@ -11679,9 +12048,31 @@ def extract_school_year_from_calendar_pdf():
             'label': f'{first_day.year}-{last_day.year}'
         }
 
+        non_school_dates = _extract_non_school_dates_from_calendar_text(
+            full_text,
+            school_start_year=school_start_year,
+            school_end_year=school_end_year,
+            first_day=first_day,
+            last_day=last_day,
+        )
+        school_day_count = len(
+            list_school_days(
+                first_day,
+                last_day,
+                non_school_dates={
+                    datetime.strptime(item['date'], '%Y-%m-%d').date()
+                    for item in non_school_dates
+                },
+                year_start=first_day,
+                year_end=last_day,
+            )
+        )
+
         return jsonify({
             'school_year': school_year,
             'quarters': quarter_dates,
+            'non_school_dates': non_school_dates,
+            'school_day_count': school_day_count,
             'extractor_used': extractor_used
         }), 200
     except Exception as e:

@@ -2663,7 +2663,147 @@ function applySchoolCalendarConfig(config) {
     if (config.school_year && config.school_year.start && config.school_year.end) {
         saveSchoolYearDates(config.school_year);
     }
+    if (Array.isArray(config.non_school_dates)) {
+        saveNonSchoolDates(config.non_school_dates);
+    }
     return true;
+}
+
+function loadNonSchoolDates() {
+    try {
+        const raw = localStorage.getItem('nonSchoolDates');
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveNonSchoolDates(dates) {
+    try {
+        localStorage.setItem('nonSchoolDates', JSON.stringify(Array.isArray(dates) ? dates : []));
+    } catch (e) {
+        console.warn('Unable to persist non-school dates locally:', e);
+    }
+}
+
+function normalizeNonSchoolDateEntry(item) {
+    if (!item) return null;
+    if (typeof item === 'string') {
+        const iso = parseFlexibleAdminDateToIso(item);
+        return iso ? { date: iso, label: '' } : null;
+    }
+    const iso = parseFlexibleAdminDateToIso(item.date || '');
+    if (!iso) return null;
+    return { date: iso, label: String(item.label || '').trim() };
+}
+
+function parseFlexibleAdminDateToIso(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const iso = normalizeDateKey(raw);
+    if (iso) return iso;
+    const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) {
+        const m = String(mdy[1]).padStart(2, '0');
+        const d = String(mdy[2]).padStart(2, '0');
+        const y = mdy[3];
+        return `${y}-${m}-${d}`;
+    }
+    return '';
+}
+
+function collectNonSchoolDatesFromUi() {
+    const listEl = document.getElementById('non-school-dates-list');
+    if (!listEl) return loadNonSchoolDates();
+    const rows = [];
+    listEl.querySelectorAll('[data-non-school-row]').forEach((row) => {
+        const dateInput = row.querySelector('[data-non-school-date]');
+        const labelInput = row.querySelector('[data-non-school-label]');
+        const entry = normalizeNonSchoolDateEntry({
+            date: dateInput ? dateInput.value : '',
+            label: labelInput ? labelInput.value : ''
+        });
+        if (entry) rows.push(entry);
+    });
+    // Dedupe by date
+    const byDate = {};
+    rows.forEach((r) => { byDate[r.date] = r; });
+    return Object.keys(byDate).sort().map((k) => byDate[k]);
+}
+
+function formatNonSchoolDateForInput(isoDate) {
+    const key = normalizeDateKey(isoDate);
+    if (!key) return '';
+    const [y, m, d] = key.split('-');
+    return `${m}/${d}/${y}`;
+}
+
+function renderNonSchoolDatesEditor(dates, schoolDayCount) {
+    const wrap = document.getElementById('non-school-dates-editor');
+    const listEl = document.getElementById('non-school-dates-list');
+    const countEl = document.getElementById('school-day-count-note');
+    if (!wrap || !listEl) return;
+    wrap.style.display = 'block';
+    const entries = (Array.isArray(dates) ? dates : [])
+        .map(normalizeNonSchoolDateEntry)
+        .filter(Boolean)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    saveNonSchoolDates(entries);
+    if (!entries.length) {
+        listEl.innerHTML = '<div class="non-school-empty" style="font-size:13px;color:#666;">No non-school dates yet. Add holidays after PDF extract or manually.</div>';
+    } else {
+        listEl.innerHTML = entries.map((entry, idx) => `
+            <div data-non-school-row style="display:grid;grid-template-columns:140px 1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
+                <input type="text" data-non-school-date value="${escapeHtml(formatNonSchoolDateForInput(entry.date))}"
+                       placeholder="MM/DD/YYYY" style="padding:6px;border:1px solid var(--border);border-radius:4px;">
+                <input type="text" data-non-school-label value="${escapeHtml(entry.label || '')}"
+                       placeholder="Label (e.g. Labor Day)" style="padding:6px;border:1px solid var(--border);border-radius:4px;">
+                <button type="button" class="btn-secondary" data-remove-non-school="${idx}">Remove</button>
+            </div>
+        `).join('');
+        listEl.querySelectorAll('[data-remove-non-school]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const current = Array.from(listEl.querySelectorAll('[data-non-school-row]'));
+                const removeIdx = Number(btn.getAttribute('data-remove-non-school'));
+                const row = current[removeIdx];
+                if (row) row.remove();
+                renderNonSchoolDatesEditor(collectNonSchoolDatesFromUi(), schoolDayCount);
+            });
+        });
+    }
+    if (countEl) {
+        const countText = Number.isFinite(Number(schoolDayCount))
+            ? `${Number(schoolDayCount)} school days in the configured year`
+            : `${entries.length} non-school date${entries.length === 1 ? '' : 's'} listed`;
+        countEl.textContent = countText;
+    }
+}
+
+function addNonSchoolDateRow() {
+    const current = collectNonSchoolDatesFromUi();
+    current.push({ date: '', label: '' });
+    // Keep a blank row editable — use today's date placeholder via empty string handling
+    const listEl = document.getElementById('non-school-dates-list');
+    const wrap = document.getElementById('non-school-dates-editor');
+    if (!listEl || !wrap) return;
+    wrap.style.display = 'block';
+    const empty = listEl.querySelector('.non-school-empty');
+    if (empty) empty.remove();
+    const row = document.createElement('div');
+    row.setAttribute('data-non-school-row', '');
+    row.style.cssText = 'display:grid;grid-template-columns:140px 1fr auto;gap:8px;align-items:center;margin-bottom:8px;';
+    row.innerHTML = `
+        <input type="text" data-non-school-date value="" placeholder="MM/DD/YYYY" style="padding:6px;border:1px solid var(--border);border-radius:4px;">
+        <input type="text" data-non-school-label value="" placeholder="Label (e.g. Labor Day)" style="padding:6px;border:1px solid var(--border);border-radius:4px;">
+        <button type="button" class="btn-secondary" data-remove-non-school-new>Remove</button>
+    `;
+    row.querySelector('[data-remove-non-school-new]')?.addEventListener('click', () => {
+        row.remove();
+        renderNonSchoolDatesEditor(collectNonSchoolDatesFromUi());
+    });
+    listEl.appendChild(row);
 }
 
 async function syncSchoolCalendarConfigFromServer(options = {}) {
@@ -2674,7 +2814,9 @@ async function syncSchoolCalendarConfigFromServer(options = {}) {
         }
         const data = await response.json();
         if (data.configured) {
-            return applySchoolCalendarConfig(data);
+            const ok = applySchoolCalendarConfig(data);
+            renderNonSchoolDatesEditor(data.non_school_dates || [], data.school_day_count);
+            return ok;
         }
 
         // Existing installs may only have browser-local admin config; upload it once.
@@ -2687,7 +2829,11 @@ async function syncSchoolCalendarConfigFromServer(options = {}) {
             const localSchoolYear = getConfiguredSchoolYearDates();
             if (localSchoolYear) {
                 try {
-                    await saveSchoolCalendarConfigToServer(loadQuarterDates(), localSchoolYear);
+                    await saveSchoolCalendarConfigToServer(
+                        loadQuarterDates(),
+                        localSchoolYear,
+                        loadNonSchoolDates()
+                    );
                     return true;
                 } catch (e) {
                     console.error('Failed to upload local school calendar config:', e);
@@ -2701,13 +2847,14 @@ async function syncSchoolCalendarConfigFromServer(options = {}) {
     }
 }
 
-async function saveSchoolCalendarConfigToServer(quarters, schoolYear) {
+async function saveSchoolCalendarConfigToServer(quarters, schoolYear, nonSchoolDates) {
     const response = await fetch('/api/admin/school-calendar-config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             quarters,
-            school_year: schoolYear
+            school_year: schoolYear,
+            non_school_dates: Array.isArray(nonSchoolDates) ? nonSchoolDates : collectNonSchoolDatesFromUi()
         })
     });
     const data = await response.json().catch(() => ({}));
@@ -2715,6 +2862,7 @@ async function saveSchoolCalendarConfigToServer(quarters, schoolYear) {
         throw new Error(data.error || 'Failed to save school calendar configuration.');
     }
     applySchoolCalendarConfig(data);
+    renderNonSchoolDatesEditor(data.non_school_dates || [], data.school_day_count);
     return data;
 }
 
@@ -4498,6 +4646,10 @@ function setupEventListeners() {
         if (extractCalendarPdfBtn) {
             extractCalendarPdfBtn.addEventListener('click', extractCalendarDatesFromPdf);
         }
+        const addNonSchoolDateBtn = document.getElementById('add-non-school-date-btn');
+        if (addNonSchoolDateBtn) {
+            addNonSchoolDateBtn.addEventListener('click', addNonSchoolDateRow);
+        }
         
 
         const createAdminAccountBtn = document.getElementById('create-admin-account-btn');
@@ -5010,14 +5162,14 @@ function saveQuarterDatesConfig() {
         return;
     }
 
-    saveSchoolCalendarConfigToServer(newQuarterDates, schoolYearDates)
+    saveSchoolCalendarConfigToServer(newQuarterDates, schoolYearDates, collectNonSchoolDatesFromUi())
         .then(() => {
             updateQuarterDisplay();
-            showButtonStatus('#save-quarter-dates-btn', 'Quarter dates saved successfully!', 'success');
+            showButtonStatus('#save-quarter-dates-btn', 'School calendar saved successfully!', 'success');
         })
         .catch((error) => {
             console.error('Error saving school calendar config:', error);
-            showButtonStatus('#save-quarter-dates-btn', error.message || 'Failed to save quarter dates to the server.', 'error');
+            showButtonStatus('#save-quarter-dates-btn', error.message || 'Failed to save school calendar to the server.', 'error');
         });
 }
 
@@ -5073,15 +5225,20 @@ async function extractCalendarDatesFromPdf() {
         saveQuarterDates(data.quarters);
         quarterDates = data.quarters;
         saveSchoolYearDates(data.school_year);
+        renderNonSchoolDatesEditor(data.non_school_dates || [], data.school_day_count);
         loadQuarterConfig();
         updateQuarterDisplay();
 
+        const holidayCount = Array.isArray(data.non_school_dates) ? data.non_school_dates.length : 0;
+        const dayCount = data.school_day_count != null ? data.school_day_count : '—';
         renderCalendarPdfResults(
             `Detected school year: <strong>${data.school_year.start}</strong> to <strong>${data.school_year.end}</strong>.<br>` +
-            'Quarter 1-4 dates have been filled. Click "Save Quarter Dates" to confirm.',
+            `Found <strong>${holidayCount}</strong> non-school date${holidayCount === 1 ? '' : 's'}; ` +
+            `about <strong>${dayCount}</strong> school days.<br>` +
+            'Review the non-school list below, then click <strong>Save school calendar</strong> to confirm.',
             'success'
         );
-        showMessage('Calendar PDF parsed successfully. Quarter dates were applied.', 'success');
+        showMessage('Calendar PDF parsed successfully. Review holidays, then save.', 'success');
     } catch (error) {
         console.error('Error extracting calendar dates:', error);
         renderCalendarPdfResults(`Error: ${error.message}`, 'error');
@@ -28981,6 +29138,7 @@ function renderSummaryTrendChart(points, checkpoints) {
                     fill: false,
                     borderWidth: 2.5,
                     tension: 0,
+                    spanGaps: true,
                     pointRadius: 4,
                     pointBackgroundColor: '#ffffff',
                     pointBorderColor: TREND_COLORS.star.line,
