@@ -17,6 +17,23 @@ STANDARD_DEDUCTION_2026 = Decimal('16100')
 DEFAULT_LATE_FEE_PER_DAY = Decimal('20')
 DEFAULT_PAY_TRACK = 'simple'
 
+# Weekly earnings record (classroom paystub worksheet)
+STUB_DAILY_RATES = {
+    'yellow': Decimal('74.16'),
+    'green': Decimal('129.16'),
+    'blue': Decimal('162.76'),
+}
+STUB_DEFAULT_DAILY_RATE = STUB_DAILY_RATES['blue']  # white or missing color
+STARBUCKS_BONUS_RATE = Decimal('2.00')
+STAR_STUDENT_BONUS_RATE = Decimal('50.00')
+STAR_CLASSROOM_BONUS_RATE = Decimal('50.00')
+STUB_FEDERAL_RATE = Decimal('0.03')
+STUB_SS_RATE = Decimal('0.062')
+STUB_MEDICARE_RATE = Decimal('0.015')
+STUB_STATE_RATE = Decimal('0.0535')  # Minnesota flat classroom rate
+MONEY_TOLERANCE = Decimal('0.01')
+PERCENT_RATE_TOLERANCE = Decimal('0.0005')
+
 
 def money(value):
     return Decimal(str(value or 0)).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
@@ -29,6 +46,138 @@ def parse_money(value):
     if text == '':
         return None
     return money(text)
+
+
+def amounts_close(left, right, tolerance=MONEY_TOLERANCE):
+    if left is None or right is None:
+        return False
+    return abs(money(left) - money(right)) <= tolerance
+
+
+def parse_percent_rate(value):
+    """Parse a student-entered percent as a fraction of 1.
+
+    Accepts 3, 3%, or 0.03 as 3%. A bare 1 is treated as 1% (not 100%),
+    matching the worksheet prompt to subtract STAR% from 100.
+    """
+    if value is None:
+        return None
+    text = str(value).replace(',', '').strip()
+    if text == '':
+        return None
+    has_pct = '%' in text
+    text = text.replace('%', '').replace('$', '').strip()
+    if text == '':
+        return None
+    try:
+        parsed = Decimal(text)
+    except (ArithmeticError, ValueError):
+        return None
+    if has_pct or parsed >= 1:
+        return parsed / Decimal('100')
+    return parsed
+
+
+def percent_rates_close(entered, expected_percent, tolerance=PERCENT_RATE_TOLERANCE):
+    parsed = parse_percent_rate(entered)
+    if parsed is None:
+        return False
+    expected_frac = max(Decimal('0'), Decimal(str(expected_percent or 0))) / Decimal('100')
+    return abs(parsed - expected_frac) <= tolerance
+
+
+def daily_rate_for_color(card_color):
+    key = (card_color or '').strip().lower()
+    if key in STUB_DAILY_RATES:
+        return money(STUB_DAILY_RATES[key])
+    return money(STUB_DEFAULT_DAILY_RATE)
+
+
+def point_card_gap_percent(star_percent):
+    pct = Decimal(str(star_percent or 0))
+    return max(Decimal('0.00'), (Decimal('100') - pct)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def compute_stub_paycheck(
+    daily_rate,
+    days_worked,
+    star_percent,
+    starbucks_count=0,
+    star_student_count=0,
+    star_classroom_count=0,
+    excused_days=0,
+    citation_count=0,
+):
+    """Classroom weekly earnings record: days x rate, bonuses, then % of gross + citations."""
+    days = int(days_worked or 0)
+    excused = int(excused_days or 0)
+    rate = money(daily_rate)
+    gap_percent = point_card_gap_percent(star_percent)
+    gap_rate = gap_percent / Decimal('100')
+
+    sb_count = int(starbucks_count or 0)
+    star_student = int(star_student_count or 0)
+    star_classroom = int(star_classroom_count or 0)
+    citations = int(citation_count or 0)
+
+    regular_pay = money(Decimal(days) * rate)
+    starbucks_pay = money(Decimal(sb_count) * STARBUCKS_BONUS_RATE)
+    star_student_pay = money(Decimal(star_student) * STAR_STUDENT_BONUS_RATE)
+    star_classroom_pay = money(Decimal(star_classroom) * STAR_CLASSROOM_BONUS_RATE)
+    gross = money(regular_pay + starbucks_pay + star_student_pay + star_classroom_pay)
+
+    point_card_deduction = money(gross * gap_rate)
+    citation_deduction = money(Decimal(citations) * CITATION_RATE)
+    federal_tax = money(gross * STUB_FEDERAL_RATE)
+    ss_tax = money(gross * STUB_SS_RATE)
+    medicare_tax = money(gross * STUB_MEDICARE_RATE)
+    state_tax = money(gross * STUB_STATE_RATE)
+    total_deductions = money(
+        point_card_deduction
+        + citation_deduction
+        + federal_tax
+        + ss_tax
+        + medicare_tax
+        + state_tax
+    )
+    net = money(gross - total_deductions)
+
+    return {
+        'daily_rate': rate,
+        'days_worked': days,
+        'excused_days': excused,
+        'starbucks_count': sb_count,
+        'star_student_count': star_student,
+        'star_classroom_count': star_classroom,
+        'starbucks_rate': money(STARBUCKS_BONUS_RATE),
+        'star_student_rate': money(STAR_STUDENT_BONUS_RATE),
+        'star_classroom_rate': money(STAR_CLASSROOM_BONUS_RATE),
+        'citation_rate': money(CITATION_RATE),
+        'regular_pay': regular_pay,
+        'starbucks_pay': starbucks_pay,
+        'star_student_pay': star_student_pay,
+        'star_classroom_pay': star_classroom_pay,
+        'gross': gross,
+        'base_pay': gross,
+        'star_percent': Decimal(str(star_percent or 0)),
+        'point_card_gap_percent': gap_percent,
+        'point_card_gap_rate': gap_rate,
+        'point_card_deduction': point_card_deduction,
+        'federal_rate': STUB_FEDERAL_RATE,
+        'ss_rate': STUB_SS_RATE,
+        'medicare_rate': STUB_MEDICARE_RATE,
+        'state_rate': STUB_STATE_RATE,
+        'federal_tax': federal_tax,
+        'ss_tax': ss_tax,
+        'medicare_tax': medicare_tax,
+        'state_tax': state_tax,
+        'total_deductions': total_deductions,
+        'final_pay': net,
+        'citation_count': citations,
+        'citation_deduction': citation_deduction,
+        'hourly_rate': rate,
+        'hours': Decimal(days),
+    }
 
 
 DEFAULT_TAX_TABLE = {

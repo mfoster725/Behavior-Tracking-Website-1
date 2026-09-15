@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=support-team-ui1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=citation-lines1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -732,10 +732,11 @@
                         </div>
                         <div id="import-outside-staff-section" style="display: none;">
                             <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-                                CSV columns: <strong>User Number (A) | Name (B) | District (C) | Email (E)</strong>
+                                CSV columns: <strong>User Number (A) | Name (B) | District (C) | Students (D) | Email (E)</strong>
                             </p>
                             <p style="font-size: 12px; color: #999; margin-bottom: 10px;">
                                 Username and password are generated the same way as staff (e.g. username from name, password username123). Users are added as Outside Staff.
+                                Column D lists students to assign (initials/names or lunch numbers). Separate multiple students with commas (e.g. <strong>JD, AS, 12345</strong>).
                             </p>
                             <input type="file" id="import-outside-staff-file" accept=".csv" style="margin-bottom: 10px; display: block;">
                         </div>
@@ -769,7 +770,7 @@
                             the sheet on its own within about a minute &mdash; there is no button to press. The columns it keeps up to
                             date are, for students, Name, Grade, Card Color, support team (E&ndash;J), Student Email (L), and Parent
                             emails (M&ndash;N); for staff, Name, Role, Grades Taught, Case Manager (E), and Email; for outside staff,
-                            Name, District, and Email.
+                            Name, District, Students (D), and Email.
                         </p>
                         <p style="font-size: 12px; color: #999; margin-bottom: 12px;">
                             <strong>Sheet edits wait for you.</strong> Editing a cell in the sheet never gets overwritten &mdash; a push
@@ -989,80 +990,321 @@
                     <!-- Current Paycheck Worksheet -->
                     <div
                         id="current-paycheck-worksheet"
-                        style="display: none; background: var(--bg-elevated); padding: 24px 28px; border-radius: 16px; margin-bottom: 20px; border: 1px solid var(--border);"
+                        class="earnings-record-wrap"
+                        style="display: none;"
                     >
-                        <h4 style="margin-top: 0; margin-bottom: 8px;">Complete Your Paycheck Worksheet</h4>
-                        <p style="margin-bottom: 20px; color: #64748b;">Calculate your pay based on your STAR data and citations.</p>
-
-                        <div class="paycheck-worksheet-form">
-                            <div class="worksheet-row" style="margin-bottom: 16px;">
-                                <label id="worksheet-base-label" style="display: block; margin-bottom: 5px; font-weight: 600;">Base Pay:</label>
-                                <p id="worksheet-base-formula" style="margin: 0 0 10px 0; color: #666;">Calculate your base pay: $100 × <span id="worksheet-avg-percent">0</span>% =</p>
-                                <input
-                                    type="text"
-                                    id="worksheet-calculated-pay"
-                                    inputmode="decimal"
-                                    placeholder="$0.00"
-                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
-                                >
-                            </div>
-
-                            <div class="worksheet-row" style="margin-bottom: 16px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Number of Citations:</label>
-                                <p style="margin: 0 0 8px 0; color: #666;">Citations this week:</p>
-                                <div id="worksheet-citation-list" style="white-space: pre-line; margin: 0 0 10px 0; padding: 10px 12px; background: var(--bg-elevated); border-radius: 8px; border: 1px solid var(--border); font-size: 14px; color: #334155; min-height: 2em;"></div>
-                                <p style="margin: 0 0 8px 0; color: #666;">Count the citations above and enter the number below.</p>
-                                <input
-                                    type="number"
-                                    id="worksheet-calculated-citations"
-                                    placeholder="Enter citation count"
-                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
-                                >
-                            </div>
-
-                            <div class="worksheet-row" style="margin-bottom: 16px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Citation Deduction:</label>
-                                <p style="margin: 0 0 10px 0; color: #666;">Citations × $2 =</p>
-                                <input
-                                    type="text"
-                                    id="worksheet-calculated-deduction"
-                                    inputmode="decimal"
-                                    placeholder="$0.00"
-                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
-                                >
-                            </div>
-
-                            <div id="complex-paycheck-fields" style="display: none;">
-                                <p id="worksheet-complex-hint" style="margin: 0 0 12px 0; color: #334155; font-size: 13px;"></p>
-                                <div class="worksheet-row" style="margin-bottom: 16px;">
-                                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">Social Security (6.2%):</label>
-                                    <p style="margin: 0 0 10px 0; color: #666;">Gross × 0.062 =</p>
-                                    <input type="text" id="worksheet-calculated-ss" inputmode="decimal" placeholder="$0.00" style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                        <article class="earnings-record" aria-labelledby="earnings-record-title">
+                            <header class="earnings-record-header">
+                                <div>
+                                    <p class="earnings-record-kicker">Manny's Market</p>
+                                    <h4 id="earnings-record-title">Weekly Earnings Record</h4>
                                 </div>
-                                <div class="worksheet-row" style="margin-bottom: 16px;">
-                                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">Medicare (1.45%):</label>
-                                    <p style="margin: 0 0 10px 0; color: #666;">Gross × 0.0145 =</p>
-                                    <input type="text" id="worksheet-calculated-medicare" inputmode="decimal" placeholder="$0.00" style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                                <p class="earnings-record-lede">Fill every amount box. Examples use different numbers than yours. Wrong answers show only after you submit.</p>
+                            </header>
+
+                            <div class="earnings-record-meta">
+                                <div>
+                                    <span>Employee</span>
+                                    <strong id="worksheet-employee-name"></strong>
                                 </div>
-                                <div class="worksheet-row" style="margin-bottom: 16px;">
-                                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">Federal income tax:</label>
-                                    <p style="margin: 0 0 10px 0; color: #666;">Type this week’s federal withholding from the hint above. Annual standard deduction is $16,100 (teaching text).</p>
-                                    <input type="text" id="worksheet-calculated-federal" inputmode="decimal" placeholder="$0.00" style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                                <div>
+                                    <span>Pay period</span>
+                                    <strong id="worksheet-pay-period"></strong>
+                                </div>
+                                <div>
+                                    <span>Pay date</span>
+                                    <strong id="worksheet-pay-date"></strong>
                                 </div>
                             </div>
 
-                            <div class="worksheet-row" style="margin-bottom: 16px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Final Pay:</label>
-                                <p id="worksheet-final-formula" style="margin: 0 0 10px 0; color: #666;">Base Pay - Citation Deduction =</p>
-                                <input
-                                    type="text"
-                                    id="worksheet-calculated-final"
-                                    inputmode="decimal"
-                                    placeholder="$0.00"
-                                    style="width: 220px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;"
-                                >
-                            </div>
+                            <section class="earnings-record-section" aria-label="Earnings">
+                                <h5>Earnings</h5>
+                                <div class="earnings-record-table-wrap">
+                                    <table class="earnings-record-table">
+                                        <colgroup>
+                                            <col class="earnings-col-desc">
+                                            <col class="earnings-col-count">
+                                            <col class="earnings-col-rate">
+                                            <col class="earnings-col-amount">
+                                            <col class="earnings-col-calc">
+                                        </colgroup>
+                                        <thead>
+                                            <tr>
+                                                <th>Description</th>
+                                                <th>Count</th>
+                                                <th>Rate</th>
+                                                <th>Amount</th>
+                                                <th class="worksheet-calc-head"><span class="visually-hidden">Calculator</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr class="earnings-record-group">
+                                                <td colspan="5">Regular hours</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Manny's Market</td>
+                                                <td id="worksheet-days"></td>
+                                                <td id="worksheet-daily-rate"></td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-regular-pay" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="regular">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="regular" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr class="earnings-record-group">
+                                                <td colspan="5">Bonuses</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Starbucks</td>
+                                                <td id="worksheet-starbucks-count"></td>
+                                                <td id="worksheet-starbucks-rate"></td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-starbucks-pay" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="starbucks">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="starbucks" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Star Student</td>
+                                                <td id="worksheet-star-student-count"></td>
+                                                <td id="worksheet-star-student-rate"></td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-star-student-pay" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="star-student">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="star-student" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Star Classroom</td>
+                                                <td id="worksheet-star-classroom-count"></td>
+                                                <td id="worksheet-star-classroom-rate"></td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-star-classroom-pay" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="star-classroom">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="star-classroom" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr class="earnings-record-total">
+                                                <td colspan="3">GROSS PAY</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-gross-pay" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="gross">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="gross" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
 
+                            <section class="earnings-record-section" aria-label="Deductions">
+                                <h5>Deductions</h5>
+                                <div class="earnings-record-note">
+                                    <p>Your average Point Card percentage (P) for this week is <strong id="worksheet-star-percent">0</strong>%.</p>
+
+                                    <h6 class="earnings-record-note-step">Step 1: Find your Point Card Deduction Rate</h6>
+                                    <p>Your Point Card Deduction Rate is the amount your Point Card percentage is below <strong>100%</strong>.</p>
+                                    <p class="earnings-record-note-eq"><strong>100% − P = Point Card Deduction Rate</strong></p>
+                                    <p class="earnings-record-note-fill">
+                                        <strong>100% − <span id="worksheet-pcd-note-percent">0</span>% =</strong>
+                                        <input type="text" inputmode="decimal" id="pcd-note-rate-eq" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate from 100% minus P">
+                                        <strong>%</strong>
+                                    </p>
+                                    <p class="earnings-record-note-fill">
+                                        Your <strong>Point Card Deduction Rate is</strong>
+                                        <input type="text" inputmode="decimal" id="pcd-note-rate-statement" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate">
+                                        <strong>%</strong>.
+                                    </p>
+
+                                    <h6 class="earnings-record-note-step">Step 2: Calculate your Point Card Deduction</h6>
+                                    <p>Multiply your Point Card Deduction Rate by your <strong>GROSS PAY (GP)</strong>.</p>
+                                    <p class="earnings-record-note-eq"><strong>Point Card Deduction Rate × GP = Point Card Deduction</strong></p>
+                                    <p class="earnings-record-note-fill">
+                                        <input type="text" inputmode="decimal" id="pcd-note-rate-step2" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate for multiplication">
+                                        <strong>×</strong>
+                                        <input type="text" inputmode="decimal" id="pcd-note-gp" class="earnings-record-note-input earnings-record-note-input-money" placeholder="$0.00" autocomplete="off" aria-label="Gross Pay for Point Card Deduction">
+                                        <strong>=</strong>
+                                        <input type="text" inputmode="decimal" id="pcd-note-amount" class="earnings-record-note-input earnings-record-note-input-money" placeholder="$0.00" autocomplete="off" aria-label="Point Card Deduction amount">
+                                    </p>
+
+                                    <hr class="earnings-record-note-divider">
+
+                                    <h6 class="earnings-record-note-step">Example</h6>
+                                    <p><strong>This is an example only. Your actual Gross Pay may be different.</strong></p>
+                                    <p>If a student's Gross Pay is <strong>$200</strong>:</p>
+                                    <p class="earnings-record-note-eq"><strong>12.5% × $200 = $25</strong></p>
+                                    <p>The student's <strong>Point Card Deduction would be $25</strong>.</p>
+                                </div>
+                                <div class="earnings-record-table-wrap">
+                                    <table class="earnings-record-table">
+                                        <colgroup>
+                                            <col class="earnings-col-desc">
+                                            <col class="earnings-col-count">
+                                            <col class="earnings-col-rate">
+                                            <col class="earnings-col-amount">
+                                            <col class="earnings-col-calc">
+                                        </colgroup>
+                                        <thead>
+                                            <tr>
+                                                <th>Description</th>
+                                                <th>Count</th>
+                                                <th>Rate</th>
+                                                <th>Amount</th>
+                                                <th class="worksheet-calc-head"><span class="visually-hidden">Calculator</span></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr class="earnings-record-group">
+                                                <td colspan="5">Behavior</td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Point Card Deduction
+                                                    <button type="button" class="worksheet-example-btn" data-example="point-card-rate">Show example</button>
+                                                    <p class="worksheet-example" data-example-panel="point-card-rate" hidden></p>
+                                                </td>
+                                                <td>
+                                                    <span class="worksheet-given-formula">100% − <span id="worksheet-point-card-given-percent">0</span>%</span>
+                                                </td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-point-card-rate" placeholder="%" autocomplete="off" aria-label="Point Card Deduction rate">
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-point-card-amount" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="point-card-amount">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="point-card-amount" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Citations
+                                                    <p class="earnings-record-row-note">Count each one this week: <span id="worksheet-citation-list">(none this week)</span></p>
+                                                    <button type="button" class="worksheet-example-btn" data-example="citation-count">Show example</button>
+                                                    <p class="worksheet-example" data-example-panel="citation-count" hidden></p>
+                                                </td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="numeric" id="worksheet-citation-count" placeholder="0" autocomplete="off" aria-label="Citation count">
+                                                    </div>
+                                                </td>
+                                                <td id="worksheet-citation-unit-rate">$2.00</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-citation-deduction" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="citations">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="citations" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr class="earnings-record-group">
+                                                <td colspan="5">Taxes</td>
+                                            </tr>
+                                            <tr>
+                                                <td>Federal Income Tax</td>
+                                                <td></td>
+                                                <td id="worksheet-federal-rate">3.0%</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-federal" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="federal">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="federal" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Social Security (FICA)</td>
+                                                <td></td>
+                                                <td id="worksheet-ss-rate">6.2%</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-ss" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="ss">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="ss" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>Medicare (FICA)</td>
+                                                <td></td>
+                                                <td id="worksheet-medicare-rate">1.5%</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-medicare" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="medicare">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="medicare" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr>
+                                                <td>State Income Tax</td>
+                                                <td></td>
+                                                <td id="worksheet-state-rate">5.35%</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-state" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="state">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="state" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                            <tr class="earnings-record-total">
+                                                <td colspan="3">TOTAL DEDUCTIONS</td>
+                                                <td>
+                                                    <div class="worksheet-input-cell">
+                                                        <input type="text" inputmode="decimal" id="worksheet-total-deductions" placeholder="$0.00" autocomplete="off">
+                                                        <button type="button" class="worksheet-example-btn" data-example="total-deductions">Show example</button>
+                                                        <p class="worksheet-example" data-example-panel="total-deductions" hidden></p>
+                                                    </div>
+                                                </td>
+                                                <td class="worksheet-calc-cell"></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+
+                            <footer class="earnings-record-footer">
+                                <div>
+                                    <p class="earnings-record-footer-label">Take-home (deposited to your account)</p>
+                                    <p class="earnings-record-footer-hint">GROSS PAY minus TOTAL DEDUCTIONS</p>
+                                </div>
+                                <div class="earnings-record-footer-amount">
+                                    <div class="worksheet-input-cell worksheet-input-cell-footer">
+                                        <input type="text" inputmode="decimal" id="worksheet-final" placeholder="$0.00" autocomplete="off">
+                                        <button type="button" class="worksheet-example-btn" data-example="final">Show example</button>
+                                        <p class="worksheet-example" data-example-panel="final" hidden></p>
+                                    </div>
+                                    <div class="worksheet-calc-cell"></div>
+                                </div>
+                            </footer>
+                        </article>
+
+                        <div class="earnings-record-actions">
                             <button
                                 id="submit-worksheet-btn"
                                 class="btn-primary"
@@ -1074,7 +1316,6 @@
                             <div id="worksheet-success" style="color: #10b981; margin-top: 10px; display: none;"></div>
                         </div>
                     </div>
-                </div>
 
                 <!-- Transaction History -->
                 <div
@@ -1104,6 +1345,40 @@
                     </div>
                 </div>
                 </div>
+
+                <aside
+                    id="worksheet-calculator"
+                    class="worksheet-calculator"
+                    hidden
+                    aria-label="Worksheet calculator"
+                >
+                    <div class="worksheet-calculator-header">
+                        <h5>Calculator</h5>
+                        <button type="button" class="worksheet-calculator-close" aria-label="Close calculator">&times;</button>
+                    </div>
+                    <div class="worksheet-calculator-display" id="worksheet-calculator-display" aria-live="polite">0</div>
+                    <div class="worksheet-calculator-keys" role="group" aria-label="Calculator keys">
+                        <button type="button" data-calc="clear">C</button>
+                        <button type="button" data-calc="back">⌫</button>
+                        <button type="button" data-calc="op" data-op="%">%</button>
+                        <button type="button" data-calc="op" data-op="/">÷</button>
+                        <button type="button" data-calc="digit">7</button>
+                        <button type="button" data-calc="digit">8</button>
+                        <button type="button" data-calc="digit">9</button>
+                        <button type="button" data-calc="op" data-op="*">×</button>
+                        <button type="button" data-calc="digit">4</button>
+                        <button type="button" data-calc="digit">5</button>
+                        <button type="button" data-calc="digit">6</button>
+                        <button type="button" data-calc="op" data-op="-">−</button>
+                        <button type="button" data-calc="digit">1</button>
+                        <button type="button" data-calc="digit">2</button>
+                        <button type="button" data-calc="digit">3</button>
+                        <button type="button" data-calc="op" data-op="+">+</button>
+                        <button type="button" data-calc="digit" class="worksheet-calculator-zero">0</button>
+                        <button type="button" data-calc="dot">.</button>
+                        <button type="button" data-calc="eq">=</button>
+                    </div>
+                </aside>
                 </div>
             </div>
         </div>
@@ -1316,7 +1591,20 @@
                 <!-- Cart summary and catalog -->
                 <div id="marketplace-catalog-cart-wrap" style="display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start;">
                     <div>
-                        <h3 style="margin-bottom: 16px; font-size: 1.1rem;">Items</h3>
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+                            <h3 style="margin: 0; font-size: 1.1rem;">Items</h3>
+                            {% if user.role in ['staff', 'admin'] %}
+                            <div id="marketplace-bulk-hide-toolbar" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #475569; cursor: pointer;">
+                                    <input type="checkbox" id="marketplace-select-all-items" style="cursor: pointer;">
+                                    <span>Select all</span>
+                                </label>
+                                <span id="marketplace-selected-count" style="font-size: 13px; color: #64748b;">0 selected</span>
+                                <button type="button" id="marketplace-bulk-hide-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 13px;" disabled>Hide selected</button>
+                                <button type="button" id="marketplace-bulk-unhide-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 13px;" disabled>Unhide selected</button>
+                            </div>
+                            {% endif %}
+                        </div>
                         <div id="marketplace-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;">
                             <!-- Item cards loaded by JS -->
                         </div>
@@ -2252,10 +2540,11 @@
             <div id="marketplace-hide-current-rules" class="marketplace-hidden-info" style="display: none; margin-bottom: 16px;"></div>
             <div class="form-group">
                 <label>Hide from</label>
-                <div style="margin-bottom: 12px;">
-                    <label style="display: inline-flex; align-items: center; gap: 8px; margin-right: 16px;"><input type="radio" name="marketplace-hide-type" value="student"> Specific student</label>
-                    <label style="display: inline-flex; align-items: center; gap: 8px; margin-right: 16px;"><input type="radio" name="marketplace-hide-type" value="card_color"> Card color</label>
+                <div style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px 16px;">
+                    <label style="display: inline-flex; align-items: center; gap: 8px;"><input type="radio" name="marketplace-hide-type" value="student"> Specific student</label>
+                    <label style="display: inline-flex; align-items: center; gap: 8px;"><input type="radio" name="marketplace-hide-type" value="card_color"> Card color</label>
                     <label style="display: inline-flex; align-items: center; gap: 8px;"><input type="radio" name="marketplace-hide-type" value="grade_section"> Grade section</label>
+                    <label style="display: inline-flex; align-items: center; gap: 8px;"><input type="radio" name="marketplace-hide-type" value="managed_by_me"> Students managed by me</label>
                 </div>
             </div>
             <div id="marketplace-hide-value-student" style="display: none; margin-bottom: 12px;">
@@ -2284,6 +2573,7 @@
                     <option value="9-12">9-12</option>
                 </select>
             </div>
+            <p id="marketplace-hide-managed-hint" style="display: none; margin: 0 0 12px 0; font-size: 13px; color: #64748b;">Hides the item from every student on your caseload (students managed by you). Caseload changes later still apply.</p>
             <div id="marketplace-hide-error" style="display: none; padding: 10px; margin-bottom: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626; font-size: 14px;"></div>
             <div style="margin-top: 16px; display: flex; gap: 10px;">
                 <button type="button" id="marketplace-hide-submit" class="btn-primary">Hide from students</button>
@@ -2532,7 +2822,7 @@
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
-    <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric6"></script>
+    <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric8"></script>
     {% endif %}
 </body>
 </html>

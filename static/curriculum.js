@@ -157,12 +157,36 @@
         this_paycheck: {
             pay_period_start: '2026-08-10',
             pay_period_end: '2026-08-14',
+            pay_date: '2026-08-17',
+            student_name: 'Alex',
             average_star_percent: 87.5,
-            base_pay: 87.5,
+            days_worked: 5,
+            excused_days: 1,
+            daily_rate: 74.16,
+            starbucks_count: 2,
+            star_student_count: 0,
+            star_classroom_count: 0,
+            starbucks_rate: 2,
+            star_student_rate: 50,
+            star_classroom_rate: 50,
+            regular_pay: 370.80,
+            starbucks_pay: 4,
+            star_student_pay: 0,
+            star_classroom_pay: 0,
+            gross_pay: 374.80,
+            base_pay: 374.80,
+            point_card_gap_percent: 12.5,
+            point_card_deduction: 46.85,
             citation_count: 3,
-            citation_list: ['Disruption', 'Language', 'Off task'],
+            citation_list: ['Off Task', 'Off Task', 'Lang'],
             citation_deduction: 6,
-            final_pay: 81.5,
+            federal_tax: 11.24,
+            ss_tax: 23.24,
+            medicare_tax: 5.62,
+            state_tax: 20.05,
+            total_deductions: 113.00,
+            tax_rates: { federal: 0.03, ss: 0.062, medicare: 0.015, state: 0.0535 },
+            final_pay: 261.80,
             is_verified: false,
             deposited_at: null,
         },
@@ -170,13 +194,16 @@
             pay_period_start: '2026-08-03',
             pay_period_end: '2026-08-07',
             average_star_percent: 72,
-            base_pay: 72,
-            citation_count: 1,
-            citation_list: ['Off task'],
-            citation_deduction: 2,
-            final_pay: 70,
+            days_worked: 4,
+            excused_days: 0,
+            daily_rate: 74.16,
+            starbucks_count: 0,
+            gross_pay: 296.64,
+            base_pay: 296.64,
+            total_deductions: 92.55,
+            final_pay: 204.09,
         },
-        pay_change: { direction: 'up', delta: 11.5, zero_citation_pay: 87.5 },
+        pay_change: { direction: 'up', delta: 57.71, zero_citation_pay: 374.80 },
         recent_purchases: [
             { id: 'ex-1', amount: 8, description: 'Snack pass' },
             { id: 'ex-2', amount: 15, description: 'Headphones' },
@@ -216,26 +243,37 @@
         const pct = thisPay && thisPay.average_star_percent != null
             ? Number(thisPay.average_star_percent).toFixed(2)
             : '0.00';
-        const citations = (thisPay && thisPay.citation_list) || [];
-        const listHtml = citations.length ? esc(citations.join('\n')) : 'None';
+        const days = thisPay && thisPay.days_worked != null ? thisPay.days_worked : 0;
+        const excused = thisPay && thisPay.excused_days ? ' (' + thisPay.excused_days + ' excused)' : '';
+        const rate = thisPay && thisPay.daily_rate != null ? money(thisPay.daily_rate) : '$0.00';
+        const sb = thisPay && thisPay.starbucks_count != null ? thisPay.starbucks_count : 0;
+        const ss = thisPay && thisPay.star_student_count != null ? thisPay.star_student_count : 0;
+        const sc = thisPay && thisPay.star_classroom_count != null ? thisPay.star_classroom_count : 0;
+        function field(id, label, hint) {
+            return '<label>' + esc(label) + '</label>' +
+                '<p class="muted">' + hint + '</p>' +
+                '<input type="text" inputmode="decimal" id="' + idPrefix + id + '" placeholder="$0.00">';
+        }
         return '<div class="curriculum-worksheet">' +
-            '<h4>Complete Your Paycheck Worksheet</h4>' +
-            '<p class="muted">Calculate your pay based on this week’s data and citations.</p>' +
+            '<h4>Weekly Earnings Record</h4>' +
+            '<p class="muted">Same math as Bank Account. Examples in Bank Account use different numbers.</p>' +
             '<div class="curriculum-lesson-form">' +
-            '<label>Base Pay</label>' +
-            '<p class="muted">Calculate your base pay: $100 × ' + esc(pct) + '% =</p>' +
-            '<input type="text" inputmode="decimal" id="' + idPrefix + 'base-pay" placeholder="$0.00">' +
-            '<label>Number of Citations</label>' +
-            '<p class="muted">Citations this week:</p>' +
-            '<div class="curriculum-citation-list">' + listHtml + '</div>' +
-            '<p class="muted">Count the citations above and enter the number below.</p>' +
-            '<input type="number" id="' + idPrefix + 'citations" placeholder="Enter citation count">' +
-            '<label>Citation Deduction</label>' +
-            '<p class="muted">Citations × $2 =</p>' +
-            '<input type="text" inputmode="decimal" id="' + idPrefix + 'deduction" placeholder="$0.00">' +
-            '<label>Final Pay</label>' +
-            '<p class="muted">Base Pay - Citation Deduction =</p>' +
-            '<input type="text" inputmode="decimal" id="' + idPrefix + 'final" placeholder="$0.00">' +
+            field('regular-pay', 'Regular hours amount', 'Days ' + days + excused + ' × rate ' + rate + ' =') +
+            field('starbucks-pay', 'Starbucks amount', 'Count ' + sb + ' × $2.00 =') +
+            field('star-student-pay', 'Star Student amount', 'Count ' + ss + ' × $50.00 =') +
+            field('star-classroom-pay', 'Star Classroom amount', 'Count ' + sc + ' × $50.00 =') +
+            field('gross', 'GROSS PAY', 'Add the four earning amounts.') +
+            '<label>Point Card Loss rate</label>' +
+            '<p class="muted">Your point card percent is ' + esc(pct) + '%. Enter 100 minus that percent.</p>' +
+            '<input type="text" inputmode="decimal" id="' + idPrefix + 'point-card-rate" placeholder="%">' +
+            field('point-card-amount', 'Point Card Loss amount', 'Loss rate × GROSS PAY =') +
+            field('citations', 'Citations', 'Count the citations (' + Number(thisPay && thisPay.citation_count != null ? thisPay.citation_count : 0) + ') × $2.00 =') +
+            field('federal', 'Federal Income Tax (3%)', '0.03 × GROSS PAY =') +
+            field('ss', 'Social Security (6.2%)', '0.062 × GROSS PAY =') +
+            field('medicare', 'Medicare (1.5%)', '0.015 × GROSS PAY =') +
+            field('state', 'State Income Tax (5.35%)', '0.0535 × GROSS PAY =') +
+            field('total-deductions', 'TOTAL DEDUCTIONS', 'Add the six deduction amounts.') +
+            field('final', 'Take-home', 'GROSS PAY − TOTAL DEDUCTIONS =') +
             '</div></div>';
     }
 
@@ -259,10 +297,12 @@
         return '<div class="curriculum-compare-card"><h4>' + esc(heading) + '</h4>' +
             '<p class="muted">' + esc(periodLabel(pay)) + '</p>' +
             '<dl class="curriculum-facts">' +
-            '<div><dt>STAR average</dt><dd>' + Number(pay.average_star_percent || 0).toFixed(2) + '%</dd></div>' +
-            '<div><dt>Base pay</dt><dd>' + money(pay.base_pay) + '</dd></div>' +
-            '<div><dt>Citations</dt><dd>' + esc(citationLine(pay)) + '</dd></div>' +
-            '<div><dt>Deduction ($2 each)</dt><dd>' + money(pay.citation_deduction) + '</dd></div>' +
+            '<div><dt>Days paid</dt><dd>' + Number(pay.days_worked || 0) +
+            (pay.excused_days ? ' (' + pay.excused_days + ' excused)' : '') + '</dd></div>' +
+            '<div><dt>Daily rate</dt><dd>' + money(pay.daily_rate) + '</dd></div>' +
+            '<div><dt>Point card</dt><dd>' + Number(pay.average_star_percent || 0).toFixed(2) + '%</dd></div>' +
+            '<div><dt>Starbucks</dt><dd>' + Number(pay.starbucks_count || 0) + '</dd></div>' +
+            '<div><dt>Gross</dt><dd>' + money(pay.gross_pay != null ? pay.gross_pay : pay.base_pay) + '</dd></div>' +
             '<div><dt>Take-home</dt><dd>' + money(pay.final_pay) + '</dd></div>' +
             '</dl></div>';
     }
@@ -270,15 +310,16 @@
     const LESSON_TEACHING = {
         read_paycheck:
             'Your paycheck is math from this week. Not a random number.\n\n' +
-            'Base pay starts at $100, then gets multiplied by your STAR percent for the week. If the week was 80%, base pay is $80.\n\n' +
-            'Citations come off after that. Each citation is $2. Three citations is $6 off.\n\n' +
-            'Take-home is what is left: base pay minus that deduction. That is the number that hits your account when you deposit.\n\n' +
+            'Regular pay is days present or excused times your daily rate. Bonuses add after that. Those four lines are GROSS PAY.\n\n' +
+            'Deductions come off of gross. Enter 100 minus your point card percent, then that rate times gross. Citations from the point card are $2 each. Federal 3%, Social Security 6.2%, Medicare 1.5%, and state 5.35% each times gross.\n\n' +
+            'Take-home is GROSS PAY minus TOTAL DEDUCTIONS. That is the number that hits your account when you deposit.\n\n' +
             'The worksheet in Bank Account is the same math with this week’s numbers. Run it. Deposit when it is right.',
         why_pay_changed:
-            'Pay moves for a reason. Two levers.\n\n' +
-            '- The week — STAR percent — sets base pay. A stronger week raises it. A weaker week lowers it.\n' +
-            '- Citations come off after. More citations, more money gone. Fewer citations, more of the base pay stays.\n\n' +
-            'If both moved, look at which one did more of the work. The two weeks are sitting right here. Read them. Then say what happened.',
+            'Pay moves for a reason. A few levers.\n\n' +
+            '- Days times daily rate sets regular pay. More paid days raises it.\n' +
+            '- Point card percent sets the Point Card Loss deduction: 100 minus that percent, times gross.\n' +
+            '- Bonuses add to gross. Tax percents stay the same, but they grow when gross grows.\n\n' +
+            'If more than one thing moved, look at which one did more of the work. The two weeks are sitting right here. Read them. Then say what happened.',
         save_or_buy:
             'Cash in your account spends once. Buy the item today and that money is not there for anything else.\n\n' +
             'First question: do you have enough? If the price is bigger than your balance, you cannot buy it today.\n\n' +
@@ -325,18 +366,18 @@
         let moved = 'Take-home matched the comparison: ' + money(thisTake) + '.';
         if (diff > 0.009) moved = 'Take-home went up ' + money(diff) + ' (' + money(compareTake) + ' → ' + money(thisTake) + ').';
         if (diff < -0.009) moved = 'Take-home went down ' + money(Math.abs(diff)) + ' (' + money(compareTake) + ' → ' + money(thisTake) + ').';
-        const thisCit = thisPay ? (thisPay.citation_count || 0) : 0;
-        const prevCit = prevPay ? (prevPay.citation_count || 0) : 0;
         const thisStar = thisPay ? Number(thisPay.average_star_percent || 0).toFixed(2) : '0.00';
-        let starLine = 'STAR this week: ' + thisStar + '%.';
+        const thisDays = thisPay ? Number(thisPay.days_worked || 0) : 0;
+        const prevDays = prevPay ? Number(prevPay.days_worked || 0) : 0;
+        let starLine = 'Point card this week: ' + thisStar + '%.';
         if (prevPay && prevPay.average_star_percent != null) {
-            starLine = 'STAR: ' + thisStar + '% this week vs ' + Number(prevPay.average_star_percent).toFixed(2) + '% last week.';
+            starLine = 'Point card: ' + thisStar + '% this week vs ' + Number(prevPay.average_star_percent).toFixed(2) + '% last week.';
         }
-        const citLine = prevPay
-            ? 'Citations: ' + thisCit + ' this week vs ' + prevCit + ' last week.'
-            : 'Citations this week: ' + thisCit + '.';
+        const dayLine = prevPay
+            ? 'Days paid: ' + thisDays + ' this week vs ' + prevDays + ' last week.'
+            : 'Days paid this week: ' + thisDays + '.';
         return '<div class="curriculum-change-summary"><p>' + esc(moved) + '</p>' +
-            '<p class="muted">' + esc(starLine) + ' ' + esc(citLine) + '</p></div>';
+            '<p class="muted">' + esc(starLine) + ' ' + esc(dayLine) + '</p></div>';
     }
 
     function lessonFormHtml(assignment, options) {
@@ -391,7 +432,7 @@
                 citation_deduction: 0,
                 final_pay: change.zero_citation_pay != null ? change.zero_citation_pay : thisPay.base_pay,
             } : null);
-            const compareHeading = prevPay ? 'Last week' : 'This week with zero citations';
+            const compareHeading = prevPay ? 'Last week' : 'This week at 100% point card (gross)';
             const compareEmpty = 'No comparison paycheck yet.';
             return staff + teach +
                 '<div class="curriculum-compare">' +
@@ -403,9 +444,9 @@
                 '<div class="curriculum-lesson-form">' +
                 '<label>What moved your pay?</label>' +
                 '<div class="curriculum-radio-row">' +
-                '<label><input type="radio" name="' + idPrefix + 'cause" value="star"> The week (STAR / base pay)</label>' +
-                '<label><input type="radio" name="' + idPrefix + 'cause" value="citations"> Citations</label>' +
-                '<label><input type="radio" name="' + idPrefix + 'cause" value="both"> Both</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="star"> Point card percent</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="days"> Days worked</label>' +
+                '<label><input type="radio" name="' + idPrefix + 'cause" value="both"> More than one thing</label>' +
                 '<label><input type="radio" name="' + idPrefix + 'cause" value="same"> It stayed about the same</label>' +
                 '</div>' +
                 '<label>In your words, why did it change — or why did it stay the same?</label>' +
@@ -767,14 +808,40 @@
         const tolerance = 0.05;
 
         if (slug === 'read_paycheck') {
-            const base = parseMoneyField(prefix + 'base-pay');
-            const citations = parseInt((document.getElementById(prefix + 'citations') || {}).value, 10);
-            const deduction = parseMoneyField(prefix + 'deduction');
+            const regular = parseMoneyField(prefix + 'regular-pay');
+            const starbucks = parseMoneyField(prefix + 'starbucks-pay');
+            const starStudent = parseMoneyField(prefix + 'star-student-pay');
+            const starClassroom = parseMoneyField(prefix + 'star-classroom-pay');
+            const gross = parseMoneyField(prefix + 'gross');
+            const gapRateRaw = ((document.getElementById(prefix + 'point-card-rate') || {}).value || '').trim();
+            const gapAmount = parseMoneyField(prefix + 'point-card-amount');
+            const citations = parseMoneyField(prefix + 'citations');
+            const federal = parseMoneyField(prefix + 'federal');
+            const ss = parseMoneyField(prefix + 'ss');
+            const medicare = parseMoneyField(prefix + 'medicare');
+            const state = parseMoneyField(prefix + 'state');
+            const totalDed = parseMoneyField(prefix + 'total-deductions');
             const finalPay = parseMoneyField(prefix + 'final');
-            if (Math.abs(base - Number(thisPay.base_pay || 0)) > tolerance) return 'Check the base pay: $100 × this week’s percent.';
-            if (citations !== Number(thisPay.citation_count || 0)) return 'Count the citations again.';
-            if (Math.abs(deduction - Number(thisPay.citation_deduction || 0)) > tolerance) return 'Deduction is citations × $2.';
-            if (Math.abs(finalPay - Number(thisPay.final_pay || 0)) > tolerance) return 'Final pay is base pay minus the deduction.';
+            const expectedGross = Number(thisPay.gross_pay != null ? thisPay.gross_pay : thisPay.base_pay || 0);
+            const expectedGap = Number(thisPay.point_card_gap_percent || 0);
+            let enteredGap = parseFloat(String(gapRateRaw).replace(/%/g, '').trim());
+            if (!isNaN(enteredGap) && Math.abs(enteredGap) <= 1 && String(gapRateRaw).indexOf('%') === -1 && enteredGap !== 0 && enteredGap !== 1) {
+                enteredGap = enteredGap * 100;
+            }
+            if (Math.abs(regular - Number(thisPay.regular_pay || 0)) > tolerance) return 'Check regular hours: days × daily rate.';
+            if (Math.abs(starbucks - Number(thisPay.starbucks_pay || 0)) > tolerance) return 'Starbucks is count × $2.';
+            if (Math.abs(starStudent - Number(thisPay.star_student_pay || 0)) > tolerance) return 'Star Student is count × $50.';
+            if (Math.abs(starClassroom - Number(thisPay.star_classroom_pay || 0)) > tolerance) return 'Star Classroom is count × $50.';
+            if (Math.abs(gross - expectedGross) > tolerance) return 'GROSS PAY is the four earning amounts added together.';
+            if (isNaN(enteredGap) || Math.abs(enteredGap - expectedGap) > 0.05) return 'Point Card Loss rate is 100 minus your point card percent.';
+            if (Math.abs(gapAmount - Number(thisPay.point_card_deduction || 0)) > tolerance) return 'Point Card Loss amount is that rate × GROSS PAY.';
+            if (Math.abs(citations - Number(thisPay.citation_deduction || 0)) > tolerance) return 'Citations are count × $2.';
+            if (Math.abs(federal - Number(thisPay.federal_tax || 0)) > tolerance) return 'Federal tax is 3% of GROSS PAY.';
+            if (Math.abs(ss - Number(thisPay.ss_tax || 0)) > tolerance) return 'Social Security is 6.2% of GROSS PAY.';
+            if (Math.abs(medicare - Number(thisPay.medicare_tax || 0)) > tolerance) return 'Medicare is 1.5% of GROSS PAY.';
+            if (Math.abs(state - Number(thisPay.state_tax || 0)) > tolerance) return 'State tax is 5.35% of GROSS PAY.';
+            if (Math.abs(totalDed - Number(thisPay.total_deductions || 0)) > tolerance) return 'TOTAL DEDUCTIONS is the six deduction amounts added together.';
+            if (Math.abs(finalPay - Number(thisPay.final_pay || 0)) > tolerance) return 'Take-home is GROSS PAY minus TOTAL DEDUCTIONS.';
             return null;
         }
         if (slug === 'why_pay_changed') {
@@ -830,13 +897,13 @@
         const s = story || {};
         const pay = s.this_paycheck || {};
         const change = s.pay_change || {};
-        let changeHint = 'No prior paycheck yet — compare to pay with zero citations.';
+        let changeHint = 'No prior paycheck yet — compare to gross before deductions.';
         if (change.direction === 'up') changeHint = 'Up ' + money(change.delta) + ' from last week.';
         if (change.direction === 'down') changeHint = 'Down ' + money(Math.abs(change.delta)) + ' from last week.';
         if (change.direction === 'same') changeHint = 'Same take-home as last week.';
         return '<div class="curriculum-stat"><p class="label">Balance</p><p class="value">' + money(s.balance) + '</p></div>' +
             '<div class="curriculum-stat"><p class="label">This week’s pay</p><p class="value">' + money(pay.final_pay) + '</p><p class="hint">' + esc(changeHint) + '</p></div>' +
-            '<div class="curriculum-stat"><p class="label">Citations</p><p class="value">' + (pay.citation_count || 0) + '</p><p class="hint">Deduction ' + money(pay.citation_deduction) + '</p></div>' +
+            '<div class="curriculum-stat"><p class="label">Days paid</p><p class="value">' + (pay.days_worked || 0) + '</p><p class="hint">Point card ' + Number(pay.average_star_percent || 0).toFixed(1) + '%</p></div>' +
             '<div class="curriculum-stat"><p class="label">Spent (30 days)</p><p class="value">' + money(s.spent_30d) + '</p></div>';
     }
 

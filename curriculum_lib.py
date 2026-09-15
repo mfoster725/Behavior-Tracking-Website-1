@@ -9,21 +9,26 @@ LESSON_SEEDS = [
         'skill_name': 'Net pay',
         'sort_order': 1,
         'student_prompt': (
-            'This week’s STAR percent and citations are already on this page. '
-            'Use them on the Bank Account worksheet, then deposit.'
+            'This week’s days, rate, bonuses, and point card percent are already on this page. '
+            'Use them on the Bank Account earnings record, then deposit.'
         ),
         'staff_script': (
-            'Teach the formula out loud before they type: base pay is $100 times '
-            'STAR percent, then $2 per citation comes off. Have them point at this '
-            'week’s numbers on the lesson, then open Bank Account and run the worksheet.'
+            'Teach the record out loud before they type: days times daily rate, add bonuses, '
+            'that is gross. Then 100 minus point card percent times gross, plus the tax percents, '
+            'then gross minus total deductions. Have them point at this week’s numbers on the '
+            'lesson, then open Bank Account and run the worksheet.'
         ),
         'teaching': (
             'Your paycheck is math from this week. Not a random number.\n\n'
-            'Base pay starts at $100, then gets multiplied by your STAR percent for '
-            'the week. If the week was 80%, base pay is $80.\n\n'
-            'Citations come off after that. Each citation is $2. Three citations is $6 off.\n\n'
-            'Take-home is what is left: base pay minus that deduction. That is the number '
-            'that hits your account when you deposit.\n\n'
+            'Regular pay is days present or excused times your card-color daily rate. '
+            'Bonuses (Starbucks, Star Student, Star Classroom) add on after that. '
+            'Those lines added together are GROSS PAY.\n\n'
+            'Deductions come off of gross. First find 100 minus your point card percent. '
+            'That Point Card Loss percent times gross is one deduction. Citations from the point card '
+            'cost $2 each. Then federal 3%, Social Security 6.2%, Medicare 1.5%, and state '
+            '5.35% each times gross.\n\n'
+            'Take-home is GROSS PAY minus TOTAL DEDUCTIONS. That is the number that hits '
+            'your account when you deposit.\n\n'
             'The worksheet in Bank Account is the same math with this week’s numbers. '
             'Run it. Deposit when it is right.'
         ),
@@ -38,17 +43,16 @@ LESSON_SEEDS = [
         ),
         'staff_script': (
             'Do not send them hunting for paystubs. The two weeks are on the page. '
-            'Walk STAR percent first (that is base pay), then citations ($2 each). '
-            'If this is a first check, compare to pay with zero citations. Ask them '
-            'to name the lever that did the most work.'
+            'Walk days and rate first (that is regular pay), then bonuses, then the '
+            'point card loss and tax percents. If this is a first check, compare to '
+            'gross before deductions. Ask them to name the lever that did the most work.'
         ),
         'teaching': (
-            'Pay moves for a reason. Two levers.\n\n'
-            '- The week — STAR percent — sets base pay. A stronger week raises it. '
-            'A weaker week lowers it.\n'
-            '- Citations come off after. More citations, more money gone. Fewer '
-            'citations, more of the base pay stays.\n\n'
-            'If both moved, look at which one did more of the work. The two weeks '
+            'Pay moves for a reason. A few levers.\n\n'
+            '- Days present or excused times your daily rate sets regular pay. More paid days raises it.\n'
+            '- Point card percent sets the Point Card Loss deduction: 100 minus that percent, times gross.\n'
+            '- Bonuses add to gross. Tax percents stay the same, but they grow when gross grows.\n\n'
+            'If more than one thing moved, look at which one did more of the work. The two weeks '
             'are sitting right here. Read them. Then say what happened.'
         ),
     },

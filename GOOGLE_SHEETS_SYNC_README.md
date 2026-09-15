@@ -27,7 +27,7 @@ Tabs are detected by name, and each one must use the **same column order as the 
 | Tab named like | Treated as | Key (column A) | Columns |
 |---|---|---|---|
 | **Staff** | Staff | User Number | A User Number, B Name, C Role, D Grades Taught, E Case Manager, F Email |
-| **Outside Staff** | Outside staff | User Number | A User Number, B Name, C District, E Email |
+| **Outside Staff** | Outside staff | User Number | A User Number, B Name, C District, D Students (comma-separated), E Email |
 | **Students** | Students | Lunch Number | A Lunch Number, B Initials, C Grade, D Card Color, E–J team members, L Student Email, M/N Parent emails |
 
 A tab is matched if its name contains "student", "staff", or both "outside" and "staff", so
@@ -76,7 +76,7 @@ Until it goes out:
 
 The columns the website keeps up to date are, for students: Name, Grade, Card Color, support team
 (E–J), Student Email (L), Parent emails (M–N); for staff: Name, Role, Grades Taught, Case Manager
-(E, Paraprofessionals), Email; for outside staff: Name, District, Email.
+(E, Paraprofessionals), Email; for outside staff: Name, District, Students (D), Email.
 
 Records that have never been synced have no agreed-on base, so the first push writes the website's
 values for them. Run **Preview Push** once after upgrading to see exactly what that first pass will

@@ -23378,6 +23378,9 @@ function formatMarketplaceHiddenRuleLabel(rule) {
     if (type === 'grade_section') {
         return 'Grade section: ' + value;
     }
+    if (type === 'managed_by_me') {
+        return 'Students managed by me';
+    }
     return value;
 }
 
@@ -23423,11 +23426,13 @@ function resetMarketplaceHideFormFields(keepType) {
     document.getElementById('marketplace-hide-student-search').value = '';
     document.getElementById('marketplace-hide-card-color').value = '';
     document.getElementById('marketplace-hide-grade').value = '';
+    var managedHint = document.getElementById('marketplace-hide-managed-hint');
     if (keepType !== 'student') {
         document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
         document.getElementById('marketplace-hide-value-student').style.display = 'none';
         document.getElementById('marketplace-hide-value-color').style.display = 'none';
         document.getElementById('marketplace-hide-value-grade').style.display = 'none';
+        if (managedHint) managedHint.style.display = 'none';
     }
 }
 
@@ -23448,6 +23453,7 @@ function renderMarketplaceCatalog(items) {
     if (!grid) return;
     if (!items || !items.length) {
         grid.innerHTML = '';
+        updateMarketplaceBulkSelectionUi();
         return;
     }
     var isStudent = window.currentUser && window.currentUser.role === 'student';
@@ -23462,6 +23468,13 @@ function renderMarketplaceCatalog(items) {
         var btnHtml = isStudent
             ? '<button type="button" class="btn-primary marketplace-card-add-btn" style="padding:6px 12px; font-size:13px;" data-item-id="' + item.id + '" data-item-name="' + (item.name || '').replace(/"/g, '&quot;') + '" data-item-price="' + item.price + '">Add to cart</button>'
             : '';
+        var selectHtml = '';
+        if (isStaffOrAdmin) {
+            var checked = marketplaceSelectedItemIds[item.id] ? ' checked' : '';
+            selectHtml = '<label class="marketplace-item-select" style="display:flex; align-items:center; gap:6px; margin-bottom:8px; font-size:12px; color:#64748b; cursor:pointer;" onclick="event.stopPropagation();">' +
+                '<input type="checkbox" class="marketplace-item-select-cb" data-item-id="' + item.id + '"' + checked + ' style="cursor:pointer;">' +
+                '<span>Select</span></label>';
+        }
         var staffBtns = '';
         var hasHidden = item.hidden_rules && item.hidden_rules.length > 0;
         if (isStaffOrAdmin) {
@@ -23479,6 +23492,7 @@ function renderMarketplaceCatalog(items) {
                 '</div>';
         }
         return '<div class="marketplace-item-card" style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer;" data-item-id="' + item.id + '">' +
+            selectHtml +
             imgHtml +
             '<h4 style="margin:0 0 8px 0; font-size:1rem;">' + (item.name || '').replace(/</g, '&lt;') + '</h4>' +
             '<p style="color:#64748b; margin:0 0 12px 0; font-size:13px; line-height:1.4; max-height:2.8em; overflow:hidden;">' + (item.description || '').replace(/</g, '&lt;').substring(0, 80) + (item.description && item.description.length > 80 ? '…' : '') + '</p>' +
@@ -23488,7 +23502,7 @@ function renderMarketplaceCatalog(items) {
     }).join('');
     grid.querySelectorAll('.marketplace-item-card').forEach(function (card) {
         card.addEventListener('click', function (e) {
-            if (e.target.closest('.marketplace-card-add-btn') || e.target.closest('.marketplace-btn-hide') || e.target.closest('.marketplace-btn-unhide') || e.target.closest('.marketplace-btn-edit') || e.target.closest('.marketplace-btn-delete')) return;
+            if (e.target.closest('.marketplace-card-add-btn') || e.target.closest('.marketplace-btn-hide') || e.target.closest('.marketplace-btn-unhide') || e.target.closest('.marketplace-btn-edit') || e.target.closest('.marketplace-btn-delete') || e.target.closest('.marketplace-item-select')) return;
             var id = parseInt(card.getAttribute('data-item-id'), 10);
             openMarketplaceItemDetailModal(id);
         });
@@ -23514,6 +23528,45 @@ function renderMarketplaceCatalog(items) {
     grid.querySelectorAll('.marketplace-btn-delete').forEach(function (btn) {
         btn.addEventListener('click', function (e) { e.stopPropagation(); confirmDeleteMarketplaceItem(parseInt(btn.getAttribute('data-item-id'), 10)); });
     });
+    grid.querySelectorAll('.marketplace-item-select-cb').forEach(function (cb) {
+        cb.addEventListener('change', function (e) {
+            e.stopPropagation();
+            var id = parseInt(cb.getAttribute('data-item-id'), 10);
+            if (cb.checked) marketplaceSelectedItemIds[id] = true;
+            else delete marketplaceSelectedItemIds[id];
+            updateMarketplaceBulkSelectionUi();
+        });
+    });
+    updateMarketplaceBulkSelectionUi();
+}
+
+var marketplaceSelectedItemIds = {};
+
+function getMarketplaceSelectedItemIds() {
+    return Object.keys(marketplaceSelectedItemIds).map(function (k) { return parseInt(k, 10); }).filter(function (n) { return !isNaN(n); });
+}
+
+function updateMarketplaceBulkSelectionUi() {
+    var ids = getMarketplaceSelectedItemIds();
+    var countEl = document.getElementById('marketplace-selected-count');
+    var hideBtn = document.getElementById('marketplace-bulk-hide-btn');
+    var unhideBtn = document.getElementById('marketplace-bulk-unhide-btn');
+    var selectAll = document.getElementById('marketplace-select-all-items');
+    if (countEl) countEl.textContent = ids.length + ' selected';
+    if (hideBtn) hideBtn.disabled = ids.length === 0;
+    if (unhideBtn) unhideBtn.disabled = ids.length === 0;
+    if (selectAll) {
+        var visibleIds = (marketplaceCatalog || []).map(function (i) { return i.id; });
+        var allVisibleSelected = visibleIds.length > 0 && visibleIds.every(function (id) { return marketplaceSelectedItemIds[id]; });
+        selectAll.checked = allVisibleSelected;
+        selectAll.indeterminate = !allVisibleSelected && visibleIds.some(function (id) { return marketplaceSelectedItemIds[id]; });
+    }
+}
+
+function clearMarketplaceItemSelection() {
+    marketplaceSelectedItemIds = {};
+    document.querySelectorAll('.marketplace-item-select-cb').forEach(function (cb) { cb.checked = false; });
+    updateMarketplaceBulkSelectionUi();
 }
 
 function openMarketplaceItemDetailModal(itemId) {
@@ -24259,54 +24312,168 @@ function submitMarketplaceAddItem() {
 }
 
 var marketplaceHideModalItemId = null;
-function openMarketplaceHideModal(itemId) {
-    marketplaceHideModalItemId = itemId;
-    var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
-    var modal = document.getElementById('marketplace-hide-modal');
-    var nameEl = document.getElementById('marketplace-hide-item-name');
-    if (nameEl) nameEl.textContent = item ? item.name : '';
-    document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
+var marketplaceHideModalItemIds = null;
+
+function resetMarketplaceHideTypePanels() {
     document.getElementById('marketplace-hide-value-student').style.display = 'none';
     document.getElementById('marketplace-hide-value-color').style.display = 'none';
     document.getElementById('marketplace-hide-value-grade').style.display = 'none';
+    var managedHint = document.getElementById('marketplace-hide-managed-hint');
+    if (managedHint) managedHint.style.display = 'none';
+}
+
+function syncMarketplaceHideTypePanels(type) {
+    resetMarketplaceHideTypePanels();
+    if (type === 'student') document.getElementById('marketplace-hide-value-student').style.display = 'block';
+    else if (type === 'card_color') document.getElementById('marketplace-hide-value-color').style.display = 'block';
+    else if (type === 'grade_section') document.getElementById('marketplace-hide-value-grade').style.display = 'block';
+    else if (type === 'managed_by_me') {
+        var managedHint = document.getElementById('marketplace-hide-managed-hint');
+        if (managedHint) managedHint.style.display = 'block';
+    }
+}
+
+function openMarketplaceHideModal(itemId, options) {
+    options = options || {};
+    marketplaceHideModalItemId = itemId || null;
+    marketplaceHideModalItemIds = options.itemIds && options.itemIds.length ? options.itemIds.slice() : null;
+    var modal = document.getElementById('marketplace-hide-modal');
+    var nameEl = document.getElementById('marketplace-hide-item-name');
+    var titleEl = modal ? modal.querySelector('h2') : null;
+    if (marketplaceHideModalItemIds && marketplaceHideModalItemIds.length > 1) {
+        if (titleEl) titleEl.textContent = 'Hide items from students';
+        if (nameEl) nameEl.textContent = marketplaceHideModalItemIds.length + ' items selected';
+    } else {
+        var singleId = marketplaceHideModalItemId || (marketplaceHideModalItemIds && marketplaceHideModalItemIds[0]);
+        marketplaceHideModalItemId = singleId;
+        marketplaceHideModalItemIds = null;
+        var item = marketplaceCatalog.find(function (x) { return x.id === singleId; });
+        if (titleEl) titleEl.textContent = 'Hide item from students';
+        if (nameEl) nameEl.textContent = item ? item.name : '';
+    }
+    document.querySelectorAll('input[name="marketplace-hide-type"]').forEach(function (r) { r.checked = false; });
+    resetMarketplaceHideTypePanels();
     document.getElementById('marketplace-hide-student-id').value = '';
     document.getElementById('marketplace-hide-student-search').value = '';
     document.getElementById('marketplace-hide-card-color').value = '';
     document.getElementById('marketplace-hide-grade').value = '';
     var errEl = document.getElementById('marketplace-hide-error');
-    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    refreshMarketplaceHideModalRules(itemId);
+    if (errEl) {
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+        errEl.style.background = '#fef2f2';
+        errEl.style.border = '1px solid #fecaca';
+        errEl.style.color = '#dc2626';
+    }
+    var rulesEl = document.getElementById('marketplace-hide-current-rules');
+    if (marketplaceHideModalItemIds) {
+        if (rulesEl) { rulesEl.style.display = 'none'; rulesEl.innerHTML = ''; }
+    } else if (marketplaceHideModalItemId) {
+        refreshMarketplaceHideModalRules(marketplaceHideModalItemId);
+    }
     if (modal) modal.style.display = 'block';
 }
+
+function openMarketplaceBulkHideModal() {
+    var ids = getMarketplaceSelectedItemIds();
+    if (!ids.length) return;
+    if (ids.length === 1) openMarketplaceHideModal(ids[0]);
+    else openMarketplaceHideModal(null, { itemIds: ids });
+}
+
 function closeMarketplaceHideModal() {
     marketplaceHideModalItemId = null;
+    marketplaceHideModalItemIds = null;
     var modal = document.getElementById('marketplace-hide-modal');
     if (modal) modal.style.display = 'none';
 }
-function submitMarketplaceHide() {
-    var itemId = marketplaceHideModalItemId;
-    var errEl = document.getElementById('marketplace-hide-error');
-    if (!itemId) {
-        if (errEl) { errEl.textContent = 'No item selected. Close and try again.'; errEl.style.display = 'block'; }
-        return;
-    }
+
+function getMarketplaceHideFormSelection() {
     var typeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
     var type = null;
     typeRadios.forEach(function (r) { if (r.checked) type = r.value; });
     var value = '';
+    var error = '';
     if (type === 'student') {
         value = document.getElementById('marketplace-hide-student-id').value.trim();
-        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a student.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+        if (!value) error = 'Select a student.';
     } else if (type === 'card_color') {
         value = document.getElementById('marketplace-hide-card-color').value.trim();
-        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a card color.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+        if (!value) error = 'Select a card color.';
     } else if (type === 'grade_section') {
         value = document.getElementById('marketplace-hide-grade').value.trim();
-        if (!value) { document.getElementById('marketplace-hide-error').textContent = 'Select a grade section.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return; }
+        if (!value) error = 'Select a grade section.';
+    } else if (type === 'managed_by_me') {
+        value = '';
     } else {
-        document.getElementById('marketplace-hide-error').textContent = 'Choose one: specific student, card color, or grade.'; document.getElementById('marketplace-hide-error').style.display = 'block'; return;
+        error = 'Choose one: specific student, card color, grade, or students managed by me.';
     }
-    errEl.style.display = 'none';
+    return { type: type, value: value, error: error };
+}
+
+function submitMarketplaceHide() {
+    var errEl = document.getElementById('marketplace-hide-error');
+    var bulkIds = marketplaceHideModalItemIds;
+    var itemId = marketplaceHideModalItemId;
+    if ((!bulkIds || !bulkIds.length) && !itemId) {
+        if (errEl) { errEl.textContent = 'No item selected. Close and try again.'; errEl.style.display = 'block'; }
+        return;
+    }
+    var selection = getMarketplaceHideFormSelection();
+    if (selection.error) {
+        if (errEl) { errEl.textContent = selection.error; errEl.style.display = 'block'; }
+        return;
+    }
+    var type = selection.type;
+    var value = selection.value;
+    if (errEl) errEl.style.display = 'none';
+
+    function showHideSuccess(message) {
+        if (!errEl) return;
+        errEl.style.display = 'block';
+        errEl.style.background = '#F0FDF4';
+        errEl.style.border = '1px solid #BBF7D0';
+        errEl.style.color = '#166534';
+        errEl.textContent = message;
+        setTimeout(function () {
+            if (errEl.textContent === message) {
+                errEl.style.display = 'none';
+                errEl.style.background = '#fef2f2';
+                errEl.style.border = '1px solid #fecaca';
+                errEl.style.color = '#dc2626';
+            }
+        }, 3000);
+    }
+
+    function showHideError(message) {
+        if (!errEl) return;
+        errEl.style.background = '#fef2f2';
+        errEl.style.border = '1px solid #fecaca';
+        errEl.style.color = '#dc2626';
+        errEl.textContent = message;
+        errEl.style.display = 'block';
+    }
+
+    if (bulkIds && bulkIds.length) {
+        fetch('/api/marketplace-items/hidden-rules/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_ids: bulkIds, hidden_type: type, value: value })
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    clearMarketplaceItemSelection();
+                    loadMarketplaceCatalog();
+                    closeMarketplaceHideModal();
+                } else {
+                    showHideError((res.data && res.data.error) || 'Failed to hide selected items.');
+                }
+            })
+            .catch(function () { showHideError('Failed to hide selected items.'); });
+        return;
+    }
+
     fetch('/api/marketplace-items/' + itemId + '/hidden-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -24322,43 +24489,46 @@ function submitMarketplaceHide() {
                         var item = marketplaceCatalog.find(function (x) { return x.id === itemId; });
                         if (item) item.hidden_rules = rules;
                         refreshMarketplaceHideModalRules(itemId);
-                        resetMarketplaceHideFormFields(type);
+                        resetMarketplaceHideFormFields(type === 'student' ? 'student' : null);
                         if (type === 'student') {
                             var studentRadio = document.querySelector('input[name="marketplace-hide-type"][value="student"]');
                             if (studentRadio) {
                                 studentRadio.checked = true;
-                                document.getElementById('marketplace-hide-value-student').style.display = 'block';
+                                syncMarketplaceHideTypePanels('student');
                             }
                         }
-                        if (errEl) {
-                            errEl.style.display = 'block';
-                            errEl.style.background = '#F0FDF4';
-                            errEl.style.border = '1px solid #BBF7D0';
-                            errEl.style.color = '#166534';
-                            errEl.textContent = 'Rule added. Select another student or close when done.';
-                            setTimeout(function () {
-                                if (errEl.textContent === 'Rule added. Select another student or close when done.') {
-                                    errEl.style.display = 'none';
-                                    errEl.style.background = '#fef2f2';
-                                    errEl.style.border = '1px solid #fecaca';
-                                    errEl.style.color = '#dc2626';
-                                }
-                            }, 3000);
-                        }
+                        showHideSuccess(type === 'student'
+                            ? 'Rule added. Select another student or close when done.'
+                            : 'Rule added.');
                     });
             } else {
-                errEl.style.background = '#fef2f2';
-                errEl.style.border = '1px solid #fecaca';
-                errEl.style.color = '#dc2626';
-                errEl.textContent = (res.data && res.data.error) || 'Failed to add rule.'; errEl.style.display = 'block';
+                showHideError((res.data && res.data.error) || 'Failed to add rule.');
             }
         })
-        .catch(function () {
-            errEl.style.background = '#fef2f2';
-            errEl.style.border = '1px solid #fecaca';
-            errEl.style.color = '#dc2626';
-            errEl.textContent = 'Failed to add rule.'; errEl.style.display = 'block';
-        });
+        .catch(function () { showHideError('Failed to add rule.'); });
+}
+
+function submitMarketplaceBulkUnhide() {
+    var ids = getMarketplaceSelectedItemIds();
+    if (!ids.length) return;
+    if (!window.confirm('Remove all hide rules from ' + ids.length + ' selected item(s)? They will become visible again under normal marketplace rules.')) {
+        return;
+    }
+    fetch('/api/marketplace-items/hidden-rules/bulk-remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: ids })
+    })
+        .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+            if (res.ok) {
+                clearMarketplaceItemSelection();
+                loadMarketplaceCatalog();
+            } else {
+                alert((res.data && res.data.error) || 'Failed to unhide selected items.');
+            }
+        })
+        .catch(function () { alert('Failed to unhide selected items.'); });
 }
 
 var marketplaceUnhideModalItemId = null;
@@ -24868,15 +25038,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hideSubmit) hideSubmit.addEventListener('click', submitMarketplaceHide);
         if (hideModal) hideModal.addEventListener('click', function (e) { if (e.target === hideModal) closeMarketplaceHideModal(); });
         var hideTypeRadios = document.querySelectorAll('input[name="marketplace-hide-type"]');
-        var hideValueStudent = document.getElementById('marketplace-hide-value-student');
-        var hideValueColor = document.getElementById('marketplace-hide-value-color');
-        var hideValueGrade = document.getElementById('marketplace-hide-value-grade');
         hideTypeRadios.forEach(function (r) {
             r.addEventListener('change', function () {
-                var t = this.value;
-                if (hideValueStudent) hideValueStudent.style.display = (t === 'student') ? 'block' : 'none';
-                if (hideValueColor) hideValueColor.style.display = (t === 'card_color') ? 'block' : 'none';
-                if (hideValueGrade) hideValueGrade.style.display = (t === 'grade_section') ? 'block' : 'none';
+                syncMarketplaceHideTypePanels(this.value);
             });
         });
         var hideStudentSearch = document.getElementById('marketplace-hide-student-search');
@@ -24918,6 +25082,32 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             document.addEventListener('click', function (e) {
                 if (!hideStudentSearch.contains(e.target) && !hideStudentDropdown.contains(e.target)) mountAutocompleteDropdown(hideStudentDropdown, document.createDocumentFragment(), false);
+            });
+        }
+        var bulkHideBtn = document.getElementById('marketplace-bulk-hide-btn');
+        var bulkUnhideBtn = document.getElementById('marketplace-bulk-unhide-btn');
+        var selectAllItems = document.getElementById('marketplace-select-all-items');
+        if (bulkHideBtn && !bulkHideBtn._marketplaceBulkBound) {
+            bulkHideBtn._marketplaceBulkBound = true;
+            bulkHideBtn.addEventListener('click', openMarketplaceBulkHideModal);
+        }
+        if (bulkUnhideBtn && !bulkUnhideBtn._marketplaceBulkBound) {
+            bulkUnhideBtn._marketplaceBulkBound = true;
+            bulkUnhideBtn.addEventListener('click', submitMarketplaceBulkUnhide);
+        }
+        if (selectAllItems && !selectAllItems._marketplaceBulkBound) {
+            selectAllItems._marketplaceBulkBound = true;
+            selectAllItems.addEventListener('change', function () {
+                var visibleIds = (marketplaceCatalog || []).map(function (i) { return i.id; });
+                if (selectAllItems.checked) {
+                    visibleIds.forEach(function (id) { marketplaceSelectedItemIds[id] = true; });
+                } else {
+                    visibleIds.forEach(function (id) { delete marketplaceSelectedItemIds[id]; });
+                }
+                document.querySelectorAll('.marketplace-item-select-cb').forEach(function (cb) {
+                    cb.checked = !!selectAllItems.checked;
+                });
+                updateMarketplaceBulkSelectionUi();
             });
         }
         var unhideClose = document.getElementById('marketplace-unhide-modal-close');
@@ -25354,166 +25544,940 @@ function formatCurrency(num) {
     return '$' + n.toFixed(2);
 }
 
+/** Parse a student percent entry into percentage points (8 for 8%). Accepts 8, 8%, or 0.08. */
+function parseWorksheetPercentPoints(str) {
+    if (str == null || str === '') return NaN;
+    const text = String(str).replace(/,/g, '').trim();
+    if (!text) return NaN;
+    const hasPct = text.indexOf('%') !== -1;
+    const cleaned = text.replace(/%/g, '').replace(/\$/g, '').trim();
+    if (!cleaned) return NaN;
+    const n = parseFloat(cleaned);
+    if (isNaN(n)) return NaN;
+    if (hasPct || Math.abs(n) >= 1 || n === 0) return n;
+    return n * 100;
+}
+
+function formatWorksheetPercent(value) {
+    if (value == null || value === '') return '';
+    const points = parseWorksheetPercentPoints(value);
+    if (isNaN(points)) return '';
+    const text = points.toFixed(4).replace(/\.?0+$/, '');
+    return text + '%';
+}
+
+const WORKSHEET_PCD_NOTE_RATE_IDS = [
+    'pcd-note-rate-eq',
+    'pcd-note-rate-statement',
+    'pcd-note-rate-step2'
+];
+const WORKSHEET_PCD_NOTE_MONEY_IDS = [
+    'pcd-note-gp',
+    'pcd-note-amount'
+];
+
+function setWorksheetPcdNoteRate(value) {
+    const formatted = value == null || value === '' ? '' : (formatWorksheetPercent(value) || String(value));
+    WORKSHEET_PCD_NOTE_RATE_IDS.forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.value = formatted;
+    });
+    const tableRate = document.getElementById('worksheet-point-card-rate');
+    if (tableRate) tableRate.value = formatted;
+}
+
+function setWorksheetPcdNoteAmount(value) {
+    let formatted = '';
+    if (value != null && value !== '') {
+        const parsed = typeof value === 'number' ? value : parseCurrency(value);
+        formatted = isNaN(parsed) ? String(value) : formatCurrency(parsed);
+    }
+    const noteAmount = document.getElementById('pcd-note-amount');
+    if (noteAmount) noteAmount.value = formatted;
+    const tableAmount = document.getElementById('worksheet-point-card-amount');
+    if (tableAmount) tableAmount.value = formatted;
+}
+
+function clearWorksheetPcdNoteFields() {
+    WORKSHEET_PCD_NOTE_RATE_IDS.concat(WORKSHEET_PCD_NOTE_MONEY_IDS).forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+}
+
+function bindWorksheetPcdNoteFields() {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    if (!worksheetDiv || worksheetDiv._pcdNoteBound) return;
+    worksheetDiv._pcdNoteBound = true;
+
+    WORKSHEET_PCD_NOTE_RATE_IDS.forEach(function (id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', function () {
+            const val = this.value;
+            WORKSHEET_PCD_NOTE_RATE_IDS.forEach(function (otherId) {
+                if (otherId === id) return;
+                const other = document.getElementById(otherId);
+                if (other) other.value = val;
+            });
+            const tableRate = document.getElementById('worksheet-point-card-rate');
+            if (tableRate) tableRate.value = val;
+        });
+        el.addEventListener('blur', function () {
+            const formatted = formatWorksheetPercent(this.value);
+            if (formatted) setWorksheetPcdNoteRate(formatted);
+        });
+    });
+
+    const noteGp = document.getElementById('pcd-note-gp');
+    if (noteGp) {
+        noteGp.addEventListener('blur', function () {
+            const parsed = parseCurrency(this.value);
+            if (!isNaN(parsed)) this.value = formatCurrency(parsed);
+        });
+    }
+
+    const noteAmount = document.getElementById('pcd-note-amount');
+    if (noteAmount) {
+        noteAmount.addEventListener('input', function () {
+            const tableAmount = document.getElementById('worksheet-point-card-amount');
+            if (tableAmount) tableAmount.value = this.value;
+        });
+        noteAmount.addEventListener('blur', function () {
+            const parsed = parseCurrency(this.value);
+            if (!isNaN(parsed)) setWorksheetPcdNoteAmount(parsed);
+        });
+    }
+
+    const tableRate = document.getElementById('worksheet-point-card-rate');
+    if (tableRate) {
+        tableRate.addEventListener('input', function () {
+            const val = this.value;
+            WORKSHEET_PCD_NOTE_RATE_IDS.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.value = val;
+            });
+        });
+    }
+
+    const tableAmount = document.getElementById('worksheet-point-card-amount');
+    if (tableAmount) {
+        tableAmount.addEventListener('input', function () {
+            const noteAmt = document.getElementById('pcd-note-amount');
+            if (noteAmt) noteAmt.value = this.value;
+        });
+    }
+}
+
+const WORKSHEET_MONEY_IDS = [
+    'worksheet-regular-pay',
+    'worksheet-starbucks-pay',
+    'worksheet-star-student-pay',
+    'worksheet-star-classroom-pay',
+    'worksheet-gross-pay',
+    'worksheet-point-card-amount',
+    'worksheet-citation-deduction',
+    'worksheet-federal',
+    'worksheet-ss',
+    'worksheet-medicare',
+    'worksheet-state',
+    'worksheet-total-deductions',
+    'worksheet-final'
+];
+const WORKSHEET_FOCUS_ORDER = [
+    'worksheet-regular-pay',
+    'worksheet-starbucks-pay',
+    'worksheet-star-student-pay',
+    'worksheet-star-classroom-pay',
+    'worksheet-gross-pay',
+    'pcd-note-rate-eq',
+    'pcd-note-rate-statement',
+    'pcd-note-rate-step2',
+    'pcd-note-gp',
+    'pcd-note-amount',
+    'worksheet-point-card-rate',
+    'worksheet-point-card-amount',
+    'worksheet-citation-count',
+    'worksheet-citation-deduction',
+    'worksheet-federal',
+    'worksheet-ss',
+    'worksheet-medicare',
+    'worksheet-state',
+    'worksheet-total-deductions',
+    'worksheet-final',
+    'submit-worksheet-btn'
+];
+
+const WORKSHEET_TAX_RATE_DEFAULTS = {
+    federal: 0.03,
+    ss: 0.062,
+    medicare: 0.015,
+    state: 0.0535
+};
+
+const WORKSHEET_CALC_ICON = (
+    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
+    '<rect x="4" y="2" width="16" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"></rect>' +
+    '<rect x="7" y="5" width="10" height="4" rx="1" fill="currentColor" opacity="0.35"></rect>' +
+    '<circle cx="8.5" cy="13" r="1" fill="currentColor"></circle>' +
+    '<circle cx="12" cy="13" r="1" fill="currentColor"></circle>' +
+    '<circle cx="15.5" cy="13" r="1" fill="currentColor"></circle>' +
+    '<circle cx="8.5" cy="17" r="1" fill="currentColor"></circle>' +
+    '<circle cx="12" cy="17" r="1" fill="currentColor"></circle>' +
+    '<circle cx="15.5" cy="17" r="1" fill="currentColor"></circle>' +
+    '</svg>'
+);
+
+const worksheetCalculatorState = {
+    display: '0',
+    left: null,
+    op: null,
+    fresh: true,
+    anchorBtn: null
+};
+
+function formatWorksheetCalcDisplay(value) {
+    const n = Number(value);
+    if (!isFinite(n)) return 'Error';
+    const rounded = Math.round(n * 1e10) / 1e10;
+    let text = String(rounded);
+    if (text.indexOf('e') !== -1) text = rounded.toFixed(8).replace(/\.?0+$/, '');
+    return text;
+}
+
+function renderWorksheetCalculator() {
+    const display = document.getElementById('worksheet-calculator-display');
+    if (display) display.textContent = worksheetCalculatorState.display;
+}
+
+function resetWorksheetCalculator() {
+    worksheetCalculatorState.display = '0';
+    worksheetCalculatorState.left = null;
+    worksheetCalculatorState.op = null;
+    worksheetCalculatorState.fresh = true;
+    renderWorksheetCalculator();
+}
+
+function applyWorksheetCalcOp(left, op, right) {
+    const a = Number(left);
+    const b = Number(right);
+    if (!isFinite(a) || !isFinite(b)) return NaN;
+    if (op === '+') return a + b;
+    if (op === '-') return a - b;
+    if (op === '*') return a * b;
+    if (op === '/') return b === 0 ? NaN : a / b;
+    return b;
+}
+
+function worksheetCalcDigit(digit) {
+    if (worksheetCalculatorState.fresh || worksheetCalculatorState.display === '0' || worksheetCalculatorState.display === 'Error') {
+        worksheetCalculatorState.display = digit;
+        worksheetCalculatorState.fresh = false;
+    } else if (worksheetCalculatorState.display.length < 16) {
+        worksheetCalculatorState.display += digit;
+    }
+    renderWorksheetCalculator();
+}
+
+function worksheetCalcDot() {
+    if (worksheetCalculatorState.fresh || worksheetCalculatorState.display === 'Error') {
+        worksheetCalculatorState.display = '0.';
+        worksheetCalculatorState.fresh = false;
+    } else if (worksheetCalculatorState.display.indexOf('.') === -1) {
+        worksheetCalculatorState.display += '.';
+    }
+    renderWorksheetCalculator();
+}
+
+function worksheetCalcBack() {
+    if (worksheetCalculatorState.fresh || worksheetCalculatorState.display === 'Error') {
+        worksheetCalculatorState.display = '0';
+        worksheetCalculatorState.fresh = true;
+    } else if (worksheetCalculatorState.display.length <= 1) {
+        worksheetCalculatorState.display = '0';
+        worksheetCalculatorState.fresh = true;
+    } else {
+        worksheetCalculatorState.display = worksheetCalculatorState.display.slice(0, -1);
+    }
+    renderWorksheetCalculator();
+}
+
+function worksheetCalcOperate(nextOp) {
+    const current = Number(worksheetCalculatorState.display);
+    if (worksheetCalculatorState.op && !worksheetCalculatorState.fresh) {
+        const result = applyWorksheetCalcOp(worksheetCalculatorState.left, worksheetCalculatorState.op, current);
+        worksheetCalculatorState.display = formatWorksheetCalcDisplay(result);
+        worksheetCalculatorState.left = isFinite(result) ? result : null;
+    } else {
+        worksheetCalculatorState.left = isFinite(current) ? current : null;
+    }
+    worksheetCalculatorState.op = nextOp;
+    worksheetCalculatorState.fresh = true;
+    renderWorksheetCalculator();
+}
+
+function worksheetCalcEquals() {
+    if (!worksheetCalculatorState.op || worksheetCalculatorState.left == null) return;
+    const result = applyWorksheetCalcOp(
+        worksheetCalculatorState.left,
+        worksheetCalculatorState.op,
+        Number(worksheetCalculatorState.display)
+    );
+    worksheetCalculatorState.display = formatWorksheetCalcDisplay(result);
+    worksheetCalculatorState.left = null;
+    worksheetCalculatorState.op = null;
+    worksheetCalculatorState.fresh = true;
+    renderWorksheetCalculator();
+}
+
+function worksheetCalcPercent() {
+    const current = Number(worksheetCalculatorState.display);
+    if (!isFinite(current)) return;
+    let result;
+    if (worksheetCalculatorState.left != null && worksheetCalculatorState.op) {
+        result = worksheetCalculatorState.left * (current / 100);
+    } else {
+        result = current / 100;
+    }
+    worksheetCalculatorState.display = formatWorksheetCalcDisplay(result);
+    worksheetCalculatorState.fresh = true;
+    renderWorksheetCalculator();
+}
+
+function getWorksheetCalculatorHost() {
+    const starbucks = document.getElementById('starbucks-section');
+    const layout = document.getElementById('bank-account-layout');
+    if (starbucks && window.matchMedia('(min-width: 901px)').matches) {
+        return starbucks;
+    }
+    return layout || starbucks;
+}
+
+function positionWorksheetCalculator(anchorBtn) {
+    const panel = document.getElementById('worksheet-calculator');
+    if (!panel || panel.hidden) return;
+    const host = panel.parentElement;
+    const btn = anchorBtn || worksheetCalculatorState.anchorBtn;
+    if (!host || !btn || !document.body.contains(btn)) return;
+
+    const btnRect = btn.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    let top = btnRect.top - hostRect.top + host.scrollTop;
+    const panelHeight = panel.offsetHeight || 280;
+    const maxTop = Math.max(0, host.clientHeight - panelHeight - 8);
+    top = Math.max(0, Math.min(top, maxTop));
+    panel.style.top = top + 'px';
+}
+
+function setWorksheetCalculatorOpen(open, anchorBtn) {
+    const panel = document.getElementById('worksheet-calculator');
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    const starbucks = document.getElementById('starbucks-section');
+    const layout = document.getElementById('bank-account-layout');
+    if (!panel) return;
+
+    if (!open) {
+        panel.hidden = true;
+        panel.style.top = '';
+        worksheetCalculatorState.anchorBtn = null;
+        if (starbucks) starbucks.classList.remove('worksheet-calculator-hosting');
+        if (layout && panel.parentElement !== layout) layout.appendChild(panel);
+        if (worksheetDiv) {
+            worksheetDiv.querySelectorAll('.worksheet-calc-btn').forEach(function (btn) {
+                btn.setAttribute('aria-expanded', 'false');
+                btn.setAttribute('aria-label', 'Open calculator');
+            });
+        }
+        return;
+    }
+
+    const host = getWorksheetCalculatorHost();
+    if (host && panel.parentElement !== host) host.appendChild(panel);
+    if (starbucks) {
+        if (host === starbucks) starbucks.classList.add('worksheet-calculator-hosting');
+        else starbucks.classList.remove('worksheet-calculator-hosting');
+    }
+    worksheetCalculatorState.anchorBtn = anchorBtn || worksheetCalculatorState.anchorBtn;
+    panel.hidden = false;
+    renderWorksheetCalculator();
+
+    if (worksheetDiv) {
+        worksheetDiv.querySelectorAll('.worksheet-calc-btn').forEach(function (btn) {
+            const active = btn === worksheetCalculatorState.anchorBtn;
+            btn.setAttribute('aria-expanded', active ? 'true' : 'false');
+            btn.setAttribute('aria-label', active ? 'Close calculator' : 'Open calculator');
+        });
+    }
+
+    requestAnimationFrame(function () {
+        positionWorksheetCalculator(worksheetCalculatorState.anchorBtn);
+    });
+}
+
+function ensureWorksheetCalcButtons(worksheetDiv) {
+    if (!worksheetDiv) return;
+    const amountIds = {};
+    WORKSHEET_MONEY_IDS.forEach(function (id) {
+        amountIds[id] = true;
+    });
+
+    worksheetDiv.querySelectorAll('.worksheet-input-cell').forEach(function (cell) {
+        const input = cell.querySelector('input');
+        if (!input || !amountIds[input.id]) return;
+
+        const tr = cell.closest('tr');
+        const footerCalc = cell.closest('.earnings-record-footer-amount');
+        const calcHost = (tr && tr.querySelector('.worksheet-calc-cell'))
+            || (footerCalc && footerCalc.querySelector('.worksheet-calc-cell'));
+
+        let btn = null;
+        if (calcHost) {
+            if (calcHost.querySelector('.worksheet-calc-btn')) return;
+            btn = document.createElement('button');
+            calcHost.appendChild(btn);
+        } else {
+            if (cell.querySelector('.worksheet-calc-btn')) return;
+            let row = input.closest('.worksheet-input-row');
+            if (!row) {
+                row = document.createElement('div');
+                row.className = 'worksheet-input-row';
+                input.parentNode.insertBefore(row, input);
+                row.appendChild(input);
+            }
+            btn = document.createElement('button');
+            row.appendChild(btn);
+        }
+
+        btn.type = 'button';
+        btn.className = 'worksheet-calc-btn';
+        btn.setAttribute('aria-label', 'Open calculator');
+        btn.setAttribute('aria-controls', 'worksheet-calculator');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.title = 'Calculator';
+        btn.innerHTML = WORKSHEET_CALC_ICON;
+    });
+}
+
+function handleWorksheetCalculatorClick(e) {
+    const worksheetDiv = document.getElementById('current-paycheck-worksheet');
+    const panel = document.getElementById('worksheet-calculator');
+
+    const toggle = e.target.closest('.worksheet-calc-btn');
+    if (toggle && worksheetDiv && worksheetDiv.contains(toggle)) {
+        const isOpen = panel && !panel.hidden;
+        const sameAnchor = worksheetCalculatorState.anchorBtn === toggle;
+        if (isOpen && sameAnchor) {
+            setWorksheetCalculatorOpen(false);
+        } else {
+            setWorksheetCalculatorOpen(true, toggle);
+        }
+        return;
+    }
+
+    const closeBtn = e.target.closest('.worksheet-calculator-close');
+    if (closeBtn && panel && panel.contains(closeBtn)) {
+        setWorksheetCalculatorOpen(false);
+        return;
+    }
+
+    const key = e.target.closest('[data-calc]');
+    if (!key || !panel || panel.hidden || !panel.contains(key)) return;
+
+    const action = key.getAttribute('data-calc');
+    if (action === 'clear') resetWorksheetCalculator();
+    else if (action === 'back') worksheetCalcBack();
+    else if (action === 'digit') worksheetCalcDigit(key.textContent.trim());
+    else if (action === 'dot') worksheetCalcDot();
+    else if (action === 'op') {
+        const op = key.getAttribute('data-op');
+        if (op === '%') worksheetCalcPercent();
+        else worksheetCalcOperate(op);
+    } else if (action === 'eq') worksheetCalcEquals();
+}
+
+function formatPercentLabel(rate) {
+    const n = Number(rate);
+    if (isNaN(n)) return '';
+    const pct = n <= 1 ? n * 100 : n;
+    const text = pct.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    return text + '%';
+}
+
+function formatPaidDays(paycheck) {
+    const days = Number(paycheck.days_worked || 0);
+    const excused = Number(paycheck.excused_days || 0);
+    if (excused > 0) {
+        return days + ' (' + excused + ' excused)';
+    }
+    return String(days);
+}
+
+function moneyExample(amount) {
+    return '$' + Number(amount).toFixed(2);
+}
+
+function formatWorksheetExample(setup, equation, conclusion) {
+    return setup + '\n\n' + equation + '\n\n' + conclusion;
+}
+
+function worksheetExampleText(kind, paycheck) {
+    const days = Number(paycheck.days_worked || 0);
+    const rate = Number(paycheck.daily_rate || 0);
+    const sbCount = Number(paycheck.starbucks_count || 0);
+    const starPct = Number(paycheck.average_star_percent || 0);
+    const citCount = Number(paycheck.citation_count || 0);
+    const candidates = {
+        regular: [
+            {
+                skip: days === 3 && Math.abs(rate - 80) < 0.01,
+                text: formatWorksheetExample(
+                    'If someone worked 3 days at $80.00:',
+                    '3 × $80.00 = $240.00',
+                    'The regular pay would be $240.00.'
+                )
+            },
+            {
+                skip: days === 2 && Math.abs(rate - 100) < 0.01,
+                text: formatWorksheetExample(
+                    'If someone worked 2 days at $100.00:',
+                    '2 × $100.00 = $200.00',
+                    'The regular pay would be $200.00.'
+                )
+            },
+            {
+                skip: days === 5 && Math.abs(rate - 60) < 0.01,
+                text: formatWorksheetExample(
+                    'If someone worked 5 days at $60.00:',
+                    '5 × $60.00 = $300.00',
+                    'The regular pay would be $300.00.'
+                )
+            }
+        ],
+        starbucks: [
+            {
+                skip: sbCount === 4,
+                text: formatWorksheetExample(
+                    'If someone had 4 Starbucks at $2.00 each:',
+                    '4 × $2.00 = $8.00',
+                    'The Starbucks pay would be $8.00.'
+                )
+            },
+            {
+                skip: sbCount === 1,
+                text: formatWorksheetExample(
+                    'If someone had 1 Starbucks at $2.00:',
+                    '1 × $2.00 = $2.00',
+                    'The Starbucks pay would be $2.00.'
+                )
+            }
+        ],
+        'star-student': [
+            {
+                skip: Number(paycheck.star_student_count || 0) === 2,
+                text: formatWorksheetExample(
+                    'If someone had 2 Star Student wins at $50.00:',
+                    '2 × $50.00 = $100.00',
+                    'The Star Student pay would be $100.00.'
+                )
+            },
+            {
+                skip: Number(paycheck.star_student_count || 0) === 1,
+                text: formatWorksheetExample(
+                    'If someone had 1 Star Student win at $50.00:',
+                    '1 × $50.00 = $50.00',
+                    'The Star Student pay would be $50.00.'
+                )
+            }
+        ],
+        'star-classroom': [
+            {
+                skip: Number(paycheck.star_classroom_count || 0) === 1,
+                text: formatWorksheetExample(
+                    'If a class had 1 Star Classroom win at $50.00:',
+                    '1 × $50.00 = $50.00',
+                    'The Star Classroom pay would be $50.00.'
+                )
+            },
+            {
+                skip: Number(paycheck.star_classroom_count || 0) === 2,
+                text: formatWorksheetExample(
+                    'If a class had 2 Star Classroom wins at $50.00:',
+                    '2 × $50.00 = $100.00',
+                    'The Star Classroom pay would be $100.00.'
+                )
+            }
+        ],
+        gross: [
+            {
+                text: formatWorksheetExample(
+                    'If regular pay was $200.00, Starbucks $6.00, and the other bonuses $0.00:',
+                    '$200.00 + $6.00 + $0.00 + $0.00 = $206.00',
+                    'The GROSS PAY would be $206.00.'
+                )
+            }
+        ],
+        'point-card-rate': [
+            {
+                skip: Math.abs(starPct - 92) < 0.01,
+                text: formatWorksheetExample(
+                    'If the average Point Card percentage was 92%:',
+                    '100% − 92% = 8%',
+                    'The Point Card Deduction Rate would be 8%.'
+                )
+            },
+            {
+                skip: Math.abs(starPct - 80) < 0.01,
+                text: formatWorksheetExample(
+                    'If the average Point Card percentage was 80%:',
+                    '100% − 80% = 20%',
+                    'The Point Card Deduction Rate would be 20%.'
+                )
+            }
+        ],
+        'point-card-amount': [
+            {
+                text: formatWorksheetExample(
+                    'If the Point Card Deduction Rate is 8% and Gross Pay is $200.00:',
+                    '8% × $200.00 = $16.00',
+                    'The Point Card Deduction would be $16.00.'
+                )
+            }
+        ],
+        'citation-count': [
+            {
+                skip: citCount === 3,
+                text: formatWorksheetExample(
+                    'If the list showed 3 citations:',
+                    '3',
+                    'The citation count would be 3.'
+                )
+            },
+            {
+                skip: citCount === 2,
+                text: formatWorksheetExample(
+                    'If the list showed 2 citations:',
+                    '2',
+                    'The citation count would be 2.'
+                )
+            },
+            {
+                skip: citCount === 0,
+                text: formatWorksheetExample(
+                    'If the list showed no citations:',
+                    '0',
+                    'The citation count would be 0.'
+                )
+            }
+        ],
+        citations: [
+            {
+                skip: citCount === 3,
+                text: formatWorksheetExample(
+                    'If someone had 3 citations at $2.00 each:',
+                    '3 × $2.00 = $6.00',
+                    'The Citations deduction would be $6.00.'
+                )
+            },
+            {
+                skip: citCount === 2,
+                text: formatWorksheetExample(
+                    'If someone had 2 citations at $2.00 each:',
+                    '2 × $2.00 = $4.00',
+                    'The Citations deduction would be $4.00.'
+                )
+            },
+            {
+                skip: citCount === 0,
+                text: formatWorksheetExample(
+                    'If someone had 0 citations:',
+                    '0 × $2.00 = $0.00',
+                    'The Citations deduction would be $0.00.'
+                )
+            }
+        ],
+        federal: [
+            {
+                text: formatWorksheetExample(
+                    'If Gross Pay is $200.00 and the Federal Income Tax rate is 3.0%:',
+                    '3.0% × $200.00 = $6.00',
+                    'The Federal Income Tax would be $6.00.'
+                )
+            }
+        ],
+        ss: [
+            {
+                text: formatWorksheetExample(
+                    'If Gross Pay is $200.00 and the Social Security rate is 6.2%:',
+                    '6.2% × $200.00 = $12.40',
+                    'The Social Security (FICA) would be $12.40.'
+                )
+            }
+        ],
+        medicare: [
+            {
+                text: formatWorksheetExample(
+                    'If Gross Pay is $200.00 and the Medicare rate is 1.5%:',
+                    '1.5% × $200.00 = $3.00',
+                    'The Medicare (FICA) would be $3.00.'
+                )
+            }
+        ],
+        state: [
+            {
+                text: formatWorksheetExample(
+                    'If Gross Pay is $200.00 and the State Income Tax rate is 5.35%:',
+                    '5.35% × $200.00 = $10.70',
+                    'The State Income Tax would be $10.70.'
+                )
+            }
+        ],
+        'total-deductions': [
+            {
+                text: formatWorksheetExample(
+                    'If the six deduction amounts were $16.00, $6.00, $6.00, $12.40, $3.00, and $10.70:',
+                    '$16.00 + $6.00 + $6.00 + $12.40 + $3.00 + $10.70 = $54.10',
+                    'The TOTAL DEDUCTIONS would be $54.10.'
+                )
+            }
+        ],
+        final: [
+            {
+                text: formatWorksheetExample(
+                    'If GROSS PAY was $200.00 and TOTAL DEDUCTIONS were $54.10:',
+                    '$200.00 − $54.10 = $145.90',
+                    'The take-home would be $145.90.'
+                )
+            }
+        ]
+    };
+    const pool = (candidates[kind] || []).filter(function (item) { return !item.skip; });
+    if (!pool.length) {
+        const fallback = (candidates[kind] || [])[0];
+        return fallback ? fallback.text : '';
+    }
+    return pool[0].text;
+}
+
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value == null ? '' : String(value);
+}
+
+function prefillWorksheetField(id, value, asMoney) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (value == null || value === '') {
+        el.value = '';
+        return;
+    }
+    if (asMoney) {
+        el.value = formatCurrency(value);
+    } else if (id === 'worksheet-point-card-rate') {
+        el.value = formatWorksheetPercent(value);
+    } else {
+        el.value = String(value);
+    }
+}
+
+function formatCitationList(paycheck) {
+    const list = paycheck.citation_list || [];
+    if (!list.length) {
+        return '(none this week)';
+    }
+    const counts = {};
+    list.forEach(function (type) {
+        counts[type] = (counts[type] || 0) + 1;
+    });
+    return Object.keys(counts)
+        .sort(function (a, b) {
+            const diff = counts[b] - counts[a];
+            return diff !== 0 ? diff : (a < b ? -1 : a > b ? 1 : 0);
+        })
+        .map(function (type) {
+            return counts[type] + 'x ' + type;
+        })
+        .join('\n');
+}
+
 // Render paycheck worksheet
 function renderPaycheckWorksheet(paycheck) {
     const worksheetDiv = document.getElementById('current-paycheck-worksheet');
     if (!worksheetDiv) return;
-    
+
     worksheetDiv.style.display = 'block';
-    document.getElementById('worksheet-avg-percent').textContent = paycheck.average_star_percent.toFixed(2);
-
-    const isComplex = paycheck.pay_track === 'complex';
-    const complexFields = document.getElementById('complex-paycheck-fields');
-    if (complexFields) complexFields.style.display = isComplex ? 'block' : 'none';
-    worksheetDiv.dataset.payTrack = isComplex ? 'complex' : 'simple';
-
-    const baseLabel = document.getElementById('worksheet-base-label');
-    const baseFormula = document.getElementById('worksheet-base-formula');
-    const finalFormula = document.getElementById('worksheet-final-formula');
-    const complexHint = document.getElementById('worksheet-complex-hint');
-    if (isComplex) {
-        if (baseLabel) baseLabel.textContent = 'Gross pay:';
-        if (baseFormula) {
-            const hourly = paycheck.hourly_rate != null ? Number(paycheck.hourly_rate).toFixed(2) : '0.00';
-            const hours = paycheck.hours_worked != null ? Number(paycheck.hours_worked).toFixed(0) : '30';
-            baseFormula.innerHTML = `Hourly $${hourly} × ${hours} hours × <span id="worksheet-avg-percent">${paycheck.average_star_percent.toFixed(2)}</span>% =`;
-        }
-        if (finalFormula) finalFormula.textContent = 'Gross − Social Security − Medicare − federal − citation deduction =';
-        if (complexHint) {
-            const std = paycheck.standard_deduction != null ? Number(paycheck.standard_deduction).toFixed(2) : '16100.00';
-            const fed = paycheck.federal_tax != null ? Number(paycheck.federal_tax).toFixed(2) : '0.00';
-            complexHint.textContent = `Annual standard deduction is $${std} (teaching text). This week’s federal withholding to type is $${fed}.`;
-        }
-    } else {
-        if (baseLabel) baseLabel.textContent = 'Base Pay:';
-        if (baseFormula) {
-            baseFormula.innerHTML = `Calculate your base pay: $100 × <span id="worksheet-avg-percent">${paycheck.average_star_percent.toFixed(2)}</span>% =`;
-        }
-        if (finalFormula) finalFormula.textContent = 'Base Pay - Citation Deduction =';
-        if (complexHint) complexHint.textContent = '';
-    }
-    
-    // Citation list: unique types with count (e.g. "2 Off Task", "1 Lang")
-    const citationListEl = document.getElementById('worksheet-citation-list');
-    if (citationListEl) {
-        const list = paycheck.citation_list || [];
-        if (!list.length) {
-            citationListEl.textContent = '(none this week)';
-        } else {
-            const counts = {};
-            list.forEach(function (type) {
-                counts[type] = (counts[type] || 0) + 1;
-            });
-            const lines = Object.keys(counts)
-                .sort(function (a, b) {
-                    const diff = counts[b] - counts[a];
-                    return diff !== 0 ? diff : (a < b ? -1 : a > b ? 1 : 0);
-                })
-                .map(function (type) {
-                    return counts[type] + 'x ' + type;
-                });
-            citationListEl.textContent = lines.join('\n');
-        }
-    }
-    
-    // Store paycheck ID
     worksheetDiv.dataset.paycheckId = paycheck.id;
-    
-    // Pre-fill inputs if this is a retry (worksheet was completed but not verified)
-    if (paycheck.worksheet_completed && !paycheck.is_verified && paycheck.student_calculated_pay) {
-        document.getElementById('worksheet-calculated-pay').value = formatCurrency(paycheck.student_calculated_pay);
-        document.getElementById('worksheet-calculated-citations').value = paycheck.student_calculated_citations || '';
-        document.getElementById('worksheet-calculated-deduction').value = formatCurrency(paycheck.student_calculated_deduction);
-        document.getElementById('worksheet-calculated-final').value = formatCurrency(paycheck.student_calculated_final);
-        if (isComplex) {
-            const ssEl = document.getElementById('worksheet-calculated-ss');
-            const medEl = document.getElementById('worksheet-calculated-medicare');
-            const fedEl = document.getElementById('worksheet-calculated-federal');
-            if (ssEl) ssEl.value = paycheck.student_calculated_ss != null ? formatCurrency(paycheck.student_calculated_ss) : '';
-            if (medEl) medEl.value = paycheck.student_calculated_medicare != null ? formatCurrency(paycheck.student_calculated_medicare) : '';
-            if (fedEl) fedEl.value = paycheck.student_calculated_federal != null ? formatCurrency(paycheck.student_calculated_federal) : '';
+    worksheetDiv.dataset.payTrack = paycheck.pay_track || 'simple';
+    ensureWorksheetCalcButtons(worksheetDiv);
+    resetWorksheetCalculator();
+    setWorksheetCalculatorOpen(false);
+
+    const taxRates = paycheck.tax_rates || {};
+    setText('worksheet-employee-name', paycheck.student_name || 'You');
+    setText('worksheet-pay-period', (paycheck.pay_period_start || '') + ' – ' + (paycheck.pay_period_end || ''));
+    setText('worksheet-pay-date', paycheck.pay_date || '');
+    setText('worksheet-days', formatPaidDays(paycheck));
+    setText('worksheet-daily-rate', paycheck.daily_rate != null ? formatCurrency(paycheck.daily_rate) : '');
+    setText('worksheet-starbucks-count', paycheck.starbucks_count != null ? paycheck.starbucks_count : 0);
+    setText('worksheet-star-student-count', paycheck.star_student_count != null ? paycheck.star_student_count : 0);
+    setText('worksheet-star-classroom-count', paycheck.star_classroom_count != null ? paycheck.star_classroom_count : 0);
+    setText('worksheet-starbucks-rate', formatCurrency(paycheck.starbucks_rate != null ? paycheck.starbucks_rate : 2));
+    setText('worksheet-star-student-rate', formatCurrency(paycheck.star_student_rate != null ? paycheck.star_student_rate : 50));
+    setText('worksheet-star-classroom-rate', formatCurrency(paycheck.star_classroom_rate != null ? paycheck.star_classroom_rate : 50));
+    const starPctText = Number(paycheck.average_star_percent || 0).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    setText('worksheet-star-percent', starPctText);
+    setText('worksheet-pcd-note-percent', starPctText);
+    setText('worksheet-point-card-given-percent', starPctText);
+    setText('worksheet-citation-list', formatCitationList(paycheck));
+    const citRate = paycheck.citation_rate != null ? Number(paycheck.citation_rate) : 2;
+    setText('worksheet-citation-unit-rate', formatCurrency(citRate));
+    setText('worksheet-federal-rate', formatPercentLabel(taxRates.federal != null ? taxRates.federal : WORKSHEET_TAX_RATE_DEFAULTS.federal));
+    setText('worksheet-ss-rate', formatPercentLabel(taxRates.ss != null ? taxRates.ss : WORKSHEET_TAX_RATE_DEFAULTS.ss));
+    setText('worksheet-medicare-rate', formatPercentLabel(taxRates.medicare != null ? taxRates.medicare : WORKSHEET_TAX_RATE_DEFAULTS.medicare));
+    setText('worksheet-state-rate', formatPercentLabel(
+        taxRates.state != null && Number(taxRates.state) !== 0.03
+            ? taxRates.state
+            : WORKSHEET_TAX_RATE_DEFAULTS.state
+    ));
+
+    worksheetDiv.querySelectorAll('.worksheet-example').forEach(function (panel) {
+        const kind = panel.getAttribute('data-example-panel');
+        panel.textContent = worksheetExampleText(kind, paycheck);
+        panel.hidden = true;
+    });
+    worksheetDiv.querySelectorAll('.worksheet-example-btn').forEach(function (btn) {
+        btn.textContent = 'Show example';
+        btn.setAttribute('aria-expanded', 'false');
+    });
+
+    const saved = paycheck.student_worksheet || {};
+    const retry = paycheck.worksheet_completed && !paycheck.is_verified;
+    clearWorksheetPcdNoteFields();
+    if (retry && (saved.regular_pay != null || paycheck.student_calculated_pay != null)) {
+        prefillWorksheetField('worksheet-regular-pay', saved.regular_pay, true);
+        prefillWorksheetField('worksheet-starbucks-pay', saved.starbucks_pay, true);
+        prefillWorksheetField('worksheet-star-student-pay', saved.star_student_pay, true);
+        prefillWorksheetField('worksheet-star-classroom-pay', saved.star_classroom_pay, true);
+        prefillWorksheetField('worksheet-gross-pay', saved.gross != null ? saved.gross : paycheck.student_calculated_gross || paycheck.student_calculated_pay, true);
+        prefillWorksheetField('worksheet-point-card-rate', saved.point_card_rate, false);
+        prefillWorksheetField('worksheet-point-card-amount', saved.point_card_deduction, true);
+        setWorksheetPcdNoteRate(saved.point_card_rate);
+        setWorksheetPcdNoteAmount(saved.point_card_deduction);
+        if (saved.gross != null || paycheck.student_calculated_gross != null || paycheck.student_calculated_pay != null) {
+            const noteGp = document.getElementById('pcd-note-gp');
+            if (noteGp) {
+                const gpVal = saved.gross != null ? saved.gross : (paycheck.student_calculated_gross || paycheck.student_calculated_pay);
+                noteGp.value = formatCurrency(gpVal);
+            }
         }
+        prefillWorksheetField(
+            'worksheet-citation-count',
+            saved.citation_count != null ? saved.citation_count : paycheck.student_calculated_citations,
+            false
+        );
+        prefillWorksheetField('worksheet-citation-deduction', saved.citation_deduction, true);
+        prefillWorksheetField('worksheet-federal', saved.federal_tax != null ? saved.federal_tax : paycheck.student_calculated_federal, true);
+        prefillWorksheetField('worksheet-ss', saved.ss_tax != null ? saved.ss_tax : paycheck.student_calculated_ss, true);
+        prefillWorksheetField('worksheet-medicare', saved.medicare_tax != null ? saved.medicare_tax : paycheck.student_calculated_medicare, true);
+        prefillWorksheetField('worksheet-state', saved.state_tax, true);
+        prefillWorksheetField('worksheet-total-deductions', saved.total_deductions != null ? saved.total_deductions : paycheck.student_calculated_deduction, true);
+        prefillWorksheetField('worksheet-final', saved.final_pay != null ? saved.final_pay : paycheck.student_calculated_final, true);
     } else {
-        // Clear inputs for new worksheet
-        document.getElementById('worksheet-calculated-pay').value = '';
-        document.getElementById('worksheet-calculated-citations').value = '';
-        document.getElementById('worksheet-calculated-deduction').value = '';
-        document.getElementById('worksheet-calculated-final').value = '';
-        ['worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal'].forEach(function (id) {
+        WORKSHEET_MONEY_IDS.concat(['worksheet-point-card-rate', 'worksheet-citation-count']).forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
     }
-    
-    // Clear error/success messages
-    document.getElementById('worksheet-error').style.display = 'none';
-    document.getElementById('worksheet-success').style.display = 'none';
+
+    const err = document.getElementById('worksheet-error');
+    const ok = document.getElementById('worksheet-success');
+    if (err) err.style.display = 'none';
+    if (ok) ok.style.display = 'none';
+}
+
+function readWorksheetMoney(id) {
+    const el = document.getElementById(id);
+    return parseCurrency(el ? el.value : '');
 }
 
 // Submit paycheck worksheet
 async function submitPaycheckWorksheet() {
     const worksheetDiv = document.getElementById('current-paycheck-worksheet');
     if (!worksheetDiv) return;
-    
+
     const paycheckId = worksheetDiv.dataset.paycheckId;
     if (!paycheckId) return;
-    
-    const calculatedPay = parseCurrency(document.getElementById('worksheet-calculated-pay').value);
-    const calculatedCitations = parseInt(document.getElementById('worksheet-calculated-citations').value, 10);
-    const calculatedDeduction = parseCurrency(document.getElementById('worksheet-calculated-deduction').value);
-    const calculatedFinal = parseCurrency(document.getElementById('worksheet-calculated-final').value);
-    const isComplex = worksheetDiv.dataset.payTrack === 'complex';
-    const calculatedSs = parseCurrency(document.getElementById('worksheet-calculated-ss')?.value);
-    const calculatedMedicare = parseCurrency(document.getElementById('worksheet-calculated-medicare')?.value);
-    const calculatedFederal = parseCurrency(document.getElementById('worksheet-calculated-federal')?.value);
-    
-    if (isNaN(calculatedPay) || isNaN(calculatedCitations) || isNaN(calculatedDeduction) || isNaN(calculatedFinal) ||
-        (isComplex && (isNaN(calculatedSs) || isNaN(calculatedMedicare) || isNaN(calculatedFederal)))) {
-        document.getElementById('worksheet-error').textContent = 'Please fill in all fields';
-        document.getElementById('worksheet-error').style.display = 'block';
+
+    const payload = {
+        regular_pay: readWorksheetMoney('worksheet-regular-pay'),
+        starbucks_pay: readWorksheetMoney('worksheet-starbucks-pay'),
+        star_student_pay: readWorksheetMoney('worksheet-star-student-pay'),
+        star_classroom_pay: readWorksheetMoney('worksheet-star-classroom-pay'),
+        gross: readWorksheetMoney('worksheet-gross-pay'),
+        point_card_rate: (document.getElementById('worksheet-point-card-rate') || {}).value,
+        point_card_deduction: readWorksheetMoney('worksheet-point-card-amount'),
+        citation_count: (document.getElementById('worksheet-citation-count') || {}).value,
+        citation_deduction: readWorksheetMoney('worksheet-citation-deduction'),
+        federal_tax: readWorksheetMoney('worksheet-federal'),
+        ss_tax: readWorksheetMoney('worksheet-ss'),
+        medicare_tax: readWorksheetMoney('worksheet-medicare'),
+        state_tax: readWorksheetMoney('worksheet-state'),
+        total_deductions: readWorksheetMoney('worksheet-total-deductions'),
+        final_pay: readWorksheetMoney('worksheet-final'),
+        calculated_pay: readWorksheetMoney('worksheet-gross-pay'),
+        calculated_gross: readWorksheetMoney('worksheet-gross-pay'),
+        calculated_ss: readWorksheetMoney('worksheet-ss'),
+        calculated_medicare: readWorksheetMoney('worksheet-medicare'),
+        calculated_federal: readWorksheetMoney('worksheet-federal'),
+        calculated_deduction: readWorksheetMoney('worksheet-total-deductions'),
+        calculated_final: readWorksheetMoney('worksheet-final'),
+        calculated_citations: parseInt(String((document.getElementById('worksheet-citation-count') || {}).value || '').trim(), 10) || 0
+    };
+
+    const citationCountRaw = String(payload.citation_count || '').trim();
+    const requiredMoney = [
+        payload.regular_pay, payload.starbucks_pay, payload.star_student_pay, payload.star_classroom_pay,
+        payload.gross, payload.point_card_deduction, payload.citation_deduction, payload.federal_tax, payload.ss_tax,
+        payload.medicare_tax, payload.state_tax, payload.total_deductions, payload.final_pay
+    ];
+    if (
+        requiredMoney.some(function (n) { return isNaN(n); }) ||
+        !String(payload.point_card_rate || '').trim() ||
+        citationCountRaw === '' ||
+        isNaN(parseInt(citationCountRaw, 10))
+    ) {
+        const err = document.getElementById('worksheet-error');
+        if (err) {
+            err.textContent = 'Please fill in all fields';
+            err.style.display = 'block';
+        }
         return;
     }
-    
+
     try {
-        const payload = {
-            calculated_pay: calculatedPay,
-            calculated_citations: calculatedCitations,
-            calculated_deduction: calculatedDeduction,
-            calculated_final: calculatedFinal
-        };
-        if (isComplex) {
-            payload.calculated_gross = calculatedPay;
-            payload.calculated_ss = calculatedSs;
-            payload.calculated_medicare = calculatedMedicare;
-            payload.calculated_federal = calculatedFederal;
-        }
         const response = await fetch(`/api/paycheck/${paycheckId}/complete-worksheet`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.verified) {
             document.getElementById('worksheet-success').textContent = data.message;
             document.getElementById('worksheet-success').style.display = 'block';
             document.getElementById('worksheet-error').style.display = 'none';
-            
-            // Reload paychecks so Undeposited button highlight updates
+
             if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId) loadPaychecks(currentBankStudentId);
-            // Reload bank account
             setTimeout(() => {
                 loadBankAccount(currentBankStudentId);
             }, 1000);
         } else {
-            document.getElementById('worksheet-error').textContent = data.message || 'Some calculations are incorrect';
             document.getElementById('worksheet-error').style.display = 'block';
             if (data.errors) {
                 document.getElementById('worksheet-error').innerHTML = data.errors.join('<br>');
+            } else {
+                document.getElementById('worksheet-error').textContent = data.message || 'Some calculations are incorrect';
             }
-            // Don't hide the worksheet - allow unlimited retries
-            // Clear success message if it was showing
             document.getElementById('worksheet-success').style.display = 'none';
         }
     } catch (error) {
@@ -25591,10 +26555,9 @@ function viewPaychecksModal(filterType) {
     html += '<th style="padding: 10px; border: 1px solid var(--border);">Period</th>';
     html += '<th style="padding: 10px; border: 1px solid var(--border);">STAR %</th>';
     if (!isUndeposited) {
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Base Pay</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Citations</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Deduction</th>';
-        html += '<th style="padding: 10px; border: 1px solid var(--border);">Final Pay</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Gross</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Deductions</th>';
+        html += '<th style="padding: 10px; border: 1px solid var(--border);">Take-home</th>';
     }
     html += '<th style="padding: 10px; border: 1px solid var(--border);">Status</th>';
     if (isUndeposited) {
@@ -25607,10 +26570,11 @@ function viewPaychecksModal(filterType) {
         html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.pay_period_start} - ${p.pay_period_end}</td>`;
         html += `<td style="padding: 10px; border: 1px solid var(--border);">${Number(p.average_star_percent).toFixed(2)}%</td>`;
         if (!isUndeposited) {
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.base_pay.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">${p.citation_count}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.citation_deduction.toFixed(2)}</td>`;
-            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${p.final_pay.toFixed(2)}</td>`;
+            const gross = p.gross_pay != null ? p.gross_pay : p.base_pay;
+            const deductions = p.total_deductions != null ? p.total_deductions : p.citation_deduction;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${Number(gross || 0).toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${Number(deductions || 0).toFixed(2)}</td>`;
+            html += `<td style="padding: 10px; border: 1px solid var(--border);">$${Number(p.final_pay || 0).toFixed(2)}</td>`;
         }
         let status = 'Incomplete';
         if (p.is_verified) {
@@ -26051,37 +27015,79 @@ function handleBankAccountView() {
     }
     
     // Currency format on blur for worksheet inputs
-    ['worksheet-calculated-pay', 'worksheet-calculated-deduction', 'worksheet-calculated-final', 'worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal'].forEach(function (id) {
+    WORKSHEET_MONEY_IDS.forEach(function (id) {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('blur', function () {
                 const parsed = parseCurrency(this.value);
-                if (!isNaN(parsed)) this.value = formatCurrency(parsed);
+                if (!isNaN(parsed)) {
+                    this.value = formatCurrency(parsed);
+                    if (id === 'worksheet-point-card-amount') {
+                        const noteAmt = document.getElementById('pcd-note-amount');
+                        if (noteAmt) noteAmt.value = this.value;
+                    }
+                }
             });
         }
     });
-    
-    // Enter = Tab in worksheet (move to next field)
-    const worksheetFocusOrder = ['worksheet-calculated-pay', 'worksheet-calculated-citations', 'worksheet-calculated-deduction', 'worksheet-calculated-ss', 'worksheet-calculated-medicare', 'worksheet-calculated-federal', 'worksheet-calculated-final', 'submit-worksheet-btn'];
+
+    const pointCardRateEl = document.getElementById('worksheet-point-card-rate');
+    if (pointCardRateEl) {
+        pointCardRateEl.addEventListener('blur', function () {
+            const formatted = formatWorksheetPercent(this.value);
+            if (formatted) setWorksheetPcdNoteRate(formatted);
+        });
+    }
+
+    bindWorksheetPcdNoteFields();
+
     const worksheetDiv = document.getElementById('current-paycheck-worksheet');
-    if (worksheetDiv) {
+    if (worksheetDiv && !worksheetDiv._earningsRecordBound) {
+        worksheetDiv._earningsRecordBound = true;
+        ensureWorksheetCalcButtons(worksheetDiv);
+        worksheetDiv.addEventListener('click', function (e) {
+            const btn = e.target.closest('.worksheet-example-btn');
+            if (!btn || !worksheetDiv.contains(btn)) return;
+            const kind = btn.getAttribute('data-example');
+            const panel = worksheetDiv.querySelector('.worksheet-example[data-example-panel="' + kind + '"]');
+            if (!panel) return;
+            const showing = panel.hidden;
+            panel.hidden = !showing;
+            btn.textContent = showing ? 'Hide example' : 'Show example';
+            btn.setAttribute('aria-expanded', showing ? 'true' : 'false');
+        });
         worksheetDiv.addEventListener('keydown', function (e) {
             if (e.key !== 'Enter') return;
             const id = e.target.id;
-            const idx = worksheetFocusOrder.indexOf(id);
+            const idx = WORKSHEET_FOCUS_ORDER.indexOf(id);
             if (idx === -1) return;
             e.preventDefault();
-            const nextId = worksheetFocusOrder[idx + 1];
-            if (nextId) {
-                for (let i = idx + 1; i < worksheetFocusOrder.length; i++) {
-                    const nextEl = document.getElementById(worksheetFocusOrder[i]);
-                    if (nextEl && nextEl.offsetParent !== null) {
-                        nextEl.focus();
-                        break;
-                    }
+            for (let i = idx + 1; i < WORKSHEET_FOCUS_ORDER.length; i++) {
+                const nextEl = document.getElementById(WORKSHEET_FOCUS_ORDER[i]);
+                if (nextEl && nextEl.offsetParent !== null) {
+                    nextEl.focus();
+                    break;
                 }
             }
         });
+    }
+
+    const bankAccountLayout = document.getElementById('bank-account-layout');
+    if (bankAccountLayout && !bankAccountLayout._worksheetCalcBound) {
+        bankAccountLayout._worksheetCalcBound = true;
+        bankAccountLayout.addEventListener('click', handleWorksheetCalculatorClick);
+        const repositionCalc = function () {
+            const panel = document.getElementById('worksheet-calculator');
+            if (!panel || panel.hidden || !worksheetCalculatorState.anchorBtn) return;
+            const desiredHost = getWorksheetCalculatorHost();
+            if (desiredHost && panel.parentElement !== desiredHost) {
+                setWorksheetCalculatorOpen(true, worksheetCalculatorState.anchorBtn);
+                return;
+            }
+            positionWorksheetCalculator();
+        };
+        window.addEventListener('resize', repositionCalc);
+        window.addEventListener('scroll', repositionCalc, true);
     }
     
     const viewDepositedBtn = document.getElementById('view-deposited-paychecks-btn');

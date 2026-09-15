@@ -19,7 +19,7 @@ if sys.platform == 'win32':
 
     _platform.machine = _platform_machine_fast
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, event, func, or_
 from sqlalchemy.orm import selectinload, load_only, joinedload
@@ -595,6 +595,47 @@ def get_caseload_student_ids_for_user(user):
     return get_caseload_student_ids(user.name, user.username)
 
 
+def get_managed_by_me_student_ids(user):
+    """Student IDs for a user's 'managed by me' scope (caseload; paras use linked CM caseloads)."""
+    if not user or user.role not in ('staff', 'admin'):
+        return []
+    if user.role == 'staff' and getattr(user, 'is_outside_staff', False):
+        return sorted({
+            assoc.student_id
+            for assoc in OutsideStaffStudent.query.filter_by(user_id=user.id).all()
+            if assoc.student_id
+        })
+    if user.role == 'staff' and getattr(user, 'designation', None) == 'Paraprofessional':
+        linked_cm_ids = get_linked_case_manager_ids(user)
+        if linked_cm_ids:
+            linked_cms = [
+                cm for cm in User.query.filter(User.id.in_(linked_cm_ids)).all()
+                if cm.designation == 'Case Manager'
+            ]
+            if linked_cms:
+                ids = set()
+                for cm in linked_cms:
+                    ids.update(get_caseload_student_ids_for_user(cm))
+                return sorted(ids)
+    return get_caseload_student_ids_for_user(user)
+
+
+def _managed_by_me_student_ids_cached(user_id):
+    """Request-scoped cache of managed-by-me student ids for a staff user id."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return set()
+    cache = getattr(g, '_marketplace_managed_by_me_cache', None)
+    if cache is None:
+        cache = {}
+        g._marketplace_managed_by_me_cache = cache
+    if uid not in cache:
+        user = User.query.get(uid)
+        cache[uid] = set(get_managed_by_me_student_ids(user)) if user else set()
+    return cache[uid]
+
+
 def are_users_on_same_student_team(user_a, user_b):
     """
     Return True if two staff users share at least one student in common in the
@@ -662,6 +703,16 @@ def marketplace_hidden_rule_label(rule):
         return f'Card color: {value.capitalize()}' if value else 'Card color'
     if rule.hidden_type == 'grade_section':
         return f'Grade section: {rule.value}'
+    if rule.hidden_type == 'managed_by_me':
+        try:
+            uid = int(rule.value)
+        except (TypeError, ValueError):
+            return 'Students managed by me'
+        staff_user = User.query.get(uid)
+        if staff_user:
+            name = (staff_user.name or staff_user.username or f'User #{uid}').strip()
+            return f'Students managed by {name}'
+        return 'Students managed by me'
     return rule.value or ''
 
 
@@ -686,6 +737,9 @@ def is_item_hidden_for_student(item_id, student):
                 return True
             # Legacy: single-grade rule (exact match)
             if (student.grade or '').strip() == rv:
+                return True
+        if r.hidden_type == 'managed_by_me':
+            if student.id in _managed_by_me_student_ids_cached(r.value):
                 return True
     return False
 
@@ -3126,6 +3180,16 @@ class Paycheck(db.Model):
     student_calculated_ss = db.Column(db.Numeric(10, 2), nullable=True)
     student_calculated_medicare = db.Column(db.Numeric(10, 2), nullable=True)
     student_calculated_federal = db.Column(db.Numeric(10, 2), nullable=True)
+    daily_rate = db.Column(db.Numeric(10, 2), nullable=True)
+    days_worked = db.Column(db.Integer, nullable=True)
+    excused_days = db.Column(db.Integer, nullable=True)
+    starbucks_count = db.Column(db.Integer, nullable=True)
+    star_student_count = db.Column(db.Integer, nullable=True)
+    star_classroom_count = db.Column(db.Integer, nullable=True)
+    state_tax = db.Column(db.Numeric(10, 2), nullable=True)
+    point_card_deduction = db.Column(db.Numeric(10, 2), nullable=True)
+    total_deductions = db.Column(db.Numeric(10, 2), nullable=True)
+    student_worksheet_json = db.Column(db.Text, nullable=True)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
     deposited_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -3277,12 +3341,12 @@ class MarketplaceItemRequest(db.Model):
 
 
 class MarketplaceItemHiddenRule(db.Model):
-    """Rule to hide a marketplace item from specific students (by student, card_color, or grade section: K-3, 4-8, 9-12)."""
+    """Rule to hide a marketplace item from students (by student, card_color, grade section, or managed_by_me)."""
     __tablename__ = 'marketplace_item_hidden_rules'
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey('marketplace_items.id'), nullable=False)
-    hidden_type = db.Column(db.String(20), nullable=False)  # 'student', 'card_color', 'grade_section'
-    value = db.Column(db.String(100), nullable=False)  # student_id, color name, or grade section (K-3, 4-8, 9-12)
+    hidden_type = db.Column(db.String(20), nullable=False)  # 'student', 'card_color', 'grade_section', 'managed_by_me'
+    value = db.Column(db.String(100), nullable=False)  # student_id, color, grade section (K-3/4-8/9-12), or staff user_id
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     item = db.relationship('MarketplaceItem', backref=db.backref('hidden_rules', lazy=True, cascade='all, delete-orphan'))
@@ -3704,6 +3768,16 @@ def ensure_economy_schema():
                 ('student_calculated_ss', 'NUMERIC(10, 2)'),
                 ('student_calculated_medicare', 'NUMERIC(10, 2)'),
                 ('student_calculated_federal', 'NUMERIC(10, 2)'),
+                ('daily_rate', 'NUMERIC(10, 2)'),
+                ('days_worked', 'INTEGER'),
+                ('excused_days', 'INTEGER'),
+                ('starbucks_count', 'INTEGER'),
+                ('star_student_count', 'INTEGER'),
+                ('star_classroom_count', 'INTEGER'),
+                ('state_tax', 'NUMERIC(10, 2)'),
+                ('point_card_deduction', 'NUMERIC(10, 2)'),
+                ('total_deductions', 'NUMERIC(10, 2)'),
+                ('student_worksheet_json', 'TEXT'),
             ]:
                 _economy_add_column(conn, is_postgres, 'paychecks', col, typ)
             _economy_add_column(conn, is_postgres, 'transactions', 'student_bill_id', 'INTEGER')
@@ -11438,7 +11512,6 @@ def _extract_date_after_keyword(text: str, keyword_pattern: str):
             return parsed
     return None
 
-
 def _coerce_year(two_or_four_digit_year: int):
     if two_or_four_digit_year >= 100:
         return two_or_four_digit_year
@@ -12697,6 +12770,7 @@ STUDENT_TEAM_COLUMNS = (
     ('Group Leader', 9),
 )
 STAFF_EMAIL_COL = 5  # column F
+OUTSIDE_STAFF_STUDENTS_COL = 3  # column D — assigned students (comma-separated)
 OUTSIDE_STAFF_EMAIL_COL = 4  # column E
 STUDENT_EMAIL_COL = 11  # column L
 STUDENT_PARENT1_EMAIL_COL = 12  # column M
@@ -12876,6 +12950,112 @@ def _resolve_import_case_managers(raw_value, staff_users=None):
     return [], [_unresolved_staff_name_message(raw_value, matches, 'Case Manager')]
 
 
+def _students_by_lunch_for_import(students):
+    """Map normalized lunch numbers (and .0 variants) to Student records."""
+    by_lunch = {}
+    for student in students or []:
+        key = normalize_import_identifier(student.lunch_number)
+        if not key:
+            continue
+        by_lunch.setdefault(key, student)
+        by_lunch.setdefault(f'{key}.0', student)
+    return by_lunch
+
+
+def _resolve_one_import_student(token, students, students_by_lunch=None):
+    """Match one CSV student token to a Student by lunch number or name/initials."""
+    token = (token or '').strip()
+    if not token:
+        return None, None
+
+    if students_by_lunch is None:
+        students_by_lunch = _students_by_lunch_for_import(students)
+
+    lunch_key = normalize_import_identifier(token)
+    if lunch_key and lunch_key in students_by_lunch:
+        return students_by_lunch[lunch_key], None
+
+    matches = _best_import_name_matches(token, students)
+    if len(matches) == 1:
+        return matches[0], None
+    if not matches:
+        return None, f"assigned student '{token}' could not be found"
+    sample = ', '.join((m.name or '?') for m in matches[:5])
+    extra = f' (+{len(matches) - 5} more)' if len(matches) > 5 else ''
+    return None, f"assigned student '{token}' matched multiple people ({sample}{extra})"
+
+
+def _resolve_import_students(raw_value, students=None):
+    """Resolve the Outside Staff CSV Students cell (column D) to Student records.
+
+    Entries may be initials/names or lunch numbers, separated like other import name lists.
+    Returns (matched students, messages for entries that did not resolve).
+    """
+    raw_value = (raw_value or '').strip()
+    if not raw_value:
+        return [], []
+
+    if students is None:
+        students = Student.query.all()
+    students_by_lunch = _students_by_lunch_for_import(students)
+
+    tokens = _split_import_name_list(raw_value)
+    # A single "Last, First" style name won't split usefully; try the whole cell too.
+    if not tokens:
+        tokens = [raw_value]
+
+    resolved = []
+    resolved_ids = set()
+    problems = []
+    for token in tokens:
+        match, problem = _resolve_one_import_student(token, students, students_by_lunch)
+        if match:
+            if match.id not in resolved_ids:
+                resolved_ids.add(match.id)
+                resolved.append(match)
+        elif problem:
+            problems.append(problem)
+
+    if resolved or problems:
+        return resolved, problems
+
+    # Nothing resolved from splits: try the whole cell as one name (e.g. "Last, First").
+    match, problem = _resolve_one_import_student(raw_value, students, students_by_lunch)
+    if match:
+        return [match], []
+    return [], [problem] if problem else [f"assigned student '{raw_value}' could not be found"]
+
+
+def _set_outside_staff_assigned_students(user, student_ids):
+    """Replace an Outside Staff user's student assignments. Returns True if anything changed."""
+    if user is None or not getattr(user, 'id', None):
+        return False
+    desired = []
+    seen = set()
+    for sid in student_ids or []:
+        try:
+            sid = int(sid)
+        except (TypeError, ValueError):
+            continue
+        if sid and sid not in seen:
+            seen.add(sid)
+            desired.append(sid)
+
+    existing = OutsideStaffStudent.query.filter_by(user_id=user.id).all()
+    existing_ids = {a.student_id for a in existing}
+    desired_ids = set(desired)
+    if existing_ids == desired_ids:
+        return False
+
+    for assignment in existing:
+        if assignment.student_id not in desired_ids:
+            db.session.delete(assignment)
+    for sid in desired:
+        if sid not in existing_ids:
+            db.session.add(OutsideStaffStudent(user_id=user.id, student_id=sid))
+    return True
+
+
 def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught, case_manager_name, email, warnings):
     """Update an existing staff or admin user from CSV. Returns True if any field changed."""
     changed = False
@@ -12924,7 +13104,9 @@ def _apply_staff_import_updates(user, *, user_number, name, role, grades_taught,
     return changed
 
 
-def _apply_outside_staff_import_updates(user, *, user_number, name, district, email):
+def _apply_outside_staff_import_updates(
+    user, *, user_number, name, district, email, students_raw=None, students=None, warnings=None
+):
     changed = False
     if not _import_str_eq(user.user_number, user_number):
         user.user_number = user_number
@@ -12940,6 +13122,15 @@ def _apply_outside_staff_import_updates(user, *, user_number, name, district, em
     if not _import_str_eq(user.email, normalized_email):
         user.email = normalized_email
         changed = True
+
+    # Column D is optional: only rewrite assignments when the cell has content.
+    if (students_raw or '').strip():
+        matched, problems = _resolve_import_students(students_raw, students=students)
+        if matched and _set_outside_staff_assigned_students(user, [s.id for s in matched]):
+            changed = True
+        if warnings is not None:
+            for problem in problems:
+                warnings.append(f"{name}: {problem}")
     return changed
 
 
@@ -13254,14 +13445,16 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
         return _import_users_payload(success, errors, warnings, updated_names, duplicate_count), 200
 
     elif import_type == 'outside_staff':
-        # CSV columns: A=User Number, B=Name, C=District, E=Email
+        # CSV columns: A=User Number, B=Name, C=District, D=Students (comma-separated), E=Email
         outside_staff_rows = rows[header_offset:]
+        all_students = Student.query.all()
         for idx, row in enumerate(outside_staff_rows, start=header_offset + 1):
             if _import_row_is_placeholder(row) or _import_row_is_header_like(row, 'outside_staff'):
                 continue
             user_number = normalize_import_identifier(row[0] if len(row) > 0 else '')
             name = (row[1] or '').strip() if len(row) > 1 else ''
             district = (row[2] or '').strip() if len(row) > 2 else ''
+            students_raw = (row[OUTSIDE_STAFF_STUDENTS_COL] or '').strip() if len(row) > OUTSIDE_STAFF_STUDENTS_COL else ''
             email = _clip_import_field(row[OUTSIDE_STAFF_EMAIL_COL] if len(row) > OUTSIDE_STAFF_EMAIL_COL else '', 200)
 
             if not user_number or not name:
@@ -13291,6 +13484,9 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
                     name=name,
                     district=district,
                     email=email,
+                    students_raw=students_raw,
+                    students=all_students,
+                    warnings=warnings,
                 )
                 if changed:
                     updated_names.append(name)
@@ -13313,6 +13509,15 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
             )
             _set_imported_password(user, password)
             db.session.add(user)
+
+            if students_raw:
+                db.session.flush()
+                matched, problems = _resolve_import_students(students_raw, students=all_students)
+                if matched:
+                    _set_outside_staff_assigned_students(user, [s.id for s in matched])
+                for problem in problems:
+                    warnings.append(f"{name} was created but {problem}")
+
             success.append(
                 {
                     'name': name,
@@ -13529,7 +13734,11 @@ SHEET_PUSH_COLUMNS = {
         (1, 'name'), (2, 'role'), (3, 'grades_taught'), (4, 'staff_case_manager'),
         (STAFF_EMAIL_COL, 'email'),
     ),
-    'outside_staff': ((1, 'name'), (2, 'district'), (OUTSIDE_STAFF_EMAIL_COL, 'email')),
+    'outside_staff': (
+        (1, 'name'), (2, 'district'),
+        (OUTSIDE_STAFF_STUDENTS_COL, 'assigned_students'),
+        (OUTSIDE_STAFF_EMAIL_COL, 'email'),
+    ),
     'student': (
         (1, 'name'), (2, 'grade'), (3, 'card_color'),
         (4, 'team_case_manager_1'), (5, 'team_case_manager_2'),
@@ -13542,6 +13751,7 @@ SHEET_PUSH_COLUMNS = {
 }
 SHEET_PUSH_FIELD_LABELS = {
     'staff_case_manager': 'Case Manager',
+    'assigned_students': 'Students',
     'team_case_manager_1': 'Case Manager',
     'team_case_manager_2': 'Case Manager (2)',
     'team_practitioner_1': 'Practitioner',
@@ -13697,7 +13907,28 @@ def sheet_dirty_user_signature(user):
         return None
     values = {field: getattr(user, field, None) for field in SHEET_DIRTY_USER_FIELDS}
     values['case_manager_ids'] = tuple(get_linked_case_manager_ids(user))
+    if getattr(user, 'is_outside_staff', False):
+        values['assigned_student_ids'] = tuple(
+            sorted(
+                a.student_id
+                for a in OutsideStaffStudent.query.filter_by(user_id=user.id).all()
+                if a.student_id
+            )
+        )
     return values
+
+
+def _sheet_outside_staff_students_value(user):
+    """Comma-separated student names for Outside Staff column D."""
+    if not user or not getattr(user, 'id', None):
+        return ''
+    names = []
+    for assignment in OutsideStaffStudent.query.filter_by(user_id=user.id).all():
+        student = Student.query.get(assignment.student_id)
+        if student and (student.name or '').strip():
+            names.append(student.name.strip())
+    names.sort(key=lambda n: n.lower())
+    return ', '.join(names)
 
 
 def sheet_dirty_student_signature(student_id):
@@ -13732,6 +13963,10 @@ def _sheet_values_equal(desired, current, field):
     """Whether a website value already matches what is in the sheet."""
     if field in ('email', 'parent_email_1', 'parent_email_2'):
         return _normalize_import_email(desired) == _normalize_import_email(current)
+    if field in ('assigned_students', 'staff_case_manager'):
+        desired_parts = sorted(p.lower() for p in _split_import_name_list(desired or ''))
+        current_parts = sorted(p.lower() for p in _split_import_name_list(current or ''))
+        return desired_parts == current_parts
     return (desired or '') == (current or '')
 
 
@@ -13803,6 +14038,10 @@ def _sheet_record_value(record, field, team_values_cache=None):
         if not isinstance(record, User):
             return ''
         return _sheet_staff_case_manager_value(record)
+    if field == 'assigned_students':
+        if not isinstance(record, User):
+            return ''
+        return _sheet_outside_staff_students_value(record)
     if field == 'role':
         # The staff tab's Role column holds "Admin" for admins and the designation otherwise.
         value = STAFF_IMPORT_ADMIN_ROLE if record.role == 'admin' else record.designation
@@ -16701,6 +16940,8 @@ def outside_staff_students(user_id):
                 db.session.add(assignment)
                 assigned_count += 1
         
+        if assigned_count:
+            mark_user_sheet_dirty(user)
         db.session.commit()
         return jsonify({'message': f'Assigned {assigned_count} students', 'count': assigned_count}), 200
     
@@ -16719,6 +16960,7 @@ def outside_staff_students(user_id):
             return jsonify({'error': 'Assignment not found'}), 404
         
         db.session.delete(assignment)
+        mark_user_sheet_dirty(user)
         db.session.commit()
         return jsonify({'message': 'Student unassigned successfully'}), 200
 
@@ -17326,30 +17568,95 @@ def _paycheck_track(paycheck, student=None):
     return eco.student_pay_track(student, default) if student else eco.DEFAULT_PAY_TRACK
 
 
-def fill_paycheck_amounts(paycheck, student, avg_star, citation_count):
+def count_pay_period_attendance(student_id, start_date, end_date):
+    """Count present and excused DailyRecord days in a pay period (unexcused/missing do not pay)."""
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date
+    ).all()
+    present = 0
+    excused = 0
+    for record in records:
+        status = _record_attendance_status_norm(record)
+        if status == 'present':
+            present += 1
+        elif status == 'excused':
+            excused += 1
+    return {
+        'present': present,
+        'excused': excused,
+        'days_worked': present + excused,
+    }
+
+
+def _starbucks_count_for_student(student_id):
+    balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
+    if not balance:
+        return 0
+    try:
+        return int(balance.count or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _compute_stub_for_student(student, start_date, end_date, star_percent=None, citation_count=None):
     import economy_lib as eco
+    days_info = count_pay_period_attendance(student.id, start_date, end_date)
+    if star_percent is None:
+        star_percent = calculate_weekly_star_percent(student.id, start_date, end_date)
+    if citation_count is None:
+        citation_count = count_weekly_infractions(student.id, start_date, end_date)
+    computed = eco.compute_stub_paycheck(
+        daily_rate=eco.daily_rate_for_color(getattr(student, 'card_color', None)),
+        days_worked=days_info['days_worked'],
+        excused_days=days_info['excused'],
+        star_percent=star_percent,
+        starbucks_count=_starbucks_count_for_student(student.id),
+        star_student_count=0,
+        star_classroom_count=0,
+        citation_count=citation_count,
+    )
+    computed['avg_pct'] = star_percent
+    computed['present_days'] = days_info['present']
+    return computed
+
+
+def _apply_stub_to_paycheck(paycheck, computed, avg_star=None):
+    paycheck.average_star_percent = avg_star if avg_star is not None else computed.get('star_percent')
+    paycheck.daily_rate = computed['daily_rate']
+    paycheck.days_worked = computed['days_worked']
+    paycheck.excused_days = computed['excused_days']
+    paycheck.starbucks_count = computed['starbucks_count']
+    paycheck.star_student_count = computed['star_student_count']
+    paycheck.star_classroom_count = computed['star_classroom_count']
+    paycheck.hourly_rate = computed['daily_rate']
+    paycheck.hours_worked = computed['days_worked']
+    paycheck.gross_pay = computed['gross']
+    paycheck.base_pay = computed['gross']
+    paycheck.ss_tax = computed['ss_tax']
+    paycheck.medicare_tax = computed['medicare_tax']
+    paycheck.federal_tax = computed['federal_tax']
+    paycheck.state_tax = computed['state_tax']
+    paycheck.point_card_deduction = computed['point_card_deduction']
+    paycheck.total_deductions = computed['total_deductions']
+    paycheck.final_pay = computed['final_pay']
+    paycheck.citation_count = int(computed.get('citation_count') or 0)
+    paycheck.citation_deduction = computed['citation_deduction']
+
+
+def fill_paycheck_amounts(paycheck, student, avg_star, citation_count):
+    """Snapshot weekly earnings-record amounts onto a paycheck."""
     track = _paycheck_track(paycheck, student)
     paycheck.pay_track = track
-    paycheck.average_star_percent = avg_star
-    paycheck.citation_count = citation_count
-    if track == 'complex':
-        computed = eco.compute_complex_paycheck(
-            _student_hourly_rate(student), avg_star, citation_count, _economy_tax_table()
-        )
-        paycheck.hourly_rate = computed['hourly_rate']
-        paycheck.hours_worked = computed['hours']
-        paycheck.gross_pay = computed['gross']
-        paycheck.ss_tax = computed['ss_tax']
-        paycheck.medicare_tax = computed['medicare_tax']
-        paycheck.federal_tax = computed['federal_tax']
-        paycheck.base_pay = computed['gross']
-        paycheck.citation_deduction = computed['citation_deduction']
-        paycheck.final_pay = computed['final_pay']
-        return computed
-    computed = eco.compute_simple_paycheck(avg_star, citation_count)
-    paycheck.base_pay = computed['base_pay']
-    paycheck.citation_deduction = computed['citation_deduction']
-    paycheck.final_pay = computed['final_pay']
+    computed = _compute_stub_for_student(
+        student,
+        paycheck.pay_period_start,
+        paycheck.pay_period_end,
+        star_percent=avg_star,
+        citation_count=citation_count,
+    )
+    _apply_stub_to_paycheck(paycheck, computed, avg_star=avg_star)
     return computed
 
 
@@ -17357,89 +17664,154 @@ def live_paycheck_amounts(paycheck):
     import economy_lib as eco
     student = Student.query.get(paycheck.student_id)
     citation_list = list_weekly_citations(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
-    live_count = len(citation_list)
     live_avg = calculate_weekly_star_percent(paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end)
     track = _paycheck_track(paycheck, student)
+    if not student:
+        return {
+            'track': track,
+            'avg_pct': live_avg or Decimal('0'),
+            'live_avg': live_avg,
+            'citation_list': citation_list,
+            'base_pay': Decimal('0'),
+            'final_pay': Decimal('0'),
+            'citation_count': 0,
+            'citation_deduction': Decimal('0'),
+        }
     if not paycheck.is_verified and paycheck.deposited_at is None:
-        if track == 'complex':
-            computed = eco.compute_complex_paycheck(
-                _student_hourly_rate(student), live_avg, live_count, _economy_tax_table()
-            )
-        else:
-            computed = eco.compute_simple_paycheck(live_avg, live_count)
-            computed = {
-                'gross': computed['base_pay'],
-                'base_pay': computed['base_pay'],
-                'citation_deduction': computed['citation_deduction'],
-                'final_pay': computed['final_pay'],
-                'ss_tax': None,
-                'medicare_tax': None,
-                'federal_tax': None,
-                'hourly_rate': None,
-                'hours': None,
-            }
-        avg_pct = live_avg
-        base_pay = computed.get('base_pay', computed.get('gross'))
-        final_pay = computed['final_pay']
-        deduction = computed['citation_deduction']
-        extra = computed
+        computed = _compute_stub_for_student(
+            student,
+            paycheck.pay_period_start,
+            paycheck.pay_period_end,
+            star_percent=live_avg,
+            citation_count=len(citation_list),
+        )
+        return {
+            'track': track,
+            'avg_pct': live_avg,
+            'live_avg': live_avg,
+            'citation_list': citation_list,
+            **computed,
+        }
+
+    days_worked = paycheck.days_worked
+    if days_worked is None and paycheck.hours_worked is not None:
+        days_worked = int(paycheck.hours_worked)
+    excused = int(paycheck.excused_days or 0)
+    present = max(0, int(days_worked or 0) - excused)
+    stored = {
+        'daily_rate': paycheck.daily_rate if paycheck.daily_rate is not None else paycheck.hourly_rate,
+        'days_worked': int(days_worked or 0),
+        'excused_days': excused,
+        'present_days': present,
+        'starbucks_count': int(paycheck.starbucks_count or 0),
+        'star_student_count': int(paycheck.star_student_count or 0),
+        'star_classroom_count': int(paycheck.star_classroom_count or 0),
+        'starbucks_rate': eco.money(eco.STARBUCKS_BONUS_RATE),
+        'star_student_rate': eco.money(eco.STAR_STUDENT_BONUS_RATE),
+        'star_classroom_rate': eco.money(eco.STAR_CLASSROOM_BONUS_RATE),
+        'gross': paycheck.gross_pay if paycheck.gross_pay is not None else paycheck.base_pay,
+        'base_pay': paycheck.gross_pay if paycheck.gross_pay is not None else paycheck.base_pay,
+        'ss_tax': paycheck.ss_tax,
+        'medicare_tax': paycheck.medicare_tax,
+        'federal_tax': paycheck.federal_tax,
+        'state_tax': paycheck.state_tax,
+        'point_card_deduction': paycheck.point_card_deduction,
+        'total_deductions': paycheck.total_deductions,
+        'final_pay': paycheck.final_pay,
+        'citation_count': paycheck.citation_count or 0,
+        'citation_deduction': paycheck.citation_deduction,
+        'citation_rate': eco.money(eco.CITATION_RATE),
+        'hourly_rate': paycheck.daily_rate if paycheck.daily_rate is not None else paycheck.hourly_rate,
+        'hours': days_worked,
+        'star_percent': paycheck.average_star_percent,
+        'point_card_gap_percent': eco.point_card_gap_percent(paycheck.average_star_percent),
+        'federal_rate': eco.STUB_FEDERAL_RATE,
+        'ss_rate': eco.STUB_SS_RATE,
+        'medicare_rate': eco.STUB_MEDICARE_RATE,
+        'state_rate': eco.STUB_STATE_RATE,
+    }
+    if stored['daily_rate'] is not None and days_worked is not None:
+        stored['regular_pay'] = eco.money(eco.money(stored['daily_rate']) * Decimal(int(days_worked or 0)))
+        stored['starbucks_pay'] = eco.money(Decimal(stored['starbucks_count']) * eco.STARBUCKS_BONUS_RATE)
+        stored['star_student_pay'] = eco.money(Decimal(stored['star_student_count']) * eco.STAR_STUDENT_BONUS_RATE)
+        stored['star_classroom_pay'] = eco.money(Decimal(stored['star_classroom_count']) * eco.STAR_CLASSROOM_BONUS_RATE)
     else:
-        avg_pct = paycheck.average_star_percent
-        base_pay = paycheck.base_pay
-        deduction = Decimal(str(live_count * 2))
-        if track == 'complex' and paycheck.gross_pay is not None:
-            extra = {
-                'gross': paycheck.gross_pay,
-                'ss_tax': paycheck.ss_tax,
-                'medicare_tax': paycheck.medicare_tax,
-                'federal_tax': paycheck.federal_tax,
-                'hourly_rate': paycheck.hourly_rate,
-                'hours': paycheck.hours_worked,
-            }
-            final_pay = paycheck.final_pay
-            base_pay = paycheck.gross_pay or paycheck.base_pay
-            deduction = paycheck.citation_deduction
-        else:
-            extra = {}
-            final_pay = (paycheck.base_pay or Decimal('0')) - deduction
+        stored['regular_pay'] = stored['base_pay']
+        stored['starbucks_pay'] = eco.money(0)
+        stored['star_student_pay'] = eco.money(0)
+        stored['star_classroom_pay'] = eco.money(0)
     return {
         'track': track,
-        'avg_pct': avg_pct,
-        'base_pay': base_pay,
-        'final_pay': final_pay,
-        'citation_count': live_count,
-        'citation_list': citation_list,
-        'citation_deduction': deduction,
+        'avg_pct': paycheck.average_star_percent,
         'live_avg': live_avg,
-        **extra,
+        'citation_list': citation_list,
+        **stored,
     }
+
+
+def _money_float(value):
+    if value is None:
+        return None
+    import economy_lib as eco
+    return float(eco.money(value))
 
 
 def serialize_paycheck_payload(p, include_student_calcs=False):
     import economy_lib as eco
     live = live_paycheck_amounts(p)
+    student = Student.query.get(p.student_id)
+    pay_date = (p.pay_period_end + timedelta(days=3)) if p.pay_period_end else None
+    days_worked = live.get('days_worked')
+    excused_days = live.get('excused_days') or 0
     payload = {
         'id': p.id,
         'student_id': p.student_id,
+        'student_name': student.name if student else '',
         'pay_period_start': p.pay_period_start.isoformat(),
         'pay_period_end': p.pay_period_end.isoformat(),
+        'pay_date': pay_date.isoformat() if pay_date else None,
         'average_star_percent': float(live['avg_pct'] or 0),
+        'daily_rate': _money_float(live.get('daily_rate')),
+        'days_worked': int(days_worked or 0),
+        'excused_days': int(excused_days or 0),
+        'present_days': int(live.get('present_days') or 0),
+        'starbucks_count': int(live.get('starbucks_count') or 0),
+        'star_student_count': int(live.get('star_student_count') or 0),
+        'star_classroom_count': int(live.get('star_classroom_count') or 0),
+        'starbucks_rate': _money_float(live.get('starbucks_rate')),
+        'star_student_rate': _money_float(live.get('star_student_rate')),
+        'star_classroom_rate': _money_float(live.get('star_classroom_rate')),
+        'regular_pay': _money_float(live.get('regular_pay')),
+        'starbucks_pay': _money_float(live.get('starbucks_pay')),
+        'star_student_pay': _money_float(live.get('star_student_pay')),
+        'star_classroom_pay': _money_float(live.get('star_classroom_pay')),
+        'point_card_gap_percent': float(live.get('point_card_gap_percent') or 0),
+        'point_card_deduction': _money_float(live.get('point_card_deduction')),
+        'state_tax': _money_float(live.get('state_tax')),
+        'total_deductions': _money_float(live.get('total_deductions')),
+        'tax_rates': {
+            'federal': float(eco.STUB_FEDERAL_RATE),
+            'ss': float(eco.STUB_SS_RATE),
+            'medicare': float(eco.STUB_MEDICARE_RATE),
+            'state': float(eco.STUB_STATE_RATE),
+        },
         'base_pay': float(eco.money(live['base_pay'])),
-        'citation_count': live['citation_count'],
-        'citation_list': live['citation_list'],
-        'citation_deduction': float(eco.money(live['citation_deduction'])),
+        'citation_count': live.get('citation_count') or 0,
+        'citation_list': live.get('citation_list') or [],
+        'citation_deduction': float(eco.money(live.get('citation_deduction') or 0)),
+        'citation_rate': _money_float(live.get('citation_rate')) if live.get('citation_rate') is not None else float(eco.CITATION_RATE),
         'final_pay': float(eco.money(live['final_pay'])),
         'worksheet_completed': p.worksheet_completed,
         'is_verified': p.is_verified,
         'deposited_at': utc_isoformat(p.deposited_at),
         'created_at': utc_isoformat(p.created_at),
         'pay_track': live['track'],
-        'hourly_rate': float(live['hourly_rate']) if live.get('hourly_rate') is not None else None,
+        'hourly_rate': _money_float(live.get('hourly_rate')),
         'hours_worked': float(live['hours']) if live.get('hours') is not None else None,
-        'gross_pay': float(live['gross']) if live.get('gross') is not None else None,
-        'ss_tax': float(live['ss_tax']) if live.get('ss_tax') is not None else None,
-        'medicare_tax': float(live['medicare_tax']) if live.get('medicare_tax') is not None else None,
-        'federal_tax': float(live['federal_tax']) if live.get('federal_tax') is not None else None,
+        'gross_pay': _money_float(live.get('gross')),
+        'ss_tax': _money_float(live.get('ss_tax')),
+        'medicare_tax': _money_float(live.get('medicare_tax')),
+        'federal_tax': _money_float(live.get('federal_tax')),
         'standard_deduction': float(eco.STANDARD_DEDUCTION_2026),
     }
     if include_student_calcs:
@@ -17452,6 +17824,7 @@ def serialize_paycheck_payload(p, include_student_calcs=False):
             'student_calculated_ss': float(p.student_calculated_ss) if p.student_calculated_ss is not None else None,
             'student_calculated_medicare': float(p.student_calculated_medicare) if p.student_calculated_medicare is not None else None,
             'student_calculated_federal': float(p.student_calculated_federal) if p.student_calculated_federal is not None else None,
+            'student_worksheet': eco.load_json(p.student_worksheet_json, {}),
         })
     return payload
 
@@ -17571,37 +17944,7 @@ def _serialize_curriculum_assignment(assignment):
 def _paycheck_live_snapshot(paycheck):
     if not paycheck:
         return None
-    citation_list = list_weekly_citations(
-        paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end
-    )
-    live_count = len(citation_list)
-    live_deduction = Decimal(str(live_count * 2))
-    if not paycheck.is_verified and paycheck.deposited_at is None:
-        live_avg = calculate_weekly_star_percent(
-            paycheck.student_id, paycheck.pay_period_start, paycheck.pay_period_end
-        )
-        live_base = (live_avg / 100) * Decimal('100')
-        live_final = live_base - live_deduction
-        avg_pct = live_avg
-        base_pay_val = live_base
-    else:
-        avg_pct = paycheck.average_star_percent
-        base_pay_val = paycheck.base_pay
-        live_final = paycheck.base_pay - live_deduction
-    return {
-        'id': paycheck.id,
-        'pay_period_start': paycheck.pay_period_start.isoformat(),
-        'pay_period_end': paycheck.pay_period_end.isoformat(),
-        'average_star_percent': float(avg_pct or 0),
-        'base_pay': float(base_pay_val or 0),
-        'citation_count': live_count,
-        'citation_list': citation_list,
-        'citation_deduction': float(live_deduction),
-        'final_pay': float(live_final or 0),
-        'is_verified': bool(paycheck.is_verified),
-        'deposited_at': utc_isoformat(paycheck.deposited_at),
-        'worksheet_completed': bool(paycheck.worksheet_completed),
-    }
+    return serialize_paycheck_payload(paycheck, include_student_calcs=False)
 
 
 def ensure_paycheck_curriculum_assignment(paycheck, notify=False):
@@ -17928,18 +18271,57 @@ def complete_paycheck_worksheet(paycheck_id):
     
     data = request.json or {}
     import economy_lib as eco
-    paycheck.student_calculated_pay = eco.parse_money(data.get('calculated_pay')) or Decimal('0')
-    paycheck.student_calculated_citations = int(data.get('calculated_citations', 0) or 0)
-    paycheck.student_calculated_deduction = eco.parse_money(data.get('calculated_deduction')) or Decimal('0')
-    paycheck.student_calculated_final = eco.parse_money(data.get('calculated_final')) or Decimal('0')
-    if data.get('calculated_gross') is not None:
-        paycheck.student_calculated_gross = eco.parse_money(data.get('calculated_gross'))
-    if data.get('calculated_ss') is not None:
-        paycheck.student_calculated_ss = eco.parse_money(data.get('calculated_ss'))
-    if data.get('calculated_medicare') is not None:
-        paycheck.student_calculated_medicare = eco.parse_money(data.get('calculated_medicare'))
-    if data.get('calculated_federal') is not None:
-        paycheck.student_calculated_federal = eco.parse_money(data.get('calculated_federal'))
+
+    def _json_money(key, *aliases):
+        for name in (key,) + aliases:
+            if name in data and data.get(name) is not None and str(data.get(name)).strip() != '':
+                return eco.parse_money(data.get(name))
+        return None
+
+    answers = {
+        'regular_pay': _json_money('regular_pay'),
+        'starbucks_pay': _json_money('starbucks_pay'),
+        'star_student_pay': _json_money('star_student_pay'),
+        'star_classroom_pay': _json_money('star_classroom_pay'),
+        'gross': _json_money('gross', 'calculated_gross', 'calculated_pay'),
+        'point_card_rate': data.get('point_card_rate'),
+        'point_card_deduction': _json_money('point_card_deduction'),
+        'citation_count': data.get('citation_count'),
+        'citation_deduction': _json_money('citation_deduction'),
+        'federal_tax': _json_money('federal_tax', 'calculated_federal'),
+        'ss_tax': _json_money('ss_tax', 'calculated_ss'),
+        'medicare_tax': _json_money('medicare_tax', 'calculated_medicare'),
+        'state_tax': _json_money('state_tax'),
+        'total_deductions': _json_money('total_deductions', 'calculated_deduction'),
+        'final_pay': _json_money('final_pay', 'calculated_final'),
+    }
+    serializable = {}
+    for key, value in answers.items():
+        if key in ('point_card_rate', 'citation_count'):
+            serializable[key] = None if value is None or str(value).strip() == '' else str(value).strip()
+        elif value is None:
+            serializable[key] = None
+        else:
+            serializable[key] = str(value)
+    paycheck.student_worksheet_json = eco.dump_json(serializable)
+    paycheck.student_calculated_pay = answers['gross'] or Decimal('0')
+    paycheck.student_calculated_gross = answers['gross']
+    paycheck.student_calculated_ss = answers['ss_tax']
+    paycheck.student_calculated_medicare = answers['medicare_tax']
+    paycheck.student_calculated_federal = answers['federal_tax']
+    paycheck.student_calculated_deduction = answers['total_deductions']
+    paycheck.student_calculated_final = answers['final_pay'] or Decimal('0')
+    paycheck.student_calculated_citations = None
+    try:
+        if answers.get('citation_count') is not None and str(answers.get('citation_count')).strip() != '':
+            paycheck.student_calculated_citations = int(str(answers['citation_count']).strip())
+        elif answers['citation_deduction'] is not None:
+            cit_amt = answers['citation_deduction']
+            rate = eco.CITATION_RATE
+            if rate and cit_amt % rate == 0:
+                paycheck.student_calculated_citations = int(cit_amt / rate)
+    except Exception:
+        paycheck.student_calculated_citations = None
     paycheck.worksheet_completed = True
     
     db.session.commit()
@@ -17959,40 +18341,70 @@ def verify_paycheck(paycheck_id):
     import economy_lib as eco
     student = Student.query.get(paycheck.student_id)
     live = live_paycheck_amounts(paycheck)
-    track = live['track']
     live_avg = live.get('live_avg')
-    live_citation_count = live['citation_count']
-    live_citation_deduction = eco.money(live['citation_deduction'])
-    live_base_pay = eco.money(live['base_pay'])
-    live_final_pay = eco.money(live['final_pay'])
-    tolerance = Decimal('0.01')
+    tolerance = eco.MONEY_TOLERANCE
+    answers = eco.load_json(paycheck.student_worksheet_json, {}) or {}
 
-    citations_correct = paycheck.student_calculated_citations == live_citation_count
-    deduction_correct = paycheck.student_calculated_deduction is not None and abs(paycheck.student_calculated_deduction - live_citation_deduction) <= tolerance
-    final_correct = paycheck.student_calculated_final is not None and abs(paycheck.student_calculated_final - live_final_pay) <= tolerance
-    pay_correct = paycheck.student_calculated_pay is not None and abs(paycheck.student_calculated_pay - live_base_pay) <= tolerance
-    extra_ok = True
-    extra_errors = []
-    if track == 'complex':
-        gross = eco.money(live.get('gross') or live_base_pay)
-        ss = eco.money(live.get('ss_tax') or 0)
-        medicare = eco.money(live.get('medicare_tax') or 0)
-        federal = eco.money(live.get('federal_tax') or 0)
-        if paycheck.student_calculated_gross is None or abs(paycheck.student_calculated_gross - gross) > tolerance:
-            extra_ok = False
-            extra_errors.append('Please correct gross pay.')
-        if paycheck.student_calculated_ss is None or abs(paycheck.student_calculated_ss - ss) > tolerance:
-            extra_ok = False
-            extra_errors.append('Please correct Social Security (6.2%).')
-        if paycheck.student_calculated_medicare is None or abs(paycheck.student_calculated_medicare - medicare) > tolerance:
-            extra_ok = False
-            extra_errors.append('Please correct Medicare (1.45%).')
-        if paycheck.student_calculated_federal is None or abs(paycheck.student_calculated_federal - federal) > tolerance:
-            extra_ok = False
-            extra_errors.append('Please correct federal income tax.')
+    def _answer_money(key, fallback=None):
+        if key in answers and answers.get(key) not in (None, ''):
+            return eco.parse_money(answers.get(key))
+        return fallback
 
-    if pay_correct and citations_correct and deduction_correct and final_correct and extra_ok:
-        fill_paycheck_amounts(paycheck, student, live_avg if live_avg is not None else paycheck.average_star_percent, live_citation_count)
+    checks = [
+        ('regular_pay', live.get('regular_pay'), 'Please correct regular hours amount.'),
+        ('starbucks_pay', live.get('starbucks_pay'), 'Please correct Starbucks amount.'),
+        ('star_student_pay', live.get('star_student_pay'), 'Please correct Star Student amount.'),
+        ('star_classroom_pay', live.get('star_classroom_pay'), 'Please correct Star Classroom amount.'),
+        ('gross', live.get('gross') or live.get('base_pay'), 'Please correct GROSS PAY.'),
+        ('point_card_deduction', live.get('point_card_deduction'), 'Please correct the point card deduction amount.'),
+        ('citation_deduction', live.get('citation_deduction'), 'Please correct Citations.'),
+        ('federal_tax', live.get('federal_tax'), 'Please correct Federal Income Tax.'),
+        ('ss_tax', live.get('ss_tax'), 'Please correct Social Security (FICA).'),
+        ('medicare_tax', live.get('medicare_tax'), 'Please correct Medicare (FICA).'),
+        ('state_tax', live.get('state_tax'), 'Please correct State Income Tax.'),
+        ('total_deductions', live.get('total_deductions'), 'Please correct TOTAL DEDUCTIONS.'),
+        ('final_pay', live.get('final_pay'), 'Please correct take-home pay.'),
+    ]
+    errors = []
+    if not eco.percent_rates_close(answers.get('point_card_rate'), live.get('point_card_gap_percent')):
+        errors.append('Please correct the Point Card Loss rate (100 minus your point card percent).')
+    try:
+        entered_citation_count = int(str(answers.get('citation_count', '')).strip())
+    except (TypeError, ValueError):
+        entered_citation_count = None
+    if entered_citation_count is None:
+        # Legacy worksheets may only have the dollar amount.
+        if paycheck.student_calculated_citations is not None:
+            entered_citation_count = int(paycheck.student_calculated_citations)
+    if entered_citation_count is None or entered_citation_count != int(live.get('citation_count') or 0):
+        errors.append('Please correct the citation count.')
+    all_ok = not errors
+    for key, expected, message in checks:
+        fallback = None
+        if key == 'gross':
+            fallback = paycheck.student_calculated_gross or paycheck.student_calculated_pay
+        elif key == 'ss_tax':
+            fallback = paycheck.student_calculated_ss
+        elif key == 'medicare_tax':
+            fallback = paycheck.student_calculated_medicare
+        elif key == 'federal_tax':
+            fallback = paycheck.student_calculated_federal
+        elif key == 'total_deductions':
+            fallback = paycheck.student_calculated_deduction
+        elif key == 'final_pay':
+            fallback = paycheck.student_calculated_final
+        entered = _answer_money(key, fallback)
+        if not eco.amounts_close(entered, expected, tolerance):
+            all_ok = False
+            errors.append(message)
+
+    if all_ok:
+        fill_paycheck_amounts(
+            paycheck,
+            student,
+            live_avg if live_avg is not None else paycheck.average_star_percent,
+            live.get('citation_count') or 0,
+        )
         paycheck.is_verified = True
         paycheck.deposited_at = datetime.utcnow()
         
@@ -18020,17 +18432,6 @@ def verify_paycheck(paycheck_id):
             'deposited_amount': float(paycheck.final_pay)
         })
     else:
-        errors = []
-        if not pay_correct:
-            errors.append('Please correct base pay calculation.' if track != 'complex' else 'Please correct gross / base pay.')
-        if not citations_correct:
-            errors.append('Please correct citation count.')
-        if not deduction_correct:
-            errors.append('Please correct citation deduction.')
-        if not final_correct:
-            errors.append('Please correct final pay calculation.')
-        errors.extend(extra_errors)
-        
         return jsonify({
             'verified': False,
             'errors': errors,
@@ -18176,7 +18577,7 @@ def _validate_lesson_responses(slug, responses, story):
 
     if slug == 'why_pay_changed':
         cause = (responses.get('cause') or '').strip().lower()
-        if cause not in ('citations', 'star', 'both', 'same'):
+        if cause not in ('citations', 'star', 'days', 'both', 'same'):
             return 'Pick what moved your pay.'
         why = (responses.get('why') or '').strip()
         if len(why) < 8:
@@ -19125,26 +19526,67 @@ def get_marketplace_item_hidden_rules(item_id):
     return jsonify([{'id': r.id, 'hidden_type': r.hidden_type, 'value': r.value, 'label': marketplace_hidden_rule_label(r), 'created_at': utc_isoformat(r.created_at)} for r in rules])
 
 
+def _normalize_marketplace_hidden_rule_payload(data, *, for_bulk=False):
+    """Validate hide rule payload. Returns (hidden_type, value, error_response)."""
+    data = data or {}
+    hidden_type = (data.get('hidden_type') or '').strip()
+    value = (data.get('value') or '').strip()
+    allowed = ('student', 'card_color', 'grade_section', 'managed_by_me')
+    if hidden_type not in allowed:
+        return None, None, (jsonify({
+            'error': 'hidden_type must be student, card_color, grade_section, or managed_by_me'
+        }), 400)
+    if hidden_type == 'managed_by_me':
+        value = str(current_user.id)
+    elif not value:
+        return None, None, (jsonify({'error': 'value is required'}), 400)
+    if hidden_type == 'card_color' and value.lower() not in ('yellow', 'green', 'blue'):
+        return None, None, (jsonify({'error': 'card_color must be yellow, green, or blue'}), 400)
+    if hidden_type == 'grade_section' and value not in ('K-3', '4-8', '9-12'):
+        return None, None, (jsonify({'error': 'grade_section must be K-3, 4-8, or 9-12'}), 400)
+    if hidden_type == 'student':
+        try:
+            sid = int(value)
+        except (TypeError, ValueError):
+            return None, None, (jsonify({'error': 'Invalid student id'}), 400)
+        if not Student.query.get(sid):
+            return None, None, (jsonify({'error': 'Student not found'}), 404)
+        value = str(sid)
+    return hidden_type, value, None
+
+
+def _add_marketplace_hidden_rule(item_id, hidden_type, value):
+    """Create or return existing hidden rule for an item. Returns (rule, created)."""
+    existing = MarketplaceItemHiddenRule.query.filter_by(
+        item_id=item_id, hidden_type=hidden_type, value=value
+    ).first()
+    if existing:
+        return existing, False
+    rule = MarketplaceItemHiddenRule(item_id=item_id, hidden_type=hidden_type, value=value)
+    db.session.add(rule)
+    return rule, True
+
+
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules', methods=['POST'])
 @login_required
 def add_marketplace_item_hidden_rule(item_id):
-    """Add a hidden rule: hide item from specific student, card_color, or grade_section (staff/admin)."""
+    """Add a hidden rule: hide item from student, card_color, grade_section, or managed_by_me (staff/admin)."""
     if current_user.role not in ['staff', 'admin']:
         return jsonify({'error': 'Permission denied'}), 403
-    item = MarketplaceItem.query.get_or_404(item_id)
-    data = request.json or {}
-    hidden_type = (data.get('hidden_type') or '').strip()
-    value = (data.get('value') or '').strip()
-    if hidden_type not in ('student', 'card_color', 'grade_section') or not value:
-        return jsonify({'error': 'hidden_type must be student, card_color, or grade_section and value is required'}), 400
-    # Avoid duplicate rule
-    existing = MarketplaceItemHiddenRule.query.filter_by(item_id=item_id, hidden_type=hidden_type, value=value).first()
-    if existing:
-        return jsonify({'id': existing.id, 'hidden_type': existing.hidden_type, 'value': existing.value}), 200
-    rule = MarketplaceItemHiddenRule(item_id=item_id, hidden_type=hidden_type, value=value)
-    db.session.add(rule)
+    MarketplaceItem.query.get_or_404(item_id)
+    hidden_type, value, err = _normalize_marketplace_hidden_rule_payload(request.json)
+    if err:
+        return err
+    rule, created = _add_marketplace_hidden_rule(item_id, hidden_type, value)
     db.session.commit()
-    return jsonify({'id': rule.id, 'hidden_type': rule.hidden_type, 'value': rule.value, 'created_at': utc_isoformat(rule.created_at)}), 201
+    payload = {
+        'id': rule.id,
+        'hidden_type': rule.hidden_type,
+        'value': rule.value,
+        'label': marketplace_hidden_rule_label(rule),
+        'created_at': utc_isoformat(rule.created_at),
+    }
+    return jsonify(payload), (201 if created else 200)
 
 
 @app.route('/api/marketplace-items/<int:item_id>/hidden-rules/<int:rule_id>', methods=['DELETE'])
@@ -19157,6 +19599,91 @@ def remove_marketplace_item_hidden_rule(item_id, rule_id):
     db.session.delete(rule)
     db.session.commit()
     return jsonify({'message': 'Rule removed'})
+
+
+@app.route('/api/marketplace-items/hidden-rules/bulk', methods=['POST'])
+@login_required
+def bulk_add_marketplace_item_hidden_rules():
+    """Apply one hidden rule to multiple marketplace items (staff/admin)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    data = request.json or {}
+    raw_ids = data.get('item_ids') or []
+    try:
+        item_ids = sorted({int(x) for x in raw_ids})
+    except (TypeError, ValueError):
+        return jsonify({'error': 'item_ids must be a list of integers'}), 400
+    if not item_ids:
+        return jsonify({'error': 'item_ids is required'}), 400
+    if len(item_ids) > 200:
+        return jsonify({'error': 'Too many items (max 200)'}), 400
+    hidden_type, value, err = _normalize_marketplace_hidden_rule_payload(data, for_bulk=True)
+    if err:
+        return err
+    existing_ids = {
+        item.id for item in MarketplaceItem.query.filter(MarketplaceItem.id.in_(item_ids)).all()
+    }
+    missing = [iid for iid in item_ids if iid not in existing_ids]
+    if missing:
+        return jsonify({'error': 'Some items were not found', 'missing_item_ids': missing}), 404
+    created = 0
+    existing = 0
+    results = []
+    for item_id in item_ids:
+        rule, was_created = _add_marketplace_hidden_rule(item_id, hidden_type, value)
+        if was_created:
+            created += 1
+        else:
+            existing += 1
+        results.append({
+            'item_id': item_id,
+            'id': rule.id,
+            'hidden_type': rule.hidden_type,
+            'value': rule.value,
+            'created': was_created,
+        })
+    db.session.commit()
+    return jsonify({
+        'message': f'Rule applied to {len(item_ids)} item(s)',
+        'created': created,
+        'already_existed': existing,
+        'rules': results,
+    }), 200
+
+
+@app.route('/api/marketplace-items/hidden-rules/bulk-remove', methods=['POST'])
+@login_required
+def bulk_remove_marketplace_item_hidden_rules():
+    """Remove all hidden rules (or matching type) from multiple marketplace items (staff/admin)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    data = request.json or {}
+    raw_ids = data.get('item_ids') or []
+    try:
+        item_ids = sorted({int(x) for x in raw_ids})
+    except (TypeError, ValueError):
+        return jsonify({'error': 'item_ids must be a list of integers'}), 400
+    if not item_ids:
+        return jsonify({'error': 'item_ids is required'}), 400
+    if len(item_ids) > 200:
+        return jsonify({'error': 'Too many items (max 200)'}), 400
+    hidden_type = (data.get('hidden_type') or '').strip()
+    value = (data.get('value') or '').strip()
+    query = MarketplaceItemHiddenRule.query.filter(MarketplaceItemHiddenRule.item_id.in_(item_ids))
+    if hidden_type:
+        if hidden_type not in ('student', 'card_color', 'grade_section', 'managed_by_me'):
+            return jsonify({'error': 'Invalid hidden_type'}), 400
+        query = query.filter_by(hidden_type=hidden_type)
+        if hidden_type == 'managed_by_me' and not value:
+            value = str(current_user.id)
+        if value:
+            query = query.filter_by(value=value)
+    rules = query.all()
+    removed = len(rules)
+    for rule in rules:
+        db.session.delete(rule)
+    db.session.commit()
+    return jsonify({'message': f'Removed {removed} rule(s)', 'removed': removed}), 200
 
 @app.route('/api/marketplace-items/<int:item_id>/request-global', methods=['POST'])
 @login_required

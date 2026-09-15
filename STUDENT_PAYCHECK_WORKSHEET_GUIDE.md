@@ -1,12 +1,12 @@
 # How to Use the Student Paycheck Worksheet
 
-This guide explains how to complete your paycheck worksheet so you can receive your pay and add it to your bank account balance.
+This guide explains how to complete your weekly earnings record so you can receive your pay and add it to your bank account balance.
 
 ---
 
 ## What Is the Paycheck Worksheet?
 
-Each week you earn pay based on your STAR performance and any citations you receive. Before that pay can be added to your bank account, you must complete a short worksheet. The worksheet asks you to calculate your pay using simple math. When your answers are correct, the system verifies your work and deposits the money into your account.
+Each week you earn pay based on days you were present or excused, your card-color daily rate, bonuses, and your point card percent. Before that pay can be added to your bank account, you must complete a short worksheet. The worksheet asks you to calculate each line using simple math. When your answers are correct, the system verifies your work and deposits the money into your account.
 
 ---
 
@@ -15,73 +15,62 @@ Each week you earn pay based on your STAR performance and any citations you rece
 1. **Log in** to the app with your student account.
 2. **Open the Bank Account view** (click the Bank Account tab or button in the main navigation).
 3. Under **Paychecks**, click the **Undeposited** button.
-4. You will see a list of paychecks that still need a worksheet. Each row shows the pay period (dates) and your STAR percentage for that week.
+4. You will see a list of paychecks that still need a worksheet. Each row shows the pay period (dates) and your point card percentage for that week.
 5. Click **Complete worksheet** on the paycheck you want to work on.
-6. The worksheet form will appear on the page.
+6. The weekly earnings record will appear on the page.
 
 ---
 
 ## Understanding Your Pay
 
-Your pay is based on two things:
+**Regular hours** = paid days × your daily rate  
+Paid days are days marked **present** or **excused**. Unexcused or missing days do not count. Your daily rate depends on card color (yellow $74.16, green $129.16, blue $162.76).
 
-- **STAR percentage** — How well you did on Safety, Teamwork, Accountability, and Relationships during the week. This is shown as a percentage (for example, 85%).
-- **Citations** — Infractions recorded during the week (for example, "Off Task" or "Lang"). Each citation costs $2.
+**Bonuses**
 
-**Base pay** = $100 × your STAR percentage  
-**Citation deduction** = number of citations × $2  
-**Final pay** = Base pay − Citation deduction
+- Starbucks: count × $2.00
+- Star Student: count × $50.00
+- Star Classroom: count × $50.00
+
+**GROSS PAY** = regular hours + all bonuses
+
+**Deductions** (each uses GROSS PAY)
+
+- Point Card Loss: D = 100% − P, L = D, amount = L × GP (P is your point card percent, shown in Count). Enter L in Rate.
+- Citations = enter the count, then Amount = count × $2.00 (from infractions on the point card)
+- Federal Income Tax = 3.0% × gross
+- Social Security (FICA) = 6.2% × gross
+- Medicare (FICA) = 1.5% × gross
+- State Income Tax = 5.35% × gross (Minnesota)
+
+**TOTAL DEDUCTIONS** = the six deduction amounts added together  
+**Take-home** = GROSS PAY − TOTAL DEDUCTIONS
 
 ---
 
 ## Step-by-Step: Completing the Worksheet
 
-The worksheet has four parts. Work through them in order.
+Work top to bottom. Each student box has a **Show example** button. The example uses different numbers than yours so you can see the steps without being given the answer.
 
-### Step 1: Base Pay
+### Earnings
 
-You will see something like:
+1. Regular hours amount: days × rate.
+2. Starbucks, Star Student, and Star Classroom amounts: count × the rate shown. If a count is 0, enter $0.00.
+3. GROSS PAY: add the four earning amounts.
 
-> Calculate your base pay: $100 × **85**% =
+### Deductions
 
-- The number in bold is your average STAR percentage for that week (the system fills this in).
-- Multiply: $100 × (your percentage ÷ 100).
-- Example: If your STAR % is 85, then $100 × 0.85 = **$85.00**
-- Enter your answer in the box. You can type `85` or `85.00`; it will format as `$85.00` when you move to the next field.
+4. Point Card Loss rate: subtract the Count formula (100% minus your percent). Enter the difference in Rate. You can type `8`, `8%`, or `0.08` — it will show with `%` after you leave the box.
+5. Point Card Loss amount: that rate × GROSS PAY.
+6. Citations: enter the count, then Amount = count × $2.00.
+7. Federal, Social Security, Medicare, and State amounts: each given percent × GROSS PAY.
+8. TOTAL DEDUCTIONS: add the six deduction amounts.
 
-### Step 2: Number of Citations
+### Take-home
 
-You will see a list of citations for that week, such as:
+9. GROSS PAY minus TOTAL DEDUCTIONS. That is what is deposited.
 
-```
-2x Off Task
-1x Lang
-```
-
-- **Count** how many citations appear in total. In this example, that is 3 (two "Off Task" plus one "Lang").
-- Enter that number in the box. Use a whole number only (no decimals).
-
-### Step 3: Citation Deduction
-
-You will see:
-
-> Citations × $2 =
-
-- Multiply the number of citations by 2.
-- Example: 3 citations × $2 = **$6.00**
-- Enter your answer in the box. It will format as currency when you leave the field.
-
-### Step 4: Final Pay
-
-You will see:
-
-> Base Pay − Citation Deduction =
-
-- Subtract the citation deduction from your base pay.
-- Example: $85.00 − $6.00 = **$79.00**
-- Enter your answer in the box.
-
-### Step 5: Submit
+### Submit
 
 Click the **Submit** button.
 
@@ -93,40 +82,47 @@ Click the **Submit** button.
   You will see a green success message: "Worksheet verified! Deposit completed." The money is added to your bank account balance, and the paycheck moves to your **Deposited** list.
 
 - **If any answer is wrong:**  
-  You will see a red error message listing which parts need to be fixed (for example, "Please correct citation count" or "Please correct base pay calculation"). Fix those answers and click **Submit** again. You can try as many times as you need until everything is correct.
+  You will see a red error message listing which parts need to be fixed. The worksheet does not tell you a line is wrong until you submit. Fix those answers and click **Submit** again. You can try as many times as you need until everything is correct.
 
 ---
 
 ## Tips
 
 - **Use a calculator** if you want. The goal is to get the right numbers, not to do mental math.
-- **Check your citation count carefully.** Count each citation in the list. If you see "2x Off Task," that means 2 citations, not 1.
-- **Currency fields** — For base pay, deduction, and final pay, you can type numbers like `85` or `85.50`. When you tab to the next field or click away, the system will add the dollar sign and decimals (e.g., `$85.00`).
+- **Show example** uses made-up numbers. Do not copy those amounts into your boxes.
+- **Currency fields** — You can type `85` or `85.50`. When you tab to the next field or click away, the system will add the dollar sign and decimals (e.g., `$85.00`).
 - **Pressing Enter** moves you to the next field, same as Tab.
-- **Rounding** — Use two decimal places for money (e.g., $79.00, not $79). The system allows tiny rounding differences.
+- **Rounding** — Use two decimal places for money. The system allows tiny rounding differences.
 
 ---
 
-## Example
+## Example (not your real paycheck)
 
-**Your STAR % for the week: 90%**  
-**Citations: 2x Off Task, 1x Lang (3 total)**
+**Days paid: 3 (none excused)**  
+**Daily rate: $80.00**  
+**Starbucks count: 2**  
+**Point card percent: 90%**
 
-1. **Base pay:** $100 × 90% = $90.00  
-2. **Number of citations:** 3  
-3. **Citation deduction:** 3 × $2 = $6.00  
-4. **Final pay:** $90.00 − $6.00 = $84.00  
+1. Regular hours: 3 × $80.00 = $240.00
+2. Starbucks: 2 × $2.00 = $4.00
+3. Star Student / Star Classroom: $0.00
+4. GROSS PAY: $240.00 + $4.00 + $0.00 + $0.00 = $244.00
+5. Point Card Loss: 100 − 90 = 10%. Amount: 0.10 × $244.00 = $24.40
+6. Citations count: count the list above and enter that number in Rate. Amount: count × $2.00.
+7. Federal 3%: $7.32 · Social Security 6.2%: $15.13 · Medicare 1.5%: $3.66 · State 3%: $7.32
+8. TOTAL DEDUCTIONS: $61.83
+9. Take-home: $244.00 − $61.83 = $182.17
 
-Enter these four values and click Submit. If correct, $84.00 is deposited into your bank account.
+Your worksheet uses your days, rate, bonuses, and percent — not this example.
 
 ---
 
 ## When Are Paychecks Created?
 
-Paychecks are created each week for the previous Monday–Friday. If you don’t see a paycheck yet, it may not have been generated for that week. Ask your teacher or staff if you expect a paycheck that isn’t showing.
+Paychecks are created each week for the previous Monday–Friday. Pay date is the Monday after that Friday. If you don’t see a paycheck yet, it may not have been generated for that week. Ask your teacher or staff if you expect a paycheck that isn’t showing.
 
 ---
 
 ## Need Help?
 
-If you believe your STAR percentage or citations are wrong, talk to your teacher or staff. The worksheet uses the data in the system for that pay period. Once the underlying data is correct, you can complete the worksheet and receive your pay.
+Ask a staff member. You can also open **Show example** next to any box to see how that line of math works with different numbers.
