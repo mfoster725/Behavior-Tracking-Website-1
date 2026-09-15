@@ -1797,6 +1797,82 @@ function periodHasEnteredStarPoints(periodOrCell) {
     return values.some((value) => starValueCountsTowardStats(value));
 }
 
+const BUS_PERIOD_TIMES = new Set(['AM Bus', 'PM Bus']);
+
+function isBusPeriodTime(time) {
+    return BUS_PERIOD_TIMES.has(String(time || '').trim());
+}
+
+function getStudentScheduleItems(studentId) {
+    if (studentId == null) return [];
+    return studentSchedulesByStudentId[studentId]
+        || studentSchedulesByStudentId[String(studentId)]
+        || [];
+}
+
+function studentHasFilledScheduleForPeriod(studentId, timePeriod, onDate = null) {
+    const period = String(timePeriod || '').trim();
+    if (!period || studentId == null) return false;
+    const items = filterScheduleItemsForDate(
+        getStudentScheduleItems(studentId),
+        onDate || currentDate || null
+    ).filter((item) => item && item.time_period === period);
+    return items.some((item) => {
+        const className = (item.class_name || '').trim();
+        const staffName = (item.staff_name || '').trim();
+        return !!(className || staffName);
+    });
+}
+
+function pointCardPeriodHasEnteredContent(period) {
+    if (periodHasEnteredStarPoints(period)) return true;
+    if (!period) return false;
+    const info = period.info;
+    if (info == null || info === '') return false;
+    if (typeof info === 'object') {
+        return typeof hasInfoData === 'function' && hasInfoData(info);
+    }
+    try {
+        const parsed = JSON.parse(info);
+        if (parsed && typeof parsed === 'object') {
+            return typeof hasInfoData === 'function' && hasInfoData(parsed);
+        }
+    } catch (e) {
+        // plain text info
+    }
+    return String(info).trim().length > 0;
+}
+
+function shouldShowBusPeriodOnPointCard(studentId, timePeriod, onDate = null, existingPeriod = null) {
+    if (!isBusPeriodTime(timePeriod)) return true;
+    if (studentId == null) return true;
+    if (studentHasFilledScheduleForPeriod(studentId, timePeriod, onDate)) return true;
+    return pointCardPeriodHasEnteredContent(existingPeriod);
+}
+
+function getStandardPeriodsForStudent(studentId, onDate = null) {
+    return STANDARD_PERIODS.filter((sp) => (
+        shouldShowBusPeriodOnPointCard(studentId, sp.time, onDate)
+    ));
+}
+
+function getStandardPeriodsForStudents(students, onDate = null) {
+    const list = Array.isArray(students) ? students : [];
+    if (!list.length) {
+        return STANDARD_PERIODS.filter((sp) => !isBusPeriodTime(sp.time));
+    }
+    return STANDARD_PERIODS.filter((sp) => {
+        if (!isBusPeriodTime(sp.time)) return true;
+        return list.some((student) => (
+            shouldShowBusPeriodOnPointCard(student && student.id, sp.time, onDate)
+        ));
+    });
+}
+
+function getDailyGridStandardPeriods() {
+    return getStandardPeriodsForStudents(getVisibleDailyStudents(), currentDate || null);
+}
+
 function defaultPointCardPeriod(standardPeriod) {
     return {
         time_range: standardPeriod.time,
@@ -1815,7 +1891,8 @@ function defaultPointCardPeriod(standardPeriod) {
     };
 }
 
-function expandPointCardPeriods(periods) {
+function expandPointCardPeriods(periods, options = {}) {
+    const { studentId = null, onDate = null } = options || {};
     const list = Array.isArray(periods) ? periods : [];
     const standardTimes = new Set(STANDARD_PERIODS.map((sp) => sp.time));
     const byTime = new Map();
@@ -1829,15 +1906,31 @@ function expandPointCardPeriods(periods) {
             extras.push(period);
         }
     });
-    const expanded = STANDARD_PERIODS.map((sp) => {
+    const expanded = [];
+    STANDARD_PERIODS.forEach((sp) => {
         const existing = byTime.get(sp.time);
-        if (!existing) return defaultPointCardPeriod(sp);
-        return {
+        if (!shouldShowBusPeriodOnPointCard(studentId, sp.time, onDate, existing)) {
+            return;
+        }
+        if (!existing) {
+            const created = defaultPointCardPeriod(sp);
+            if (studentId != null) {
+                const scheduled = formatStudentScheduleLocation(
+                    getStudentScheduleItems(studentId),
+                    sp.time,
+                    onDate || currentDate || null
+                );
+                if (scheduled) created.location = scheduled;
+            }
+            expanded.push(created);
+            return;
+        }
+        expanded.push({
             ...defaultPointCardPeriod(sp),
             ...existing,
             time_range: sp.time,
             location: existing.location || ''
-        };
+        });
     });
     extras.forEach((period) => {
         const time = String(period.time_range || '').trim();
@@ -1892,13 +1985,18 @@ function buildCompleteDailyPeriodsForStudent(studentId) {
     const studentData = dailyData[studentId] || {};
     const used = new Set();
     const periods = [];
-    STANDARD_PERIODS.forEach((sp) => {
+    getStandardPeriodsForStudent(studentId, currentDate || null).forEach((sp) => {
         used.add(sp.time);
         const payload = buildMergePeriodPayload(studentId, sp.time, studentData[sp.time]);
         if (payload) periods.push(payload);
     });
     Object.keys(studentData).forEach((periodTime) => {
         if (used.has(periodTime)) return;
+        // Keep already-entered bus data even if schedule no longer has bus.
+        if (isBusPeriodTime(periodTime)
+            && !shouldShowBusPeriodOnPointCard(studentId, periodTime, currentDate || null, studentData[periodTime])) {
+            return;
+        }
         const payload = buildMergePeriodPayload(studentId, periodTime, studentData[periodTime]);
         if (payload) periods.push(payload);
     });
@@ -6435,21 +6533,23 @@ function renderDailyGrid() {
 
     ensureStudentSchedulesLoadedForVisibleStudents(studentsToDisplay);
 
+    const gridPeriods = getStandardPeriodsForStudents(studentsToDisplay, currentDate || null);
+
     // Calculate grid columns: Period + spacer + (5 or 6 columns per student)
     const spacerWidth = '7px'; // 1/4 of original 27px
     const studentColumns = buildPointCardStudentColumnsTemplate(
         studentsToDisplay,
         spacerWidth,
-        STANDARD_PERIODS
+        gridPeriods
     );
     const columnsPerStudent = getPointCardColumnsPerStudent();
     const showStudentSchedules = isShowStudentSchedulesInPointCards() && canEdit();
     
-    const scheduleTexts = STANDARD_PERIODS.map((period) => formatPointCardScheduleForPeriod(period.time));
+    const scheduleTexts = gridPeriods.map((period) => formatPointCardScheduleForPeriod(period.time));
     const scheduleWidth = measurePointCardOwnScheduleColumnWidth(['Schedule', ...scheduleTexts]);
     const hideOwnSchedule = isHideOwnScheduleInPointCards();
     const periodWidth = measurePointCardPeriodColumnWidth(
-        ['Period', 'Percent', ...STANDARD_PERIODS.map((period) => period.time)],
+        ['Period', 'Percent', ...gridPeriods.map((period) => period.time)],
         hideOwnSchedule && canEdit() ? { extraWidth: 18 } : {}
     );
     setDailyGridColumnTemplate(header, body, studentColumns, spacerWidth, scheduleWidth, {
@@ -6621,7 +6721,7 @@ function renderDailyGrid() {
     });
 
     // Create rows for each period
-    STANDARD_PERIODS.forEach((period, periodIndex) => {
+    gridPeriods.forEach((period, periodIndex) => {
         const isOddRow = periodIndex % 2 === 1;
         // Period cell
         const periodCell = document.createElement('div');
@@ -6832,7 +6932,7 @@ function renderDailyGrid() {
     // Update "I" box highlights for all students and periods on initial load
     studentsToDisplay.forEach(student => {
         applyAttendanceStarCellState(student.id);
-        STANDARD_PERIODS.forEach(period => {
+        gridPeriods.forEach(period => {
             updateInfoButtonHighlight(student.id, period.time);
         });
     });
@@ -7036,7 +7136,7 @@ function moveDailyStarInput(currentInput, direction) {
     const catIdx = STAR_GRID_CATEGORIES.indexOf(category);
     const periodIdx = isPeriodEntryViewActive()
         ? 0
-        : STANDARD_PERIODS.findIndex((p) => p.time === period);
+        : getDailyGridStandardPeriods().findIndex((p) => p.time === period);
 
     if (studentIdx < 0 || catIdx < 0) return false;
     if (!isPeriodEntryViewActive() && periodIdx < 0) return false;
@@ -7044,6 +7144,7 @@ function moveDailyStarInput(currentInput, direction) {
     let nextStudentIdx = studentIdx;
     let nextPeriodIdx = periodIdx;
     let nextCatIdx = catIdx;
+    const gridPeriods = getDailyGridStandardPeriods();
 
     if (direction === 'right') {
         if (catIdx < STAR_GRID_CATEGORIES.length - 1) {
@@ -7064,7 +7165,7 @@ function moveDailyStarInput(currentInput, direction) {
             return false;
         }
     } else if (direction === 'down') {
-        if (isPeriodEntryViewActive() || periodIdx >= STANDARD_PERIODS.length - 1) return false;
+        if (isPeriodEntryViewActive() || periodIdx >= gridPeriods.length - 1) return false;
         nextPeriodIdx += 1;
     } else if (direction === 'up') {
         if (isPeriodEntryViewActive() || periodIdx <= 0) return false;
@@ -7074,7 +7175,7 @@ function moveDailyStarInput(currentInput, direction) {
     }
 
     const nextStudent = students[nextStudentIdx];
-    const nextPeriod = isPeriodEntryViewActive() ? period : STANDARD_PERIODS[nextPeriodIdx].time;
+    const nextPeriod = isPeriodEntryViewActive() ? period : gridPeriods[nextPeriodIdx].time;
     return focusStarInput(nextStudent.id, nextPeriod, STAR_GRID_CATEGORIES[nextCatIdx]);
 }
 
@@ -7209,9 +7310,10 @@ function moveToPreviousInput(currentInput) {
 
     const mode = getStarEntryMode();
     if (mode === 'student' && !isPeriodEntryViewActive()) {
-        const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+        const gridPeriods = getDailyGridStandardPeriods();
+        const periodIdx = gridPeriods.findIndex((p) => p.time === period);
         if (periodIdx > 0) {
-            focusStarInput(studentId, STANDARD_PERIODS[periodIdx - 1].time, 'r');
+            focusStarInput(studentId, gridPeriods[periodIdx - 1].time, 'r');
         }
         return;
     }
@@ -7224,9 +7326,10 @@ function moveToPreviousInput(currentInput) {
             return;
         }
         if (!isPeriodEntryViewActive()) {
-            const periodIdx = STANDARD_PERIODS.findIndex((p) => p.time === period);
+            const gridPeriods = getDailyGridStandardPeriods();
+            const periodIdx = gridPeriods.findIndex((p) => p.time === period);
             if (periodIdx > 0) {
-                const prevPeriod = STANDARD_PERIODS[periodIdx - 1].time;
+                const prevPeriod = gridPeriods[periodIdx - 1].time;
                 const lastStudent = students[students.length - 1];
                 focusStarInput(lastStudent.id, prevPeriod, 'r');
             }
@@ -7570,8 +7673,9 @@ function isStarRowComplete(studentId, period) {
 
 function isLastPeriodRow(period) {
     if (isPeriodEntryViewActive()) return true;
-    if (!period || !STANDARD_PERIODS.length) return true;
-    return STANDARD_PERIODS[STANDARD_PERIODS.length - 1].time === period;
+    const gridPeriods = getDailyGridStandardPeriods();
+    if (!period || !gridPeriods.length) return true;
+    return gridPeriods[gridPeriods.length - 1].time === period;
 }
 
 function focusStarInput(studentId, period, category = 's') {
@@ -7597,7 +7701,7 @@ function findFirstIncompleteStarInput(studentId) {
         }
         return false;
     }
-    for (const period of STANDARD_PERIODS) {
+    for (const period of getDailyGridStandardPeriods()) {
         if (!isStarRowComplete(studentId, period.time)) {
             return focusStarInput(studentId, period.time, 's');
         }
@@ -7611,9 +7715,10 @@ function navigateNextPeriod(select) {
     if (isPeriodEntryViewActive() || isLastPeriodRow(period)) {
         return false;
     }
-    const idx = STANDARD_PERIODS.findIndex((p) => p.time === period);
-    if (idx < 0 || idx >= STANDARD_PERIODS.length - 1) return false;
-    return focusStarInput(studentId, STANDARD_PERIODS[idx + 1].time, 's');
+    const gridPeriods = getDailyGridStandardPeriods();
+    const idx = gridPeriods.findIndex((p) => p.time === period);
+    if (idx < 0 || idx >= gridPeriods.length - 1) return false;
+    return focusStarInput(studentId, gridPeriods[idx + 1].time, 's');
 }
 
 function navigateNextStudent(select) {
@@ -8229,7 +8334,7 @@ function loadStandardPeriods() {
     const container = document.getElementById('periods-container');
     container.innerHTML = '';
     
-    STANDARD_PERIODS.forEach(period => {
+    getStandardPeriodsForStudent(currentStudentId, currentDate || null).forEach(period => {
         addPeriod(period.time, period.location);
     });
 }
@@ -8498,7 +8603,10 @@ async function saveDailyRecord() {
         student_id: parseInt(currentStudentId),
         date: date,
         present: true,
-        periods: expandPointCardPeriods(periods),
+        periods: expandPointCardPeriods(periods, {
+            studentId: parseInt(currentStudentId, 10),
+            onDate: date,
+        }),
         frenzies
     };
 
@@ -10322,7 +10430,10 @@ async function loadPointCardData(studentIdOverride) {
 
         records.sort((a, b) => new Date(b.date) - new Date(a.date));
         records.forEach((record) => {
-            record.periods = expandPointCardPeriods(record.periods);
+            record.periods = expandPointCardPeriods(record.periods, {
+                studentId,
+                onDate: record.date,
+            });
         });
 
         const student = Array.isArray(allStudents) ? allStudents.find((s) => s.id === parseInt(studentId, 10)) : null;
@@ -10731,7 +10842,10 @@ function formatPointCardStarCell(record, value) {
 }
 
 function renderPointCardGrid(record, studentId) {
-    const periods = expandPointCardPeriods(record && record.periods);
+    const periods = expandPointCardPeriods(record && record.periods, {
+        studentId: studentId || record?.student_id,
+        onDate: record?.date || null,
+    });
     const attendance = getPointCardAttendanceStatus(record);
     const sid = studentId || record?.student_id;
 
@@ -11132,7 +11246,10 @@ async function editPointCardDay(e) {
         }
         
         const record = records[0];
-        record.periods = expandPointCardPeriods(record.periods);
+        record.periods = expandPointCardPeriods(record.periods, {
+            studentId,
+            onDate: date,
+        });
         
         // Create edit modal or inline edit view
         showEditPointCardModal(record, studentId, studentName, date);
@@ -11152,7 +11269,10 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     modal.className = 'modal';
     modal.id = 'edit-point-card-modal';
     modal.style.display = 'block';
-    record.periods = expandPointCardPeriods(record.periods);
+    record.periods = expandPointCardPeriods(record.periods, {
+        studentId,
+        onDate: date,
+    });
 
     const [year, month, day] = date.split('-').map(Number);
     const dateObj = new Date(year, month - 1, day);
@@ -11568,7 +11688,10 @@ async function saveEditedPointCard(recordId, studentId, date) {
         };
     });
     
-    const periodsToSave = expandPointCardPeriods(updatedPeriods).filter((p) => {
+    const periodsToSave = expandPointCardPeriods(updatedPeriods, {
+        studentId: normalizedStudentId,
+        onDate: date,
+    }).filter((p) => {
         const time = String(p.time_range || '').trim();
         const location = String(p.location || '').trim();
         return !!(time || location);
@@ -15385,6 +15508,8 @@ function getStudentScheduleLocationForPeriod(studentId, timePeriod, onDate = nul
     const location = formatStudentScheduleLocation(items, timePeriod, onDate || currentDate || null);
     if (location) return location;
     if (isOtherSchoolPeriod(studentId, timePeriod)) return 'Other school';
+    // Do not invent a Bus location when the schedule slot is empty.
+    if (isBusPeriodTime(timePeriod)) return '';
     const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
     return standard ? standard.location : timePeriod;
 }

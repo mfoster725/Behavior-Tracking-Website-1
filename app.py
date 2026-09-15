@@ -1232,6 +1232,96 @@ POINT_CARD_PERIODS = (
 )
 POINT_CARD_TIME_RANGES = tuple(time_range for time_range, _location in POINT_CARD_PERIODS)
 POINT_CARD_DEFAULT_LOCATIONS = dict(POINT_CARD_PERIODS)
+BUS_PERIOD_TIMES = frozenset({'AM Bus', 'PM Bus'})
+
+
+def _is_bus_period(time_range):
+    return (time_range or '').strip() in BUS_PERIOD_TIMES
+
+
+def _schedule_row_is_filled(row):
+    if isinstance(row, dict):
+        class_name = (row.get('class_name') or '').strip()
+        staff_name = (row.get('staff_name') or '').strip()
+    else:
+        class_name = (getattr(row, 'class_name', None) or '').strip()
+        staff_name = (getattr(row, 'staff_name', None) or '').strip()
+    return bool(class_name or staff_name)
+
+
+def _student_has_filled_schedule_for_period(student_id, time_period, schedule_rows=None, on_date=None):
+    """True when the student's schedule has class/staff filled for this period."""
+    time_period = (time_period or '').strip()
+    if not time_period:
+        return False
+    rows = schedule_rows if schedule_rows is not None else _student_schedule_rows(student_id)
+    for row in _filter_schedule_rows_for_date(rows, on_date):
+        if isinstance(row, dict):
+            row_period = (row.get('time_period') or '').strip()
+        else:
+            row_period = (getattr(row, 'time_period', None) or '').strip()
+        if row_period == time_period and _schedule_row_is_filled(row):
+            return True
+    return False
+
+
+def _serialized_period_has_entered_content(period):
+    """True when a serialized period has STAR points or info worth keeping visible."""
+    if not isinstance(period, dict):
+        return False
+    for field in (
+        'safety_points',
+        'teamwork_points',
+        'accountability_points',
+        'relationships_points',
+    ):
+        value = period.get(field)
+        if value is None or value == '':
+            continue
+        return True
+    info = period.get('info')
+    if info is None:
+        return False
+    if isinstance(info, dict):
+        return bool(info)
+    text = str(info).strip()
+    return bool(text) and text not in ('{}', 'null')
+
+
+def _should_include_bus_period_on_point_card(
+    time_range,
+    *,
+    student_id=None,
+    schedule_rows=None,
+    on_date=None,
+    existing_period=None,
+):
+    if not _is_bus_period(time_range):
+        return True
+    if student_id is None:
+        return True
+    if _student_has_filled_schedule_for_period(
+        student_id, time_range, schedule_rows=schedule_rows, on_date=on_date
+    ):
+        return True
+    if existing_period is None:
+        return False
+    if isinstance(existing_period, dict):
+        return _serialized_period_has_entered_content(existing_period)
+    for field in (
+        'safety_points',
+        'teamwork_points',
+        'accountability_points',
+        'relationships_points',
+    ):
+        value = getattr(existing_period, field, None)
+        if value is not None and value != '':
+            return True
+    info = getattr(existing_period, 'info', None)
+    if info is None:
+        return False
+    text = str(info).strip()
+    return bool(text) and text not in ('{}', 'null')
 
 # School-day clock helpers for student transitions (arrive/leave split).
 # AM Bus ends at first bell; PM Bus starts at last bell. 1:00–6:59 on the
@@ -1755,6 +1845,9 @@ def _student_location_for_period(student_id, time_period, schedule_rows=None, fa
     transition = _get_student_transition(student_id)
     if not is_home_period(transition, time_period):
         return 'Other school'
+    # Do not invent a Bus location when the schedule slot is empty.
+    if _is_bus_period(time_period):
+        return ''
     return POINT_CARD_DEFAULT_LOCATIONS.get((time_period or '').strip(), '')
 
 
@@ -1880,8 +1973,14 @@ def _empty_serialized_point_card_period(time_range, location, include_details=Tr
     return period
 
 
-def _expand_serialized_point_card_periods(periods, include_details=True):
-    """Return every standard point-card row, even when STAR cells are empty."""
+def _expand_serialized_point_card_periods(
+    periods,
+    include_details=True,
+    student_id=None,
+    on_date=None,
+    schedule_rows=None,
+):
+    """Return standard point-card rows, omitting empty bus rows without schedule."""
     periods = list(periods or [])
     standard_times = set(POINT_CARD_TIME_RANGES)
     by_time = {}
@@ -1894,9 +1993,20 @@ def _expand_serialized_point_card_periods(periods, include_details=True):
             by_time.setdefault(time_range, period)
         else:
             extras.append(period)
+    rows = schedule_rows
+    if rows is None and student_id is not None:
+        rows = _student_schedule_rows(student_id)
     expanded = []
     for time_range, location in POINT_CARD_PERIODS:
         existing = by_time.get(time_range)
+        if not _should_include_bus_period_on_point_card(
+            time_range,
+            student_id=student_id,
+            schedule_rows=rows,
+            on_date=on_date,
+            existing_period=existing,
+        ):
+            continue
         if existing:
             expanded.append(existing)
         else:
@@ -1914,6 +2024,7 @@ def _ensure_full_point_card_periods(daily_record):
 
     Uses a direct table query instead of the ORM collection so concurrent
     period saves cannot trigger delete-orphan on rows another user just added.
+    Skips AM/PM Bus when the student's schedule has no filled bus period.
     """
     if not daily_record:
         return
@@ -1929,15 +2040,23 @@ def _ensure_full_point_card_periods(daily_record):
         if (time_range or '').strip()
     }
     schedule_rows = _student_schedule_rows(daily_record.student_id)
+    on_date = getattr(daily_record, 'date', None)
     for time_range, default_location in POINT_CARD_PERIODS:
         if time_range in existing:
+            continue
+        if not _should_include_bus_period_on_point_card(
+            time_range,
+            student_id=daily_record.student_id,
+            schedule_rows=schedule_rows,
+            on_date=on_date,
+        ):
             continue
         location = _student_location_for_period(
             daily_record.student_id,
             time_range,
             schedule_rows=schedule_rows,
             fallback=default_location,
-            on_date=getattr(daily_record, 'date', None),
+            on_date=on_date,
         )
         db.session.add(PeriodRecord(
             daily_record_id=daily_record.id,
@@ -2073,10 +2192,26 @@ def _format_school_date(record_date):
     return record_date.strftime('%B ') + str(record_date.day) + record_date.strftime(', %Y')
 
 
-def _collect_point_card_gaps(period_records_by_time):
+def _collect_point_card_gaps(
+    period_records_by_time,
+    student_id=None,
+    schedule_rows=None,
+    on_date=None,
+):
     gaps = []
     all_labels = [label for _, label in STAR_POINT_FIELDS]
+    rows = schedule_rows
+    if rows is None and student_id is not None:
+        rows = _student_schedule_rows(student_id)
     for time_range in POINT_CARD_TIME_RANGES:
+        if not _should_include_bus_period_on_point_card(
+            time_range,
+            student_id=student_id,
+            schedule_rows=rows,
+            on_date=on_date,
+            existing_period=period_records_by_time.get(time_range),
+        ):
+            continue
         period = period_records_by_time.get(time_range)
         if period is None:
             gaps.append({'time_range': time_range, 'categories': list(all_labels)})
@@ -2195,7 +2330,12 @@ def notify_missing_point_card_entries(dates):
                 for period in record.periods:
                     if period.time_range:
                         period_by_time[period.time_range] = period
-            gaps = _collect_point_card_gaps(period_by_time)
+            gaps = _collect_point_card_gaps(
+                period_by_time,
+                student_id=student_id,
+                schedule_rows=schedules_by_student.get(student_id, []),
+                on_date=record_date,
+            )
             if not gaps:
                 db.session.add(MissingPointCardNotice(
                     student_id=student_id, record_date=record_date
@@ -6963,7 +7103,12 @@ def daily_records():
                 'attendance_status': attendance_status,
                 'submitted': bool(record.submitted_at),
                 'submitted_at': record.submitted_at.isoformat() if record.submitted_at else None,
-                'periods': _expand_serialized_point_card_periods(periods, include_details),
+                'periods': _expand_serialized_point_card_periods(
+                    periods,
+                    include_details,
+                    student_id=record.student_id,
+                    on_date=record.date,
+                ),
                 'frenzies': frenzies
             })
         
@@ -16885,7 +17030,12 @@ def export_student_data(student_id):
             'date': record.date.isoformat(),
             'day_of_week': record.day_of_week,
             'attendance_status': record.attendance_status,
-            'periods': _expand_serialized_point_card_periods(periods_data, include_details=True),
+            'periods': _expand_serialized_point_card_periods(
+                periods_data,
+                include_details=True,
+                student_id=student_id,
+                on_date=record.date,
+            ),
             'frenzy_events': [{
                 'time_range': f.time_range,
                 'location': f.location,
