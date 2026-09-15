@@ -114,6 +114,37 @@ def frenzy_purpose_labels_from_event(purpose1, purpose2=None):
     return labels if labels else [FRENZY_MISSING_LABEL]
 
 
+def _info_json_truthy(value):
+    """Truthy check for values stored in period.info JSON (booleans, strings, ints)."""
+    return value and value not in (False, None, '', 'false', 'False', '0', 0)
+
+
+def _period_info_has_frenzy(period):
+    """True when a period's info JSON marks a frenzy (daily-entry frenzies)."""
+    info_raw = getattr(period, 'info', None)
+    if not info_raw:
+        return False
+    try:
+        info_data = json.loads(info_raw) if isinstance(info_raw, str) else info_raw
+    except (TypeError, ValueError, AttributeError):
+        return False
+    if not isinstance(info_data, dict):
+        return False
+    return _info_json_truthy(info_data.get('frenzy'))
+
+
+def _count_daily_record_frenzies(record):
+    """
+    Count frenzies the same way as the Reports Frenzies card:
+    FrenzyEvent rows plus period.info frenzy flags (daily entry).
+    """
+    count = len(getattr(record, 'frenzies', None) or [])
+    for period in (getattr(record, 'periods', None) or []):
+        if _period_info_has_frenzy(period):
+            count += 1
+    return count
+
+
 def frenzy_purpose_labels_from_info(info_data):
     labels = []
     purposes = (info_data or {}).get('purposes')
@@ -7044,7 +7075,8 @@ def api_trends():
                 'possible': 0,
             }
         entry = by_date[key]
-        entry['frenzy_count'] += len(record.frenzies or [])
+        # Include period.info frenzies — same sources as the Frenzies card total.
+        entry['frenzy_count'] += _count_daily_record_frenzies(record)
         for period in (record.periods or []):
             entry['safety'] += _star_point_sum_value(period.safety_points)
             entry['teamwork'] += _star_point_sum_value(period.teamwork_points)

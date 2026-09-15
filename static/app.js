@@ -28039,6 +28039,16 @@ async function fetchSummaryTrendRecordsForRange(rangeOverride) {
             const row = byDate.get(record.date);
             row.frenzy_count += Array.isArray(record.frenzies) ? record.frenzies.length : 0;
             (record.periods || []).forEach((period) => {
+                // Match Frenzies card: also count daily-entry frenzies in period.info.
+                try {
+                    const infoRaw = period && period.info;
+                    if (infoRaw) {
+                        const infoData = typeof infoRaw === 'string' ? JSON.parse(infoRaw) : infoRaw;
+                        if (isInfoFrenzyChecked(infoData)) row.frenzy_count += 1;
+                    }
+                } catch (e) {
+                    /* ignore malformed info JSON */
+                }
                 row.safety += Number(period.safety_points) || 0;
                 row.teamwork += Number(period.teamwork_points) || 0;
                 row.accountability += Number(period.accountability_points) || 0;
