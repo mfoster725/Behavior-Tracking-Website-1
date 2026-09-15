@@ -11229,19 +11229,42 @@ def _extract_non_school_dates_from_calendar_text(text, school_start_year=None, s
             except ValueError:
                 pass
 
-        # Day numbers with current month context (e.g. "4 No School", "No School 4")
+        # Same-month day ranges used by district calendars: "23-31 No School - Winter Break"
+        # or "15-16 NO SCHOOL – Fall Break". Expand every day in the span (weekends skipped later).
+        day_range_match = re.search(r'(?<!\d)(\d{1,2})\s*[-–—]\s*(\d{1,2})(?!\d)', line)
+        expanded_day_range = False
+        if day_range_match and current_month is not None and current_year is not None:
+            d1 = int(day_range_match.group(1))
+            d2 = int(day_range_match.group(2))
+            if 1 <= d1 <= 31 and 1 <= d2 <= 31 and d1 <= d2:
+                try:
+                    start_d = date(current_year, current_month, d1)
+                    end_d = date(current_year, current_month, d2)
+                    _expand_range(start_d, end_d, matched_label)
+                    expanded_day_range = True
+                except ValueError:
+                    pass
+
+        # When a day-day range was expanded, skip per-number adds (otherwise only
+        # endpoints would appear to "win" and middles are easy to miss in review).
+        if expanded_day_range:
+            continue
+
+        # Day numbers with current month context (e.g. "4 No School", "No School 4").
+        # Prefer a leading day-of-month so grade tokens like "K-6" / "7-12th" are ignored.
         day_candidates = []
         leading = re.match(r'^(\d{1,2})\b', line)
         if leading:
             day_candidates.append(int(leading.group(1)))
-        for day_tok in re.findall(r'\b([0-2]?\d|3[01])\b', line):
-            day_num = int(day_tok)
-            if day_num not in day_candidates:
-                day_candidates.append(day_num)
-        if not day_candidates and i > 0 and re.fullmatch(r'\d{1,2}', lines[i - 1]):
-            day_candidates.append(int(lines[i - 1]))
-        if not day_candidates and i + 1 < len(lines) and re.fullmatch(r'\d{1,2}', lines[i + 1]):
-            day_candidates.append(int(lines[i + 1]))
+        else:
+            for day_tok in re.findall(r'\b([0-2]?\d|3[01])\b', line):
+                day_num = int(day_tok)
+                if day_num not in day_candidates:
+                    day_candidates.append(day_num)
+            if not day_candidates and i > 0 and re.fullmatch(r'\d{1,2}', lines[i - 1]):
+                day_candidates.append(int(lines[i - 1]))
+            if not day_candidates and i + 1 < len(lines) and re.fullmatch(r'\d{1,2}', lines[i + 1]):
+                day_candidates.append(int(lines[i + 1]))
 
         for day_num in day_candidates:
             _add_day(day_num, matched_label)
