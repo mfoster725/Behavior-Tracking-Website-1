@@ -1906,7 +1906,7 @@ table tbody tr:hover {
 
 /* Info modal */
 #info-modal {
-    z-index: 2000 !important;
+    z-index: 4000 !important;
 }
 
 #info-modal .modal-content {

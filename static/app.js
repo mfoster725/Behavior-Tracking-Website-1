@@ -1843,7 +1843,9 @@ function getStandardPeriodsForStudents(students, onDate = null) {
     }
     return STANDARD_PERIODS.filter((sp) => {
         if (!isBusPeriodTime(sp.time)) return true;
-        return list.some((student) => (
+        // Shared grids keep one period list. Only keep AM/PM Bus when every
+        // visible student actually has that time filled on their schedule.
+        return list.every((student) => (
             shouldShowBusPeriodOnPointCard(student && student.id, sp.time, onDate)
         ));
     });
@@ -1915,6 +1917,9 @@ function expandPointCardPeriods(periods, options = {}) {
     extras.forEach((period) => {
         const time = String(period.time_range || '').trim();
         const location = String(period.location || '').trim();
+        if (isBusPeriodTime(time) && !shouldShowBusPeriodOnPointCard(studentId, time, onDate)) {
+            return;
+        }
         if (time || location) expanded.push(period);
     });
     return expanded;
@@ -2610,8 +2615,22 @@ function bindStarSelectEntryGuards() {
     }, true);
 }
 
+function bindInfoButtonClickDelegation() {
+    if (window.__infoBtnClickBound) return;
+    window.__infoBtnClickBound = true;
+    document.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest
+            ? e.target.closest('button.info-btn')
+            : null;
+        if (!btn || btn.disabled) return;
+        e.preventDefault();
+        showInfoModal({ currentTarget: btn, target: btn });
+    }, true);
+}
+
 function ensureDailyGridDelegatedListeners() {
     bindStarSelectEntryGuards();
+    bindInfoButtonClickDelegation();
     if (dailyGridDelegationBound) return;
     const gridContainer = document.getElementById('daily-grid-container');
     if (!gridContainer) return;
@@ -3384,12 +3403,12 @@ function collectPointCardVisibleStudentIds() {
 }
 
 function ensureStudentSchedulesLoadedForVisibleStudents(students) {
-    if (!isShowStudentSchedulesInPointCards() || !canEdit() || !students?.length) return;
+    if (!students?.length) return Promise.resolve();
     const missing = students
         .filter((student) => !studentSchedulesByStudentId[student.id] && !studentSchedulesByStudentId[String(student.id)])
         .map((student) => student.id);
-    if (!missing.length) return;
-    loadStudentSchedulesForIds(missing).then(() => refreshPointCardGridsAfterScheduleLoad());
+    if (!missing.length) return Promise.resolve();
+    return loadStudentSchedulesForIds(missing).then(() => refreshPointCardGridsAfterScheduleLoad());
 }
 
 async function updatePointCardSchedulePreference(key, value) {
@@ -5925,7 +5944,6 @@ function renderStudentsGrid() {
             }
         }
         
-        infoButton.addEventListener('click', showInfoModal);
         infoCell.appendChild(infoButton);
         grid.appendChild(infoCell);
         
@@ -6394,6 +6412,8 @@ async function loadDailyData(options = {}) {
         Object.keys(attendanceUpdates).forEach(studentId => {
             attendanceData[currentDate][studentId] = attendanceUpdates[studentId];
         });
+
+        await loadStudentSchedulesForIds(Array.from(visibleStudentIds));
     } catch (error) {
         if (error && error.name === 'AbortError') {
             if (requestTimedOut && requestToken === dailyLoadRequestToken) {
@@ -6803,7 +6823,6 @@ function renderDailyGrid() {
                 }
             }
 
-            infoButton.addEventListener('click', showInfoModal);
             infoCell.appendChild(infoButton);
             body.appendChild(infoCell);
             
@@ -13973,10 +13992,13 @@ async function showInfoModal(event) {
         console.error('Info modal elements missing');
         return;
     }
-    
+
     const viewOnly = (isStudent() || !canEditStarPeriod(studentId, period)) ? ' (View Only)' : '';
     modalTitle.textContent = `Additional Information - ${studentName} - ${period}${viewOnly}`;
-    
+    modal.style.zIndex = '4000';
+    modal.style.display = 'block';
+
+    try {
     // Parse existing info (stored as JSON string)
     let infoData = {};
     if (currentInfo) {
@@ -14006,16 +14028,21 @@ async function showInfoModal(event) {
     }
 
     // Basic fields
-    document.getElementById('info-notes').value = infoData.notes || '';
-    document.getElementById('info-notes').disabled = isReadOnly;
+    const notesEl = document.getElementById('info-notes');
+    if (notesEl) {
+        notesEl.value = infoData.notes || '';
+        notesEl.disabled = isReadOnly;
+    }
     renderInfoEditHistory(infoData.edit_history);
     
     // Alternate Location
     const alternateLocationInput = document.getElementById('info-alternate-location');
     const locationSelect = document.getElementById('info-alternate-location-select');
-    alternateLocationInput.value = infoData.alternate_location || '';
-    alternateLocationInput.disabled = isReadOnly;
-    alternateLocationInput.dataset.manualOverride = infoData.alternate_location_manual ? 'true' : '';
+    if (alternateLocationInput) {
+        alternateLocationInput.value = infoData.alternate_location || '';
+        alternateLocationInput.disabled = isReadOnly;
+        alternateLocationInput.dataset.manualOverride = infoData.alternate_location_manual ? 'true' : '';
+    }
     if (locationSelect) locationSelect.disabled = isReadOnly;
 
     bindAlternateLocationInput();
@@ -14283,12 +14310,11 @@ async function showInfoModal(event) {
     if (button.dataset.isEditPointCard === 'true') {
         modal.dataset.isEditPointCard = 'true';
         modal.dataset.periodIndex = button.dataset.periodIndex ?? '';
-        // Ensure info modal appears above edit point card modal
-        modal.style.zIndex = '2000';
+        modal.style.zIndex = '4000';
     } else {
         delete modal.dataset.isEditPointCard;
         delete modal.dataset.periodIndex;
-        modal.style.zIndex = '';
+        modal.style.zIndex = '4000';
     }
 
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
@@ -14298,8 +14324,9 @@ async function showInfoModal(event) {
 
     const saveBtn = document.querySelector('#info-modal .modal-buttons .btn-primary');
     if (saveBtn) saveBtn.style.display = isReadOnly ? 'none' : '';
-    
-    modal.style.display = 'block';
+    } catch (error) {
+        console.error('Error populating info modal:', error);
+    }
 }
 
 function ensureInfoSeverityControl() {

@@ -2026,6 +2026,14 @@ def _expand_serialized_point_card_periods(
     for period in extras:
         time_range = (period.get('time_range') or '').strip()
         location = (period.get('location') or '').strip()
+        if _is_bus_period(time_range) and not _should_include_bus_period_on_point_card(
+            time_range,
+            student_id=student_id,
+            schedule_rows=rows,
+            on_date=on_date,
+            existing_period=period,
+        ):
+            continue
         if time_range or location:
             expanded.append(period)
     return expanded
