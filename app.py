@@ -3892,6 +3892,7 @@ def init_db():
             ensure_daily_query_indexes()
             ensure_point_card_submit_schema()
             ensure_star_points_string_schema()
+            ensure_school_calendar_schema()
             try:
                 seed_plan_if_library()
             except Exception as seed_err:
