@@ -5615,87 +5615,16 @@ def students():
                 query = Student.query
             
             if managed_by_me:
-                # Paraprofessional with linked Case Managers: show every linked case manager's students
-                linked_cm_ids = (
-                    get_linked_case_manager_ids(current_user)
-                    if (
-                        current_user.role == 'staff'
-                        and getattr(current_user, 'designation', None) == 'Paraprofessional'
+                # Outside staff: assigned students. Paras: linked CM caseloads. Others: team caseload.
+                managed_ids = get_managed_by_me_student_ids(current_user)
+                if managed_ids:
+                    students = (
+                        query.filter(Student.id.in_(managed_ids))
+                        .order_by(Student.name)
+                        .all()
                     )
-                    else []
-                )
-                if linked_cm_ids:
-                    linked_cms = [
-                        cm for cm in User.query.filter(User.id.in_(linked_cm_ids)).all()
-                        if cm.designation == 'Case Manager'
-                    ]
-                    if linked_cms:
-                        cm_identifiers = set()
-                        for linked_cm in linked_cms:
-                            for value in (linked_cm.name, linked_cm.username):
-                                if value and str(value).strip():
-                                    cm_identifiers.add(str(value).strip().lower())
-                        team_members = TeamMember.query.filter(
-                            TeamMember.role == 'Case Manager',
-                            db.func.lower(TeamMember.name).in_(sorted(cm_identifiers)),
-                        ).all()
-                        student_ids = list({tm.student_id for tm in team_members if tm.student_id})
-                        if student_ids:
-                            if current_user.role == 'staff' and current_user.is_outside_staff:
-                                assigned_student_ids = [
-                                    assoc.student_id
-                                    for assoc in OutsideStaffStudent.query.filter_by(
-                                        user_id=current_user.id
-                                    ).all()
-                                ]
-                                student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
-                            if student_ids:
-                                students = (
-                                    query.filter(Student.id.in_(student_ids))
-                                    .order_by(Student.name)
-                                    .all()
-                                )
-                            else:
-                                students = []
-                        else:
-                            students = []
-                    else:
-                        students = []
                 else:
-                    # Get current user's name and username - team members might be stored with either
-                    user_name = (current_user.name or current_user.username or '').strip()
-                    user_username = (current_user.username or '').strip()
-
-                    # Find all students where this user is a team member (case-insensitive match)
-                    team_members = TeamMember.query.filter(
-                        db.or_(
-                            db.func.lower(TeamMember.name) == db.func.lower(user_name),
-                            db.func.lower(TeamMember.name) == db.func.lower(user_username),
-                        )
-                    ).all()
-                    student_ids = list({tm.student_id for tm in team_members if tm.student_id})
-
-                    if student_ids:
-                        # Intersect with Outside Staff assignments if applicable
-                        if current_user.role == 'staff' and current_user.is_outside_staff:
-                            assigned_student_ids = [
-                                assoc.student_id
-                                for assoc in OutsideStaffStudent.query.filter_by(
-                                    user_id=current_user.id
-                                ).all()
-                            ]
-                            student_ids = [sid for sid in student_ids if sid in assigned_student_ids]
-
-                        if student_ids:
-                            students = (
-                                query.filter(Student.id.in_(student_ids))
-                                .order_by(Student.name)
-                                .all()
-                            )
-                        else:
-                            students = []
-                    else:
-                        students = []
+                    students = []
             else:
                 students = query.order_by(Student.name).all()
             
@@ -15923,13 +15852,13 @@ def schedules():
             target_user_id = current_user.id  # for teacher schedule
             is_outside = current_user.role == 'staff' and current_user.is_outside_staff
             if schedule_type == 'teacher':
-                if is_outside:
-                    return jsonify({'error': 'Outside staff cannot save teacher schedules'}), 403
-                # Staff can only save their own; admin can save for any user via user_id
+                # Staff (including outside staff) can only save their own; admin can save for any user via user_id
                 if teacher_user_id is not None:
                     if current_user.role != 'admin':
                         return jsonify({'error': 'Only admin can save another user\'s teacher schedule'}), 403
                     target_user_id = int(teacher_user_id)
+                elif is_outside:
+                    target_user_id = current_user.id
                 Schedule.query.filter_by(schedule_type='teacher', user_id=target_user_id).delete()
                 for index, period in enumerate(normalized_periods):
                     db.session.add(_create_schedule_row(
@@ -15997,7 +15926,11 @@ def schedules():
                                         'effective_start': None,
                                         'effective_end': None,
                                     })
-                            # If period omitted from payload, clear owned entries
+                            else:
+                                # Period omitted from payload — preserve existing owned entries
+                                # (avoids wiping times/classes that weren't shown in the UI)
+                                for existing in existing_by_period.get(time_period, []):
+                                    merged.append(existing)
                         else:
                             for existing in existing_by_period.get(time_period, []):
                                 merged.append(existing)

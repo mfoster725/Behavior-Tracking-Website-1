@@ -3176,9 +3176,22 @@ table tbody tr:hover {
 .schedule-table tr.schedule-row-other-school input {
     background: #d6d3d1;
     color: #57534e;
+}
+
+/* Only lock interaction on periods the current user cannot edit */
+.schedule-table tr.schedule-row-other-school input:disabled,
+.schedule-table tr.schedule-row-locked input:disabled {
     cursor: default;
     pointer-events: none;
     user-select: none;
+}
+
+.schedule-table tr.schedule-row-other-school input:not(:disabled) {
+    cursor: text;
+    pointer-events: auto;
+    user-select: auto;
+    background: #fff;
+    color: inherit;
 }
 
 .schedule-table tr.schedule-row-split-marker td {

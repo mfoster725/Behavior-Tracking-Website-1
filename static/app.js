@@ -4046,7 +4046,7 @@ async function savePointCardScheduleEditModal() {
         }
 
         if (type === 'teacher') {
-            await loadSchedules('teacher');
+            await loadSchedules('teacher', null, currentTeacherScheduleUserId);
             if (document.getElementById('teacher-schedule-body')) {
                 renderTeacherSchedule();
             }
@@ -4082,7 +4082,7 @@ function refreshPointCardGridsAfterScheduleLoad() {
 }
 
 function loadPeriodEntrySchedule() {
-    if (canEdit()) {
+    if (canEdit() || isOutsideStaff()) {
         return loadSchedules('teacher');
     }
     if (isStudent()) {
@@ -5129,7 +5129,7 @@ async function switchView(viewName) {
             // Fetch all class names from teacher schedules for the dropdown
             fetchAllTeacherClassNames();
             
-            if (canEdit()) {
+            if (canEdit() || isOutsideStaff()) {
                 // Always render teacher schedule immediately with default periods
                 // This ensures the periods are shown even before API call completes
                 renderTeacherSchedule();
@@ -11283,15 +11283,22 @@ function renderPointCardInfoAggregate(record, previousRecord = null) {
 }
 
 async function editPointCardDay(e) {
-    if (!canEdit()) {
-        showMessage('View-only access. Contact staff to make changes.', 'error');
-        return;
-    }
     const button = e.target;
     const recordId = button.dataset.recordId;
     const date = button.dataset.date;
     const studentId = button.dataset.studentId;
     const studentName = button.dataset.studentName;
+
+    if (!canEditPointCardForStudent(studentId)) {
+        const needsTransition = isOutsideStaff() && !getStudentTransition(studentId);
+        showMessage(
+            needsTransition
+                ? 'Set a Transition on the Schedules tab before editing other-school periods.'
+                : 'View-only access. Contact staff to make changes.',
+            'error'
+        );
+        return;
+    }
     
     // Fetch the full record data
     try {
@@ -15699,7 +15706,7 @@ function updateTeacherScheduleSubtitle() {
 }
 
 function updateTeacherScheduleEditability() {
-    const canEdit = window.currentUser && (
+    const canEditTeacher = window.currentUser && (
         currentTeacherScheduleUserId == null ||
         currentTeacherScheduleUserId === window.currentUser.id ||
         window.currentUser.role === 'admin'
@@ -15707,30 +15714,30 @@ function updateTeacherScheduleEditability() {
     const addBtn = document.getElementById('add-teacher-period-btn');
     const saveBtn = document.getElementById('save-teacher-schedule-btn');
     const tbody = document.getElementById('teacher-schedule-body');
-    if (addBtn) addBtn.style.display = canEdit ? '' : 'none';
-    if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
+    if (addBtn) addBtn.style.display = canEditTeacher ? '' : 'none';
+    if (saveBtn) saveBtn.style.display = canEditTeacher ? '' : 'none';
     if (tbody) {
         tbody.querySelectorAll('input, select, button').forEach((el) => {
             if (el.classList.contains('schedule-entry-kebab-btn')
                 || el.classList.contains('schedule-entry-add-btn')
                 || el.classList.contains('schedule-entry-edit-btn')
                 || el.classList.contains('schedule-entry-remove-btn')) {
-                el.style.display = canEdit ? '' : 'none';
-                el.disabled = !canEdit;
+                el.style.display = canEditTeacher ? '' : 'none';
+                el.disabled = !canEditTeacher;
                 return;
             }
             if (el.classList.contains('class-input') || el.classList.contains('staff-input')) {
                 el.readOnly = true;
-                el.disabled = !canEdit;
+                el.disabled = !canEditTeacher;
                 return;
             }
-            el.disabled = !canEdit;
+            el.disabled = !canEditTeacher;
             if (el.tagName === 'INPUT' && (el.type === 'text' || !el.type)) {
-                el.readOnly = !canEdit;
+                el.readOnly = !canEditTeacher;
             }
         });
         tbody.querySelectorAll('.schedule-entry-kebab-wrap').forEach((el) => {
-            el.style.display = canEdit ? '' : 'none';
+            el.style.display = canEditTeacher ? '' : 'none';
         });
     }
 }
@@ -16591,6 +16598,7 @@ function applyStudentScheduleRowOwnership(row, timePeriod, studentId) {
     const other = isOtherSchoolPeriod(studentId, timePeriod);
     const canEditPeriod = canEditSchedulePeriod(studentId, timePeriod);
     row.classList.toggle('schedule-row-other-school', other);
+    row.classList.toggle('schedule-row-locked', !canEditPeriod);
     row.querySelectorAll('input, select, button').forEach((el) => {
         if (el.classList.contains('time-input')) {
             el.disabled = !canEditPeriod;
@@ -16746,7 +16754,11 @@ async function saveSchedule(type) {
         if (response.ok) {
             const btnId = type === 'teacher' ? '#save-teacher-schedule-btn' : '#save-student-schedule-btn';
             showButtonStatus(btnId, `${type === 'teacher' ? 'Teacher' : 'Student'} schedule saved successfully!`, 'success');
-            loadSchedules(type, currentScheduleStudentId);
+            if (type === 'teacher') {
+                loadSchedules('teacher', null, currentTeacherScheduleUserId);
+            } else {
+                loadSchedules('student', currentScheduleStudentId);
+            }
         } else {
             // Try to get error message from response
             let errorMessage = 'Error saving schedule. Please try again.';
