@@ -15902,6 +15902,11 @@ def schedules():
                     existing_by_period[row.time_period].append(_period_payload_from_row(row))
 
                 if transition:
+                    # Payload is authoritative for periods the user owns. Omitted owned
+                    # periods are dropped (supports renaming a time without leaving a
+                    # ghost class on the old slot). Unowned periods are always preserved.
+                    # The schedule UI renders all saved times so owned entries aren't
+                    # accidentally omitted just because they used a custom time label.
                     merged = []
                     seen = set()
                     for time_period in existing_order + payload_order:
@@ -15926,11 +15931,7 @@ def schedules():
                                         'effective_start': None,
                                         'effective_end': None,
                                     })
-                            else:
-                                # Period omitted from payload — preserve existing owned entries
-                                # (avoids wiping times/classes that weren't shown in the UI)
-                                for existing in existing_by_period.get(time_period, []):
-                                    merged.append(existing)
+                            # else: owned period omitted from payload → intentionally removed/renamed
                         else:
                             for existing in existing_by_period.get(time_period, []):
                                 merged.append(existing)

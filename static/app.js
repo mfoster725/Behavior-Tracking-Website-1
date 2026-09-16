@@ -509,6 +509,20 @@ function addClassInputGroup(container, options = {}) {
     return addScheduleEntry(row, options);
 }
 
+/** Standard schedule slots plus any custom/renamed times present in saved data. */
+function getScheduleTimesToRender(scheduleData) {
+    const times = SCHEDULE_PERIODS.slice();
+    const seen = new Set(times);
+    (scheduleData || []).forEach((schedule) => {
+        const time = schedule && schedule.time_period ? String(schedule.time_period).trim() : '';
+        if (time && !seen.has(time)) {
+            times.push(time);
+            seen.add(time);
+        }
+    });
+    return times;
+}
+
 function buildSchedulePeriodRowHtml(timePeriod, { includeStaff = true } = {}) {
     const staffCell = includeStaff ? `
         <td class="staff-cell">
@@ -517,7 +531,7 @@ function buildSchedulePeriodRowHtml(timePeriod, { includeStaff = true } = {}) {
     ` : '';
     return `
         <td class="time-cell">
-            <input type="text" value="${escapeScheduleAttr(timePeriod)}" class="time-input" placeholder="e.g., 7:45-8:30" tabindex="-1">
+            <input type="text" value="${escapeScheduleAttr(timePeriod)}" class="time-input" placeholder="e.g., 7:45-8:30">
         </td>
         <td class="classes-cell">
             <div class="schedule-entry-stack classes-stack"></div>
@@ -531,6 +545,17 @@ function buildSchedulePeriodRowHtml(timePeriod, { includeStaff = true } = {}) {
 
 function setupScheduleRowButtons(row, timePeriod, tbody, type = 'teacher') {
     ensurePeriodAddKebab(row);
+    const timeInput = row.querySelector('.time-input');
+    if (timeInput && !timeInput.dataset.timeChangeBound) {
+        timeInput.dataset.timeChangeBound = '1';
+        timeInput.addEventListener('change', () => {
+            const nextTime = timeInput.value.trim();
+            if (!nextTime) return;
+            if (type === 'student') {
+                applyStudentScheduleRowOwnership(row, nextTime, currentScheduleStudentId);
+            }
+        });
+    }
 }
 
 function addScheduleRow(type, timePeriod = '', data = null, targetTbody = null, studentId = currentScheduleStudentId) {
@@ -1063,6 +1088,16 @@ function isOtherSchoolPeriod(studentId, timePeriod) {
     const transition = getStudentTransition(studentId);
     if (!transition) return false;
     return !isHomePeriod(transition, timePeriod);
+}
+
+/** Grey point-card periods the current user cannot edit (home for outside staff, other-school for ours). */
+function shouldGreyTransitionPeriod(studentId, timePeriod) {
+    if (!studentId || !timePeriod) return false;
+    if (!getStudentTransition(studentId)) return false;
+    if (isOutsideStaff() || isStaff() || isAdmin()) {
+        return !canEditStarPeriod(studentId, timePeriod);
+    }
+    return isOtherSchoolPeriod(studentId, timePeriod);
 }
 
 function canEditStarPeriod(studentId, timePeriod) {
@@ -3689,7 +3724,7 @@ function createStudentScheduleDataCell(studentId, timePeriod, options = {}) {
             cell.dataset[key] = value;
         });
     }
-    if (timePeriod && isOtherSchoolPeriod(studentId, timePeriod)) {
+    if (timePeriod && shouldGreyTransitionPeriod(studentId, timePeriod)) {
         cell.classList.add('other-school-period');
     }
     return cell;
@@ -3819,12 +3854,13 @@ function populateTeacherScheduleTbody(tbody, scheduleData) {
     const schedulesByTime = {};
     (scheduleData || []).forEach((schedule) => {
         const time = schedule.time_period;
+        if (!time) return;
         if (!schedulesByTime[time]) {
             schedulesByTime[time] = [];
         }
         schedulesByTime[time].push(schedule);
     });
-    SCHEDULE_PERIODS.forEach((time) => {
+    getScheduleTimesToRender(scheduleData).forEach((time) => {
         const savedSchedules = schedulesByTime[time] || [];
         if (savedSchedules.length > 0) {
             const row = document.createElement('tr');
@@ -3862,7 +3898,7 @@ function populateStudentScheduleTbody(tbody, scheduleData, studentId = currentSc
         if (!schedulesByTime[time]) schedulesByTime[time] = [];
         schedulesByTime[time].push(schedule);
     });
-    SCHEDULE_PERIODS.forEach((time) => {
+    getScheduleTimesToRender(scheduleData).forEach((time) => {
         const savedSchedules = schedulesByTime[time] || [];
         const home = isHomePeriod(transition, time);
         if (transition && prevHome !== null && home !== prevHome && !insertedMarker) {
@@ -5924,7 +5960,7 @@ function renderStudentsGrid() {
             cell.style.display = 'flex';
             cell.style.justifyContent = 'center';
             cell.style.alignItems = 'center';
-            if (isOtherSchoolPeriod(student.id, currentPeriod || '')) {
+            if (shouldGreyTransitionPeriod(student.id, currentPeriod || '')) {
                 cell.classList.add('other-school-period');
             }
             if (isAttendanceStarLocked(student.id)) {
@@ -6818,7 +6854,7 @@ function renderDailyGrid() {
                 if (isOddRow) {
                     cell.style.background = 'var(--bg-page)';
                 }
-                if (isOtherSchoolPeriod(student.id, period.time)) {
+                if (shouldGreyTransitionPeriod(student.id, period.time)) {
                     cell.classList.add('other-school-period');
                 }
                 if (isAttendanceStarLocked(student.id)) {
@@ -10977,9 +11013,9 @@ function renderPointCardGrid(record, studentId) {
             : '<span style="color: var(--text-secondary);">-</span>';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
 
-        const otherClass = (sid && isOtherSchoolPeriod(sid, period.time_range)) ? ' other-school-period' : '';
+        const otherClass = (sid && shouldGreyTransitionPeriod(sid, period.time_range)) ? ' other-school-period' : '';
         const attendanceLockedClass = (attendance === 'excused' || attendance === 'unexcused') ? ' attendance-locked-period' : '';
-        const locationText = period.location || (otherClass ? 'Other school' : '');
+        const locationText = period.location || ((sid && isOtherSchoolPeriod(sid, period.time_range)) ? 'Other school' : '');
 
         html += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
@@ -11364,13 +11400,13 @@ function showEditPointCardModal(record, studentId, studentName, date) {
     record.periods.forEach((period, index) => {
         const parsedInfo = parsePointCardInfoData(period.info || '');
         const hasInfo = !!(parsedInfo && hasInfoData(parsedInfo));
-        const otherClass = isOtherSchoolPeriod(studentId, period.time_range) ? ' other-school-period' : '';
+        const otherClass = shouldGreyTransitionPeriod(studentId, period.time_range) ? ' other-school-period' : '';
         const attendanceLockedClass = starDisabled ? ' attendance-locked-period' : '';
         const infoCellClass = hasInfo ? 'pc-cell pc-info-cell pc-info-cell-has-data' : 'pc-cell pc-info-cell';
         const infoLabel = canEditStarPeriod(studentId, period.time_range) ? (hasInfo ? 'Edit' : 'Add') : (hasInfo ? 'View' : 'Info');
         gridRows += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell${otherClass}">${period.location || (otherClass ? 'Other school' : '')}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${period.location || (isOtherSchoolPeriod(studentId, period.time_range) ? 'Other school' : '')}</div>
             <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'safety', period.safety_points, period.time_range)}
             </div>
