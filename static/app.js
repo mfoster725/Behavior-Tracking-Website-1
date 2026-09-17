@@ -18279,7 +18279,7 @@ function createStudentRow(user) {
     `;
 
     const menuItems = [];
-    if (isAdmin()) {
+    if (isAdmin() || isStaff()) {
         menuItems.push({
             label: 'Share login information',
             onClick: () => shareLoginInformation(user.id, user.username)
@@ -18406,7 +18406,7 @@ function createOutsideStaffRow(user) {
     `;
 
     const menuItems = [];
-    if (isAdmin()) {
+    if (isAdmin() || isStaff()) {
         menuItems.push({
             label: 'Share login information',
             onClick: () => shareLoginInformation(user.id, user.username)
@@ -18491,8 +18491,8 @@ async function resetAndViewPassword(userId, username, userHint) {
 }
 
 async function shareLoginInformation(userId, username) {
-    if (!isAdmin()) {
-        showMessage('Only admins can share login information.', 'error');
+    if (!isAdmin() && !isStaff()) {
+        showMessage('Only staff and admins can share login information.', 'error');
         return;
     }
     if (!confirm(`Reset password and email login information for ${username} to all emails on this row?`)) {

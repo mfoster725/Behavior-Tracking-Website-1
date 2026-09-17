@@ -16594,7 +16594,12 @@ def manage_users():
 @login_required
 def share_user_login(user_id):
     """Reset password to the role default and email login info to all emails on the row."""
-    if current_user.role != 'admin':
+    is_admin = current_user.role == 'admin'
+    is_internal_staff = (
+        current_user.role == 'staff'
+        and not getattr(current_user, 'is_outside_staff', False)
+    )
+    if not is_admin and not is_internal_staff:
         return jsonify({'error': 'Permission denied'}), 403
 
     user = User.query.get(user_id)
@@ -16602,6 +16607,15 @@ def share_user_login(user_id):
         return jsonify({'error': 'User not found'}), 404
     if getattr(user, 'hidden_from_management', False):
         return jsonify({'error': 'This account cannot be managed from User Management.'}), 403
+
+    # Staff may only share login info for students and outside staff (not staff/admins).
+    if not is_admin:
+        target_is_student = user.role == 'student'
+        target_is_outside_staff = (
+            user.role == 'staff' and getattr(user, 'is_outside_staff', False)
+        )
+        if not (target_is_student or target_is_outside_staff):
+            return jsonify({'error': 'Permission denied'}), 403
 
     result = _share_login_info_for_user(user, reset_password=True)
     if not result.get('ok'):
