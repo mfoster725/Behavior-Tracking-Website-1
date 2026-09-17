@@ -20936,29 +20936,78 @@ function filterUserTable(tableType, searchQuery) {
     const tbody = document.getElementById(`${tableType}-users-table-body`);
     
     if (!tbody) return;
-    
-    const rows = tbody.getElementsByTagName('tr');
-    
-    for (let row of rows) {
-        // Skip empty state rows
-        if (row.cells.length === 1 && row.cells[0].colSpan > 1) {
-            continue;
+
+    // Name is always column 0; username column varies by table layout.
+    const usernameCellIndex = {
+        student: 9,
+        staff: 3,
+        admin: 3,
+        'outside-staff': 4
+    }[tableType] ?? 3;
+
+    const isEmptyStateRow = (row) =>
+        row.cells.length === 1 && row.cells[0].colSpan > 1;
+
+    const rows = Array.from(tbody.getElementsByTagName('tr'));
+
+    // Remember load order so clearing search restores grade/name sort.
+    rows.forEach((row, index) => {
+        if (row.dataset.umOriginalIndex === undefined) {
+            row.dataset.umOriginalIndex = String(index);
         }
-        
-        let shouldShow = false;
-        
-        if (query === '') {
-            shouldShow = true;
-        } else {
-            const searchableText = Array.from(row.cells)
-                .filter(cell => !cell.classList.contains('actions-cell') && !cell.id.startsWith('password-cell-'))
-                .map(cell => cell.textContent.toLowerCase())
-                .join(' ');
-            
-            shouldShow = searchableText.includes(query);
+    });
+
+    const getMatchRank = (row) => {
+        const name = (row.cells[0]?.textContent || '').trim().toLowerCase();
+        const username = (row.cells[usernameCellIndex]?.textContent || '').trim().toLowerCase();
+        const otherText = Array.from(row.cells)
+            .filter((cell, index) =>
+                index !== 0 &&
+                index !== usernameCellIndex &&
+                !cell.classList.contains('actions-cell') &&
+                !String(cell.id || '').startsWith('password-cell-')
+            )
+            .map(cell => cell.textContent.toLowerCase())
+            .join(' ');
+
+        // Lower rank = higher priority. Name matches beat username and other columns.
+        if (name === query) return 0;
+        if (name.startsWith(query)) return 1;
+        if (name.includes(query)) return 2;
+        if (username === query) return 3;
+        if (username.startsWith(query)) return 4;
+        if (username.includes(query)) return 5;
+        if (otherText.includes(query)) return 6;
+        return -1;
+    };
+
+    if (query === '') {
+        rows
+            .filter(row => !isEmptyStateRow(row))
+            .sort((a, b) => Number(a.dataset.umOriginalIndex) - Number(b.dataset.umOriginalIndex))
+            .forEach(row => {
+                row.style.display = '';
+                tbody.appendChild(row);
+            });
+    } else {
+        const ranked = [];
+        for (const row of rows) {
+            if (isEmptyStateRow(row)) continue;
+            const rank = getMatchRank(row);
+            if (rank < 0) {
+                row.style.display = 'none';
+                continue;
+            }
+            row.style.display = '';
+            ranked.push({
+                row,
+                rank,
+                original: Number(row.dataset.umOriginalIndex)
+            });
         }
-        
-        row.style.display = shouldShow ? '' : 'none';
+        ranked
+            .sort((a, b) => a.rank - b.rank || a.original - b.original)
+            .forEach(({ row }) => tbody.appendChild(row));
     }
 
     scheduleUserManagementTablesAutoFit();
