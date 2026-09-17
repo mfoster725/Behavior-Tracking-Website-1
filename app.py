@@ -16509,7 +16509,9 @@ def manage_users():
                     student.parent_emails = stacked
         
         elif current_user.role == 'staff' and current_user.id == user_id:
-            # Staff can only update their own password
+            # Staff editing themselves: password, and (for Paraprofessionals) case manager links.
+            # Other profile fields require an admin.
+            updated = False
             if 'password' in data:
                 # Audit: Validate password strength
                 is_valid, error_msg = validate_password_strength(data['password'])
@@ -16518,8 +16520,16 @@ def manage_users():
                 user.set_password(data['password'])
                 if hasattr(user, 'must_change_password'):
                     user.must_change_password = False
-            else:
-                return jsonify({'error': 'Staff can only change their own password'}), 403
+                updated = True
+            case_manager_ids = parse_case_manager_ids_payload(data)
+            if case_manager_ids is not None and (user.designation or '') == 'Paraprofessional':
+                set_linked_case_manager_ids(user, case_manager_ids)
+                updated = True
+            if not updated:
+                return jsonify({
+                    'error': 'Staff can only update their own password'
+                    + (' or case manager links' if (user.designation or '') == 'Paraprofessional' else '')
+                }), 403
         
         elif current_user.id == user_id and user.role == 'student':
             # Students can only update their own password

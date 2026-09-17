@@ -18931,19 +18931,42 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     // Check if staff is editing their own account
     const isStaffEditingSelf = isStaff() && !isAdmin() && userId === window.currentUser.id;
     
-    // Disable fields for staff editing themselves (they can only change password)
+    // Disable fields for staff editing themselves (password + case managers for paras)
     const nameInput = document.getElementById('edit-user-name');
     const usernameInput = document.getElementById('edit-user-username');
     const roleSelect = document.getElementById('edit-user-role');
+    const staffSelfEditTitle = role === 'staff' && designation === 'Paraprofessional'
+        ? 'Staff can only change their own password or case manager links'
+        : 'Staff can only change their own password';
     
     if (isStaffEditingSelf) {
         nameInput.disabled = true;
-        nameInput.title = 'Staff can only change their own password';
+        nameInput.title = staffSelfEditTitle;
         usernameInput.disabled = true;
-        usernameInput.title = 'Staff can only change their own password';
+        usernameInput.title = staffSelfEditTitle;
         roleSelect.disabled = true;
-        roleSelect.title = 'Staff can only change their own password';
+        roleSelect.title = staffSelfEditTitle;
+        const emailInputSelf = document.getElementById('edit-user-email');
+        if (emailInputSelf) {
+            emailInputSelf.disabled = true;
+            emailInputSelf.title = staffSelfEditTitle;
+        }
+        const designationSelect = document.getElementById('edit-user-designation');
+        if (designationSelect) {
+            designationSelect.disabled = true;
+            designationSelect.title = staffSelfEditTitle;
+        }
     } else {
+        const emailInputSelf = document.getElementById('edit-user-email');
+        if (emailInputSelf) {
+            emailInputSelf.disabled = false;
+            emailInputSelf.title = '';
+        }
+        const designationSelect = document.getElementById('edit-user-designation');
+        if (designationSelect) {
+            designationSelect.disabled = false;
+            designationSelect.title = '';
+        }
         nameInput.disabled = false;
         nameInput.title = '';
         usernameInput.disabled = false;
@@ -19521,6 +19544,43 @@ async function saveEditUser() {
         }
     }
     
+    // Staff editing themselves: only password and (for paras) case manager links
+    const isStaffEditingSelf = isStaff() && !isAdmin() && userId === window.currentUser.id;
+    if (isStaffEditingSelf) {
+        const updateData = { id: userId };
+        if (password) {
+            updateData.password = password;
+        }
+        if (designation === 'Paraprofessional') {
+            const editCaseManagerSelect = document.getElementById('edit-user-case-manager-select');
+            updateData.linked_case_manager_ids = getSelectedCaseManagerIds(editCaseManagerSelect);
+        }
+        if (!updateData.password && !('linked_case_manager_ids' in updateData)) {
+            showButtonStatus('#save-edit-user-btn', 'Staff can only change their own password', 'error');
+            return;
+        }
+        try {
+            const response = await fetch('/api/users', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updateData)
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to update user');
+            }
+            showButtonStatus('#save-edit-user-btn', 'User updated successfully', 'success');
+            setTimeout(() => {
+                document.getElementById('edit-user-modal').style.display = 'none';
+            }, 1200);
+            await loadUsers();
+        } catch (error) {
+            console.error('Error updating user:', error);
+            showButtonStatus('#save-edit-user-btn', 'Error: ' + error.message, 'error');
+        }
+        return;
+    }
+
     // Prepare update data
     const updateData = {
         id: userId,
