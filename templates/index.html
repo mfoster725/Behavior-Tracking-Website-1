@@ -2300,7 +2300,13 @@
             </div>
 
             <div id="info-auto-preview" class="info-auto-preview" style="display: none;">
-                <div class="info-auto-preview-title">Auto-detected from notes</div>
+                <div class="info-auto-preview-header">
+                    <div class="info-auto-preview-title">Suggested from notes</div>
+                    <div class="info-auto-preview-actions">
+                        <button type="button" id="info-auto-accept-btn" class="btn-primary info-auto-accept-btn">Accept</button>
+                        <button type="button" id="info-auto-dismiss-btn" class="btn-secondary info-auto-dismiss-btn">Dismiss</button>
+                    </div>
+                </div>
                 <div id="info-auto-preview-content" class="info-auto-preview-content"></div>
             </div>
 
@@ -2819,7 +2825,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=info-popup1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=info-suggest1"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

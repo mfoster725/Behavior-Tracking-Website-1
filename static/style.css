@@ -4816,11 +4816,32 @@ table tbody tr:hover {
     padding: 10px 12px;
 }
 
+.info-auto-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+
 .info-auto-preview-title {
     font-size: 12px;
     font-weight: 700;
     color: #075985;
-    margin-bottom: 6px;
+}
+
+.info-auto-preview-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.info-auto-preview-actions .info-auto-accept-btn,
+.info-auto-preview-actions .info-auto-dismiss-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.2;
 }
 
 .info-auto-preview-content {

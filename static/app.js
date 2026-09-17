@@ -14449,6 +14449,9 @@ async function showInfoModal(event) {
     }
 
     updateInfoModalAutoBadges(infoData.auto_from_notes || {});
+    setInfoModalAcceptedAutoFromNotes(infoData.auto_from_notes || {});
+    setInfoModalDismissedSuggestionKey('');
+    setInfoModalPendingSuggestion(null);
     bindInfoModalAutoPreview();
     refreshInfoModalAutoPreview();
     applyInfoModalStarHighlights(studentId, period);
@@ -14651,8 +14654,10 @@ function normalizeInfoFromTextFields(infoData, knownLocations = [], scheduledLoc
     ];
     const corpus = textFields.join('\n').toLowerCase();
 
-    // Infractions: exact keyword matches, merged into infraction rows.
-    const infractions = Array.isArray(clone.infractions) ? [...clone.infractions] : [];
+    // Infractions: exact keyword matches; raise count to note match count (never stack on every pass).
+    const infractions = Array.isArray(clone.infractions)
+        ? clone.infractions.map((item) => ({ ...item }))
+        : [];
     INFRACTION_OPTIONS.forEach((infraction) => {
         const matches = countExactPhraseMatches(corpus, infraction.toLowerCase());
         if (!matches) return;
@@ -14661,11 +14666,14 @@ function normalizeInfoFromTextFields(infoData, knownLocations = [], scheduledLoc
         );
         if (existing) {
             const existingCount = Number(existing.count) || 0;
-            existing.count = String(existingCount + matches);
+            if (matches > existingCount) {
+                existing.count = String(matches);
+                autoFromNotes.infractions = true;
+            }
         } else {
             infractions.push({ type: normalizeInfractionType(infraction), count: String(matches) });
+            autoFromNotes.infractions = true;
         }
-        autoFromNotes.infractions = true;
     });
     clone.infractions = infractions;
 
@@ -14825,6 +14833,86 @@ function collectInfoModalDraftData() {
     return draft;
 }
 
+function getInfoModalPendingSuggestion() {
+    const modal = document.getElementById('info-modal');
+    if (!modal?.dataset?.pendingAutoSuggestion) return null;
+    try {
+        return JSON.parse(modal.dataset.pendingAutoSuggestion);
+    } catch (e) {
+        return null;
+    }
+}
+
+function setInfoModalPendingSuggestion(normalizedInfo) {
+    const modal = document.getElementById('info-modal');
+    if (!modal) return;
+    if (normalizedInfo) {
+        modal.dataset.pendingAutoSuggestion = JSON.stringify(normalizedInfo);
+    } else {
+        delete modal.dataset.pendingAutoSuggestion;
+    }
+}
+
+function getInfoModalAcceptedAutoFromNotes() {
+    const modal = document.getElementById('info-modal');
+    if (!modal?.dataset?.acceptedAutoFromNotes) return {};
+    try {
+        const parsed = JSON.parse(modal.dataset.acceptedAutoFromNotes);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function setInfoModalAcceptedAutoFromNotes(autoFromNotes) {
+    const modal = document.getElementById('info-modal');
+    if (!modal) return;
+    const next = autoFromNotes && typeof autoFromNotes === 'object' ? autoFromNotes : {};
+    if (Object.keys(next).length) {
+        modal.dataset.acceptedAutoFromNotes = JSON.stringify(next);
+    } else {
+        delete modal.dataset.acceptedAutoFromNotes;
+    }
+}
+
+function getInfoModalDismissedSuggestionKey() {
+    return document.getElementById('info-modal')?.dataset?.dismissedAutoSuggestionKey || '';
+}
+
+function setInfoModalDismissedSuggestionKey(key) {
+    const modal = document.getElementById('info-modal');
+    if (!modal) return;
+    if (key) modal.dataset.dismissedAutoSuggestionKey = key;
+    else delete modal.dataset.dismissedAutoSuggestionKey;
+}
+
+function buildInfoAutoSuggestionKey(normalizedInfo) {
+    const auto = normalizedInfo?.auto_from_notes || {};
+    const payload = {
+        infractions: auto.infractions ? (normalizedInfo.infractions || []) : null,
+        purposes: auto.purposes ? (normalizedInfo.purposes || []) : null,
+        frenzy: !!auto.frenzy,
+        reset: !!auto.reset,
+        reminders: auto.reminders
+            ? [!!normalizedInfo.reminder1, !!normalizedInfo.reminder2, !!normalizedInfo.reminder3]
+            : null,
+        alternate_location: auto.alternate_location ? String(normalizedInfo.alternate_location || '') : null
+    };
+    return JSON.stringify(payload);
+}
+
+function hasPendingInfoAutoSuggestion(normalizedInfo) {
+    const auto = normalizedInfo?.auto_from_notes || {};
+    return !!(
+        auto.infractions ||
+        auto.purposes ||
+        auto.frenzy ||
+        auto.reset ||
+        auto.reminders ||
+        auto.alternate_location
+    );
+}
+
 function renderInfoModalAutoPreview(normalizedInfo) {
     const previewBox = document.getElementById('info-auto-preview');
     const previewContent = document.getElementById('info-auto-preview-content');
@@ -14851,13 +14939,124 @@ function renderInfoModalAutoPreview(normalizedInfo) {
         lines.push(`<strong>Alt location:</strong> ${escapeHtml(String(normalizedInfo.alternate_location))}`);
     }
 
-    if (!lines.length) {
+    if (!lines.length || !hasPendingInfoAutoSuggestion(normalizedInfo)) {
+        setInfoModalPendingSuggestion(null);
         previewBox.style.display = 'none';
         previewContent.innerHTML = '';
         return;
     }
+
+    const suggestionKey = buildInfoAutoSuggestionKey(normalizedInfo);
+    if (suggestionKey && suggestionKey === getInfoModalDismissedSuggestionKey()) {
+        setInfoModalPendingSuggestion(null);
+        previewBox.style.display = 'none';
+        previewContent.innerHTML = '';
+        return;
+    }
+
+    setInfoModalPendingSuggestion(normalizedInfo);
     previewContent.innerHTML = lines.join('<br>');
     previewBox.style.display = 'block';
+    const isReadOnly = !!document.getElementById('info-notes')?.disabled;
+    const acceptBtn = document.getElementById('info-auto-accept-btn');
+    const dismissBtn = document.getElementById('info-auto-dismiss-btn');
+    if (acceptBtn) acceptBtn.style.display = isReadOnly ? 'none' : '';
+    if (dismissBtn) dismissBtn.style.display = isReadOnly ? 'none' : '';
+}
+
+function applyInfoModalSuggestionToForm(normalizedInfo) {
+    if (!normalizedInfo) return;
+    const auto = normalizedInfo.auto_from_notes || {};
+    const isReadOnly = !!document.getElementById('info-notes')?.disabled;
+
+    if (auto.infractions && Array.isArray(normalizedInfo.infractions)) {
+        const container = document.getElementById('infractions-container');
+        if (container) {
+            container.innerHTML = '';
+            const rows = normalizedInfo.infractions.length
+                ? normalizedInfo.infractions
+                : [{ type: '', count: '' }];
+            rows.forEach((inf) => {
+                container.appendChild(createInfractionRow(inf.type || '', inf.count || '', isReadOnly));
+            });
+        }
+    }
+
+    if (auto.frenzy) {
+        const frenzyCheckbox = document.getElementById('info-frenzy');
+        if (frenzyCheckbox) frenzyCheckbox.checked = true;
+    }
+
+    if (auto.reset) {
+        const resetCheckbox = document.getElementById('info-reset');
+        if (resetCheckbox) {
+            resetCheckbox.checked = true;
+            const resetWarning = document.getElementById('info-reset-warning');
+            if (resetWarning) resetWarning.style.display = 'inline';
+            const frenzyWarning = document.getElementById('info-frenzy-warning');
+            const resetFrenzyWarning = document.getElementById('info-reset-frenzy-warning');
+            if (frenzyWarning) frenzyWarning.style.display = 'inline';
+            if (resetFrenzyWarning) resetFrenzyWarning.style.display = 'inline';
+        }
+    }
+
+    if (auto.reminders) {
+        const r1 = document.getElementById('info-reminder-1');
+        const r2 = document.getElementById('info-reminder-2');
+        const r3 = document.getElementById('info-reminder-3');
+        if (r1) r1.checked = !!normalizedInfo.reminder1;
+        if (r2) r2.checked = !!normalizedInfo.reminder2;
+        if (r3) r3.checked = !!normalizedInfo.reminder3;
+    }
+
+    if (auto.alternate_location && normalizedInfo.alternate_location) {
+        const altInput = document.getElementById('info-alternate-location');
+        if (altInput) {
+            altInput.value = normalizedInfo.alternate_location;
+            markAlternateLocationManual(false);
+            syncAlternateLocationSelectFromInput();
+        }
+    }
+
+    const frenzyOn = !!document.getElementById('info-frenzy')?.checked;
+    syncInfoFrenzyDependentFields(frenzyOn, isReadOnly);
+
+    if (auto.purposes && Array.isArray(normalizedInfo.purposes) && frenzyOn) {
+        const container = document.getElementById('purposes-container');
+        if (container) {
+            container.innerHTML = '';
+            const rows = normalizedInfo.purposes.length ? normalizedInfo.purposes : [''];
+            rows.forEach((purpose) => {
+                container.appendChild(createPurposeRow(purpose || '', isReadOnly));
+            });
+            syncInfoFrenzyDependentFields(true, isReadOnly);
+        }
+    }
+
+    const mergedAuto = { ...getInfoModalAcceptedAutoFromNotes(), ...auto };
+    setInfoModalAcceptedAutoFromNotes(mergedAuto);
+    updateInfoModalAutoBadges(mergedAuto);
+}
+
+function acceptInfoModalAutoSuggestions() {
+    const pending = getInfoModalPendingSuggestion();
+    if (!pending) return;
+    applyInfoModalSuggestionToForm(pending);
+    setInfoModalDismissedSuggestionKey('');
+    setInfoModalPendingSuggestion(null);
+    refreshInfoModalAutoPreview();
+}
+
+function dismissInfoModalAutoSuggestions() {
+    const pending = getInfoModalPendingSuggestion();
+    if (pending) {
+        setInfoModalDismissedSuggestionKey(buildInfoAutoSuggestionKey(pending));
+    }
+    setInfoModalPendingSuggestion(null);
+    const previewBox = document.getElementById('info-auto-preview');
+    const previewContent = document.getElementById('info-auto-preview-content');
+    if (previewBox) previewBox.style.display = 'none';
+    if (previewContent) previewContent.innerHTML = '';
 }
 
 function refreshInfoModalAutoPreview() {
@@ -14874,19 +15073,16 @@ function bindInfoModalAutoPreview() {
     const handler = () => refreshInfoModalAutoPreview();
     modal.addEventListener('input', handler);
     modal.addEventListener('change', handler);
+    const acceptBtn = document.getElementById('info-auto-accept-btn');
+    const dismissBtn = document.getElementById('info-auto-dismiss-btn');
+    if (acceptBtn) acceptBtn.addEventListener('click', acceptInfoModalAutoSuggestions);
+    if (dismissBtn) dismissBtn.addEventListener('click', dismissInfoModalAutoSuggestions);
     modal.dataset.autoPreviewBound = 'true';
 }
 
 function normalizeInfoStringFromNotes(infoString, knownLocations = [], scheduledLocation = '') {
-    if (!infoString || !String(infoString).trim()) return infoString || '';
-    let parsed;
-    try {
-        parsed = JSON.parse(infoString);
-    } catch (e) {
-        parsed = { notes: String(infoString) };
-    }
-    const normalized = normalizeInfoFromTextFields(parsed, knownLocations, scheduledLocation);
-    return JSON.stringify(normalized);
+    // Suggestions must be accepted in the info modal; do not silently override on save.
+    return infoString || '';
 }
 
 function closeInfoModal() {
@@ -14953,10 +15149,14 @@ function saveInfoModal() {
     }
     infoData.purposes = purposes;
 
-    // Parse text fields for exact keyword matches and auto-fill related Info values.
-    const knownLocations = getKnownLocationsFromInfoModal();
-    infoData = normalizeInfoFromTextFields(infoData, knownLocations, getInfoModalScheduledLocation());
-    updateInfoModalAutoBadges(infoData.auto_from_notes);
+    // Auto-derived values are suggestions only; apply only what the user already accepted into the form.
+    const acceptedAuto = getInfoModalAcceptedAutoFromNotes();
+    if (Object.keys(acceptedAuto).length) {
+        infoData.auto_from_notes = acceptedAuto;
+    } else if (infoData.auto_from_notes) {
+        delete infoData.auto_from_notes;
+    }
+    updateInfoModalAutoBadges(infoData.auto_from_notes || {});
 
     const periodIndex = modal.dataset.periodIndex === undefined || modal.dataset.periodIndex === ''
         ? undefined
