@@ -4526,6 +4526,13 @@ function setupEventListeners() {
             dailyManagedByMeCheckbox.addEventListener('change', (e) => {
                 dailyEntryManagedByMe = e.target.checked;
                 console.log('Daily managed by me checkbox changed:', dailyEntryManagedByMe);
+                // Checking "managed by me" clears any committed staff/student search.
+                if (dailyEntryManagedByMe) {
+                    const dailySearch = document.getElementById('daily-search-input');
+                    if (dailySearch) dailySearch.value = '';
+                    dailyEntrySearchQuery = '';
+                    dailyEntrySearchCommitted = true;
+                }
                 scheduleDailyDataLoad(0);
             });
         }
@@ -4756,21 +4763,26 @@ function setupEventListeners() {
         if (managedByMeCheckbox) {
             managedByMeCheckbox.addEventListener('change', async () => {
                 console.log('Managed by me checkbox changed:', managedByMeCheckbox.checked);
-                const summarySelect = document.getElementById('summary-student-select');
-                const currentSelection = summarySelect ? summarySelect.value : null;
-                
-                // Reload summary students dropdown with filter
-                await loadStudents(managedByMeCheckbox.checked, true);
-                
-                // If a student was selected, check if it still exists in the filtered list
-                if (currentSelection && summarySelect) {
-                    const optionExists = Array.from(summarySelect.options).some(opt => opt.value === currentSelection);
-                    if (!optionExists) {
-                        // Selected student is no longer in the filtered list, clear selection
-                        summarySelect.value = '';
-                        console.log('Cleared student selection - student not in filtered list');
+
+                // Checking "managed by me" clears any selected staff/student search.
+                if (managedByMeCheckbox.checked && typeof dashboardState !== 'undefined' && dashboardState.summary) {
+                    dashboardState.summary.studentId = null;
+                    dashboardState.summary.studentName = null;
+                    dashboardState.summary.staffId = null;
+                    dashboardState.summary.staffName = null;
+                    const studentSearch = document.getElementById('summary-student-search');
+                    const staffSearch = document.getElementById('summary-staff-search');
+                    if (studentSearch) studentSearch.value = '';
+                    if (staffSearch) staffSearch.value = '';
+                    const summarySelect = document.getElementById('summary-student-select');
+                    if (summarySelect) summarySelect.value = '';
+                    if (typeof updateContextBanner === 'function') {
+                        updateContextBanner('summary');
                     }
                 }
+
+                // Reload summary students dropdown with filter
+                await loadStudents(managedByMeCheckbox.checked, true);
 
                 // Refresh dashboard once after student scope updates.
                 if (typeof triggerDashboardLoad === 'function') {
@@ -15552,6 +15564,9 @@ function initStarbucksManagement() {
     if (studentSearchInput) {
         studentSearchInput.addEventListener('input', () => {
             if (staffSearchInput) staffSearchInput.value = '';
+            if (studentSearchInput.value.trim() && managedByMeCheckbox && managedByMeCheckbox.checked) {
+                managedByMeCheckbox.checked = false;
+            }
             loadStarbucksData();
         });
     }
@@ -15559,6 +15574,9 @@ function initStarbucksManagement() {
     if (staffSearchInput) {
         staffSearchInput.addEventListener('input', () => {
             if (studentSearchInput) studentSearchInput.value = '';
+            if (staffSearchInput.value.trim() && managedByMeCheckbox && managedByMeCheckbox.checked) {
+                managedByMeCheckbox.checked = false;
+            }
             loadStarbucksData();
         });
     }
@@ -15566,6 +15584,11 @@ function initStarbucksManagement() {
     if (managedByMeCheckbox && !managedByMeCheckbox._starbucksManagedBound) {
         managedByMeCheckbox._starbucksManagedBound = true;
         managedByMeCheckbox.addEventListener('change', () => {
+            // Checking "managed by me" clears any selected staff/student search.
+            if (managedByMeCheckbox.checked) {
+                if (studentSearchInput) studentSearchInput.value = '';
+                if (staffSearchInput) staffSearchInput.value = '';
+            }
             loadStarbucksData();
         });
     }
@@ -16412,6 +16435,12 @@ function setupDailySearchAutocomplete(input) {
                 input.value = selectedItem.dataset.value;
                 dailyEntrySearchQuery = selectedItem.dataset.value;
                 dailyEntrySearchCommitted = true;
+                // When a daily search is committed via Enter on autocomplete, clear "managed by me".
+                const managedCheckbox = document.getElementById('daily-managed-by-me-checkbox');
+                if (managedCheckbox && managedCheckbox.checked) {
+                    managedCheckbox.checked = false;
+                    dailyEntryManagedByMe = false;
+                }
                 hideDropdown();
                 scheduleDailyDataLoad(0);
             }
@@ -24927,7 +24956,17 @@ function setupMarketplaceStudentSearch() {
     searchInput.addEventListener('input', loadList);
     searchInput.addEventListener('focus', function () { if (list.length) showDropdown(list); else loadList(); });
     document.addEventListener('click', function (e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false); });
-    if (managedByMe) managedByMe.addEventListener('change', loadList);
+    if (managedByMe) {
+        managedByMe.addEventListener('change', function () {
+            if (managedByMe.checked) {
+                searchInput.value = '';
+                if (typeof currentMarketplaceStudentId !== 'undefined') {
+                    currentMarketplaceStudentId = null;
+                }
+            }
+            loadList();
+        });
+    }
 }
 
 var currentBankStudentId = null;
@@ -25040,6 +25079,11 @@ function selectBankStudent(student) {
     var wrapper = searchInput && searchInput.closest('.bank-search-autocomplete-wrapper');
     var dropdown = wrapper && wrapper.querySelector('.bank-search-autocomplete-dropdown');
     if (dropdown) mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
+    // Selecting a student via search clears "managed by me" so the filters stay mutually exclusive.
+    var managedByMe = document.getElementById('bank-managed-by-me-checkbox');
+    if (managedByMe && managedByMe.checked) {
+        managedByMe.checked = false;
+    }
     setBankStaffDetailMode(true);
     loadBankAccount(student.student_id);
 }
