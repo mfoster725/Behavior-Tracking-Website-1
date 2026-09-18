@@ -13035,6 +13035,49 @@ tr[data-aggregate-day-label] {
     font-size: 14px;
 }
 
+.bonuses-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 12px 0;
+}
+
+.bonuses-type-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+#bonuses-type-select {
+    padding: 6px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    font-size: 14px;
+    min-width: 200px;
+    background: var(--bg-surface);
+}
+
+#bonuses-classroom-table {
+    display: inline-table;
+    width: fit-content !important;
+    max-width: none;
+    min-width: 0;
+    table-layout: auto;
+    border-collapse: collapse;
+}
+
+#bonuses-classroom-table th,
+#bonuses-classroom-table td {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+#bonuses-classroom-table td[colspan] {
+    white-space: normal;
+}
+
 @media (min-width: 901px) {
     #bank-account-layout:has(#starbucks-section) {
         flex-direction: row;

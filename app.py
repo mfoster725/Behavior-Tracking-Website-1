@@ -2610,7 +2610,7 @@ class Student(db.Model):
     # Parent/guardian contact emails stacked with newlines (CSV import columns M/N)
     parent_emails = db.Column(db.Text, nullable=True)
     grade = db.Column(db.String(20))  # Grade level (e.g., "9", "10", "11", "12")
-    card_color = db.Column(db.String(20), nullable=True)  # 'yellow', 'green', 'blue', or None
+    card_color = db.Column(db.String(20), nullable=True)  # required for students: yellow/green/blue
     # simple = $100 × STAR%; complex = card-color wages + tax worksheet
     pay_track = db.Column(db.String(20), nullable=False, default='simple')
     # When set, only school days with data after this date count toward the next level-up window.
@@ -5473,6 +5473,15 @@ def students():
             return jsonify({'error': 'Outside Staff cannot create students'}), 403
         
         data = request.json
+
+        try:
+            import economy_lib as eco
+            card_color = eco.require_point_card_color(data.get('card_color'), student_label=data.get('name'))
+        except Exception as color_err:
+            import economy_lib as eco
+            if isinstance(color_err, eco.MissingCardColorError):
+                return jsonify({'error': str(color_err)}), 400
+            raise
         
         lunch_number = (data.get('lunch_number') or '').strip() or None
         parent_emails_raw = data.get('parent_emails')
@@ -5488,7 +5497,7 @@ def students():
             name=data['name'],
             email=(data.get('email') or '').strip() or None,
             grade=data.get('grade'),
-            card_color=data.get('card_color'),
+            card_color=card_color,
             lunch_number=lunch_number,
             parent_emails=parent_emails_stacked,
         )
@@ -16482,7 +16491,17 @@ def manage_users():
             if 'card_color' in data and user.student_id:
                 student = Student.query.get(user.student_id)
                 if student:
-                    student.card_color = data['card_color'] if data['card_color'] else None
+                    try:
+                        import economy_lib as eco
+                        student.card_color = eco.require_point_card_color(
+                            data.get('card_color'),
+                            student_label=student.name or user.name,
+                        )
+                    except Exception as color_err:
+                        import economy_lib as eco
+                        if isinstance(color_err, eco.MissingCardColorError):
+                            return jsonify({'error': str(color_err)}), 400
+                        raise
             if 'pay_track' in data and user.student_id and data.get('pay_track') in ('simple', 'complex'):
                 student = Student.query.get(user.student_id)
                 if student:
@@ -16525,7 +16544,17 @@ def manage_users():
             if 'card_color' in data and user.student_id:
                 student = Student.query.get(user.student_id)
                 if student:
-                    student.card_color = data['card_color'] if data['card_color'] else None
+                    try:
+                        import economy_lib as eco
+                        student.card_color = eco.require_point_card_color(
+                            data.get('card_color'),
+                            student_label=student.name or user.name,
+                        )
+                    except Exception as color_err:
+                        import economy_lib as eco
+                        if isinstance(color_err, eco.MissingCardColorError):
+                            return jsonify({'error': str(color_err)}), 400
+                        raise
             if 'pay_track' in data and user.student_id and data.get('pay_track') in ('simple', 'complex'):
                 student = Student.query.get(user.student_id)
                 if student:
@@ -20506,7 +20535,7 @@ def list_starbucks_balances():
 @staff_required
 def update_starbucks_balances_bulk():
     """
-    Bulk update Starbucks / Star Student / Star Classroom balances.
+    Bulk update bonus balances. Only fields present on each row are written.
 
     Expects JSON body:
     {
@@ -20537,7 +20566,9 @@ def update_starbucks_balances_bulk():
                 continue
 
             balance = get_or_create_starbucks_balance(student_id)
-            balance.count = _safe_bonus_int(row.get('count', 0))
+            if 'count' in row or 'starbucks_count' in row:
+                raw = row['count'] if 'count' in row else row.get('starbucks_count')
+                balance.count = _safe_bonus_int(raw)
             if 'star_student_count' in row:
                 balance.star_student_count = _safe_bonus_int(row.get('star_student_count'))
             if 'star_classroom_count' in row:
@@ -20550,6 +20581,124 @@ def update_starbucks_balances_bulk():
         return jsonify({'error': 'Failed to update Starbucks balances'}), 500
 
     return jsonify({'status': 'ok'})
+
+
+def _active_student_user_ids():
+    """Student IDs that have an active student login (User Management)."""
+    return {
+        u.student_id
+        for u in User.query.filter_by(role='student').all()
+        if u.student_id
+    }
+
+
+def _bonus_caseload_rows_for_staff(staff_user):
+    """Active students on a staff user's caseload, with Star Classroom counts."""
+    student_ids = get_caseload_student_ids_for_user(staff_user)
+    if not student_ids:
+        return []
+    active_ids = _active_student_user_ids()
+    student_ids = [sid for sid in student_ids if sid in active_ids]
+    if not student_ids:
+        return []
+    students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
+    rows = []
+    for student in students:
+        balance = StarbucksBalance.query.filter_by(student_id=student.id).first()
+        rows.append({
+            'student_id': student.id,
+            'student_name': student.name,
+            'star_classroom_count': _safe_bonus_int(
+                getattr(balance, 'star_classroom_count', 0) if balance else 0
+            ),
+        })
+    return rows
+
+
+@app.route('/api/bonuses/caseload', methods=['GET'])
+@login_required
+@staff_required
+def list_bonus_caseload():
+    """Preview students on a staff member's caseload for Star Classroom awards."""
+    try:
+        staff_id = int(request.args.get('staff_id') or 0)
+    except (TypeError, ValueError):
+        staff_id = 0
+    if staff_id <= 0:
+        return jsonify({'error': 'staff_id is required'}), 400
+
+    staff_user = User.query.get(staff_id)
+    if not staff_user or staff_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Staff member not found'}), 404
+
+    rows = _bonus_caseload_rows_for_staff(staff_user)
+    return jsonify({
+        'staff_id': staff_user.id,
+        'staff_name': staff_user.name or staff_user.username,
+        'students': rows,
+        'student_count': len(rows),
+    })
+
+
+@app.route('/api/bonuses/star-classroom/award', methods=['POST'])
+@login_required
+@staff_required
+def award_star_classroom_caseload():
+    """
+    Award +1 Star Classroom to every active student on a teacher's caseload.
+
+    Body: { "staff_id": 12, "amount": 1 }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        staff_id = int(data.get('staff_id') or 0)
+    except (TypeError, ValueError):
+        staff_id = 0
+    if staff_id <= 0:
+        return jsonify({'error': 'staff_id is required'}), 400
+
+    amount = _safe_bonus_int(data.get('amount', 1))
+    if amount <= 0:
+        amount = 1
+
+    staff_user = User.query.get(staff_id)
+    if not staff_user or staff_user.role not in ('staff', 'admin'):
+        return jsonify({'error': 'Staff member not found'}), 404
+
+    rows = _bonus_caseload_rows_for_staff(staff_user)
+    if not rows:
+        return jsonify({
+            'error': 'No active students found on that staff member’s caseload.',
+            'staff_id': staff_user.id,
+            'staff_name': staff_user.name or staff_user.username,
+            'awarded': 0,
+        }), 400
+
+    try:
+        updated = []
+        for row in rows:
+            balance = get_or_create_starbucks_balance(row['student_id'])
+            new_count = _safe_bonus_int(getattr(balance, 'star_classroom_count', 0)) + amount
+            balance.star_classroom_count = new_count
+            updated.append({
+                'student_id': row['student_id'],
+                'student_name': row['student_name'],
+                'star_classroom_count': new_count,
+            })
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('Error awarding Star Classroom bonuses')
+        return jsonify({'error': 'Failed to award Star Classroom bonuses'}), 500
+
+    return jsonify({
+        'status': 'ok',
+        'staff_id': staff_user.id,
+        'staff_name': staff_user.name or staff_user.username,
+        'amount': amount,
+        'awarded': len(updated),
+        'students': updated,
+    })
 
 
 LEVEL_UP_WINDOW_DAYS = 30

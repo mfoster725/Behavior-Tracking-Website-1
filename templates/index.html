@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=info-popup1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bonuses-dropdown1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -857,54 +857,100 @@
             <div class="form-section accounts-ui">
                 <div id="bank-account-layout">
                 {% if user.role in ['staff', 'admin'] %}
-                <!-- Bonus counts management (staff/admin only) -->
+                <!-- Bonuses management (staff/admin only) -->
                 <div id="starbucks-section">
-                    <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Bonuses</h3>
-                    <p class="starbucks-lede">
-                        Track Starbucks ($2), Star Student ($50), and Star Classroom ($50) counts. These running totals appear on each student’s weekly earnings record. Search to load students, then edit counts in the table.
+                    <div class="bonuses-header">
+                        <label for="bonuses-type-select" class="bonuses-type-label">Bonuses</label>
+                        <select id="bonuses-type-select" aria-label="Bonus type">
+                            <option value="starbucks">Starbucks ($2)</option>
+                            <option value="star_student">Star Student ($50)</option>
+                            <option value="star_classroom">Star Classroom ($50)</option>
+                        </select>
+                    </div>
+                    <p id="bonuses-lede" class="starbucks-lede">
+                        Edit each student’s Starbucks count. Running totals appear on the weekly earnings record.
                     </p>
 
-                    <div class="dashboard-controls" style="margin-bottom: 12px;">
-                        <div class="dashboard-search-row">
-                            <div class="dashboard-search-wrap" id="starbucks-student-search-wrap">
-                                <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                <input type="text" id="starbucks-student-search" placeholder="Search student..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
-                                <div class="dashboard-search-dropdown" id="starbucks-student-dropdown"></div>
+                    <!-- Per-student counts: Starbucks / Star Student (and future student-level bonuses) -->
+                    <div id="bonuses-student-panel">
+                        <div class="dashboard-controls" style="margin-bottom: 12px;">
+                            <div class="dashboard-search-row">
+                                <div class="dashboard-search-wrap" id="starbucks-student-search-wrap">
+                                    <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="starbucks-student-search" placeholder="Search student..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                                    <div class="dashboard-search-dropdown" id="starbucks-student-dropdown"></div>
+                                </div>
+                                <div class="dashboard-search-wrap" id="starbucks-staff-search-wrap">
+                                    <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                    <input type="text" id="starbucks-staff-search" placeholder="Search staff..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                                    <div class="dashboard-search-dropdown" id="starbucks-staff-dropdown"></div>
+                                </div>
+                                <label class="dashboard-managed-check">
+                                    <input type="checkbox" id="starbucks-managed-by-me-checkbox">
+                                    <span>Managed by me</span>
+                                </label>
                             </div>
-                            <div class="dashboard-search-wrap" id="starbucks-staff-search-wrap">
-                                <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                                <input type="text" id="starbucks-staff-search" placeholder="Search staff..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
-                                <div class="dashboard-search-dropdown" id="starbucks-staff-dropdown"></div>
+                        </div>
+
+                        <div id="starbucks-table-container" style="display: inline-block; width: fit-content; max-width: 100%;">
+                            <table id="starbucks-table" style="width: fit-content; display: inline-table; table-layout: auto;">
+                                <thead>
+                                    <tr style="background: var(--bg-elevated);">
+                                        <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Student Name</th>
+                                        <th id="bonuses-count-header" style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Starbucks</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="starbucks-table-body">
+                                    <tr>
+                                        <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                                            Use the search controls above to load students.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div style="margin-top: 10px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap;">
+                                <button type="button" id="starbucks-submit-btn" class="btn-primary" title="Save bonus count changes">
+                                    Submit Table
+                                </button>
                             </div>
-                            <label class="dashboard-managed-check">
-                                <input type="checkbox" id="starbucks-managed-by-me-checkbox">
-                                <span>Managed by me</span>
-                            </label>
                         </div>
                     </div>
 
-                    <div id="starbucks-table-container" style="display: inline-block; width: fit-content; max-width: 100%;">
-                        <table id="starbucks-table" style="width: fit-content; display: inline-table; table-layout: auto;">
-                            <thead>
-                                <tr style="background: var(--bg-elevated);">
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Student Name</th>
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Starbucks</th>
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Star Student</th>
-                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Star Classroom</th>
-                                </tr>
-                            </thead>
-                            <tbody id="starbucks-table-body">
-                                <tr>
-                                    <td colspan="4" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
-                                        Use the search controls above to load students.
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div style="margin-top: 10px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap;">
-                            <button type="button" id="starbucks-submit-btn" class="btn-primary" title="Save all bonus count changes">
-                                Submit Bonuses Table
-                            </button>
+                    <!-- Caseload award: Star Classroom -->
+                    <div id="bonuses-classroom-panel" style="display: none;">
+                        <div class="dashboard-controls" style="margin-bottom: 12px;">
+                            <div class="dashboard-search-row">
+                                <div class="dashboard-search-wrap" id="bonuses-teacher-search-wrap" style="min-width: 240px; flex: 1 1 240px;">
+                                    <svg class="dashboard-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                    <input type="text" id="bonuses-teacher-search" placeholder="Select teacher / case manager..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                                    <div class="dashboard-search-dropdown" id="bonuses-teacher-dropdown"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <p id="bonuses-classroom-summary" class="starbucks-lede" style="margin-bottom: 12px;">
+                            Choose a teacher to preview their caseload, then award Star Classroom to every student on it.
+                        </p>
+                        <div id="bonuses-classroom-table-container" style="display: inline-block; width: fit-content; max-width: 100%;">
+                            <table id="bonuses-classroom-table" style="width: fit-content; display: inline-table; table-layout: auto;">
+                                <thead>
+                                    <tr style="background: var(--bg-elevated);">
+                                        <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Student Name</th>
+                                        <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Star Classroom</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bonuses-classroom-table-body">
+                                    <tr>
+                                        <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                                            Select a teacher to load their caseload.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div style="margin-top: 10px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap;">
+                                <button type="button" id="bonuses-classroom-award-btn" class="btn-primary" disabled title="Add 1 Star Classroom to every student on this caseload">
+                                    Award Star Classroom (+1)
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2827,7 +2873,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=star-bonuses1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=bonuses-dropdown1"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

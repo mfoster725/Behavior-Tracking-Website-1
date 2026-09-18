@@ -1712,9 +1712,11 @@ function applyAttendanceStarCellState(studentId) {
 let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
 let starNavKeydownBound = false;
 let starZeroWarningKeydownBound = false;
-# Starbucks / Star bonus management state (Bank Account tab)
+// Bonuses management state (Bank Account tab)
 let starbucksRows = []; // [{ student_id, student_name, starbucks_count, star_student_count, star_classroom_count }]
-let starbucksAutosaveTimer = null; // Debounce timer for bonuses table autosave
+let starbucksAutosaveTimer = null; // Debounce timer for student-count bonus autosave
+let bonusesClassroomTeacherId = null;
+let bonusesClassroomRows = [];
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
 let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
 let dailyLoadDebounceTimer = null;
@@ -15454,7 +15456,45 @@ function showInfoViewPopup(infoDataString, time, location) {
     });
 }
 
-// Bonus counts management (Bank Account tab, staff/admin)
+// Bonuses management (Bank Account tab, staff/admin)
+// Extensible type list: student_counts = editable per-student table;
+// caseload_award = pick a teacher and +1 every student on their caseload.
+const BONUS_TYPE_CONFIG = {
+    starbucks: {
+        id: 'starbucks',
+        label: 'Starbucks',
+        field: 'starbucks_count',
+        apiField: 'count',
+        rateLabel: '$2',
+        mode: 'student_counts',
+        lede: 'Edit each student’s Starbucks count. Running totals appear on the weekly earnings record.'
+    },
+    star_student: {
+        id: 'star_student',
+        label: 'Star Student',
+        field: 'star_student_count',
+        apiField: 'star_student_count',
+        rateLabel: '$50',
+        mode: 'student_counts',
+        lede: 'Edit each student’s Star Student wins. Each win is $50 on the weekly earnings record.'
+    },
+    star_classroom: {
+        id: 'star_classroom',
+        label: 'Star Classroom',
+        field: 'star_classroom_count',
+        apiField: 'star_classroom_count',
+        rateLabel: '$50',
+        mode: 'caseload_award',
+        lede: 'Select a teacher or case manager. Awarding Star Classroom adds +1 to every active student on their caseload ($50 each on the earnings record).'
+    }
+};
+
+function getSelectedBonusType() {
+    const select = document.getElementById('bonuses-type-select');
+    const key = select ? select.value : 'starbucks';
+    return BONUS_TYPE_CONFIG[key] || BONUS_TYPE_CONFIG.starbucks;
+}
+
 function initStarbucksManagement() {
     const studentSearchInput = document.getElementById('starbucks-student-search');
     const staffSearchInput = document.getElementById('starbucks-staff-search');
@@ -15462,12 +15502,16 @@ function initStarbucksManagement() {
     const submitBtn = document.getElementById('starbucks-submit-btn');
     const studentDropdown = document.getElementById('starbucks-student-dropdown');
     const staffDropdown = document.getElementById('starbucks-staff-dropdown');
+    const typeSelect = document.getElementById('bonuses-type-select');
+    const teacherSearchInput = document.getElementById('bonuses-teacher-search');
+    const teacherDropdown = document.getElementById('bonuses-teacher-dropdown');
+    const classroomAwardBtn = document.getElementById('bonuses-classroom-award-btn');
 
-    if (!studentSearchInput && !staffSearchInput && !managedByMeCheckbox && !submitBtn) {
+    if (!typeSelect && !studentSearchInput && !teacherSearchInput) {
         return;
     }
-
-    if (studentSearchInput && studentSearchInput._starbucksBound) return;
+    if (typeSelect && typeSelect._bonusesBound) return;
+    if (typeSelect) typeSelect._bonusesBound = true;
     if (studentSearchInput) studentSearchInput._starbucksBound = true;
 
     function bonusCountValue(row, key) {
@@ -15475,17 +15519,42 @@ function initStarbucksManagement() {
         return typeof raw === 'number' ? raw : (raw ? Number(raw) || 0 : 0);
     }
 
-    function loadingRow(message, isError) {
+    function loadingRow(message, isError, colspan) {
+        const cols = colspan || 2;
         return `
                 <tr>
-                    <td colspan="4" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: ${isError ? '#dc2626' : '#94a3b8'};">
+                    <td colspan="${cols}" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: ${isError ? '#dc2626' : '#94a3b8'};">
                         ${message}
                     </td>
                 </tr>
             `;
     }
 
+    function applyBonusTypeUi() {
+        const cfg = getSelectedBonusType();
+        const lede = document.getElementById('bonuses-lede');
+        const studentPanel = document.getElementById('bonuses-student-panel');
+        const classroomPanel = document.getElementById('bonuses-classroom-panel');
+        const countHeader = document.getElementById('bonuses-count-header');
+
+        if (lede) lede.textContent = cfg.lede;
+        if (countHeader) countHeader.textContent = cfg.label;
+
+        const isCaseload = cfg.mode === 'caseload_award';
+        if (studentPanel) studentPanel.style.display = isCaseload ? 'none' : '';
+        if (classroomPanel) classroomPanel.style.display = isCaseload ? '' : 'none';
+
+        if (isCaseload) {
+            renderClassroomTable();
+        } else {
+            renderStarbucksTable();
+        }
+    }
+
     async function loadStarbucksData() {
+        const cfg = getSelectedBonusType();
+        if (cfg.mode === 'caseload_award') return;
+
         const studentQuery = studentSearchInput ? studentSearchInput.value.trim() : '';
         const staffQuery = staffSearchInput ? staffSearchInput.value.trim() : '';
         const managed = !!(managedByMeCheckbox && managedByMeCheckbox.checked);
@@ -15497,7 +15566,7 @@ function initStarbucksManagement() {
 
         const container = document.getElementById('starbucks-table-body');
         if (container) {
-            container.innerHTML = loadingRow('Loading bonus counts...');
+            container.innerHTML = loadingRow('Loading ' + cfg.label + ' counts...');
         }
 
         try {
@@ -15522,7 +15591,7 @@ function initStarbucksManagement() {
         }
     }
 
-    function setupStarbucksAutocomplete(input, dropdown, type) {
+    function setupBonusAutocomplete(input, dropdown, type, onPick) {
         if (!input || !dropdown) return;
 
         let debounceTimer = null;
@@ -15594,20 +15663,12 @@ function initStarbucksManagement() {
             const opt = e.target.closest('.dashboard-search-option');
             if (!opt) return;
             const name = opt.dataset.name || '';
+            const id = opt.dataset.id || '';
             input.value = name;
             mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
-
-            if (type === 'student' && staffSearchInput) {
-                staffSearchInput.value = '';
-            } else if (type === 'staff' && studentSearchInput) {
-                studentSearchInput.value = '';
+            if (typeof onPick === 'function') {
+                onPick({ id, name, type });
             }
-
-            if (managedByMeCheckbox && managedByMeCheckbox.checked) {
-                managedByMeCheckbox.checked = false;
-            }
-
-            loadStarbucksData();
         });
 
         input.addEventListener('focus', () => {
@@ -15629,16 +15690,15 @@ function initStarbucksManagement() {
             }
             if (e.key === 'Enter') {
                 e.preventDefault();
+                const first = dropdown.querySelector('.dashboard-search-option');
+                if (first) {
+                    first.click();
+                    return;
+                }
                 mountAutocompleteDropdown(dropdown, document.createDocumentFragment(), false);
-                if (type === 'student' && staffSearchInput) {
-                    staffSearchInput.value = '';
-                } else if (type === 'staff' && studentSearchInput) {
-                    studentSearchInput.value = '';
+                if (typeof onPick === 'function') {
+                    onPick({ id: '', name: input.value.trim(), type });
                 }
-                if (managedByMeCheckbox && managedByMeCheckbox.checked) {
-                    managedByMeCheckbox.checked = false;
-                }
-                loadStarbucksData();
             }
         });
     }
@@ -15668,6 +15728,8 @@ function initStarbucksManagement() {
     function renderStarbucksTable() {
         const tbody = document.getElementById('starbucks-table-body');
         if (!tbody) return;
+        const cfg = getSelectedBonusType();
+        if (cfg.mode !== 'student_counts') return;
 
         if (!starbucksRows || starbucksRows.length === 0) {
             tbody.innerHTML = loadingRow('No students found for the current filters.');
@@ -15675,9 +15737,10 @@ function initStarbucksManagement() {
         }
 
         tbody.innerHTML = '';
+        const field = cfg.field;
         const sortedRows = [...starbucksRows].sort((a, b) => {
-            const aVal = bonusCountValue(a, 'starbucks_count');
-            const bVal = bonusCountValue(b, 'starbucks_count');
+            const aVal = bonusCountValue(a, field);
+            const bVal = bonusCountValue(b, field);
             if (bVal !== aVal) return bVal - aVal;
             const aName = (a.student_name || '').toLowerCase();
             const bName = (b.student_name || '').toLowerCase();
@@ -15695,13 +15758,11 @@ function initStarbucksManagement() {
             nameTd.textContent = row.student_name || '';
             tr.appendChild(nameTd);
 
-            ['starbucks_count', 'star_student_count', 'star_classroom_count'].forEach((field) => {
-                const countTd = document.createElement('td');
-                countTd.style.padding = '10px 12px';
-                countTd.style.border = '1px solid var(--border)';
-                countTd.appendChild(bindBonusCountInput(document.createElement('input'), row, field));
-                tr.appendChild(countTd);
-            });
+            const countTd = document.createElement('td');
+            countTd.style.padding = '10px 12px';
+            countTd.style.border = '1px solid var(--border)';
+            countTd.appendChild(bindBonusCountInput(document.createElement('input'), row, field));
+            tr.appendChild(countTd);
             tbody.appendChild(tr);
         });
     }
@@ -15729,12 +15790,14 @@ function initStarbucksManagement() {
 
     async function saveStarbucksData(options = {}) {
         const { silent = false } = options;
-        const rowsPayload = (starbucksRows || []).map((row) => ({
-            student_id: row.student_id,
-            count: bonusCountValue(row, 'starbucks_count'),
-            star_student_count: bonusCountValue(row, 'star_student_count'),
-            star_classroom_count: bonusCountValue(row, 'star_classroom_count'),
-        }));
+        const cfg = getSelectedBonusType();
+        if (cfg.mode !== 'student_counts') return;
+
+        const rowsPayload = (starbucksRows || []).map((row) => {
+            const payload = { student_id: row.student_id };
+            payload[cfg.apiField] = bonusCountValue(row, cfg.field);
+            return payload;
+        });
 
         if (!rowsPayload.length) {
             if (!silent) {
@@ -15755,12 +15818,8 @@ function initStarbucksManagement() {
                 throw new Error('Failed to save bonus counts');
             }
             if (!silent) {
-                if (studentSearchInput) {
-                    studentSearchInput.value = '';
-                }
-                if (staffSearchInput) {
-                    staffSearchInput.value = '';
-                }
+                if (studentSearchInput) studentSearchInput.value = '';
+                if (staffSearchInput) staffSearchInput.value = '';
                 loadStarbucksData();
             }
             updateStarbucksSaveStatus('All changes saved');
@@ -15770,8 +15829,160 @@ function initStarbucksManagement() {
         }
     }
 
-    setupStarbucksAutocomplete(studentSearchInput, studentDropdown, 'student');
-    setupStarbucksAutocomplete(staffSearchInput, staffDropdown, 'staff');
+    function updateClassroomAwardStatus(text) {
+        const normalized = (text || '').trim();
+        if (!normalized) {
+            showButtonStatus('#bonuses-classroom-award-btn', '', 'success');
+            return;
+        }
+        const type = /fail|error|no active/i.test(normalized) ? 'error' : 'success';
+        showButtonStatus('#bonuses-classroom-award-btn', normalized, type);
+    }
+
+    function renderClassroomTable() {
+        const tbody = document.getElementById('bonuses-classroom-table-body');
+        const summary = document.getElementById('bonuses-classroom-summary');
+        if (!tbody) return;
+
+        if (!bonusesClassroomTeacherId) {
+            tbody.innerHTML = loadingRow('Select a teacher to load their caseload.');
+            if (classroomAwardBtn) classroomAwardBtn.disabled = true;
+            if (summary) {
+                summary.textContent = 'Choose a teacher to preview their caseload, then award Star Classroom to every student on it.';
+            }
+            return;
+        }
+
+        if (!bonusesClassroomRows.length) {
+            tbody.innerHTML = loadingRow('No active students on this caseload.');
+            if (classroomAwardBtn) classroomAwardBtn.disabled = true;
+            if (summary) {
+                summary.textContent = 'No active students found on that staff member’s caseload.';
+            }
+            return;
+        }
+
+        if (classroomAwardBtn) classroomAwardBtn.disabled = false;
+        if (summary) {
+            const name = (teacherSearchInput && teacherSearchInput.value) || 'Selected staff';
+            summary.textContent = name + ' — ' + bonusesClassroomRows.length +
+                ' student' + (bonusesClassroomRows.length === 1 ? '' : 's') +
+                '. Awarding adds +1 Star Classroom to each.';
+        }
+
+        tbody.innerHTML = '';
+        [...bonusesClassroomRows].sort((a, b) => {
+            const aName = (a.student_name || '').toLowerCase();
+            const bName = (b.student_name || '').toLowerCase();
+            if (aName < bName) return -1;
+            if (aName > bName) return 1;
+            return 0;
+        }).forEach((row) => {
+            const tr = document.createElement('tr');
+            const nameTd = document.createElement('td');
+            nameTd.style.padding = '10px 12px';
+            nameTd.style.border = '1px solid var(--border)';
+            nameTd.style.whiteSpace = 'nowrap';
+            nameTd.textContent = row.student_name || '';
+            const countTd = document.createElement('td');
+            countTd.style.padding = '10px 12px';
+            countTd.style.border = '1px solid var(--border)';
+            countTd.textContent = String(bonusCountValue(row, 'star_classroom_count'));
+            tr.appendChild(nameTd);
+            tr.appendChild(countTd);
+            tbody.appendChild(tr);
+        });
+    }
+
+    async function loadClassroomCaseload(staffId) {
+        const tbody = document.getElementById('bonuses-classroom-table-body');
+        bonusesClassroomTeacherId = staffId || null;
+        bonusesClassroomRows = [];
+        if (classroomAwardBtn) classroomAwardBtn.disabled = true;
+
+        if (!staffId) {
+            renderClassroomTable();
+            return;
+        }
+
+        if (tbody) tbody.innerHTML = loadingRow('Loading caseload...');
+        try {
+            const response = await fetch('/api/bonuses/caseload?staff_id=' + encodeURIComponent(staffId));
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to load caseload');
+            }
+            bonusesClassroomRows = Array.isArray(data.students) ? data.students : [];
+            renderClassroomTable();
+        } catch (err) {
+            console.error('Error loading Star Classroom caseload:', err);
+            if (tbody) tbody.innerHTML = loadingRow(err.message || 'Error loading caseload.', true);
+            updateClassroomAwardStatus('Failed to load caseload');
+        }
+    }
+
+    async function awardClassroomBonus() {
+        if (!bonusesClassroomTeacherId) return;
+        const count = bonusesClassroomRows.length;
+        if (!count) return;
+        const teacherName = (teacherSearchInput && teacherSearchInput.value) || 'this teacher';
+        const ok = window.confirm(
+            'Award +1 Star Classroom to all ' + count + ' student' +
+            (count === 1 ? '' : 's') + ' on ' + teacherName + '’s caseload?'
+        );
+        if (!ok) return;
+
+        if (classroomAwardBtn) classroomAwardBtn.disabled = true;
+        updateClassroomAwardStatus('Awarding...');
+        try {
+            const response = await fetch('/api/bonuses/star-classroom/award', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staff_id: Number(bonusesClassroomTeacherId), amount: 1 }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Award failed');
+            }
+            bonusesClassroomRows = Array.isArray(data.students) ? data.students : bonusesClassroomRows;
+            renderClassroomTable();
+            updateClassroomAwardStatus('Awarded +1 to ' + (data.awarded || count) + ' students');
+        } catch (err) {
+            console.error('Error awarding Star Classroom:', err);
+            updateClassroomAwardStatus(err.message || 'Award failed');
+            if (classroomAwardBtn) classroomAwardBtn.disabled = false;
+        }
+    }
+
+    setupBonusAutocomplete(studentSearchInput, studentDropdown, 'student', () => {
+        if (staffSearchInput) staffSearchInput.value = '';
+        if (managedByMeCheckbox && managedByMeCheckbox.checked) managedByMeCheckbox.checked = false;
+        loadStarbucksData();
+    });
+    setupBonusAutocomplete(staffSearchInput, staffDropdown, 'staff', () => {
+        if (studentSearchInput) studentSearchInput.value = '';
+        if (managedByMeCheckbox && managedByMeCheckbox.checked) managedByMeCheckbox.checked = false;
+        loadStarbucksData();
+    });
+    setupBonusAutocomplete(teacherSearchInput, teacherDropdown, 'staff', (picked) => {
+        if (picked && picked.id) {
+            loadClassroomCaseload(picked.id);
+        } else {
+            bonusesClassroomTeacherId = null;
+            bonusesClassroomRows = [];
+            renderClassroomTable();
+        }
+    });
+
+    if (typeSelect && !typeSelect._bonusesChangeBound) {
+        typeSelect._bonusesChangeBound = true;
+        typeSelect.addEventListener('change', () => {
+            applyBonusTypeUi();
+            if (getSelectedBonusType().mode === 'student_counts') {
+                loadStarbucksData();
+            }
+        });
+    }
 
     if (studentSearchInput) {
         studentSearchInput.addEventListener('input', () => {
@@ -15811,7 +16022,17 @@ function initStarbucksManagement() {
         });
     }
 
-    loadStarbucksData();
+    if (classroomAwardBtn && !classroomAwardBtn._bonusesAwardBound) {
+        classroomAwardBtn._bonusesAwardBound = true;
+        classroomAwardBtn.addEventListener('click', () => {
+            awardClassroomBonus();
+        });
+    }
+
+    applyBonusTypeUi();
+    if (getSelectedBonusType().mode === 'student_counts') {
+        loadStarbucksData();
+    }
 }
 
 // Make functions globally accessible
