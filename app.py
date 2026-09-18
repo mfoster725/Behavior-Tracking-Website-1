@@ -2983,10 +2983,17 @@ class BankAccount(db.Model):
 
 
 class StarbucksBalance(db.Model):
+    """Per-student running bonus counts used on the weekly earnings record.
+
+    ``count`` is Starbucks. Star Student / Star Classroom are tracked on the
+    same row so staff can edit all three from one Bank Account table.
+    """
     __tablename__ = 'starbucks_balances'
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
     count = db.Column(db.Integer, default=0, nullable=False)
+    star_student_count = db.Column(db.Integer, default=0, nullable=False)
+    star_classroom_count = db.Column(db.Integer, default=0, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
@@ -3747,6 +3754,11 @@ def ensure_economy_schema():
             ]:
                 _economy_add_column(conn, is_postgres, 'paychecks', col, typ)
             _economy_add_column(conn, is_postgres, 'transactions', 'student_bill_id', 'INTEGER')
+            for col, typ in [
+                ('star_student_count', 'INTEGER DEFAULT 0'),
+                ('star_classroom_count', 'INTEGER DEFAULT 0'),
+            ]:
+                _economy_add_column(conn, is_postgres, 'starbucks_balances', col, typ)
             conn.commit()
     except Exception as e:
         try:
@@ -7696,6 +7708,8 @@ def summary():
                             'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
                             'staff_context': staff_context_name,
                             'starbucks_total': 0,
+                            'star_student_total': 0,
+                            'star_classroom_total': 0,
                         })
                 else:
                     query = query.filter(DailyRecord.student_id.in_(staff_student_ids))
@@ -7708,6 +7722,8 @@ def summary():
                     'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
                     'staff_context': staff_context_name,
                     'starbucks_total': 0,
+                    'star_student_total': 0,
+                    'star_classroom_total': 0,
                 })
     # Students can only see their own summary
     elif current_user.role == 'student':
@@ -7729,6 +7745,8 @@ def summary():
                 'total_frenzies': 0,
                 'additional_info': {'infractions': {}, 'total_reminders': 0, 'total_resets': 0},
                 'starbucks_total': 0,
+                'star_student_total': 0,
+                'star_classroom_total': 0,
             })
         if student_id:
             # Verify access to requested student
@@ -7778,6 +7796,8 @@ def summary():
                         'total_resets': 0
                     },
                     'starbucks_total': 0,
+                    'star_student_total': 0,
+                    'star_classroom_total': 0,
                 })
     elif managed_by_me:
         # Filter to only students managed by current user (case-insensitive match on support team name)
@@ -7819,6 +7839,8 @@ def summary():
                     'total_resets': 0
                 },
                 'starbucks_total': 0,
+                'star_student_total': 0,
+                'star_classroom_total': 0,
             })
     
     # For staff/admin views, restrict to active students only (students with a User account role='student')
@@ -7852,6 +7874,8 @@ def summary():
                     'total_resets': 0
                 },
                 'starbucks_total': 0,
+                'star_student_total': 0,
+                'star_classroom_total': 0,
             })
         query = query.filter(DailyRecord.student_id.in_(active_student_ids))
 
@@ -8040,15 +8064,15 @@ def summary():
     all_records = filtered_records
     print(f"After filtering out excused records: {len(all_records)} records")
 
-    # Compute Starbucks total for this summary (per-student only; aggregated views use 0)
+    # Bonus running totals for this summary (per-student only; aggregated views use 0)
     starbucks_total = 0
+    star_student_total = 0
+    star_classroom_total = 0
     if student_id:
-        starbucks_balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
-        if starbucks_balance:
-            try:
-                starbucks_total = int(starbucks_balance.count or 0)
-            except (TypeError, ValueError):
-                starbucks_total = 0
+        bonuses = _bonus_counts_for_student(student_id)
+        starbucks_total = bonuses['starbucks_count']
+        star_student_total = bonuses['star_student_count']
+        star_classroom_total = bonuses['star_classroom_count']
     
     # Helper function to check if a date is in a month-day range (handles year boundaries)
     def date_in_range(record_date, start_md, end_md):
@@ -10332,6 +10356,8 @@ def summary():
             'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
+            'star_student_total': star_student_total,
+            'star_classroom_total': star_classroom_total,
             'attendance_summary': attendance_summary,
             'attendance_by_day_of_week': attendance_by_day,
         }
@@ -10495,6 +10521,8 @@ def summary():
             'week_start': most_recent_monday.isoformat(),
             'week_end': most_recent_sunday.isoformat(),
             'starbucks_total': starbucks_total,
+            'star_student_total': star_student_total,
+            'star_classroom_total': star_classroom_total,
             'attendance_summary': attendance_summary_cur,
             'attendance_by_day_of_week': attendance_by_day_cur,
         }
@@ -10568,6 +10596,8 @@ def summary():
             'available_data_points': available_data_points,
             'has_full_30_days': available_data_points >= 30,
             'starbucks_total': starbucks_total,
+            'star_student_total': star_student_total,
+            'star_classroom_total': star_classroom_total,
             'attendance_summary': attendance_summary_cur,
             'attendance_by_day_of_week': attendance_by_day_cur,
         }
@@ -10795,6 +10825,8 @@ def summary():
             'frenzy_cell_details_by_time_by_day': stats.get('frenzy_cell_details_by_time_by_day', {}),
             'infractions_by_type': stats.get('infractions_by_type', {}),
             'starbucks_total': starbucks_total,
+            'star_student_total': star_student_total,
+            'star_classroom_total': star_classroom_total,
             'attendance_summary': attendance_summary_all,
             'attendance_by_day_of_week': attendance_by_day_all,
         }
@@ -17514,14 +17546,31 @@ def count_pay_period_attendance(student_id, start_date, end_date):
     }
 
 
-def _starbucks_count_for_student(student_id):
-    balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
-    if not balance:
-        return 0
+def _safe_bonus_int(value):
     try:
-        return int(balance.count or 0)
+        return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _bonus_counts_for_student(student_id):
+    """Running Starbucks / Star Student / Star Classroom counts for paycheck math."""
+    balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
+    if not balance:
+        return {
+            'starbucks_count': 0,
+            'star_student_count': 0,
+            'star_classroom_count': 0,
+        }
+    return {
+        'starbucks_count': _safe_bonus_int(balance.count),
+        'star_student_count': _safe_bonus_int(getattr(balance, 'star_student_count', 0)),
+        'star_classroom_count': _safe_bonus_int(getattr(balance, 'star_classroom_count', 0)),
+    }
+
+
+def _starbucks_count_for_student(student_id):
+    return _bonus_counts_for_student(student_id)['starbucks_count']
 
 
 def _compute_stub_for_student(student, start_date, end_date, star_percent=None, citation_count=None):
@@ -17531,14 +17580,15 @@ def _compute_stub_for_student(student, start_date, end_date, star_percent=None, 
         star_percent = calculate_weekly_star_percent(student.id, start_date, end_date)
     if citation_count is None:
         citation_count = count_weekly_infractions(student.id, start_date, end_date)
+    bonuses = _bonus_counts_for_student(student.id)
     computed = eco.compute_stub_paycheck(
         daily_rate=eco.daily_rate_for_color(getattr(student, 'card_color', None)),
         days_worked=days_info['days_worked'],
         excused_days=days_info['excused'],
         star_percent=star_percent,
-        starbucks_count=_starbucks_count_for_student(student.id),
-        star_student_count=0,
-        star_classroom_count=0,
+        starbucks_count=bonuses['starbucks_count'],
+        star_student_count=bonuses['star_student_count'],
+        star_classroom_count=bonuses['star_classroom_count'],
         citation_count=citation_count,
     )
     computed['avg_pct'] = star_percent
@@ -17754,11 +17804,27 @@ def serialize_paycheck_payload(p, include_student_calcs=False):
 
 
 def get_or_create_starbucks_balance(student_id):
-    """Get or create the Starbucks balance record for a student"""
+    """Get or create the bonus-count record (Starbucks + Star awards) for a student."""
     balance = StarbucksBalance.query.filter_by(student_id=student_id).first()
     if not balance:
-        balance = StarbucksBalance(student_id=student_id, count=0)
+        balance = StarbucksBalance(
+            student_id=student_id,
+            count=0,
+            star_student_count=0,
+            star_classroom_count=0,
+        )
         db.session.add(balance)
+        db.session.commit()
+        return balance
+    # Backfill NULLs on older rows before the Star columns existed.
+    dirty = False
+    if getattr(balance, 'star_student_count', None) is None:
+        balance.star_student_count = 0
+        dirty = True
+    if getattr(balance, 'star_classroom_count', None) is None:
+        balance.star_classroom_count = 0
+        dirty = True
+    if dirty:
         db.session.commit()
     return balance
 
@@ -17780,12 +17846,14 @@ def get_bank_account(student_id):
         return jsonify({'error': 'Access denied'}), 403
     
     account = get_or_create_bank_account(student_id)
-    starbucks_balance = get_or_create_starbucks_balance(student_id)
+    bonus_balance = get_or_create_starbucks_balance(student_id)
     transactions = Transaction.query.filter_by(student_id=student_id).order_by(Transaction.created_at.desc()).limit(50).all()
     
     return jsonify({
         'balance': float(account.balance),
-        'starbucks_total': int(starbucks_balance.count or 0),
+        'starbucks_total': _safe_bonus_int(bonus_balance.count),
+        'star_student_total': _safe_bonus_int(getattr(bonus_balance, 'star_student_count', 0)),
+        'star_classroom_total': _safe_bonus_int(getattr(bonus_balance, 'star_classroom_count', 0)),
         'transactions': [{
             'id': t.id,
             'type': t.transaction_type,
@@ -20333,7 +20401,8 @@ def search_bank_accounts():
 @staff_required
 def list_starbucks_balances():
     """
-    List Starbucks balances for students, using similar access rules to /api/bank-account/search.
+    List bonus balances (Starbucks, Star Student, Star Classroom) for students,
+    using similar access rules to /api/bank-account/search.
     Supports:
       - ?q=... (search by student name or staff/case manager name)
       - ?managed_by_me=true (restrict to students managed by the current user)
@@ -20413,15 +20482,20 @@ def list_starbucks_balances():
     student_user_ids = {u.student_id for u in student_users if u.student_id}
     students = [s for s in students if s.id in student_user_ids]
 
-    # Attach Starbucks balances
+    # Attach bonus balances
     result = []
     for student in students:
         balance = StarbucksBalance.query.filter_by(student_id=student.id).first()
-        count = int(balance.count) if balance and balance.count is not None else 0
         result.append({
             'student_id': student.id,
             'student_name': student.name,
-            'starbucks_count': count,
+            'starbucks_count': _safe_bonus_int(balance.count if balance else 0),
+            'star_student_count': _safe_bonus_int(
+                getattr(balance, 'star_student_count', 0) if balance else 0
+            ),
+            'star_classroom_count': _safe_bonus_int(
+                getattr(balance, 'star_classroom_count', 0) if balance else 0
+            ),
         })
 
     return jsonify(result)
@@ -20432,12 +20506,17 @@ def list_starbucks_balances():
 @staff_required
 def update_starbucks_balances_bulk():
     """
-    Bulk update Starbucks balances.
+    Bulk update Starbucks / Star Student / Star Classroom balances.
 
     Expects JSON body:
     {
       "rows": [
-        {"student_id": 1, "count": 5},
+        {
+          "student_id": 1,
+          "count": 5,
+          "star_student_count": 1,
+          "star_classroom_count": 0
+        },
         ...
       ]
     }
@@ -20457,16 +20536,12 @@ def update_starbucks_balances_bulk():
             if student_id <= 0:
                 continue
 
-            count_value = row.get('count', 0)
-            try:
-                count_int = int(count_value)
-            except (TypeError, ValueError):
-                count_int = 0
-            if count_int < 0:
-                count_int = 0
-
             balance = get_or_create_starbucks_balance(student_id)
-            balance.count = count_int
+            balance.count = _safe_bonus_int(row.get('count', 0))
+            if 'star_student_count' in row:
+                balance.star_student_count = _safe_bonus_int(row.get('star_student_count'))
+            if 'star_classroom_count' in row:
+                balance.star_classroom_count = _safe_bonus_int(row.get('star_classroom_count'))
 
         db.session.commit()
     except Exception as e:

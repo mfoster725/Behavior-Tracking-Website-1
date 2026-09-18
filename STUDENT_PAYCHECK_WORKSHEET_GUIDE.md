@@ -101,17 +101,19 @@ Click the **Submit** button.
 **Days paid: 3 (none excused)**  
 **Daily rate: $80.00**  
 **Starbucks count: 2**  
+**Star Student count: 1**  
+**Star Classroom count: 0**  
 **Point card percent: 90%**
 
 1. Regular hours: 3 × $80.00 = $240.00
 2. Starbucks: 2 × $2.00 = $4.00
-3. Star Student / Star Classroom: $0.00
-4. GROSS PAY: $240.00 + $4.00 + $0.00 + $0.00 = $244.00
-5. Point Card Loss: 100 − 90 = 10%. Amount: 0.10 × $244.00 = $24.40
-6. Citations count: count the list above and enter that number in Rate. Amount: count × $2.00.
-7. Federal 3%: $7.32 · Social Security 6.2%: $15.13 · Medicare 1.5%: $3.66 · State 3%: $7.32
-8. TOTAL DEDUCTIONS: $61.83
-9. Take-home: $244.00 − $61.83 = $182.17
+3. Star Student: 1 × $50.00 = $50.00
+4. Star Classroom: 0 × $50.00 = $0.00
+5. GROSS PAY: $240.00 + $4.00 + $50.00 + $0.00 = $294.00
+6. Point Card Loss: 100 − 90 = 10%. Amount: 0.10 × $294.00 = $29.40
+7. Federal 3%: $8.82 · Social Security 6.2%: $18.23 · Medicare 1.5%: $4.41 · State 3%: $8.82
+8. TOTAL DEDUCTIONS: $69.68
+9. Take-home: $294.00 − $69.68 = $224.32
 
 Your worksheet uses your days, rate, bonuses, and percent — not this example.
 

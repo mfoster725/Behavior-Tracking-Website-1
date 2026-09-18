@@ -857,11 +857,11 @@
             <div class="form-section accounts-ui">
                 <div id="bank-account-layout">
                 {% if user.role in ['staff', 'admin'] %}
-                <!-- Starbucks Management (staff/admin only) -->
+                <!-- Bonus counts management (staff/admin only) -->
                 <div id="starbucks-section">
-                    <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Starbucks</h3>
+                    <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Bonuses</h3>
                     <p class="starbucks-lede">
-                        Track the number of Starbucks each student has earned. Use the search options below to find students, then edit counts directly in the table.
+                        Track Starbucks ($2), Star Student ($50), and Star Classroom ($50) counts. These running totals appear on each student’s weekly earnings record. Search to load students, then edit counts in the table.
                     </p>
 
                     <div class="dashboard-controls" style="margin-bottom: 12px;">
@@ -889,19 +889,21 @@
                                 <tr style="background: var(--bg-elevated);">
                                     <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Student Name</th>
                                     <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Starbucks</th>
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Star Student</th>
+                                    <th style="padding: 10px 12px; border: 1px solid var(--border); text-align: left; font-weight: 600;">Star Classroom</th>
                                 </tr>
                             </thead>
                             <tbody id="starbucks-table-body">
                                 <tr>
-                                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
+                                    <td colspan="4" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
                                         Use the search controls above to load students.
                                     </td>
                                 </tr>
                             </tbody>
                         </table>
                         <div style="margin-top: 10px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap;">
-                            <button type="button" id="starbucks-submit-btn" class="btn-primary" title="Save all Starbucks changes">
-                                Submit Starbucks Table
+                            <button type="button" id="starbucks-submit-btn" class="btn-primary" title="Save all bonus count changes">
+                                Submit Bonuses Table
                             </button>
                         </div>
                     </div>
@@ -2825,7 +2827,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=info-suggest1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=star-bonuses1"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

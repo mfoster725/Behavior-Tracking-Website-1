@@ -13054,7 +13054,7 @@ tr[data-aggregate-day-label] {
         flex: 0 0 auto;
         order: 2;
         width: min-content;
-        max-width: 42%;
+        max-width: 52%;
         margin: 0;
         padding: 0 24px 0 28px;
         border-left: 1px solid var(--border);
@@ -13120,8 +13120,12 @@ tr[data-aggregate-day-label] {
 }
 
 #starbucks-table th:nth-child(2),
-#starbucks-table td:nth-child(2) {
-    /* Let this column auto-size just enough for its text on one line */
+#starbucks-table td:nth-child(2),
+#starbucks-table th:nth-child(3),
+#starbucks-table td:nth-child(3),
+#starbucks-table th:nth-child(4),
+#starbucks-table td:nth-child(4) {
+    /* Count columns: keep inputs readable without stretching the layout */
     white-space: nowrap;
 }
 

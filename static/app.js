@@ -1712,9 +1712,9 @@ function applyAttendanceStarCellState(studentId) {
 let pendingStarNavContext = null; // { select, studentId, period, studentName, hideAdditionalInfo, skipZeroWarning }
 let starNavKeydownBound = false;
 let starZeroWarningKeydownBound = false;
-// Starbucks management state (Bank Account tab)
-let starbucksRows = []; // [{ student_id, student_name, starbucks_count }]
-let starbucksAutosaveTimer = null; // Debounce timer for Starbucks table autosave
+# Starbucks / Star bonus management state (Bank Account tab)
+let starbucksRows = []; // [{ student_id, student_name, starbucks_count, star_student_count, star_classroom_count }]
+let starbucksAutosaveTimer = null; // Debounce timer for bonuses table autosave
 let filteredDailyStudents = []; // Filtered list of students for daily entry display
 let currentPdfType = null; // 'summary' or 'frenzy' - for PDF generation modal
 let dailyLoadDebounceTimer = null;
@@ -9469,6 +9469,12 @@ async function loadSummary() {
             const starbucksTotal = typeof data.starbucks_total === 'number'
                 ? data.starbucks_total
                 : (data.starbucks_total ? Number(data.starbucks_total) || 0 : 0);
+            const starStudentTotal = typeof data.star_student_total === 'number'
+                ? data.star_student_total
+                : (data.star_student_total ? Number(data.star_student_total) || 0 : 0);
+            const starClassroomTotal = typeof data.star_classroom_total === 'number'
+                ? data.star_classroom_total
+                : (data.star_classroom_total ? Number(data.star_classroom_total) || 0 : 0);
 
             container.innerHTML = `
                 <div class="summary-card">
@@ -9482,6 +9488,14 @@ async function loadSummary() {
                         <div style="flex: 0 0 auto; min-width: 160px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: #fef3c7;">
                             <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #92400e; margin-bottom: 4px;">Starbucks Received</div>
                             <div style="font-size: 20px; font-weight: 600; color: #92400e;">${starbucksTotal}</div>
+                        </div>
+                        <div style="flex: 0 0 auto; min-width: 160px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: #eff6ff;">
+                            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #1e40af; margin-bottom: 4px;">Star Student</div>
+                            <div style="font-size: 20px; font-weight: 600; color: #1e40af;">${starStudentTotal}</div>
+                        </div>
+                        <div style="flex: 0 0 auto; min-width: 160px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: #f0fdf4;">
+                            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #166534; margin-bottom: 4px;">Star Classroom</div>
+                            <div style="font-size: 20px; font-weight: 600; color: #166534;">${starClassroomTotal}</div>
                         </div>
                     </div>
 
@@ -15440,7 +15454,7 @@ function showInfoViewPopup(infoDataString, time, location) {
     });
 }
 
-// Starbucks management (Bank Account tab, staff/admin)
+// Bonus counts management (Bank Account tab, staff/admin)
 function initStarbucksManagement() {
     const studentSearchInput = document.getElementById('starbucks-student-search');
     const staffSearchInput = document.getElementById('starbucks-staff-search');
@@ -15456,6 +15470,21 @@ function initStarbucksManagement() {
     if (studentSearchInput && studentSearchInput._starbucksBound) return;
     if (studentSearchInput) studentSearchInput._starbucksBound = true;
 
+    function bonusCountValue(row, key) {
+        const raw = row && row[key];
+        return typeof raw === 'number' ? raw : (raw ? Number(raw) || 0 : 0);
+    }
+
+    function loadingRow(message, isError) {
+        return `
+                <tr>
+                    <td colspan="4" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: ${isError ? '#dc2626' : '#94a3b8'};">
+                        ${message}
+                    </td>
+                </tr>
+            `;
+    }
+
     async function loadStarbucksData() {
         const studentQuery = studentSearchInput ? studentSearchInput.value.trim() : '';
         const staffQuery = staffSearchInput ? staffSearchInput.value.trim() : '';
@@ -15468,33 +15497,27 @@ function initStarbucksManagement() {
 
         const container = document.getElementById('starbucks-table-body');
         if (container) {
-            container.innerHTML = `
-                <tr>
-                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
-                        Loading Starbucks data...
-                    </td>
-                </tr>
-            `;
+            container.innerHTML = loadingRow('Loading bonus counts...');
         }
 
         try {
             const response = await fetch('/api/starbucks?' + params.toString());
             if (!response.ok) {
-                throw new Error('Failed to load Starbucks data');
+                throw new Error('Failed to load bonus counts');
             }
             const data = await response.json();
-            starbucksRows = Array.isArray(data) ? data : [];
+            starbucksRows = (Array.isArray(data) ? data : []).map((row) => ({
+                student_id: row.student_id,
+                student_name: row.student_name,
+                starbucks_count: bonusCountValue(row, 'starbucks_count'),
+                star_student_count: bonusCountValue(row, 'star_student_count'),
+                star_classroom_count: bonusCountValue(row, 'star_classroom_count'),
+            }));
             renderStarbucksTable();
         } catch (err) {
-            console.error('Error loading Starbucks data:', err);
+            console.error('Error loading bonus counts:', err);
             if (container) {
-                container.innerHTML = `
-                    <tr>
-                        <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #dc2626;">
-                            Error loading Starbucks data. Please try again.
-                        </td>
-                    </tr>
-                `;
+                container.innerHTML = loadingRow('Error loading bonus counts. Please try again.', true);
             }
         }
     }
@@ -15527,7 +15550,7 @@ function initStarbucksManagement() {
                             list = getSearchableStaffMembers();
                         }
                     } catch (e) {
-                        console.error('Error loading data for Starbucks search:', e);
+                        console.error('Error loading data for bonuses search:', e);
                     }
                 }
 
@@ -15580,7 +15603,6 @@ function initStarbucksManagement() {
                 studentSearchInput.value = '';
             }
 
-            // When a Starbucks search is committed, clear "managed by me" so it does not persist across searches.
             if (managedByMeCheckbox && managedByMeCheckbox.checked) {
                 managedByMeCheckbox.checked = false;
             }
@@ -15613,7 +15635,6 @@ function initStarbucksManagement() {
                 } else if (type === 'staff' && studentSearchInput) {
                     studentSearchInput.value = '';
                 }
-                // When a Starbucks search is committed via Enter, clear "managed by me" so it does not persist across searches.
                 if (managedByMeCheckbox && managedByMeCheckbox.checked) {
                     managedByMeCheckbox.checked = false;
                 }
@@ -15622,29 +15643,41 @@ function initStarbucksManagement() {
         });
     }
 
+    function bindBonusCountInput(input, row, field) {
+        input.type = 'text';
+        input.inputMode = 'numeric';
+        input.value = bonusCountValue(row, field);
+        input.dataset.studentId = row.student_id;
+        input.dataset.bonusField = field;
+        input.className = 'starbucks-count-input';
+        input.style.width = '7ch';
+        input.style.padding = '6px 8px';
+        input.addEventListener('input', () => {
+            const val = parseInt(input.value, 10);
+            const safeVal = isNaN(val) || val < 0 ? 0 : val;
+            input.value = safeVal;
+            const idx = starbucksRows.findIndex(r => r.student_id === row.student_id);
+            if (idx !== -1) {
+                starbucksRows[idx][field] = safeVal;
+            }
+            scheduleStarbucksAutosave();
+        });
+        return input;
+    }
+
     function renderStarbucksTable() {
         const tbody = document.getElementById('starbucks-table-body');
         if (!tbody) return;
 
         if (!starbucksRows || starbucksRows.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="2" style="padding: 12px; border: 1px solid var(--border); text-align: center; color: #94a3b8;">
-                        No students found for the current filters.
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = loadingRow('No students found for the current filters.');
             return;
         }
 
         tbody.innerHTML = '';
         const sortedRows = [...starbucksRows].sort((a, b) => {
-            const aVal = typeof a.starbucks_count === 'number'
-                ? a.starbucks_count
-                : (a.starbucks_count ? Number(a.starbucks_count) || 0 : 0);
-            const bVal = typeof b.starbucks_count === 'number'
-                ? b.starbucks_count
-                : (b.starbucks_count ? Number(b.starbucks_count) || 0 : 0);
+            const aVal = bonusCountValue(a, 'starbucks_count');
+            const bVal = bonusCountValue(b, 'starbucks_count');
             if (bVal !== aVal) return bVal - aVal;
             const aName = (a.student_name || '').toLowerCase();
             const bName = (b.student_name || '').toLowerCase();
@@ -15660,36 +15693,15 @@ function initStarbucksManagement() {
             nameTd.style.border = '1px solid var(--border)';
             nameTd.style.whiteSpace = 'nowrap';
             nameTd.textContent = row.student_name || '';
-
-            const countTd = document.createElement('td');
-            countTd.style.padding = '10px 12px';
-            countTd.style.border = '1px solid var(--border)';
-
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.inputMode = 'numeric';
-            input.value = typeof row.starbucks_count === 'number'
-                ? row.starbucks_count
-                : (row.starbucks_count ? Number(row.starbucks_count) || 0 : 0);
-            input.dataset.studentId = row.student_id;
-            input.className = 'starbucks-count-input';
-            input.style.width = '7ch';
-            input.style.padding = '6px 8px';
-
-            input.addEventListener('input', () => {
-                const val = parseInt(input.value, 10);
-                const safeVal = isNaN(val) || val < 0 ? 0 : val;
-                input.value = safeVal;
-                const idx = starbucksRows.findIndex(r => r.student_id === row.student_id);
-                if (idx !== -1) {
-                    starbucksRows[idx].starbucks_count = safeVal;
-                }
-                scheduleStarbucksAutosave();
-            });
-
-            countTd.appendChild(input);
             tr.appendChild(nameTd);
-            tr.appendChild(countTd);
+
+            ['starbucks_count', 'star_student_count', 'star_classroom_count'].forEach((field) => {
+                const countTd = document.createElement('td');
+                countTd.style.padding = '10px 12px';
+                countTd.style.border = '1px solid var(--border)';
+                countTd.appendChild(bindBonusCountInput(document.createElement('input'), row, field));
+                tr.appendChild(countTd);
+            });
             tbody.appendChild(tr);
         });
     }
@@ -15719,14 +15731,14 @@ function initStarbucksManagement() {
         const { silent = false } = options;
         const rowsPayload = (starbucksRows || []).map((row) => ({
             student_id: row.student_id,
-            count: typeof row.starbucks_count === 'number'
-                ? row.starbucks_count
-                : (row.starbucks_count ? Number(row.starbucks_count) || 0 : 0),
+            count: bonusCountValue(row, 'starbucks_count'),
+            star_student_count: bonusCountValue(row, 'star_student_count'),
+            star_classroom_count: bonusCountValue(row, 'star_classroom_count'),
         }));
 
         if (!rowsPayload.length) {
             if (!silent) {
-                updateStarbucksSaveStatus('No Starbucks data to save');
+                updateStarbucksSaveStatus('No bonus data to save');
             } else {
                 updateStarbucksSaveStatus('');
             }
@@ -15740,7 +15752,7 @@ function initStarbucksManagement() {
                 body: JSON.stringify({ rows: rowsPayload }),
             });
             if (!response.ok) {
-                throw new Error('Failed to save Starbucks data');
+                throw new Error('Failed to save bonus counts');
             }
             if (!silent) {
                 if (studentSearchInput) {
@@ -15753,7 +15765,7 @@ function initStarbucksManagement() {
             }
             updateStarbucksSaveStatus('All changes saved');
         } catch (err) {
-            console.error('Error saving Starbucks data:', err);
+            console.error('Error saving bonus counts:', err);
             updateStarbucksSaveStatus('Save failed');
         }
     }
@@ -15784,7 +15796,6 @@ function initStarbucksManagement() {
     if (managedByMeCheckbox && !managedByMeCheckbox._starbucksManagedBound) {
         managedByMeCheckbox._starbucksManagedBound = true;
         managedByMeCheckbox.addEventListener('change', () => {
-            // Checking "managed by me" clears any selected staff/student search.
             if (managedByMeCheckbox.checked) {
                 if (studentSearchInput) studentSearchInput.value = '';
                 if (staffSearchInput) staffSearchInput.value = '';
