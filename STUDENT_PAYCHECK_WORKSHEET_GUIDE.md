@@ -24,7 +24,7 @@ Each week you earn pay based on days you were present or excused, your card-colo
 ## Understanding Your Pay
 
 **Regular hours** = paid days × your daily rate  
-Paid days are days marked **present** or **excused**. Unexcused or missing days do not count. Your daily rate depends on card color (yellow $74.16, green $129.16, blue $162.76).
+Paid days are days marked **present** or **excused** in the Monday–Friday pay period. Unexcused or missing days do not count. Your daily rate depends on card color (yellow $74.16, green $129.16, blue $162.76). Every student must have a yellow, green, or blue card — missing or white is not allowed.
 
 **Bonuses**
 

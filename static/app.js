@@ -8769,6 +8769,11 @@ async function saveStudent() {
         return;
     }
 
+    if (!cardColor || !['yellow', 'green', 'blue'].includes(cardColor)) {
+        alert('Please select a card color (yellow, green, or blue)');
+        return;
+    }
+
     if (!password || password.length < 6) {
         alert('Password must be at least 6 characters long');
         return;
@@ -8787,7 +8792,7 @@ async function saveStudent() {
                 name: name.trim(),
                 lunch_number: lunchNumber.trim(),
                 grade: grade,
-                card_color: cardColor || null,
+                card_color: cardColor,
                 username: username.trim(),
                 password: password,
                 case_manager: caseManager,
@@ -20097,7 +20102,11 @@ async function saveEditUser() {
     
     // Include card_color for student users
     if (systemRole === 'student') {
-        updateData.card_color = cardColor || null;
+        if (!cardColor || !['yellow', 'green', 'blue'].includes(cardColor)) {
+            alert('Please select a card color (yellow, green, or blue)');
+            return;
+        }
+        updateData.card_color = cardColor;
         updateData.pay_track = payTrack || 'simple';
     }
     
@@ -27230,6 +27239,10 @@ async function openWorksheetForPaycheck(paycheckId) {
         const response = await fetch(`/api/paycheck/${paycheckId}`);
         if (!response.ok) return;
         const paycheck = await response.json();
+        if (paycheck.card_color_error) {
+            alert(paycheck.card_color_error);
+            return;
+        }
         renderPaycheckWorksheet(paycheck);
         closePaychecksModal();
     } catch (error) {

@@ -20,8 +20,12 @@ def main():
     target = sys.argv[1] if len(sys.argv) > 1 else None
     with app.app_context():
         try:
-            count, start, end = run_paycheck_generation(target)
+            count, start, end, card_color_errors = run_paycheck_generation(target)
             print(f"OK: Generated {count} paychecks for {start} to {end}")
+            if card_color_errors:
+                print("Card color errors:")
+                for err in card_color_errors:
+                    print(f"  - {err}")
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)

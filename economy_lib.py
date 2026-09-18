@@ -18,12 +18,12 @@ DEFAULT_LATE_FEE_PER_DAY = Decimal('20')
 DEFAULT_PAY_TRACK = 'simple'
 
 # Weekly earnings record (classroom paystub worksheet)
+VALID_POINT_CARD_COLORS = frozenset({'yellow', 'green', 'blue'})
 STUB_DAILY_RATES = {
     'yellow': Decimal('74.16'),
     'green': Decimal('129.16'),
     'blue': Decimal('162.76'),
 }
-STUB_DEFAULT_DAILY_RATE = STUB_DAILY_RATES['blue']  # white or missing color
 STARBUCKS_BONUS_RATE = Decimal('2.00')
 STAR_STUDENT_BONUS_RATE = Decimal('50.00')
 STAR_CLASSROOM_BONUS_RATE = Decimal('50.00')
@@ -33,6 +33,25 @@ STUB_MEDICARE_RATE = Decimal('0.015')
 STUB_STATE_RATE = Decimal('0.0535')  # Minnesota flat classroom rate
 MONEY_TOLERANCE = Decimal('0.01')
 PERCENT_RATE_TOLERANCE = Decimal('0.0005')
+
+
+class MissingCardColorError(ValueError):
+    """Student must have a yellow, green, or blue point card color."""
+
+
+def require_point_card_color(card_color, student_label=None):
+    """Return normalized yellow/green/blue, or raise MissingCardColorError."""
+    key = (card_color or '').strip().lower()
+    if key in VALID_POINT_CARD_COLORS:
+        return key
+    who = f' for {student_label}' if student_label else ''
+    if not key or key == 'white':
+        raise MissingCardColorError(
+            f'Student must have a card color (yellow, green, or blue){who}.'
+        )
+    raise MissingCardColorError(
+        f'Invalid card color "{card_color}"{who}; must be yellow, green, or blue.'
+    )
 
 
 def money(value):
@@ -86,11 +105,9 @@ def percent_rates_close(entered, expected_percent, tolerance=PERCENT_RATE_TOLERA
     return abs(parsed - expected_frac) <= tolerance
 
 
-def daily_rate_for_color(card_color):
-    key = (card_color or '').strip().lower()
-    if key in STUB_DAILY_RATES:
-        return money(STUB_DAILY_RATES[key])
-    return money(STUB_DEFAULT_DAILY_RATE)
+def daily_rate_for_color(card_color, student_label=None):
+    key = require_point_card_color(card_color, student_label=student_label)
+    return money(STUB_DAILY_RATES[key])
 
 
 def point_card_gap_percent(star_percent):
@@ -545,7 +562,8 @@ def location_contains(haystack, needle):
 
 
 def card_color_key(student):
-    return (getattr(student, 'card_color', None) or 'yellow').strip().lower() or 'yellow'
+    label = getattr(student, 'name', None) or getattr(student, 'id', None)
+    return require_point_card_color(getattr(student, 'card_color', None), student_label=label)
 
 
 def student_pay_track(student, school_default=DEFAULT_PAY_TRACK):

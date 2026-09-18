@@ -13118,7 +13118,8 @@ def _apply_student_import_updates(
     if not _import_str_eq(student.grade, grade):
         student.grade = grade or None
         changed = True
-    desired_color = card_color or None
+    import economy_lib as eco
+    desired_color = eco.require_point_card_color(card_color, student_label=initials or lunch_number)
     if not _import_str_eq(student.card_color, desired_color):
         student.card_color = desired_color
         changed = True
@@ -13569,12 +13570,23 @@ def _run_user_import(rows, import_type, send_login_emails=True, dry_run=False):
                         )
                     continue
 
+                try:
+                    import economy_lib as eco
+                    imported_card_color = eco.require_point_card_color(
+                        card_color, student_label=initials or lunch_number
+                    )
+                except Exception as color_err:
+                    import economy_lib as eco
+                    if isinstance(color_err, eco.MissingCardColorError):
+                        errors.append(f'Row {idx} ({initials or lunch_number}): {color_err}')
+                        continue
+                    raise
                 username = _unique_import_username(initials.lower(), used_usernames)
                 password = f"{initials.upper()}{lunch_number}"
                 student = Student(
                     name=initials,
                     grade=grade or None,
-                    card_color=card_color or None,
+                    card_color=imported_card_color,
                     lunch_number=lunch_number,
                     directory_info_opt_out=False,
                     email=_normalize_import_email(student_email) or None,
@@ -17611,7 +17623,10 @@ def _compute_stub_for_student(student, start_date, end_date, star_percent=None, 
         citation_count = count_weekly_infractions(student.id, start_date, end_date)
     bonuses = _bonus_counts_for_student(student.id)
     computed = eco.compute_stub_paycheck(
-        daily_rate=eco.daily_rate_for_color(getattr(student, 'card_color', None)),
+        daily_rate=eco.daily_rate_for_color(
+            getattr(student, 'card_color', None),
+            student_label=getattr(student, 'name', None) or getattr(student, 'id', None),
+        ),
         days_worked=days_info['days_worked'],
         excused_days=days_info['excused'],
         star_percent=star_percent,
@@ -17681,13 +17696,26 @@ def live_paycheck_amounts(paycheck):
             'citation_deduction': Decimal('0'),
         }
     if not paycheck.is_verified and paycheck.deposited_at is None:
-        computed = _compute_stub_for_student(
-            student,
-            paycheck.pay_period_start,
-            paycheck.pay_period_end,
-            star_percent=live_avg,
-            citation_count=len(citation_list),
-        )
+        try:
+            computed = _compute_stub_for_student(
+                student,
+                paycheck.pay_period_start,
+                paycheck.pay_period_end,
+                star_percent=live_avg,
+                citation_count=len(citation_list),
+            )
+        except eco.MissingCardColorError as err:
+            return {
+                'track': track,
+                'avg_pct': live_avg or Decimal('0'),
+                'live_avg': live_avg,
+                'citation_list': citation_list,
+                'base_pay': Decimal('0'),
+                'final_pay': Decimal('0'),
+                'citation_count': len(citation_list),
+                'citation_deduction': Decimal('0'),
+                'card_color_error': str(err),
+            }
         return {
             'track': track,
             'avg_pct': live_avg,
@@ -17816,6 +17844,7 @@ def serialize_paycheck_payload(p, include_student_calcs=False):
         'medicare_tax': _money_float(live.get('medicare_tax')),
         'federal_tax': _money_float(live.get('federal_tax')),
         'standard_deduction': float(eco.STANDARD_DEDUCTION_2026),
+        'card_color_error': live.get('card_color_error'),
     }
     if include_student_calcs:
         payload.update({
@@ -18040,8 +18069,9 @@ def run_paycheck_generation(target_date=None):
                  the **previous week** (Monday of the week before the current week).
 
     Returns:
-        tuple: (generated_count, pay_period_start, pay_period_end)
+        tuple: (generated_count, pay_period_start, pay_period_end, card_color_errors)
     """
+    import economy_lib as eco
     seed_curriculum_lessons(commit=False)
     if target_date is not None:
         if isinstance(target_date, str):
@@ -18058,6 +18088,7 @@ def run_paycheck_generation(target_date=None):
     pay_period_end = target_date + timedelta(days=4)
 
     generated_count = 0
+    card_color_errors = []
 
     # Only process students who have active user accounts (User Management tab).
     student_users = User.query.filter_by(role='student').all()
@@ -18077,7 +18108,11 @@ def run_paycheck_generation(target_date=None):
         student = Student.query.get(paycheck.student_id)
         avg_star_percent = calculate_weekly_star_percent(paycheck.student_id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(paycheck.student_id, pay_period_start, pay_period_end)
-        fill_paycheck_amounts(paycheck, student, avg_star_percent, citation_count)
+        try:
+            fill_paycheck_amounts(paycheck, student, avg_star_percent, citation_count)
+        except eco.MissingCardColorError as err:
+            card_color_errors.append(str(err))
+            continue
         generated_count += 1
         ensure_paycheck_curriculum_assignment(paycheck, notify=False)
 
@@ -18095,6 +18130,12 @@ def run_paycheck_generation(target_date=None):
             continue  # Already updated in step 1 if not deposited; if deposited, leave as-is
         avg_star_percent = calculate_weekly_star_percent(student.id, pay_period_start, pay_period_end)
         citation_count = count_weekly_infractions(student.id, pay_period_start, pay_period_end)
+        try:
+            # Validate card color before creating the paycheck row.
+            eco.require_point_card_color(getattr(student, 'card_color', None), student_label=student.name)
+        except eco.MissingCardColorError as err:
+            card_color_errors.append(str(err))
+            continue
         paycheck = Paycheck(
             student_id=student.id,
             pay_period_start=pay_period_start,
@@ -18113,7 +18154,7 @@ def run_paycheck_generation(target_date=None):
         generated_count += 1
 
     db.session.commit()
-    return (generated_count, pay_period_start, pay_period_end)
+    return (generated_count, pay_period_start, pay_period_end, card_color_errors)
 
 
 @app.route('/api/paycheck/generate', methods=['POST'])
@@ -18124,7 +18165,7 @@ def generate_paychecks():
     data = request.get_json(silent=True) or {}
     target_date = data.get('date')
     try:
-        count, start, end = run_paycheck_generation(target_date)
+        count, start, end, card_color_errors = run_paycheck_generation(target_date)
         economy = {}
         try:
             if hasattr(app, 'run_economy_maintenance'):
@@ -18133,11 +18174,15 @@ def generate_paychecks():
         except Exception as eco_err:
             app.logger.exception('economy maintenance during manual paycheck generate failed: %s', eco_err)
             economy = {'error': str(eco_err)}
+        message = f'Generated {count} paychecks'
+        if card_color_errors:
+            message += f'; skipped {len(card_color_errors)} student(s) missing card color'
         return jsonify({
-            'message': f'Generated {count} paychecks',
+            'message': message,
             'count': count,
             'pay_period_start': start.isoformat(),
             'pay_period_end': end.isoformat(),
+            'card_color_errors': card_color_errors,
             'economy': economy,
         })
     except Exception as e:
@@ -18184,7 +18229,7 @@ def generate_paychecks_cron():
     elif request.method == 'GET':
         target_date = request.args.get('date')
     try:
-        count, start, end = run_paycheck_generation(target_date)
+        count, start, end, card_color_errors = run_paycheck_generation(target_date)
         economy = {}
         try:
             if hasattr(app, 'run_economy_maintenance'):
@@ -18193,11 +18238,16 @@ def generate_paychecks_cron():
         except Exception as eco_err:
             app.logger.exception('economy maintenance during paycheck cron failed: %s', eco_err)
             economy = {'error': str(eco_err)}
+        message = f'Generated {count} paychecks'
+        if card_color_errors:
+            message += f'; skipped {len(card_color_errors)} student(s) missing card color'
+            app.logger.error('paycheck cron card color errors: %s', card_color_errors)
         return jsonify({
-            'message': f'Generated {count} paychecks',
+            'message': message,
             'count': count,
             'pay_period_start': start.isoformat(),
             'pay_period_end': end.isoformat(),
+            'card_color_errors': card_color_errors,
             'economy': economy,
         })
     except Exception as e:
@@ -20716,8 +20766,7 @@ def _normalize_card_color(card_color):
     color = (card_color or '').strip().lower()
     if color in ('yellow', 'green', 'blue'):
         return color
-    # Unset card color is treated as Yellow Card (school starting level).
-    return 'yellow'
+    return None
 
 
 def _daily_star_overall_percent_from_totals(
@@ -21069,7 +21118,7 @@ def _compute_level_up_progress(daily_pcts_newest_first):
 
 def _build_level_up_entry(student, daily_pcts):
     color = _normalize_card_color(getattr(student, 'card_color', None))
-    if color == 'blue':
+    if color is None or color == 'blue':
         return None
 
     reset_at = getattr(student, 'card_level_reset_at', None)
@@ -21140,7 +21189,7 @@ def level_ups():
         for u in User.query.filter(User.role == 'student', User.student_id.in_(selected_ids)).all()
         if u.student_id
     }
-    students = [s for s in students if s.id in active_student_ids and _normalize_card_color(s.card_color) != 'blue']
+    students = [s for s in students if s.id in active_student_ids and _normalize_card_color(s.card_color) in ('yellow', 'green')]
     if not students:
         return jsonify({
             'yellow_to_green': [],
@@ -21216,6 +21265,8 @@ def level_up_student(student_id):
         return jsonify({'error': 'Student not found'}), 404
 
     color = _normalize_card_color(student.card_color)
+    if color is None:
+        return jsonify({'error': 'Student must have a card color (yellow, green, or blue)'}), 400
     next_color = LEVEL_UP_NEXT_COLOR.get(color)
     if not next_color:
         return jsonify({'error': 'Student is already at the highest card level'}), 400
