@@ -50,7 +50,7 @@ MARKETPLACE_ITEMS = [
     {
         "name": "Pizza Slice",
         "description": "One slice of cheese pizza from the cafeteria.",
-        "price": "5.00",
+        "price": "20.00",
         "type_name": "Food",
         "category_name": "Snacks",
         "image_url": "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=400",
@@ -58,7 +58,7 @@ MARKETPLACE_ITEMS = [
     {
         "name": "Extra Recess Pass",
         "description": "15 minutes of extra outdoor recess with staff approval.",
-        "price": "8.50",
+        "price": "34.00",
         "type_name": "Activity",
         "category_name": "Experiences",
         "image_url": "https://images.unsplash.com/photo-1503454537845-cef7fdbb3e56?w=400",
@@ -66,7 +66,7 @@ MARKETPLACE_ITEMS = [
     {
         "name": "Headphones (1 hour)",
         "description": "Borrow noise-canceling headphones for one class period.",
-        "price": "3.25",
+        "price": "13.00",
         "type_name": "Equipment",
         "category_name": "Supplies",
         "image_url": "https://images.unsplash.com/photo-1484704849700-f032a568e944?w=400",
@@ -75,7 +75,7 @@ MARKETPLACE_ITEMS = [
     {
         "name": "Preferred Seating",
         "description": "Choose your seat in the classroom for one week.",
-        "price": "12.00",
+        "price": "48.00",
         "type_name": "Privilege",
         "category_name": "Privileges",
         "image_url": "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=400",
@@ -83,7 +83,7 @@ MARKETPLACE_ITEMS = [
     {
         "name": "School Store Gift Card",
         "description": "$10 credit toward pencils, notebooks, and school supplies.",
-        "price": "10.00",
+        "price": "40.00",
         "type_name": "Reward",
         "category_name": "Rewards",
         "image_url": "https://images.unsplash.com/photo-1452860600635-30c2a0d88a03?w=400",
