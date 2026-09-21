@@ -2898,6 +2898,20 @@
         </div>
     </div>
 
+    <div id="schedule-csv-export-modal" class="modal" onclick="if(event.target===this) closeScheduleCsvExportModal()">
+        <div class="modal-content schedule-csv-export-modal-content" onclick="event.stopPropagation()">
+            <span class="close" id="schedule-csv-export-close">&times;</span>
+            <h2>Export CSV</h2>
+            <p id="schedule-csv-export-filename" class="schedule-csv-export-filename"></p>
+            <p class="schedule-csv-export-hint">Download the file or copy it to the clipboard.</p>
+            <div class="schedule-csv-export-actions">
+                <button type="button" id="schedule-csv-export-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="schedule-csv-export-copy" class="btn-secondary">Copy</button>
+                <button type="button" id="schedule-csv-export-download" class="btn-primary">Download</button>
+            </div>
+        </div>
+    </div>
+
     <div id="schedule-print-preview-modal" class="modal" onclick="if(event.target===this) closeSchedulePrintPreview()">
         <div class="modal-content schedule-print-preview-modal-content" onclick="event.stopPropagation()">
             <span class="close" id="schedule-print-preview-close">&times;</span>
@@ -2927,7 +2941,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=schedule-export1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=schedule-export2"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

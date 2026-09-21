@@ -17419,10 +17419,14 @@ function escapeCsvField(value) {
     return text;
 }
 
-function downloadCsvFile(filename, rows) {
+function rowsToCsvText(rows, options = {}) {
     const lines = (rows || []).map((row) => (row || []).map(escapeCsvField).join(','));
-    const content = `\uFEFF${lines.join('\r\n')}`;
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const body = lines.join('\r\n');
+    return options.bom ? `\uFEFF${body}` : body;
+}
+
+function downloadCsvText(filename, text) {
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -17431,6 +17435,65 @@ function downloadCsvFile(filename, rows) {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadCsvFile(filename, rows) {
+    downloadCsvText(filename, rowsToCsvText(rows, { bom: true }));
+}
+
+let scheduleCsvExportState = {
+    filename: '',
+    copyText: '',
+    downloadText: ''
+};
+
+function openScheduleCsvExportModal(filename, rows) {
+    scheduleCsvExportState = {
+        filename: filename || 'schedules.csv',
+        copyText: rowsToCsvText(rows, { bom: false }),
+        downloadText: rowsToCsvText(rows, { bom: true })
+    };
+    const modal = document.getElementById('schedule-csv-export-modal');
+    const nameEl = document.getElementById('schedule-csv-export-filename');
+    if (nameEl) nameEl.textContent = scheduleCsvExportState.filename;
+    if (modal) modal.style.display = 'block';
+}
+
+function closeScheduleCsvExportModal() {
+    const modal = document.getElementById('schedule-csv-export-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function downloadScheduleCsvExport() {
+    if (!scheduleCsvExportState.downloadText) return;
+    downloadCsvText(scheduleCsvExportState.filename, scheduleCsvExportState.downloadText);
+    closeScheduleCsvExportModal();
+    showMessage('CSV downloaded.', 'success');
+}
+
+async function copyScheduleCsvExport() {
+    const text = scheduleCsvExportState.copyText || '';
+    if (!text) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', '');
+            area.style.position = 'fixed';
+            area.style.left = '-9999px';
+            document.body.appendChild(area);
+            area.select();
+            document.execCommand('copy');
+            area.remove();
+        }
+        closeScheduleCsvExportModal();
+        showMessage('CSV copied to clipboard.', 'success');
+    } catch (err) {
+        console.error('CSV copy failed:', err);
+        showMessage('Could not copy CSV. Try Download instead.', 'error');
+    }
 }
 
 function slugifyScheduleExportName(name) {
@@ -17837,16 +17900,12 @@ function buildTeacherScheduleCsvRows(periods) {
 }
 
 function buildTeacherScheduleRosterCsvRows(periods, rosterMap) {
-    const rows = [['Time', 'Class', 'Student']];
+    const rows = [['Time', 'Class', 'Students']];
     groupSchedulePeriodsForRosterPrint(periods, rosterMap).forEach((row) => {
-        if (!row.students || !row.students.length) {
-            rows.push([row.time, row.className, '']);
-            return;
-        }
-        row.students.forEach((student) => {
-            const name = typeof student === 'string' ? student : (student && student.name) || '';
-            rows.push([row.time, row.className, name]);
-        });
+        const studentNames = (row.students || []).map((student) => (
+            typeof student === 'string' ? student : (student && student.name) || ''
+        )).filter(Boolean);
+        rows.push([row.time, row.className, studentNames.join(', ')]);
     });
     return rows;
 }
@@ -17929,8 +17988,7 @@ async function exportStaffSchedule(action) {
             ? buildTeacherScheduleRosterCsvRows(periods, rosterMap)
             : buildTeacherScheduleCsvRows(periods);
         const suffix = withRosters ? 'class_lists' : 'schedule';
-        downloadCsvFile(`${slugifyScheduleExportName(name)}_${suffix}.csv`, rows);
-        showMessage('CSV downloaded.', 'success');
+        openScheduleCsvExportModal(`${slugifyScheduleExportName(name)}_${suffix}.csv`, rows);
         return;
     }
 
@@ -17956,11 +18014,10 @@ async function exportSelectedStudentSchedule() {
     const name = getSelectedStudentScheduleName() || 'Student';
     const periods = collectSchedulePeriodsFromTable('student');
     if (getStudentScheduleExportFormat() === 'csv') {
-        downloadCsvFile(
+        openScheduleCsvExportModal(
             `${slugifyScheduleExportName(name)}_schedule.csv`,
             buildStudentScheduleCsvRows([{ name, periods }])
         );
-        showMessage('CSV downloaded.', 'success');
         return;
     }
     openSchedulePrintPreview([{
@@ -17996,11 +18053,10 @@ async function exportStudentSchedulesFromApi(query, documentTitle, emptyMessage,
             return;
         }
         if (asCsv) {
-            downloadCsvFile(
+            openScheduleCsvExportModal(
                 `${slugifyScheduleExportName(filenameBase || documentTitle || 'student_schedules')}.csv`,
                 buildStudentScheduleCsvRows(items)
             );
-            showMessage(`CSV downloaded (${items.length} student${items.length === 1 ? '' : 's'}).`, 'success');
             return;
         }
         const printedOn = formatSchedulePrintDate();
@@ -21645,6 +21701,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.querySelectorAll('input[name="schedule-print-per-page"]').forEach((input) => {
         input.addEventListener('change', renderSchedulePrintPreview);
+    });
+
+    const scheduleCsvExportClose = document.getElementById('schedule-csv-export-close');
+    if (scheduleCsvExportClose) {
+        scheduleCsvExportClose.addEventListener('click', closeScheduleCsvExportModal);
+    }
+    const scheduleCsvExportCancel = document.getElementById('schedule-csv-export-cancel');
+    if (scheduleCsvExportCancel) {
+        scheduleCsvExportCancel.addEventListener('click', closeScheduleCsvExportModal);
+    }
+    const scheduleCsvExportDownload = document.getElementById('schedule-csv-export-download');
+    if (scheduleCsvExportDownload) {
+        scheduleCsvExportDownload.addEventListener('click', downloadScheduleCsvExport);
+    }
+    const scheduleCsvExportCopy = document.getElementById('schedule-csv-export-copy');
+    if (scheduleCsvExportCopy) {
+        scheduleCsvExportCopy.addEventListener('click', () => {
+            copyScheduleCsvExport();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const csvModal = document.getElementById('schedule-csv-export-modal');
+        if (csvModal && csvModal.style.display === 'block') {
+            closeScheduleCsvExportModal();
+        }
     });
     
     // User management buttons
