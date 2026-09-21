@@ -6793,14 +6793,31 @@ table tbody tr:hover {
     color: #1E40AF;
 }
 
-/* In the Reports tab, keep the blue "Viewing" banner from running
-   underneath the right-side Overview card. On wider screens, limit
-   the banner width so it starts at the left edge of the page and
-   stops 20px before the Overview card. (Tweaked for visual spacing.) */
-@media (min-width: 901px) {
-    #summary-view .dashboard-context-banner,
+/* In the Reports tab, keep filters and the blue "Viewing" banner from
+   running underneath the right-side Overview card. Same clearance as
+   the full-screen layout: the controls stop about 20px before the
+   overview column. Phone widths stack the cards, so the limit lifts. */
+@media (min-width: 721px) {
+    #summary-view:not(.reports-layout-stacked) .dashboard-controls,
+    #summary-view:not(.reports-layout-stacked) .dashboard-context-banner,
     #frenzy-view .dashboard-context-banner {
         max-width: calc(67% - 10px);
+    }
+}
+
+/* Keep the timeframe row on one line in the left columns, matching
+   the full-screen toolbar, without widening into the overview card. */
+@media (max-width: 1280px) and (min-width: 721px) {
+    #summary-view .dashboard-filter-pills {
+        gap: 4px;
+    }
+
+    #summary-view .dashboard-period-select {
+        min-width: 0;
+        width: 9.75rem;
+        max-width: 9.75rem;
+        padding-left: 0.7rem;
+        padding-right: 1.6rem;
     }
 }
 
@@ -7812,15 +7829,24 @@ a.dashboard-compare-toggle {
     min-height: 140px;
 }
 
-@media (max-width: 1200px) {
+/* Phone only. Wider windows keep the full-screen three-column reports
+   layout (overview on the right, other cards in the left columns). */
+@media (max-width: 720px) {
     #summary-results .dashboard-card-grid > .overview-card {
         position: static !important;
+        top: auto;
+        right: auto;
+        left: auto;
         width: 100%;
         order: -1;
     }
 
-    #summary-results .reports-trend-card {
-        width: 100%;
+    #summary-results .dashboard-card-grid > .dashboard-card {
+        position: static !important;
+        top: auto !important;
+        left: auto !important;
+        width: 100% !important;
+        max-width: 100% !important;
     }
 }
 
@@ -8488,6 +8514,8 @@ a.dashboard-compare-toggle {
 .overview-card--rich {
     padding: 14px 16px;
     border-radius: 14px;
+    container-type: inline-size;
+    container-name: overview-card;
 }
 
 .overview-card--rich .overview-rich-header {
@@ -9338,6 +9366,95 @@ a.dashboard-compare-toggle {
     font-size: 0.78rem;
     line-height: 1.1;
     font-weight: 600;
+}
+
+/* Narrow overview column: same arrangement as full screen, scaled so
+   gauges, labels, and the donut stay inside their panels. */
+@container overview-card (max-width: 520px) {
+    .overview-card--rich .overview-rich-row {
+        gap: 6px;
+    }
+
+    .overview-card--rich .overview-rich-gauges .overview-beige-panel,
+    .overview-card--rich .overview-rich-bottom .overview-beige-panel,
+    .overview-card--rich .overview-rich-secondary .overview-beige-panel {
+        padding: 6px 5px;
+        min-width: 0;
+    }
+
+    .overview-card--rich .overview-rich-gauges .overview-panel-kicker,
+    .overview-card--rich .overview-rich-bottom .overview-panel-kicker {
+        font-size: 0.58rem;
+        letter-spacing: 0.04em;
+        line-height: 1.15;
+        text-align: center;
+        overflow-wrap: anywhere;
+    }
+
+    .overview-card--rich .overview-gauge-wrap--attendance-donut,
+    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
+        width: min(117px, 100%);
+        max-width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+    }
+
+    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg {
+        width: 100%;
+    }
+
+    .overview-card--rich .overview-gauge-attendance .overview-gauge-big,
+    .overview-card--rich .overview-gauge-star .overview-gauge-big,
+    .overview-card--rich .overview-gauge-plans .overview-gauge-big {
+        font-size: 1rem;
+    }
+
+    .overview-card--rich .overview-gauge-attendance .overview-gauge-small,
+    .overview-card--rich .overview-gauge-star .overview-gauge-small,
+    .overview-card--rich .overview-gauge-plans .overview-gauge-small,
+    .overview-card--rich .overview-plan-stat-sub {
+        font-size: 0.62rem;
+        line-height: 1.15;
+        text-align: center;
+    }
+
+    .overview-card--rich .overview-plan-stat-body {
+        padding: 2px 0 0;
+    }
+
+    .overview-card--rich .overview-donut-wrap {
+        width: 64px;
+        height: 64px;
+    }
+
+    .overview-card--rich .overview-infractions-body {
+        gap: 6px;
+    }
+
+    .overview-card--rich .overview-infractions-legend {
+        min-width: 0;
+        flex: 1 1 auto;
+        font-size: 0.68rem;
+    }
+
+    .overview-card--rich .overview-infractions-legend li {
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        column-gap: 4px;
+    }
+
+    .overview-card--rich .overview-incidents-panel .overview-incidents-bars {
+        gap: 8px;
+        min-height: 96px;
+    }
+
+    .overview-card--rich .overview-trends-card {
+        min-width: 0;
+        padding: 6px;
+    }
+
+    .overview-card--rich .overview-trend-line {
+        font-size: 0.68rem;
+    }
 }
 
 .overview-card--rich .overview-incidents-panel .overview-incidents-bars {

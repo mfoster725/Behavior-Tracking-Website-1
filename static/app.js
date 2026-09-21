@@ -32612,10 +32612,14 @@ function applySummaryMasonryLayout(grid) {
         card.style.width = '';
     });
 
-    // On narrow/medium screens, rely on the normal flex layout so
-    // overview can stack above trend content instead of being clipped.
+    // Keep the full-screen composition (trends across the left two columns,
+    // overview pinned to the right) while the window shrinks. Only the
+    // narrow phone layout stacks cards to full width.
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || grid.clientWidth;
-    if (viewportWidth <= 1200) {
+    const summaryView = grid.closest('#summary-view');
+    const stackReportsLayout = viewportWidth < 721;
+    if (summaryView) summaryView.classList.toggle('reports-layout-stacked', stackReportsLayout);
+    if (stackReportsLayout) {
         grid.style.height = '';
         if (summaryContainer && summaryContainer.id === 'summary-results') {
             summaryContainer.style.minHeight = '';
@@ -32627,18 +32631,20 @@ function applySummaryMasonryLayout(grid) {
     const containerWidth = grid.clientWidth || grid.offsetWidth;
     if (!containerWidth) return;
 
-    // Use up to 3 equal-width columns on desktop
+    const trendCard = grid.querySelector('.reports-trend-card');
+    const overviewCard = grid.querySelector('.overview-card');
+    const useRestoredReportsLayout = !!(trendCard && overviewCard);
+    // Full-screen reports always use three columns. Fall back to fewer
+    // only when this grid has no overview/trend pair to anchor.
     const maxColumns = 3;
     const minCardWidth = 260;
     const possibleColumns = Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)));
-    const columnCount = Math.min(maxColumns, possibleColumns);
+    const columnCount = useRestoredReportsLayout
+        ? maxColumns
+        : Math.min(maxColumns, possibleColumns);
     const totalGapWidth = gap * (columnCount - 1);
     const columnWidth = (containerWidth - totalGapWidth);
     const perColWidth = columnWidth / columnCount;
-
-    const trendCard = grid.querySelector('.reports-trend-card');
-    const overviewCard = grid.querySelector('.overview-card');
-    const useRestoredReportsLayout = trendCard && overviewCard && columnCount >= 3;
 
     if (useRestoredReportsLayout) {
         const leftWidth = (perColWidth * 2) + gap;
@@ -32829,6 +32835,26 @@ function applySummaryMasonryLayout(grid) {
  * DOM before we measure, plus several delayed runs to catch late layout (fonts,
  * async content). Call this whenever a card's content is expanded (tabs, drilldowns, etc.).
  */
+if (!window.__summaryMasonryResizeBound) {
+    window.__summaryMasonryResizeBound = true;
+    let masonryResizeRaf = 0;
+    window.addEventListener('resize', () => {
+        if (masonryResizeRaf) cancelAnimationFrame(masonryResizeRaf);
+        masonryResizeRaf = requestAnimationFrame(() => {
+            masonryResizeRaf = 0;
+            document.querySelectorAll('#summary-results .dashboard-card-grid').forEach((grid) => {
+                applySummaryMasonryLayout(grid);
+            });
+            if (typeof summaryChartInstance !== 'undefined' && summaryChartInstance && typeof summaryChartInstance.resize === 'function') {
+                summaryChartInstance.resize();
+            }
+            if (typeof summaryTrendsChartInstance !== 'undefined' && summaryTrendsChartInstance && typeof summaryTrendsChartInstance.resize === 'function') {
+                summaryTrendsChartInstance.resize();
+            }
+        });
+    });
+}
+
 function scheduleMasonryLayoutAfterResize(grid) {
     if (!grid || typeof applySummaryMasonryLayout !== 'function') return;
     const run = () => {
