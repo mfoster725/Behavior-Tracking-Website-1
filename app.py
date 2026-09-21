@@ -4824,6 +4824,59 @@ def _collect_user_recipient_emails(user):
     return deduped
 
 
+def _append_unique_emails(target, seen, raw_or_list):
+    """Append parsed emails to target, skipping duplicates (case-insensitive)."""
+    if isinstance(raw_or_list, list):
+        candidates = []
+        for item in raw_or_list:
+            candidates.extend(_parse_email_list(item))
+    else:
+        candidates = _parse_email_list(raw_or_list)
+    for email in candidates:
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        target.append(email)
+
+
+def _case_manager_users_for_student(student_id):
+    """Return User rows for a student's case manager(s), deduped by id."""
+    if not student_id:
+        return []
+    users_by_id = {}
+    for cm_id in get_case_manager_user_ids_for_student(student_id):
+        cm = User.query.get(cm_id)
+        if cm and cm.id not in users_by_id:
+            users_by_id[cm.id] = cm
+    if not users_by_id:
+        cm = get_student_case_manager(student_id)
+        if cm:
+            users_by_id[cm.id] = cm
+    return list(users_by_id.values())
+
+
+def _collect_share_login_recipient_emails(user, requester=None):
+    """
+    Recipients for a share-login email: emails on the account/student row, plus the
+    staff/admin who triggered the share (so they have a copy to forward), plus the
+    student's case manager(s) when the target is a student.
+    """
+    emails = list(_collect_user_recipient_emails(user))
+    seen = {e.lower() for e in emails}
+
+    if requester is not None:
+        _append_unique_emails(emails, seen, getattr(requester, 'email', None))
+
+    role = (getattr(user, 'role', None) or '').strip().lower()
+    student_id = getattr(user, 'student_id', None)
+    if role == 'student' and student_id:
+        for cm in _case_manager_users_for_student(student_id):
+            _append_unique_emails(emails, seen, getattr(cm, 'email', None))
+
+    return emails
+
+
 def _canonical_student_password(student, user):
     """Match CSV import: {INITIALS}{lunch_number} with normalized lunch."""
     initials = ((student.name if student else None) or user.name or '').strip().upper()
@@ -4955,18 +5008,29 @@ def _send_smtp_email(to_addrs, subject, body):
     return True, None
 
 
-def _share_login_info_for_user(user, *, reset_password=True, password_override=None):
+def _share_login_info_for_user(user, *, reset_password=True, password_override=None, requester=None):
     """
-    Reset (optional) and email login credentials to all emails on the user row.
+    Reset (optional) and email login credentials to account emails, the requester,
+    and (for students) their case manager(s).
     Returns dict: {ok, sent_to, password, error, warning}
     """
-    recipients = _collect_user_recipient_emails(user)
+    if requester is None:
+        try:
+            if current_user is not None and getattr(current_user, 'is_authenticated', False):
+                requester = current_user
+        except Exception:
+            requester = None
+
+    recipients = _collect_share_login_recipient_emails(user, requester=requester)
     if not recipients:
         return {
             'ok': False,
             'sent_to': [],
             'password': None,
-            'error': 'No email addresses on this user row.',
+            'error': (
+                'No email addresses on this user row, the requesting user, '
+                "or the student's case manager."
+            ),
         }
 
     if password_override:
@@ -16666,7 +16730,7 @@ def manage_users():
 @app.route('/api/users/<int:user_id>/share-login', methods=['POST'])
 @login_required
 def share_user_login(user_id):
-    """Reset password to the role default and email login info to all emails on the row."""
+    """Reset password and email login info to account emails, the requester, and student case manager(s)."""
     is_admin = current_user.role == 'admin'
     is_internal_staff = (
         current_user.role == 'staff'
@@ -16690,7 +16754,7 @@ def share_user_login(user_id):
         if not (target_is_student or target_is_outside_staff):
             return jsonify({'error': 'Permission denied'}), 403
 
-    result = _share_login_info_for_user(user, reset_password=True)
+    result = _share_login_info_for_user(user, reset_password=True, requester=current_user)
     if not result.get('ok'):
         # Password may already have been reset before send failed — commit hash if set
         try:
@@ -16762,7 +16826,9 @@ def share_user_login_bulk():
         if idx > 0:
             time.sleep(2)
         try:
-            result = _share_login_info_for_user(user, reset_password=True)
+            result = _share_login_info_for_user(
+                user, reset_password=True, requester=current_user
+            )
             if result.get('ok'):
                 try:
                     db.session.commit()

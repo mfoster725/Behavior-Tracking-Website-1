@@ -18932,7 +18932,11 @@ async function shareLoginInformation(userId, username) {
         showMessage('Only staff and admins can share login information.', 'error');
         return;
     }
-    if (!confirm(`Reset password and email login information for ${username} to all emails on this row?`)) {
+    if (!confirm(
+        `Reset password and email login information for ${username}?\n\n` +
+        'Recipients: emails on this row, you (so you have a copy to forward), ' +
+        "and the student's case manager when applicable."
+    )) {
         return;
     }
     try {
@@ -18947,6 +18951,7 @@ async function shareLoginInformation(userId, username) {
         const sentTo = (data.sent_to || []).join(', ');
         showMessage(
             `Login info handed off to mail server for: ${sentTo || 'recipients'}. ` +
+            'You and the case manager (for students) are included so you can confirm and forward if needed. ' +
             'If families do not see it, check parent/guardian inboxes (not only @isd2149.org student mail) and spam. ' +
             (data.username ? `(username: ${data.username}` : '') +
             (data.password ? `, password: ${data.password})` : (data.username ? ')' : '')),
