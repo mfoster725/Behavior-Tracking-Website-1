@@ -3874,16 +3874,49 @@ def seed_economy(commit=True):
         if not creator:
             creator = User.query.order_by(User.id).first()
         if creator:
+            seed_names = {
+                spec['name'] for spec in MARKETPLACE_ITEM_SEEDS
+                if not spec.get('skip') and Decimal(str(spec.get('price') or 0)) > 0
+            }
+            # One-time: when weekly pay rose ~$100→~$400, scale any custom catalog
+            # items 4x if seeded items are still on the pre-scale prices.
+            old_seed_sentinels = (
+                ('Gum', Decimal('25.00')),
+                ('3 Musketeers', Decimal('150.00')),
+                ("Teacher's Chair (day rental)", Decimal('100.00')),
+            )
+            needs_custom_scale = False
+            for name, old_price in old_seed_sentinels:
+                row = MarketplaceItem.query.filter_by(name=name).first()
+                if row is not None and Decimal(str(row.price or 0)) == old_price:
+                    needs_custom_scale = True
+                    break
+            if needs_custom_scale:
+                for item in MarketplaceItem.query.all():
+                    if item.name in seed_names:
+                        continue
+                    item.price = (Decimal(str(item.price or 0)) * Decimal('4')).quantize(Decimal('0.01'))
+
             for spec in MARKETPLACE_ITEM_SEEDS:
                 if spec.get('skip') or Decimal(str(spec.get('price') or 0)) <= 0:
                     continue
+                seed_price = Decimal(str(spec['price']))
                 existing = MarketplaceItem.query.filter_by(name=spec['name']).first()
                 if existing:
+                    # Keep catalog prices in sync with seeds (e.g. pay-scale adjustments).
+                    if existing.price != seed_price:
+                        existing.price = seed_price
+                    if spec.get('description') and existing.description != spec.get('description'):
+                        existing.description = spec.get('description') or ''
+                    if spec.get('type_name') and type_ids.get(spec.get('type_name')):
+                        existing.item_type_id = type_ids.get(spec.get('type_name'))
+                    if spec.get('category_name') and cat_ids.get(spec.get('category_name')):
+                        existing.category_id = cat_ids.get(spec.get('category_name'))
                     continue
                 db.session.add(MarketplaceItem(
                     name=spec['name'],
                     description=spec.get('description') or '',
-                    price=Decimal(str(spec['price'])),
+                    price=seed_price,
                     created_by_user_id=creator.id,
                     is_global=True,
                     is_approved_for_global=True,
@@ -5775,24 +5808,23 @@ def delete_student(student_id):
     
     return jsonify({'message': 'Student deleted successfully'}), 200
 
-@app.route('/api/students/by-staff-period', methods=['GET'])
-@login_required
-def students_by_staff_period():
-    """Get students who have the current staff member in their schedule for a given period and optionally class"""
-    if current_user.role not in ['staff', 'admin']:
-        return jsonify({'error': 'Permission denied'}), 403
-    
-    period = request.args.get('period')
-    class_name = request.args.get('class_name', '').strip()  # Optional class name filter
-    on_date = _parse_schedule_date(request.args.get('date')) or school_now().date()
-    if not period:
-        return jsonify({'error': 'Period parameter is required'}), 400
-    
-    # Get current user's name (prefer name, fall back to username)
-    staff_name = current_user.name or current_user.username
-    staff_name_key = (staff_name or '').strip().lower()
+def _active_student_user_ids():
+    """Student IDs that have an active student user account (Period Entry visibility)."""
+    return {u.student_id for u in User.query.filter_by(role='student').all() if u.student_id}
 
-    # Load all student rows for this period, apply date + recurrence override, then match staff
+
+def _period_entry_student_ids_for_staff(staff_user, period, class_name='', on_date=None):
+    """
+    Student IDs shown in Period Entry for a staff member on a given period/class.
+    Matches students whose schedule lists this staff (and optional class) for the period.
+    """
+    if not staff_user or not period:
+        return []
+    on_date = on_date or school_now().date()
+    staff_name = staff_user.name or staff_user.username
+    staff_name_key = (staff_name or '').strip().lower()
+    class_name = (class_name or '').strip()
+
     period_rows = Schedule.query.filter_by(
         schedule_type='student',
         time_period=period,
@@ -5818,10 +5850,10 @@ def students_by_staff_period():
             student_ids.append(student_id)
 
     # Assigned outside staff also see students who are at the other school this period
-    if current_user.role == 'staff' and current_user.is_outside_staff:
+    if staff_user.role == 'staff' and getattr(staff_user, 'is_outside_staff', False):
         assigned_ids = [
             assoc.student_id
-            for assoc in OutsideStaffStudent.query.filter_by(user_id=current_user.id).all()
+            for assoc in OutsideStaffStudent.query.filter_by(user_id=staff_user.id).all()
         ]
         extra_ids = []
         transitions = _transitions_by_student_id(assigned_ids)
@@ -5829,6 +5861,112 @@ def students_by_staff_period():
             if not is_home_period(transitions.get(sid), period):
                 extra_ids.append(sid)
         student_ids = list(set(student_ids) | set(extra_ids))
+
+    return student_ids
+
+
+def _period_entry_class_rosters_for_staff(staff_user, on_date=None):
+    """
+    Students per (time_period, class_name) for a staff member, using the same
+    staff/class matching as Period Entry (excluding outside-school extras, which
+    are not tied to a specific class on the teacher schedule).
+    """
+    if not staff_user:
+        return []
+    on_date = on_date or school_now().date()
+    staff_name = staff_user.name or staff_user.username
+    staff_name_key = (staff_name or '').strip().lower()
+
+    all_rows = Schedule.query.filter_by(schedule_type='student').all()
+    rows_by_student = {}
+    for row in all_rows:
+        if row.student_id:
+            rows_by_student.setdefault(row.student_id, []).append(row)
+
+    roster_ids = {}  # (period, class_name) -> set(student_id)
+    for student_id, rows in rows_by_student.items():
+        active = _filter_schedule_rows_for_date(rows, on_date)
+        for row in active:
+            row_staff = (row.staff_name or '').strip()
+            if row_staff.lower() != staff_name_key:
+                continue
+            period = (row.time_period or '').strip()
+            class_name = (row.class_name or '').strip()
+            if not period or not class_name:
+                continue
+            roster_ids.setdefault((period, class_name), set()).add(student_id)
+
+    active_ids = _active_student_user_ids()
+    all_student_ids = set()
+    for ids in roster_ids.values():
+        all_student_ids |= {sid for sid in ids if sid in active_ids}
+
+    students_by_id = {}
+    if all_student_ids:
+        students = Student.query.filter(Student.id.in_(all_student_ids)).order_by(Student.name).all()
+        students = filter_directory_info(students, include_opted_out=False)
+        students_by_id = {s.id: s for s in students}
+
+    classes = []
+    for (period, class_name), ids in sorted(
+        roster_ids.items(),
+        key=lambda item: (item[0][0], item[0][1].lower()),
+    ):
+        students = [
+            {'id': students_by_id[sid].id, 'name': students_by_id[sid].name}
+            for sid in sorted(ids, key=lambda i: (students_by_id[i].name.lower() if i in students_by_id else '', i))
+            if sid in students_by_id
+        ]
+        classes.append({
+            'time_period': period,
+            'class_name': class_name,
+            'students': students,
+        })
+    return classes
+
+
+@app.route('/api/schedules/class-rosters', methods=['GET'])
+@login_required
+def schedule_class_rosters():
+    """Return Period Entry class rosters for a staff member (students in each class)."""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    staff_id = request.args.get('staff_id', type=int)
+    on_date = _parse_schedule_date(request.args.get('date')) or school_now().date()
+
+    if staff_id:
+        if current_user.role != 'admin' and staff_id != current_user.id:
+            return jsonify({'error': 'Permission denied'}), 403
+        staff_user = User.query.get(staff_id)
+        if not staff_user or staff_user.role not in ['staff', 'admin']:
+            return jsonify({'error': 'Staff not found'}), 404
+    else:
+        staff_user = current_user
+
+    staff_name = staff_user.name or staff_user.username
+    return jsonify({
+        'staff_id': staff_user.id,
+        'staff_name': staff_name,
+        'date': on_date.isoformat(),
+        'classes': _period_entry_class_rosters_for_staff(staff_user, on_date),
+    })
+
+
+@app.route('/api/students/by-staff-period', methods=['GET'])
+@login_required
+def students_by_staff_period():
+    """Get students who have the current staff member in their schedule for a given period and optionally class"""
+    if current_user.role not in ['staff', 'admin']:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    period = request.args.get('period')
+    class_name = request.args.get('class_name', '').strip()  # Optional class name filter
+    on_date = _parse_schedule_date(request.args.get('date')) or school_now().date()
+    if not period:
+        return jsonify({'error': 'Period parameter is required'}), 400
+
+    student_ids = _period_entry_student_ids_for_staff(current_user, period, class_name, on_date)
     
     # Get student details
     if student_ids:
@@ -5838,8 +5976,7 @@ def students_by_staff_period():
         # active student user account. This keeps archived/non-user students from
         # appearing in period entry lists. Archived students are available via a
         # separate admin-only archived-students view.
-        student_users = User.query.filter_by(role='student').all()
-        student_user_ids = {u.student_id for u in student_users if u.student_id}
+        student_user_ids = _active_student_user_ids()
         students = [s for s in students if s.id in student_user_ids]
         
         # Filter out students who opted out of directory information
@@ -18488,7 +18625,7 @@ def verify_paycheck(paycheck_id):
         return fallback
 
     checks = [
-        ('regular_pay', live.get('regular_pay'), 'Please correct regular hours amount.'),
+        ('regular_pay', live.get('regular_pay'), 'Please correct regular days amount.'),
         ('starbucks_pay', live.get('starbucks_pay'), 'Please correct Starbucks amount.'),
         ('star_student_pay', live.get('star_student_pay'), 'Please correct Star Student amount.'),
         ('star_classroom_pay', live.get('star_classroom_pay'), 'Please correct Star Classroom amount.'),

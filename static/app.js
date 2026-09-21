@@ -17289,16 +17289,39 @@ function closeStudentSchedulePrintMenu() {
     if (toggle) toggle.setAttribute('aria-expanded', 'false');
 }
 
+function closeStaffScheduleExportMenu() {
+    const menu = document.getElementById('export-staff-schedule-menu');
+    const toggle = document.getElementById('export-staff-schedule-menu-btn');
+    if (menu) menu.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+function toggleStaffScheduleExportMenu() {
+    const menu = document.getElementById('export-staff-schedule-menu');
+    const toggle = document.getElementById('export-staff-schedule-menu-btn');
+    if (!menu || !toggle) return;
+    const willOpen = menu.hidden;
+    closeStudentSchedulePrintMenu();
+    menu.hidden = !willOpen;
+    toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
 function toggleStudentSchedulePrintMenu() {
     const menu = document.getElementById('print-student-schedule-menu');
     const toggle = document.getElementById('print-student-schedule-menu-btn');
     if (!menu || !toggle) return;
     const willOpen = menu.hidden;
+    closeStaffScheduleExportMenu();
     if (willOpen) {
         populateStudentSchedulePrintFilters();
     }
     menu.hidden = !willOpen;
     toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
+function getStudentScheduleExportFormat() {
+    const selected = document.querySelector('input[name="student-schedule-export-format"]:checked');
+    return selected && selected.value === 'csv' ? 'csv' : 'print';
 }
 
 function populateStudentSchedulePrintFilters() {
@@ -17364,6 +17387,17 @@ function getSelectedStaffScheduleName() {
     return 'Staff';
 }
 
+function getSelectedTeacherScheduleUserId() {
+    const select = document.getElementById('teacher-schedule-staff-search');
+    if (select && select.value) {
+        const parsed = parseInt(select.value, 10);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    if (currentTeacherScheduleUserId != null) return currentTeacherScheduleUserId;
+    if (window.currentUser && window.currentUser.id != null) return window.currentUser.id;
+    return null;
+}
+
 function getSelectedStudentScheduleName() {
     const select = document.getElementById('schedule-student-select');
     if (select && select.value && select.selectedOptions[0]) {
@@ -17375,6 +17409,37 @@ function getSelectedStudentScheduleName() {
 function collectSchedulePeriodsFromTable(type) {
     const tbody = document.getElementById(`${type}-schedule-body`);
     return collectSchedulePeriodsFromTbody(tbody, type);
+}
+
+function escapeCsvField(value) {
+    const text = value == null ? '' : String(value);
+    if (/[",\n\r]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+}
+
+function downloadCsvFile(filename, rows) {
+    const lines = (rows || []).map((row) => (row || []).map(escapeCsvField).join(','));
+    const content = `\uFEFF${lines.join('\r\n')}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || 'schedules.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function slugifyScheduleExportName(name) {
+    return String(name || 'schedule')
+        .trim()
+        .replace(/[^\w\-]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 60) || 'schedule';
 }
 
 function groupSchedulePeriodsForPrint(periods, includeStaff) {
@@ -17414,6 +17479,46 @@ function groupSchedulePeriodsForPrint(periods, includeStaff) {
     });
 }
 
+function groupSchedulePeriodsForRosterPrint(periods, rosterMap) {
+    const byTime = {};
+    (periods || []).forEach((period) => {
+        const time = (period && period.time_period) ? String(period.time_period).trim() : '';
+        if (!time) return;
+        if (!byTime[time]) byTime[time] = [];
+        byTime[time].push(period);
+    });
+    const times = SCHEDULE_PERIODS.slice();
+    Object.keys(byTime).forEach((time) => {
+        if (!times.includes(time)) times.push(time);
+    });
+    const rows = [];
+    times.forEach((time) => {
+        const items = byTime[time] || [];
+        const seenClasses = new Set();
+        const classItems = items.filter((item) => {
+            const className = (item.class_name || '').trim();
+            if (!className || seenClasses.has(className)) return false;
+            seenClasses.add(className);
+            return true;
+        });
+        if (!classItems.length) {
+            rows.push({ time, className: '', students: [] });
+            return;
+        }
+        classItems.forEach((item) => {
+            const className = (item.class_name || '').trim();
+            const summary = formatScheduleRecurrenceSummary(item);
+            const label = (!item.recurrence_type || item.recurrence_type === 'daily')
+                ? className
+                : `${className} (${summary})`;
+            const key = `${time}::${className}`;
+            const students = (rosterMap && rosterMap[key]) ? rosterMap[key] : [];
+            rows.push({ time, className: label, students });
+        });
+    });
+    return rows;
+}
+
 function formatSchedulePrintDate() {
     return new Date().toLocaleDateString('en-US', {
         weekday: 'long',
@@ -17423,33 +17528,59 @@ function formatSchedulePrintDate() {
     });
 }
 
+function buildSchedulePrintStudentListHtml(students) {
+    if (!students || !students.length) {
+        return '<div class="schedule-print-students-empty">No students</div>';
+    }
+    return `<ul class="schedule-print-students">${students.map((student) => {
+        const name = typeof student === 'string' ? student : (student && student.name) || '';
+        return `<li>${escapeHtml(name)}</li>`;
+    }).join('')}</ul>`;
+}
+
 function buildSchedulePrintCardHtml(block) {
     const includeStaff = block.kind === 'student';
-    const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
+    const withRosters = !!block.withRosters;
     const printedOn = block.printedOn || formatSchedulePrintDate();
     const transition = block.transition || null;
-    const rowHtml = rows.map((row) => {
-        const other = transition && !isHomePeriod(transition, row.time);
-        const extra = other ? ' class="schedule-print-other-school"' : '';
-        return `
+    let rowHtml = '';
+    if (withRosters) {
+        const rows = groupSchedulePeriodsForRosterPrint(block.periods, block.rosterMap || {});
+        rowHtml = rows.map((row) => {
+            const other = transition && !isHomePeriod(transition, row.time);
+            const extra = other ? ' class="schedule-print-other-school"' : '';
+            return `
+        <tr${extra}>
+            <td>${escapeHtml(row.time)}${other ? '<div class="schedule-print-other-label">Other school</div>' : ''}</td>
+            <td>${escapeHtml(row.className)}</td>
+            <td>${buildSchedulePrintStudentListHtml(row.students)}</td>
+        </tr>`;
+        }).join('');
+    } else {
+        const rows = groupSchedulePeriodsForPrint(block.periods, includeStaff);
+        rowHtml = rows.map((row) => {
+            const other = transition && !isHomePeriod(transition, row.time);
+            const extra = other ? ' class="schedule-print-other-school"' : '';
+            return `
         <tr${extra}>
             <td>${escapeHtml(row.time)}${other ? '<div class="schedule-print-other-label">Other school</div>' : ''}</td>
             <td>${escapeHtml(row.className)}</td>
             ${includeStaff ? `<td>${escapeHtml(row.staffName)}</td>` : ''}
         </tr>`;
-    }).join('');
+        }).join('');
+    }
     return `
         <section class="schedule-print-card">
             <header class="schedule-print-header">
                 <h1>${escapeHtml(block.title)}</h1>
-                <p>Printed ${escapeHtml(printedOn)}</p>
+                <p>${withRosters ? 'Class lists' : 'Printed'} ${escapeHtml(printedOn)}</p>
             </header>
             <table class="schedule-print-table">
                 <thead>
                     <tr>
                         <th>Time</th>
                         <th>Class</th>
-                        ${includeStaff ? '<th>Staff</th>' : ''}
+                        ${withRosters ? '<th>Students</th>' : (includeStaff ? '<th>Staff</th>' : '')}
                     </tr>
                 </thead>
                 <tbody>${rowHtml}</tbody>
@@ -17535,6 +17666,10 @@ html, body {
     white-space: nowrap;
     color: #000;
 }
+.schedule-print-table td:last-child {
+    white-space: normal;
+    min-width: 4.5rem;
+}
 .schedule-print-other-school td {
     background: #e7e5e4;
     -webkit-print-color-adjust: exact;
@@ -17556,6 +17691,19 @@ html, body {
     print-color-adjust: exact;
 }
 .schedule-print-table td:first-child { font-weight: 600; }
+.schedule-print-students {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-weight: 400;
+    white-space: normal;
+    line-height: 1.35;
+}
+.schedule-print-students li { margin: 0; }
+.schedule-print-students-empty {
+    color: #666;
+    font-style: italic;
+}
 .schedule-print-sheet[data-per-page="1"] .schedule-print-header h1 { font-size: 16pt; }
 .schedule-print-sheet[data-per-page="1"] .schedule-print-table th,
 .schedule-print-sheet[data-per-page="1"] .schedule-print-table td {
@@ -17592,7 +17740,8 @@ function getSchedulePrintPerPage() {
 function openSchedulePrintPreview(blocks, documentTitle) {
     schedulePrintState.blocks = Array.isArray(blocks) ? blocks : [];
     schedulePrintState.title = documentTitle || 'Schedules';
-    schedulePrintState.perPage = defaultSchedulePrintPerPage(schedulePrintState.blocks.length);
+    const hasRosters = schedulePrintState.blocks.some((block) => block && block.withRosters);
+    schedulePrintState.perPage = hasRosters ? 1 : defaultSchedulePrintPerPage(schedulePrintState.blocks.length);
     const modal = document.getElementById('schedule-print-preview-modal');
     const titleEl = document.getElementById('schedule-print-preview-title');
     const countEl = document.getElementById('schedule-print-preview-count');
@@ -17679,39 +17828,158 @@ ${buildSchedulePrintSheetsHtml(schedulePrintState.blocks, perPage)}
     setTimeout(triggerPrint, 200);
 }
 
-function printStaffSchedule() {
+function buildTeacherScheduleCsvRows(periods) {
+    const rows = [['Time', 'Class']];
+    groupSchedulePeriodsForPrint(periods, false).forEach((row) => {
+        rows.push([row.time, row.className]);
+    });
+    return rows;
+}
+
+function buildTeacherScheduleRosterCsvRows(periods, rosterMap) {
+    const rows = [['Time', 'Class', 'Student']];
+    groupSchedulePeriodsForRosterPrint(periods, rosterMap).forEach((row) => {
+        if (!row.students || !row.students.length) {
+            rows.push([row.time, row.className, '']);
+            return;
+        }
+        row.students.forEach((student) => {
+            const name = typeof student === 'string' ? student : (student && student.name) || '';
+            rows.push([row.time, row.className, name]);
+        });
+    });
+    return rows;
+}
+
+function buildStudentScheduleCsvRows(items) {
+    const rows = [['Student', 'Time', 'Class', 'Staff']];
+    (items || []).forEach((item) => {
+        const studentName = item.name || 'Student';
+        const grouped = groupSchedulePeriodsForPrint(item.periods || [], true);
+        grouped.forEach((row) => {
+            rows.push([studentName, row.time, row.className, row.staffName]);
+        });
+    });
+    return rows;
+}
+
+function buildRosterMapFromApiClasses(classes) {
+    const map = {};
+    (classes || []).forEach((entry) => {
+        const time = (entry.time_period || '').trim();
+        const className = (entry.class_name || '').trim();
+        if (!time || !className) return;
+        map[`${time}::${className}`] = Array.isArray(entry.students) ? entry.students : [];
+    });
+    return map;
+}
+
+async function fetchStaffClassRosterMap(staffId) {
+    let url = '/api/schedules/class-rosters';
+    if (staffId != null) {
+        url += `?staff_id=${encodeURIComponent(staffId)}`;
+    }
+    if (currentDate) {
+        url += `${staffId != null ? '&' : '?'}date=${encodeURIComponent(currentDate)}`;
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error('Could not load class lists.');
+    }
+    const payload = await response.json();
+    return buildRosterMapFromApiClasses(payload.classes || []);
+}
+
+async function exportStaffSchedule(action) {
+    closeStaffScheduleExportMenu();
     const staffSelect = document.getElementById('teacher-schedule-staff-search');
     if (staffSelect && !staffSelect.value) {
-        showMessage('Select a staff member to print their schedule.', 'error');
+        showMessage('Select a staff member to export their schedule.', 'error');
         return;
     }
     const name = getSelectedStaffScheduleName();
+    const periods = collectSchedulePeriodsFromTable('teacher');
+    const withRosters = action === 'print-rosters' || action === 'csv-rosters';
+    const asCsv = action === 'csv' || action === 'csv-rosters';
+
+    let rosterMap = {};
+    if (withRosters) {
+        const menuBtn = document.getElementById('export-staff-schedule-menu-btn');
+        const originalLabel = menuBtn ? menuBtn.textContent : 'Export';
+        if (menuBtn) {
+            menuBtn.disabled = true;
+            menuBtn.textContent = 'Preparing…';
+        }
+        try {
+            rosterMap = await fetchStaffClassRosterMap(getSelectedTeacherScheduleUserId());
+        } catch (error) {
+            console.error('Error loading class rosters:', error);
+            showMessage(error.message || 'Could not load class lists.', 'error');
+            return;
+        } finally {
+            if (menuBtn) {
+                menuBtn.disabled = false;
+                menuBtn.textContent = originalLabel || 'Export';
+            }
+        }
+    }
+
+    if (asCsv) {
+        const rows = withRosters
+            ? buildTeacherScheduleRosterCsvRows(periods, rosterMap)
+            : buildTeacherScheduleCsvRows(periods);
+        const suffix = withRosters ? 'class_lists' : 'schedule';
+        downloadCsvFile(`${slugifyScheduleExportName(name)}_${suffix}.csv`, rows);
+        showMessage('CSV downloaded.', 'success');
+        return;
+    }
+
     openSchedulePrintPreview([{
-        title: `${name}'s Schedule`,
+        title: withRosters ? `${name}'s Schedule (Class Lists)` : `${name}'s Schedule`,
         kind: 'teacher',
-        periods: collectSchedulePeriodsFromTable('teacher')
-    }], `${name} Staff Schedule`);
+        withRosters,
+        rosterMap,
+        periods
+    }], withRosters ? `${name} Staff Schedule Class Lists` : `${name} Staff Schedule`);
 }
 
-async function printSelectedStudentSchedule() {
+function printStaffSchedule() {
+    exportStaffSchedule('print');
+}
+
+async function exportSelectedStudentSchedule() {
     closeStudentSchedulePrintMenu();
     if (!currentScheduleStudentId) {
-        showMessage('Select a student to print their schedule.', 'error');
+        showMessage('Select a student to export their schedule.', 'error');
         return;
     }
     const name = getSelectedStudentScheduleName() || 'Student';
+    const periods = collectSchedulePeriodsFromTable('student');
+    if (getStudentScheduleExportFormat() === 'csv') {
+        downloadCsvFile(
+            `${slugifyScheduleExportName(name)}_schedule.csv`,
+            buildStudentScheduleCsvRows([{ name, periods }])
+        );
+        showMessage('CSV downloaded.', 'success');
+        return;
+    }
     openSchedulePrintPreview([{
         title: `${name}'s Schedule`,
         kind: 'student',
-        periods: collectSchedulePeriodsFromTable('student'),
+        periods,
         transition: getStudentTransition(currentScheduleStudentId)
     }], `${name} Student Schedule`);
 }
 
-async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) {
+async function printSelectedStudentSchedule() {
+    await exportSelectedStudentSchedule();
+}
+
+async function exportStudentSchedulesFromApi(query, documentTitle, emptyMessage, filenameBase) {
     closeStudentSchedulePrintMenu();
     const menuBtn = document.getElementById('print-student-schedule-menu-btn');
-    const originalLabel = menuBtn ? menuBtn.textContent : 'Print';
+    const originalLabel = menuBtn ? menuBtn.textContent : 'Export';
+    const asCsv = getStudentScheduleExportFormat() === 'csv';
     if (menuBtn) {
         menuBtn.disabled = true;
         menuBtn.textContent = 'Preparing…';
@@ -17724,7 +17992,15 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
         const payload = await schedulesResponse.json();
         const items = (payload && Array.isArray(payload.items)) ? payload.items : [];
         if (!items.length) {
-            showMessage(emptyMessage || 'No student schedules are available to print.', 'error');
+            showMessage(emptyMessage || 'No student schedules are available to export.', 'error');
+            return;
+        }
+        if (asCsv) {
+            downloadCsvFile(
+                `${slugifyScheduleExportName(filenameBase || documentTitle || 'student_schedules')}.csv`,
+                buildStudentScheduleCsvRows(items)
+            );
+            showMessage(`CSV downloaded (${items.length} student${items.length === 1 ? '' : 's'}).`, 'success');
             return;
         }
         const printedOn = formatSchedulePrintDate();
@@ -17737,14 +18013,18 @@ async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) 
         }));
         openSchedulePrintPreview(blocks, documentTitle);
     } catch (error) {
-        console.error('Error printing student schedules:', error);
-        showMessage(error.message || 'Could not print student schedules.', 'error');
+        console.error('Error exporting student schedules:', error);
+        showMessage(error.message || 'Could not export student schedules.', 'error');
     } finally {
         if (menuBtn) {
             menuBtn.disabled = false;
-            menuBtn.textContent = originalLabel || 'Print';
+            menuBtn.textContent = originalLabel || 'Export';
         }
     }
+}
+
+async function printStudentSchedulesFromApi(query, documentTitle, emptyMessage) {
+    await exportStudentSchedulesFromApi(query, documentTitle, emptyMessage);
 }
 
 async function printManagedStudentSchedules() {
@@ -17757,22 +18037,24 @@ async function printManagedStudentSchedules() {
     const students = Array.isArray(studentsData) ? studentsData : [];
     if (!students.length) {
         closeStudentSchedulePrintMenu();
-        showMessage('No students managed by you are available to print.', 'error');
+        showMessage('No students managed by you are available to export.', 'error');
         return;
     }
     const ids = students.map((student) => student.id).filter(Boolean).join(',');
-    await printStudentSchedulesFromApi(
+    await exportStudentSchedulesFromApi(
         `student_ids=${encodeURIComponent(ids)}`,
         'Managed Student Schedules',
-        'No students managed by you are available to print.'
+        'No students managed by you are available to export.',
+        'managed_student_schedules'
     );
 }
 
 async function printAllStudentSchedules() {
-    await printStudentSchedulesFromApi(
+    await exportStudentSchedulesFromApi(
         'all=true',
         'All Student Schedules',
-        'No student schedules are available to print.'
+        'No student schedules are available to export.',
+        'all_student_schedules'
     );
 }
 
@@ -17781,27 +18063,30 @@ async function printStudentSchedulesByStaff(staffId) {
     const staffName = (staffSelect && staffSelect.selectedOptions[0])
         ? staffSelect.selectedOptions[0].textContent.trim()
         : 'Staff';
-    await printStudentSchedulesFromApi(
+    await exportStudentSchedulesFromApi(
         `staff_id=${encodeURIComponent(staffId)}`,
         `${staffName} Student Schedules`,
-        `No students managed by ${staffName} are available to print.`
+        `No students managed by ${staffName} are available to export.`,
+        `${slugifyScheduleExportName(staffName)}_student_schedules`
     );
 }
 
 async function printStudentSchedulesByGrade(grade) {
-    await printStudentSchedulesFromApi(
+    await exportStudentSchedulesFromApi(
         `grade=${encodeURIComponent(grade)}`,
         `Grade ${grade} Student Schedules`,
-        `No students in grade ${grade} are available to print.`
+        `No students in grade ${grade} are available to export.`,
+        `grade_${slugifyScheduleExportName(grade)}_student_schedules`
     );
 }
 
 async function printStudentSchedulesByCardColor(color) {
     const label = color ? color.charAt(0).toUpperCase() + color.slice(1) : color;
-    await printStudentSchedulesFromApi(
+    await exportStudentSchedulesFromApi(
         `card_color=${encodeURIComponent(color)}`,
         `${label} Card Student Schedules`,
-        `No ${label.toLowerCase()} card students are available to print.`
+        `No ${label.toLowerCase()} card students are available to export.`,
+        `${slugifyScheduleExportName(color)}_card_student_schedules`
     );
 }
 
@@ -21251,9 +21536,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const printStaffScheduleBtn = document.getElementById('print-staff-schedule-btn');
-    if (printStaffScheduleBtn) {
-        printStaffScheduleBtn.addEventListener('click', printStaffSchedule);
+    const exportStaffScheduleMenuBtn = document.getElementById('export-staff-schedule-menu-btn');
+    const exportStaffScheduleMenu = document.getElementById('export-staff-schedule-menu');
+    if (exportStaffScheduleMenuBtn && exportStaffScheduleMenu) {
+        exportStaffScheduleMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleStaffScheduleExportMenu();
+        });
+        exportStaffScheduleMenu.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('[data-staff-export]');
+            if (!actionBtn) return;
+            const action = actionBtn.getAttribute('data-staff-export');
+            exportStaffSchedule(action);
+        });
     }
 
     const printStudentScheduleMenuBtn = document.getElementById('print-student-schedule-menu-btn');
@@ -21305,14 +21600,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.target !== printStudentScheduleMenuBtn) {
                 closeStudentSchedulePrintMenu();
             }
+            if (exportStaffScheduleMenu && !exportStaffScheduleMenu.hidden &&
+                !exportStaffScheduleMenu.contains(e.target) &&
+                e.target !== exportStaffScheduleMenuBtn) {
+                closeStaffScheduleExportMenu();
+            }
         });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeStudentSchedulePrintMenu();
+                closeStaffScheduleExportMenu();
                 const previewModal = document.getElementById('schedule-print-preview-modal');
                 if (previewModal && previewModal.style.display === 'block') {
                     closeSchedulePrintPreview();
                 }
+            }
+        });
+    } else if (exportStaffScheduleMenuBtn && exportStaffScheduleMenu) {
+        document.addEventListener('click', (e) => {
+            if (!exportStaffScheduleMenu.hidden &&
+                !exportStaffScheduleMenu.contains(e.target) &&
+                e.target !== exportStaffScheduleMenuBtn) {
+                closeStaffScheduleExportMenu();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeStaffScheduleExportMenu();
             }
         });
     }
@@ -26464,6 +26778,13 @@ const WORKSHEET_CALC_ICON = (
     '</svg>'
 );
 
+const WORKSHEET_CALC_OP_SYMBOLS = {
+    '+': '+',
+    '-': '−',
+    '*': '×',
+    '/': '÷'
+};
+
 const worksheetCalculatorState = {
     display: '0',
     left: null,
@@ -26481,9 +26802,44 @@ function formatWorksheetCalcDisplay(value) {
     return text;
 }
 
+function getWorksheetCalculatorDisplayText() {
+    let text = worksheetCalculatorState.display;
+    if (
+        worksheetCalculatorState.op &&
+        worksheetCalculatorState.fresh &&
+        worksheetCalculatorState.display !== 'Error'
+    ) {
+        const sym = WORKSHEET_CALC_OP_SYMBOLS[worksheetCalculatorState.op];
+        if (sym) text = text + ' ' + sym;
+    }
+    return text;
+}
+
 function renderWorksheetCalculator() {
     const display = document.getElementById('worksheet-calculator-display');
-    if (display) display.textContent = worksheetCalculatorState.display;
+    if (display) {
+        const text = getWorksheetCalculatorDisplayText();
+        if (display.tagName === 'INPUT' || display.tagName === 'TEXTAREA') {
+            display.value = text;
+        } else {
+            display.textContent = text;
+        }
+    }
+
+    const panel = document.getElementById('worksheet-calculator');
+    if (panel) {
+        panel.querySelectorAll('[data-calc="op"]').forEach(function (btn) {
+            const op = btn.getAttribute('data-op');
+            const active = !!(
+                worksheetCalculatorState.op &&
+                worksheetCalculatorState.fresh &&
+                op === worksheetCalculatorState.op &&
+                op !== '%'
+            );
+            btn.classList.toggle('is-active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    }
 }
 
 function resetWorksheetCalculator() {
@@ -26492,6 +26848,31 @@ function resetWorksheetCalculator() {
     worksheetCalculatorState.op = null;
     worksheetCalculatorState.fresh = true;
     renderWorksheetCalculator();
+}
+
+function focusWorksheetCalculatorDisplay(selectAll) {
+    const display = document.getElementById('worksheet-calculator-display');
+    if (!display) return;
+    try {
+        display.focus({ preventScroll: true });
+        if (selectAll && typeof display.select === 'function') display.select();
+    } catch (err) {
+        display.focus();
+    }
+}
+
+function sanitizeWorksheetCalcTypedValue(raw) {
+    let text = String(raw || '').replace(/[^0-9.]/g, '');
+    const dot = text.indexOf('.');
+    if (dot !== -1) {
+        text = text.slice(0, dot + 1) + text.slice(dot + 1).replace(/\./g, '');
+    }
+    if (text.length > 16) text = text.slice(0, 16);
+    if (text === '' || text === '.') return text === '.' ? '0.' : '0';
+    if (text.length > 1 && text.charAt(0) === '0' && text.charAt(1) !== '.') {
+        text = text.replace(/^0+/, '') || '0';
+    }
+    return text;
 }
 
 function applyWorksheetCalcOp(left, op, right) {
@@ -26526,7 +26907,20 @@ function worksheetCalcDot() {
 }
 
 function worksheetCalcBack() {
-    if (worksheetCalculatorState.fresh || worksheetCalculatorState.display === 'Error') {
+    if (worksheetCalculatorState.display === 'Error') {
+        worksheetCalculatorState.display = '0';
+        worksheetCalculatorState.left = null;
+        worksheetCalculatorState.op = null;
+        worksheetCalculatorState.fresh = true;
+        renderWorksheetCalculator();
+        return;
+    }
+    if (worksheetCalculatorState.fresh && worksheetCalculatorState.op) {
+        worksheetCalculatorState.op = null;
+        renderWorksheetCalculator();
+        return;
+    }
+    if (worksheetCalculatorState.fresh) {
         worksheetCalculatorState.display = '0';
         worksheetCalculatorState.fresh = true;
     } else if (worksheetCalculatorState.display.length <= 1) {
@@ -26581,28 +26975,45 @@ function worksheetCalcPercent() {
 }
 
 function getWorksheetCalculatorHost() {
-    const starbucks = document.getElementById('starbucks-section');
-    const layout = document.getElementById('bank-account-layout');
-    if (starbucks && window.matchMedia('(min-width: 901px)').matches) {
-        return starbucks;
-    }
-    return layout || starbucks;
+    return document.body;
 }
 
 function positionWorksheetCalculator(anchorBtn) {
     const panel = document.getElementById('worksheet-calculator');
     if (!panel || panel.hidden) return;
-    const host = panel.parentElement;
-    const btn = anchorBtn || worksheetCalculatorState.anchorBtn;
-    if (!host || !btn || !document.body.contains(btn)) return;
 
-    const btnRect = btn.getBoundingClientRect();
-    const hostRect = host.getBoundingClientRect();
-    let top = btnRect.top - hostRect.top + host.scrollTop;
+    const margin = 8;
+    const btn = anchorBtn || worksheetCalculatorState.anchorBtn;
     const panelHeight = panel.offsetHeight || 280;
-    const maxTop = Math.max(0, host.clientHeight - panelHeight - 8);
-    top = Math.max(0, Math.min(top, maxTop));
+    const panelWidth = panel.offsetWidth || 248;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+
+    let top = margin;
+    let left = Math.max(margin, vw - panelWidth - 24);
+
+    if (btn && document.body.contains(btn)) {
+        const btnRect = btn.getBoundingClientRect();
+        top = btnRect.top;
+        left = btnRect.right + margin;
+
+        if (left + panelWidth > vw - margin) {
+            left = btnRect.left - panelWidth - margin;
+        }
+        if (left < margin) {
+            left = Math.min(btnRect.left, Math.max(margin, vw - panelWidth - margin));
+        }
+    }
+
+    const maxTop = Math.max(margin, vh - panelHeight - margin);
+    const maxLeft = Math.max(margin, vw - panelWidth - margin);
+    top = Math.max(margin, Math.min(top, maxTop));
+    left = Math.max(margin, Math.min(left, maxLeft));
+
     panel.style.top = top + 'px';
+    panel.style.left = left + 'px';
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
 }
 
 function setWorksheetCalculatorOpen(open, anchorBtn) {
@@ -26615,6 +27026,9 @@ function setWorksheetCalculatorOpen(open, anchorBtn) {
     if (!open) {
         panel.hidden = true;
         panel.style.top = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.bottom = '';
         worksheetCalculatorState.anchorBtn = null;
         if (starbucks) starbucks.classList.remove('worksheet-calculator-hosting');
         if (layout && panel.parentElement !== layout) layout.appendChild(panel);
@@ -26629,10 +27043,7 @@ function setWorksheetCalculatorOpen(open, anchorBtn) {
 
     const host = getWorksheetCalculatorHost();
     if (host && panel.parentElement !== host) host.appendChild(panel);
-    if (starbucks) {
-        if (host === starbucks) starbucks.classList.add('worksheet-calculator-hosting');
-        else starbucks.classList.remove('worksheet-calculator-hosting');
-    }
+    if (starbucks) starbucks.classList.remove('worksheet-calculator-hosting');
     worksheetCalculatorState.anchorBtn = anchorBtn || worksheetCalculatorState.anchorBtn;
     panel.hidden = false;
     renderWorksheetCalculator();
@@ -26647,6 +27058,7 @@ function setWorksheetCalculatorOpen(open, anchorBtn) {
 
     requestAnimationFrame(function () {
         positionWorksheetCalculator(worksheetCalculatorState.anchorBtn);
+        focusWorksheetCalculatorDisplay(true);
     });
 }
 
@@ -26729,6 +27141,57 @@ function handleWorksheetCalculatorClick(e) {
         if (op === '%') worksheetCalcPercent();
         else worksheetCalcOperate(op);
     } else if (action === 'eq') worksheetCalcEquals();
+
+    focusWorksheetCalculatorDisplay();
+}
+
+function isWorksheetCalculatorTypingTarget(target) {
+    if (!target || !target.closest) return false;
+    if (target.closest('#worksheet-calculator')) return true;
+    const tag = (target.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return false;
+    return true;
+}
+
+function handleWorksheetCalculatorKeydown(e) {
+    const panel = document.getElementById('worksheet-calculator');
+    if (!panel || panel.hidden) return;
+    if (!isWorksheetCalculatorTypingTarget(e.target)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const key = e.key;
+    let handled = true;
+
+    if (key >= '0' && key <= '9') worksheetCalcDigit(key);
+    else if (key === '.' || key === ',') worksheetCalcDot();
+    else if (key === 'Backspace') worksheetCalcBack();
+    else if (key === 'Escape') setWorksheetCalculatorOpen(false);
+    else if (key === 'Enter' || key === '=') worksheetCalcEquals();
+    else if (key === '+') worksheetCalcOperate('+');
+    else if (key === '-') worksheetCalcOperate('-');
+    else if (key === '*' || key === 'x' || key === 'X') worksheetCalcOperate('*');
+    else if (key === '/') worksheetCalcOperate('/');
+    else if (key === '%') worksheetCalcPercent();
+    else if (key === 'c' || key === 'C' || key === 'Delete') resetWorksheetCalculator();
+    else handled = false;
+
+    if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+}
+
+function handleWorksheetCalculatorInput(e) {
+    const panel = document.getElementById('worksheet-calculator');
+    const display = document.getElementById('worksheet-calculator-display');
+    if (!panel || panel.hidden || !display || e.target !== display) return;
+
+    const cleaned = sanitizeWorksheetCalcTypedValue(
+        String(display.value || '').replace(/[+\−×÷\s]/g, '')
+    );
+    worksheetCalculatorState.display = cleaned;
+    worksheetCalculatorState.fresh = cleaned === '0' && !String(display.value || '').replace(/[+\−×÷\s]/g, '');
+    renderWorksheetCalculator();
 }
 
 function formatPercentLabel(rate) {
@@ -26874,7 +27337,7 @@ function worksheetExampleText(kind, paycheck) {
             {
                 text: formatWorksheetExample(
                     'If the Point Card Deduction Rate is 8% and Gross Pay is $200.00:',
-                    '8% × $200.00 = $16.00',
+                    '8% = 8 ÷ 100 = 0.08\n0.08 × $200.00 = $16.00',
                     'The Point Card Deduction would be $16.00.'
                 )
             }
@@ -26935,7 +27398,7 @@ function worksheetExampleText(kind, paycheck) {
             {
                 text: formatWorksheetExample(
                     'If Gross Pay is $200.00 and the Federal Income Tax rate is 3.0%:',
-                    '3.0% × $200.00 = $6.00',
+                    '3.0% = 3.0 ÷ 100 = 0.03\n0.03 × $200.00 = $6.00',
                     'The Federal Income Tax would be $6.00.'
                 )
             }
@@ -26944,7 +27407,7 @@ function worksheetExampleText(kind, paycheck) {
             {
                 text: formatWorksheetExample(
                     'If Gross Pay is $200.00 and the Social Security rate is 6.2%:',
-                    '6.2% × $200.00 = $12.40',
+                    '6.2% = 6.2 ÷ 100 = 0.062\n0.062 × $200.00 = $12.40',
                     'The Social Security (FICA) would be $12.40.'
                 )
             }
@@ -26953,7 +27416,7 @@ function worksheetExampleText(kind, paycheck) {
             {
                 text: formatWorksheetExample(
                     'If Gross Pay is $200.00 and the Medicare rate is 1.5%:',
-                    '1.5% × $200.00 = $3.00',
+                    '1.5% = 1.5 ÷ 100 = 0.015\n0.015 × $200.00 = $3.00',
                     'The Medicare (FICA) would be $3.00.'
                 )
             }
@@ -26962,7 +27425,7 @@ function worksheetExampleText(kind, paycheck) {
             {
                 text: formatWorksheetExample(
                     'If Gross Pay is $200.00 and the State Income Tax rate is 5.35%:',
-                    '5.35% × $200.00 = $10.70',
+                    '5.35% = 5.35 ÷ 100 = 0.0535\n0.0535 × $200.00 = $10.70',
                     'The State Income Tax would be $10.70.'
                 )
             }
@@ -26997,6 +27460,24 @@ function worksheetExampleText(kind, paycheck) {
 function setText(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = value == null ? '' : String(value);
+}
+
+function syncWorksheetTaxGrossCounts(value) {
+    let text = '—';
+    if (value != null && value !== '') {
+        const parsed = typeof value === 'number' ? value : parseCurrency(value);
+        if (!isNaN(parsed)) text = formatCurrency(parsed);
+        else if (typeof value === 'string' && value.trim()) text = value.trim();
+    }
+    [
+        'worksheet-point-card-gross',
+        'worksheet-federal-gross',
+        'worksheet-ss-gross',
+        'worksheet-medicare-gross',
+        'worksheet-state-gross'
+    ].forEach(function (id) {
+        setText(id, text);
+    });
 }
 
 function prefillWorksheetField(id, value, asMoney) {
@@ -27084,6 +27565,9 @@ function renderPaycheckWorksheet(paycheck) {
         btn.textContent = 'Show example';
         btn.setAttribute('aria-expanded', 'false');
     });
+    const pcdNote = worksheetDiv.querySelector('#earnings-record-pcd-note')
+        || worksheetDiv.querySelector('.earnings-record-note');
+    if (pcdNote) pcdNote.hidden = true;
 
     const saved = paycheck.student_worksheet || {};
     const retry = paycheck.worksheet_completed && !paycheck.is_verified;
@@ -27117,11 +27601,13 @@ function renderPaycheckWorksheet(paycheck) {
         prefillWorksheetField('worksheet-state', saved.state_tax, true);
         prefillWorksheetField('worksheet-total-deductions', saved.total_deductions != null ? saved.total_deductions : paycheck.student_calculated_deduction, true);
         prefillWorksheetField('worksheet-final', saved.final_pay != null ? saved.final_pay : paycheck.student_calculated_final, true);
+        syncWorksheetTaxGrossCounts(saved.gross != null ? saved.gross : (paycheck.student_calculated_gross || paycheck.student_calculated_pay));
     } else {
         WORKSHEET_MONEY_IDS.concat(['worksheet-point-card-rate', 'worksheet-citation-count']).forEach(function (id) {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
+        syncWorksheetTaxGrossCounts('');
     }
 
     const err = document.getElementById('worksheet-error');
@@ -27766,8 +28252,20 @@ function handleBankAccountView() {
                         const noteAmt = document.getElementById('pcd-note-amount');
                         if (noteAmt) noteAmt.value = this.value;
                     }
+                    if (id === 'worksheet-gross-pay') {
+                        syncWorksheetTaxGrossCounts(parsed);
+                        const noteGp = document.getElementById('pcd-note-gp');
+                        if (noteGp) noteGp.value = this.value;
+                    }
+                } else if (id === 'worksheet-gross-pay') {
+                    syncWorksheetTaxGrossCounts(this.value);
                 }
             });
+            if (id === 'worksheet-gross-pay') {
+                el.addEventListener('input', function () {
+                    syncWorksheetTaxGrossCounts(this.value);
+                });
+            }
         }
     });
 
@@ -27789,6 +28287,18 @@ function handleBankAccountView() {
             const btn = e.target.closest('.worksheet-example-btn');
             if (!btn || !worksheetDiv.contains(btn)) return;
             const kind = btn.getAttribute('data-example');
+
+            if (kind === 'point-card-rate') {
+                const note = worksheetDiv.querySelector('#earnings-record-pcd-note')
+                    || worksheetDiv.querySelector('.earnings-record-note');
+                if (!note) return;
+                const showing = note.hidden;
+                note.hidden = !showing;
+                btn.textContent = showing ? 'Hide example' : 'Show example';
+                btn.setAttribute('aria-expanded', showing ? 'true' : 'false');
+                return;
+            }
+
             const panel = worksheetDiv.querySelector('.worksheet-example[data-example-panel="' + kind + '"]');
             if (!panel) return;
             const showing = panel.hidden;
@@ -27815,15 +28325,12 @@ function handleBankAccountView() {
     const bankAccountLayout = document.getElementById('bank-account-layout');
     if (bankAccountLayout && !bankAccountLayout._worksheetCalcBound) {
         bankAccountLayout._worksheetCalcBound = true;
-        bankAccountLayout.addEventListener('click', handleWorksheetCalculatorClick);
+        document.addEventListener('click', handleWorksheetCalculatorClick);
+        document.addEventListener('keydown', handleWorksheetCalculatorKeydown);
+        document.addEventListener('input', handleWorksheetCalculatorInput);
         const repositionCalc = function () {
             const panel = document.getElementById('worksheet-calculator');
             if (!panel || panel.hidden || !worksheetCalculatorState.anchorBtn) return;
-            const desiredHost = getWorksheetCalculatorHost();
-            if (desiredHost && panel.parentElement !== desiredHost) {
-                setWorksheetCalculatorOpen(true, worksheetCalculatorState.anchorBtn);
-                return;
-            }
             positionWorksheetCalculator();
         };
         window.addEventListener('resize', repositionCalc);

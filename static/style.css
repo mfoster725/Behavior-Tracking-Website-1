@@ -2817,6 +2817,55 @@ table tbody tr:hover {
     font-size: 0.8125rem;
 }
 
+.schedule-export-format-toggle {
+    display: flex;
+    gap: 0.35rem;
+}
+
+.schedule-export-format-option {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--bg-elevated);
+}
+
+.schedule-export-format-option input {
+    margin: 0;
+}
+
+.schedule-export-format-option:has(input:checked) {
+    border-color: var(--accent, #2563eb);
+    background: var(--bg-surface);
+    box-shadow: inset 0 0 0 1px var(--accent, #2563eb);
+}
+
+.schedule-print-students {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-weight: 400;
+    white-space: normal;
+    line-height: 1.35;
+}
+
+.schedule-print-students li {
+    margin: 0;
+}
+
+.schedule-print-students-empty {
+    color: #666;
+    font-style: italic;
+}
+
 #schedule-print-root {
     display: none;
 }
@@ -3006,6 +3055,11 @@ table tbody tr:hover {
     color: #111;
     vertical-align: top;
     white-space: nowrap;
+}
+
+.schedule-print-table td:last-child {
+    white-space: normal;
+    min-width: 4.5rem;
 }
 
 .schedule-print-table th {
@@ -5785,11 +5839,28 @@ table tbody tr:hover {
 }
 
 .worksheet-given-formula {
-    display: inline-block;
-    font-size: 13px;
+    display: block;
+    font-size: 12px;
     font-weight: 600;
-    color: #334155;
+    color: #64748b;
     white-space: nowrap;
+    margin-bottom: 4px;
+}
+
+.worksheet-tax-gross-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 2px;
+}
+
+.worksheet-tax-gross {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: #0f172a;
 }
 
 .earnings-record-table td:first-child .worksheet-example-btn {
@@ -5838,22 +5909,20 @@ table tbody tr:hover {
 
 .worksheet-calculator {
     width: 248px;
-    max-width: calc(100% - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: #f8fafc;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-    position: absolute;
-    z-index: 40;
-    left: 28px;
-    top: 0;
-    box-sizing: border-box;
-}
-
-#bank-account-layout > .worksheet-calculator {
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+    position: fixed;
+    z-index: 1200;
     left: auto;
     right: 24px;
+    top: 0;
+    box-sizing: border-box;
+    overflow: auto;
 }
 
 #starbucks-section.worksheet-calculator-hosting > :not(#worksheet-calculator) {
@@ -5897,6 +5966,8 @@ table tbody tr:hover {
 }
 
 .worksheet-calculator-display {
+    display: block;
+    width: 100%;
     margin-bottom: 10px;
     padding: 10px 12px;
     border: 1px solid var(--border);
@@ -5904,10 +5975,19 @@ table tbody tr:hover {
     background: #fff;
     font-size: 22px;
     font-variant-numeric: tabular-nums;
+    font-family: inherit;
     text-align: right;
     color: #0f172a;
     min-height: 44px;
+    line-height: 1.2;
+    box-sizing: border-box;
     word-break: break-all;
+}
+
+.worksheet-calculator-display:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .worksheet-calculator-keys {
@@ -5936,6 +6016,12 @@ table tbody tr:hover {
 .worksheet-calculator-keys button[data-calc="eq"] {
     background: #eff6ff;
     color: #1d4ed8;
+}
+
+.worksheet-calculator-keys button[data-calc="op"].is-active {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #fff;
 }
 
 .worksheet-calculator-keys button[data-calc="clear"],
@@ -6061,11 +6147,11 @@ table tbody tr:hover {
         padding-right: 16px;
     }
 
-    .worksheet-calculator,
-    #bank-account-layout > .worksheet-calculator {
-        left: 16px;
-        right: 16px;
+    .worksheet-calculator {
+        left: 8px !important;
+        right: 8px !important;
         width: auto;
+        max-width: none;
     }
 }
 

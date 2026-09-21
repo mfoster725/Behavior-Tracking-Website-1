@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bonuses-dropdown1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=worksheet-pcd-gross1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -358,15 +358,38 @@
                     <!-- Titles (grid row 1 — aligned across columns) -->
                     <div class="schedule-section-header schedule-area-title-teacher">
                         <h3>Teacher's Schedule</h3>
-                        <button type="button" id="print-staff-schedule-btn" class="btn-secondary">Print</button>
+                        <div class="schedule-print-menu">
+                            <button type="button" id="export-staff-schedule-menu-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="export-staff-schedule-menu">Export</button>
+                            <div id="export-staff-schedule-menu" class="schedule-print-menu-dropdown" role="menu" hidden>
+                                <button type="button" role="menuitem" data-staff-export="print">Print schedule</button>
+                                <button type="button" role="menuitem" data-staff-export="print-rosters">Print with class lists</button>
+                                <div class="schedule-print-menu-divider"></div>
+                                <button type="button" role="menuitem" data-staff-export="csv">Export CSV</button>
+                                <button type="button" role="menuitem" data-staff-export="csv-rosters">Export CSV with class lists</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="schedule-section-header schedule-area-title-student">
                         <h3>Student's Schedule</h3>
                         <div class="schedule-student-header-actions">
                             <button type="button" id="student-transition-btn" class="btn-secondary" disabled>Transition</button>
                             <div class="schedule-print-menu">
-                            <button type="button" id="print-student-schedule-menu-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="print-student-schedule-menu">Print</button>
+                            <button type="button" id="print-student-schedule-menu-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="print-student-schedule-menu">Export</button>
                             <div id="print-student-schedule-menu" class="schedule-print-menu-dropdown" role="menu" hidden>
+                                <div class="schedule-print-menu-row schedule-export-format-row" role="radiogroup" aria-label="Export format">
+                                    <label>Format</label>
+                                    <div class="schedule-export-format-toggle">
+                                        <label class="schedule-export-format-option">
+                                            <input type="radio" name="student-schedule-export-format" value="print" checked>
+                                            <span>Print</span>
+                                        </label>
+                                        <label class="schedule-export-format-option">
+                                            <input type="radio" name="student-schedule-export-format" value="csv">
+                                            <span>CSV</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="schedule-print-menu-divider"></div>
                                 <button type="button" role="menuitem" data-print-scope="selected">This student</button>
                                 <button type="button" role="menuitem" data-print-scope="managed">Students managed by me</button>
                                 <button type="button" role="menuitem" data-print-scope="all">All students</button>
@@ -1087,7 +1110,7 @@
                                         </thead>
                                         <tbody>
                                             <tr class="earnings-record-group">
-                                                <td colspan="5">Regular hours</td>
+                                                <td colspan="5">Regular days</td>
                                             </tr>
                                             <tr>
                                                 <td>Manny's Market</td>
@@ -1162,7 +1185,7 @@
 
                             <section class="earnings-record-section" aria-label="Deductions">
                                 <h5>Deductions</h5>
-                                <div class="earnings-record-note">
+                                <div class="earnings-record-note" id="earnings-record-pcd-note" hidden>
                                     <p>Your average Point Card percentage (P) for this week is <strong id="worksheet-star-percent">0</strong>%.</p>
 
                                     <h6 class="earnings-record-note-step">Step 1: Find your Point Card Deduction Rate</h6>
@@ -1180,8 +1203,9 @@
                                     </p>
 
                                     <h6 class="earnings-record-note-step">Step 2: Calculate your Point Card Deduction</h6>
-                                    <p>Multiply your Point Card Deduction Rate by your <strong>GROSS PAY (GP)</strong>.</p>
-                                    <p class="earnings-record-note-eq"><strong>Point Card Deduction Rate × GP = Point Card Deduction</strong></p>
+                                    <p>First convert your Point Card Deduction Rate from a percent to a decimal (divide by 100). Then multiply that decimal by your <strong>GROSS PAY (GP)</strong>.</p>
+                                    <p class="earnings-record-note-eq"><strong>Rate ÷ 100 = decimal</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>decimal × GP = Point Card Deduction</strong></p>
                                     <p class="earnings-record-note-fill">
                                         <input type="text" inputmode="decimal" id="pcd-note-rate-step2" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate for multiplication">
                                         <strong>×</strong>
@@ -1194,8 +1218,9 @@
 
                                     <h6 class="earnings-record-note-step">Example</h6>
                                     <p><strong>This is an example only. Your actual Gross Pay may be different.</strong></p>
-                                    <p>If a student's Gross Pay is <strong>$200</strong>:</p>
-                                    <p class="earnings-record-note-eq"><strong>12.5% × $200 = $25</strong></p>
+                                    <p>If a student's Gross Pay is <strong>$200</strong> and the Point Card Deduction Rate is <strong>12.5%</strong>:</p>
+                                    <p class="earnings-record-note-eq"><strong>12.5% = 12.5 ÷ 100 = 0.125</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>0.125 × $200 = $25</strong></p>
                                     <p>The student's <strong>Point Card Deduction would be $25</strong>.</p>
                                 </div>
                                 <div class="earnings-record-table-wrap">
@@ -1223,14 +1248,21 @@
                                             <tr>
                                                 <td>
                                                     Point Card Deduction
-                                                    <button type="button" class="worksheet-example-btn" data-example="point-card-rate">Show example</button>
-                                                    <p class="worksheet-example" data-example-panel="point-card-rate" hidden></p>
+                                                    <button
+                                                        type="button"
+                                                        class="worksheet-example-btn"
+                                                        data-example="point-card-rate"
+                                                        aria-controls="earnings-record-pcd-note"
+                                                        aria-expanded="false"
+                                                    >Show example</button>
                                                 </td>
                                                 <td>
-                                                    <span class="worksheet-given-formula">100% − <span id="worksheet-point-card-given-percent">0</span>%</span>
+                                                    <span class="worksheet-tax-gross-label">Gross Pay</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-point-card-gross">—</span>
                                                 </td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
+                                                        <span class="worksheet-given-formula">100% − <span id="worksheet-point-card-given-percent">0</span>%</span>
                                                         <input type="text" inputmode="decimal" id="worksheet-point-card-rate" placeholder="%" autocomplete="off" aria-label="Point Card Deduction rate">
                                                     </div>
                                                 </td>
@@ -1270,7 +1302,10 @@
                                             </tr>
                                             <tr>
                                                 <td>Federal Income Tax</td>
-                                                <td></td>
+                                                <td>
+                                                    <span class="worksheet-tax-gross-label">Gross Pay</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-federal-gross">—</span>
+                                                </td>
                                                 <td id="worksheet-federal-rate">3.0%</td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
@@ -1283,7 +1318,10 @@
                                             </tr>
                                             <tr>
                                                 <td>Social Security (FICA)</td>
-                                                <td></td>
+                                                <td>
+                                                    <span class="worksheet-tax-gross-label">Gross Pay</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-ss-gross">—</span>
+                                                </td>
                                                 <td id="worksheet-ss-rate">6.2%</td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
@@ -1296,7 +1334,10 @@
                                             </tr>
                                             <tr>
                                                 <td>Medicare (FICA)</td>
-                                                <td></td>
+                                                <td>
+                                                    <span class="worksheet-tax-gross-label">Gross Pay</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-medicare-gross">—</span>
+                                                </td>
                                                 <td id="worksheet-medicare-rate">1.5%</td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
@@ -1309,7 +1350,10 @@
                                             </tr>
                                             <tr>
                                                 <td>State Income Tax</td>
-                                                <td></td>
+                                                <td>
+                                                    <span class="worksheet-tax-gross-label">Gross Pay</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-state-gross">—</span>
+                                                </td>
                                                 <td id="worksheet-state-rate">5.35%</td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
@@ -1405,7 +1449,17 @@
                         <h5>Calculator</h5>
                         <button type="button" class="worksheet-calculator-close" aria-label="Close calculator">&times;</button>
                     </div>
-                    <div class="worksheet-calculator-display" id="worksheet-calculator-display" aria-live="polite">0</div>
+                    <input
+                        type="text"
+                        class="worksheet-calculator-display"
+                        id="worksheet-calculator-display"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="Calculator display"
+                        aria-live="polite"
+                        value="0"
+                    >
                     <div class="worksheet-calculator-keys" role="group" aria-label="Calculator keys">
                         <button type="button" data-calc="clear">C</button>
                         <button type="button" data-calc="back">⌫</button>
@@ -2873,7 +2927,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=share-login-cc1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=schedule-export1"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
