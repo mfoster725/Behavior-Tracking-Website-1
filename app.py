@@ -1477,6 +1477,13 @@ SCHEDULE_WEEKDAY_FROM_PYTHON = {
     3: 'thu',
     4: 'fri',
 }
+SCHEDULE_WEEKDAY_LABELS = {
+    'mon': 'Mon',
+    'tue': 'Tue',
+    'wed': 'Wed',
+    'thu': 'Thu',
+    'fri': 'Fri',
+}
 SCHEDULE_RECURRENCE_TYPES = frozenset({'daily', 'weekly', 'biweekly', 'nth_weekday'})
 SCHEDULE_MONTH_ORDINALS = frozenset({'1', '2', '3', '4', 'last'})
 
@@ -1595,25 +1602,21 @@ def schedule_entry_applies_on_date(entry, on_date=None):
     elif isinstance(on_date, datetime):
         on_date = on_date.date()
 
+    if not _schedule_entry_in_effective_window(entry, on_date):
+        return False
+
     if isinstance(entry, dict):
         recurrence_type = (entry.get('recurrence_type') or 'daily').strip().lower() or 'daily'
         weekdays = _normalize_schedule_weekdays(entry.get('weekdays'))
         month_ordinal = _normalize_month_ordinal(entry.get('month_ordinal'))
         biweekly_anchor = _parse_schedule_date(entry.get('biweekly_anchor'))
         effective_start = _parse_schedule_date(entry.get('effective_start'))
-        effective_end = _parse_schedule_date(entry.get('effective_end'))
     else:
         recurrence_type = (getattr(entry, 'recurrence_type', None) or 'daily').strip().lower() or 'daily'
         weekdays = _normalize_schedule_weekdays(getattr(entry, 'weekdays', None))
         month_ordinal = _normalize_month_ordinal(getattr(entry, 'month_ordinal', None))
         biweekly_anchor = _parse_schedule_date(getattr(entry, 'biweekly_anchor', None))
         effective_start = _parse_schedule_date(getattr(entry, 'effective_start', None))
-        effective_end = _parse_schedule_date(getattr(entry, 'effective_end', None))
-
-    if effective_start and on_date < effective_start:
-        return False
-    if effective_end and on_date > effective_end:
-        return False
 
     if recurrence_type not in SCHEDULE_RECURRENCE_TYPES:
         recurrence_type = 'daily'
@@ -1649,6 +1652,85 @@ def schedule_entry_applies_on_date(entry, on_date=None):
         return bool(target and target == on_date)
 
     return True
+
+
+def _schedule_entry_in_effective_window(entry, on_date=None):
+    """True when on_date falls within the entry's effective start/end (weekday ignored)."""
+    if on_date is None:
+        on_date = school_now().date()
+    elif isinstance(on_date, datetime):
+        on_date = on_date.date()
+
+    if isinstance(entry, dict):
+        effective_start = _parse_schedule_date(entry.get('effective_start'))
+        effective_end = _parse_schedule_date(entry.get('effective_end'))
+    else:
+        effective_start = _parse_schedule_date(getattr(entry, 'effective_start', None))
+        effective_end = _parse_schedule_date(getattr(entry, 'effective_end', None))
+
+    if effective_start and on_date < effective_start:
+        return False
+    if effective_end and on_date > effective_end:
+        return False
+    return True
+
+
+def _format_schedule_recurrence_summary(entry):
+    """Human-readable recurrence label, matching the schedule UI summaries."""
+    if isinstance(entry, dict):
+        recurrence_type = (entry.get('recurrence_type') or 'daily').strip().lower() or 'daily'
+        weekdays = _normalize_schedule_weekdays(entry.get('weekdays'))
+        month_ordinal = _normalize_month_ordinal(entry.get('month_ordinal'))
+        effective_start = _parse_schedule_date(entry.get('effective_start'))
+        effective_end = _parse_schedule_date(entry.get('effective_end'))
+    else:
+        recurrence_type = (getattr(entry, 'recurrence_type', None) or 'daily').strip().lower() or 'daily'
+        weekdays = _normalize_schedule_weekdays(getattr(entry, 'weekdays', None))
+        month_ordinal = _normalize_month_ordinal(getattr(entry, 'month_ordinal', None))
+        effective_start = _parse_schedule_date(getattr(entry, 'effective_start', None))
+        effective_end = _parse_schedule_date(getattr(entry, 'effective_end', None))
+
+    if recurrence_type not in SCHEDULE_RECURRENCE_TYPES:
+        recurrence_type = 'daily'
+
+    day_labels = ', '.join(SCHEDULE_WEEKDAY_LABELS.get(day, day) for day in weekdays)
+    if recurrence_type == 'weekly':
+        core = f'Every {day_labels}' if day_labels else 'Weekly'
+    elif recurrence_type == 'biweekly':
+        core = f'Every other {day_labels}' if day_labels else 'Every other week'
+    elif recurrence_type == 'nth_weekday':
+        ord_map = {'1': '1st', '2': '2nd', '3': '3rd', '4': '4th', 'last': 'Last'}
+        ord_label = ord_map.get(month_ordinal or '1', month_ordinal or '1')
+        day = day_labels or 'weekday'
+        core = f'{ord_label} {day} of month'
+    else:
+        core = 'Every school day'
+
+    range_bits = []
+    if effective_start:
+        range_bits.append(f'from {effective_start.isoformat()}')
+    if effective_end:
+        range_bits.append(f'until {effective_end.isoformat()}')
+    return f"{core} ({' '.join(range_bits)})" if range_bits else core
+
+
+def _roster_student_payload(student, entry):
+    """Student dict for class-list export/print, with recurrence annotation when not daily."""
+    recurrence_type = (getattr(entry, 'recurrence_type', None) or 'daily').strip().lower() or 'daily'
+    if recurrence_type not in SCHEDULE_RECURRENCE_TYPES:
+        recurrence_type = 'daily'
+    weekdays = _normalize_schedule_weekdays(getattr(entry, 'weekdays', None))
+    summary = _format_schedule_recurrence_summary(entry)
+    show_when = recurrence_type != 'daily' or bool(getattr(entry, 'effective_start', None) or getattr(entry, 'effective_end', None))
+    label = f'{student.name} ({summary})' if show_when else student.name
+    return {
+        'id': student.id,
+        'name': student.name,
+        'recurrence_type': recurrence_type,
+        'weekdays': weekdays,
+        'recurrence_summary': summary,
+        'label': label,
+    }
 
 
 def _schedule_row_recurrence_type(row):
@@ -5867,9 +5949,11 @@ def _period_entry_student_ids_for_staff(staff_user, period, class_name='', on_da
 
 def _period_entry_class_rosters_for_staff(staff_user, on_date=None):
     """
-    Students per (time_period, class_name) for a staff member, using the same
-    staff/class matching as Period Entry (excluding outside-school extras, which
-    are not tied to a specific class on the teacher schedule).
+    Students per (time_period, class_name) for a staff member's class-list export.
+
+    Unlike Period Entry (which is date-specific), this includes every student
+    assignment that falls in the effective date window — including weekly-only
+    classes — and annotates each student with their recurrence (e.g. Every Mon).
     """
     if not staff_user:
         return []
@@ -5878,45 +5962,54 @@ def _period_entry_class_rosters_for_staff(staff_user, on_date=None):
     staff_name_key = (staff_name or '').strip().lower()
 
     all_rows = Schedule.query.filter_by(schedule_type='student').all()
-    rows_by_student = {}
+    # (period, class_name, student_id) -> best matching schedule row
+    best_rows = {}
     for row in all_rows:
-        if row.student_id:
-            rows_by_student.setdefault(row.student_id, []).append(row)
-
-    roster_ids = {}  # (period, class_name) -> set(student_id)
-    for student_id, rows in rows_by_student.items():
-        active = _filter_schedule_rows_for_date(rows, on_date)
-        for row in active:
-            row_staff = (row.staff_name or '').strip()
-            if row_staff.lower() != staff_name_key:
-                continue
-            period = (row.time_period or '').strip()
-            class_name = (row.class_name or '').strip()
-            if not period or not class_name:
-                continue
-            roster_ids.setdefault((period, class_name), set()).add(student_id)
+        if not row.student_id:
+            continue
+        if not _schedule_entry_in_effective_window(row, on_date):
+            continue
+        row_staff = (row.staff_name or '').strip()
+        if row_staff.lower() != staff_name_key:
+            continue
+        period = (row.time_period or '').strip()
+        class_name = (row.class_name or '').strip()
+        if not period or not class_name:
+            continue
+        key = (period, class_name, row.student_id)
+        existing = best_rows.get(key)
+        if existing is None:
+            best_rows[key] = row
+            continue
+        # Prefer the more specific (non-daily) assignment when both exist
+        existing_type = _schedule_row_recurrence_type(existing)
+        new_type = _schedule_row_recurrence_type(row)
+        if existing_type == 'daily' and new_type != 'daily':
+            best_rows[key] = row
 
     active_ids = _active_student_user_ids()
-    all_student_ids = set()
-    for ids in roster_ids.values():
-        all_student_ids |= {sid for sid in ids if sid in active_ids}
-
+    student_ids = {sid for (_, _, sid) in best_rows.keys() if sid in active_ids}
     students_by_id = {}
-    if all_student_ids:
-        students = Student.query.filter(Student.id.in_(all_student_ids)).order_by(Student.name).all()
+    if student_ids:
+        students = Student.query.filter(Student.id.in_(student_ids)).order_by(Student.name).all()
         students = filter_directory_info(students, include_opted_out=False)
         students_by_id = {s.id: s for s in students}
 
+    grouped = {}  # (period, class_name) -> [payload, ...]
+    for (period, class_name, student_id), row in best_rows.items():
+        student = students_by_id.get(student_id)
+        if not student:
+            continue
+        grouped.setdefault((period, class_name), []).append(
+            _roster_student_payload(student, row)
+        )
+
     classes = []
-    for (period, class_name), ids in sorted(
-        roster_ids.items(),
+    for (period, class_name), students in sorted(
+        grouped.items(),
         key=lambda item: (item[0][0], item[0][1].lower()),
     ):
-        students = [
-            {'id': students_by_id[sid].id, 'name': students_by_id[sid].name}
-            for sid in sorted(ids, key=lambda i: (students_by_id[i].name.lower() if i in students_by_id else '', i))
-            if sid in students_by_id
-        ]
+        students.sort(key=lambda s: ((s.get('name') or '').lower(), s.get('id') or 0))
         classes.append({
             'time_period': period,
             'class_name': class_name,

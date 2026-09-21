@@ -17596,9 +17596,21 @@ function buildSchedulePrintStudentListHtml(students) {
         return '<div class="schedule-print-students-empty">No students</div>';
     }
     return `<ul class="schedule-print-students">${students.map((student) => {
-        const name = typeof student === 'string' ? student : (student && student.name) || '';
-        return `<li>${escapeHtml(name)}</li>`;
+        return `<li>${escapeHtml(formatRosterStudentLabel(student))}</li>`;
     }).join('')}</ul>`;
+}
+
+function formatRosterStudentLabel(student) {
+    if (student == null) return '';
+    if (typeof student === 'string') return student;
+    if (student.label) return String(student.label);
+    const name = (student.name || '').trim();
+    const summary = (student.recurrence_summary || '').trim();
+    const recurrenceType = String(student.recurrence_type || 'daily').trim().toLowerCase() || 'daily';
+    if (summary && recurrenceType !== 'daily') {
+        return `${name} (${summary})`;
+    }
+    return name;
 }
 
 function buildSchedulePrintCardHtml(block) {
@@ -17636,7 +17648,7 @@ function buildSchedulePrintCardHtml(block) {
         <section class="schedule-print-card">
             <header class="schedule-print-header">
                 <h1>${escapeHtml(block.title)}</h1>
-                <p>${withRosters ? 'Class lists' : 'Printed'} ${escapeHtml(printedOn)}</p>
+                <p>${withRosters ? 'Class lists (weekly patterns shown)' : 'Printed'} ${escapeHtml(printedOn)}</p>
             </header>
             <table class="schedule-print-table">
                 <thead>
@@ -17902,9 +17914,9 @@ function buildTeacherScheduleCsvRows(periods) {
 function buildTeacherScheduleRosterCsvRows(periods, rosterMap) {
     const rows = [['Time', 'Class', 'Students']];
     groupSchedulePeriodsForRosterPrint(periods, rosterMap).forEach((row) => {
-        const studentNames = (row.students || []).map((student) => (
-            typeof student === 'string' ? student : (student && student.name) || ''
-        )).filter(Boolean);
+        const studentNames = (row.students || [])
+            .map((student) => formatRosterStudentLabel(student))
+            .filter(Boolean);
         rows.push([row.time, row.className, studentNames.join(', ')]);
     });
     return rows;
