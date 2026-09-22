@@ -21185,8 +21185,17 @@ let _selectedBillingPlan = null;
 
 function billingSelectedPlanId(data) {
     if (_selectedBillingPlan) return _selectedBillingPlan;
-    if (data && data.configured && !data.on_paid_plan) return 'paid';
+    if (data && data.configured && !data.on_paid_plan) {
+        const plans = Array.isArray(data.plans) ? data.plans : [];
+        if (plans.some((p) => p.id === 'monthly')) return 'monthly';
+        if (plans.some((p) => p.id === 'yearly')) return 'yearly';
+        return 'paid';
+    }
     return (data && data.current_plan) || 'free';
+}
+
+function billingIsPaidPlanId(planId) {
+    return planId === 'monthly' || planId === 'yearly' || planId === 'paid';
 }
 
 function billingPlanRow(plan, selectedId) {
@@ -21216,15 +21225,17 @@ function updateBillingManageActions(data) {
     const portalOpenBtn = document.getElementById('billing-portal-open-btn');
     const emailWrap = document.getElementById('billing-manage-email-wrap');
     const emailInput = document.getElementById('billing-manage-email');
-    const canPayPaid = data.configured && selectedId === 'paid' && !data.monthly_ok;
-    const canPayBuild = data.configured && selectedId === 'paid' && !!data.monthly_ok && !!data.can_pay_build_fee;
+    const paidSelected = billingIsPaidPlanId(selectedId);
+    const canPayPaid = data.configured && paidSelected && !data.monthly_ok;
+    const canPayBuild = data.configured && paidSelected && !!data.monthly_ok && !!data.can_pay_build_fee;
     if (payBtn) {
         if (canPayPaid) {
             payBtn.style.display = '';
             payBtn.disabled = false;
+            const planWord = selectedId === 'yearly' ? 'yearly' : 'monthly';
             payBtn.textContent = data.build_fee_required && !data.build_fee_paid
-                ? 'Pay monthly + build fee'
-                : 'Pay selected plan';
+                ? `Pay ${planWord} + build fee`
+                : `Pay ${planWord} plan`;
         } else if (canPayBuild) {
             payBtn.style.display = '';
             payBtn.disabled = false;
@@ -21269,6 +21280,9 @@ function renderBillingManageModal(data) {
     ];
     if (selectedId === 'free' && data.on_paid_plan) {
         sections.push('<div style="font-size:13px;color:var(--text-secondary);">To switch to Free, use Update card or cancel and end the subscription at the period end.</div>');
+    }
+    if (data.on_paid_plan && billingIsPaidPlanId(selectedId) && selectedId !== data.current_plan) {
+        sections.push('<div style="font-size:13px;color:var(--text-secondary);">To switch between monthly and yearly, use Update card or cancel and choose a different plan.</div>');
     }
     if (data.build_fee_required && data.on_paid_plan) {
         const buildBits = [
@@ -21351,7 +21365,7 @@ async function loadSchoolBilling() {
     }
 }
 
-async function startSchoolSubscription(intent) {
+async function startSchoolSubscription(intent, plan) {
     const payBtn = document.getElementById('billing-manage-pay-btn');
     const emailInput = document.getElementById('billing-manage-email');
     setBillingMessage('');
@@ -21362,7 +21376,8 @@ async function startSchoolSubscription(intent) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 email: emailInput ? emailInput.value.trim() : '',
-                intent: intent || 'auto'
+                intent: intent || 'auto',
+                plan: plan || 'monthly'
             })
         });
         const data = await response.json().catch(() => ({}));
@@ -21383,12 +21398,12 @@ async function startSchoolSubscription(intent) {
 function paySelectedBillingPlan() {
     const data = _schoolBillingStatus || {};
     const selectedId = billingSelectedPlanId(data);
-    if (selectedId !== 'paid') return;
+    if (!billingIsPaidPlanId(selectedId)) return;
     if (data.monthly_ok && data.can_pay_build_fee) {
-        startSchoolSubscription('build_fee');
+        startSchoolSubscription('build_fee', selectedId);
         return;
     }
-    startSchoolSubscription('auto');
+    startSchoolSubscription('auto', selectedId === 'paid' ? 'monthly' : selectedId);
 }
 
 async function openSchoolBillingPortal() {

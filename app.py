@@ -277,9 +277,15 @@ def _login_attempt_key():
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '').strip()
 STRIPE_PRICE_LOOKUP_KEY = os.environ.get('STRIPE_PRICE_LOOKUP_KEY', 'monthly').strip() or 'monthly'
+STRIPE_YEARLY_PRICE_LOOKUP_KEY = (
+    os.environ.get('STRIPE_YEARLY_PRICE_LOOKUP_KEY', 'yearly').strip() or 'yearly'
+)
 STRIPE_BUILD_FEE_LOOKUP_KEY = os.environ.get('STRIPE_BUILD_FEE_LOOKUP_KEY', 'build_fee').strip() or 'build_fee'
 # Optional fallbacks while migrating off hardcoded Price IDs.
 STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID', '').strip()
+STRIPE_YEARLY_PRICE_ID = os.environ.get(
+    'STRIPE_YEARLY_PRICE_ID', 'price_1UISwlAwoC6pk76On34l1hS4'
+).strip()
 STRIPE_BUILD_FEE_PRICE_ID = os.environ.get('STRIPE_BUILD_FEE_PRICE_ID', '').strip()
 if stripe_sdk is not None and STRIPE_SECRET_KEY:
     stripe_sdk.api_key = STRIPE_SECRET_KEY
@@ -4822,12 +4828,39 @@ def _monthly_price(fresh=False):
     return _lookup_stripe_price(STRIPE_PRICE_LOOKUP_KEY, STRIPE_PRICE_ID, fresh=fresh)
 
 
+def _yearly_price(fresh=False):
+    return _lookup_stripe_price(
+        STRIPE_YEARLY_PRICE_LOOKUP_KEY, STRIPE_YEARLY_PRICE_ID, fresh=fresh
+    )
+
+
+def _normalize_billing_plan(plan):
+    value = (plan or 'monthly').strip().lower()
+    if value in ('yearly', 'year', 'annual', 'annually'):
+        return 'yearly'
+    if value in ('monthly', 'month', 'paid'):
+        return 'monthly'
+    return None
+
+
+def _subscription_price_for_plan(plan='monthly', fresh=False):
+    """Return (price_obj, plan_id, fallback_interval) for a paid billing plan."""
+    plan_id = _normalize_billing_plan(plan) or 'monthly'
+    if plan_id == 'yearly':
+        return _yearly_price(fresh=fresh), 'yearly', 'year'
+    return _monthly_price(fresh=fresh), 'monthly', 'month'
+
+
 def _build_fee_price(fresh=False):
     return _lookup_stripe_price(STRIPE_BUILD_FEE_LOOKUP_KEY, STRIPE_BUILD_FEE_PRICE_ID, fresh=fresh)
 
 
 def _stripe_configured():
-    return bool(stripe_sdk is not None and STRIPE_SECRET_KEY and _price_id_of(_monthly_price()))
+    return bool(
+        stripe_sdk is not None
+        and STRIPE_SECRET_KEY
+        and (_price_id_of(_monthly_price()) or _price_id_of(_yearly_price()))
+    )
 
 
 def _build_fee_configured():
@@ -5330,16 +5363,50 @@ def _billing_status_payload():
     monthly_ok = _subscription_is_current(row.status)
     on_paid_plan = _on_paid_plan(row.status)
     monthly_obj = _monthly_price()
+    yearly_obj = _yearly_price()
     build_obj = _build_fee_price()
-    configured = bool(stripe_sdk is not None and STRIPE_SECRET_KEY and _price_id_of(monthly_obj))
+    monthly_id = _price_id_of(monthly_obj)
+    yearly_id = _price_id_of(yearly_obj)
+    configured = bool(
+        stripe_sdk is not None and STRIPE_SECRET_KEY and (monthly_id or yearly_id)
+    )
     build_required = bool(_price_id_of(build_obj))
     build_paid = bool(row.build_fee_paid) if build_required else True
     up_to_date = monthly_ok and build_paid
-    monthly_info = _price_info_from_obj(monthly_obj, 'month') if configured else {'label': None, 'name': None}
+    monthly_info = (
+        _price_info_from_obj(monthly_obj, 'month') if monthly_id else {'label': None, 'name': None}
+    )
+    yearly_info = (
+        _price_info_from_obj(yearly_obj, 'year') if yearly_id else {'label': None, 'name': None}
+    )
     build_info = _price_info_from_obj(build_obj) if build_required and configured else {'label': None, 'name': None}
     period_end = row.current_period_end.isoformat() + 'Z' if row.current_period_end else None
     build_paid_at = row.build_fee_paid_at.isoformat() + 'Z' if row.build_fee_paid_at else None
-    paid_name = monthly_info.get('name') or 'Paid plan'
+    product_name = (
+        monthly_info.get('name')
+        or yearly_info.get('name')
+        or 'Paid plan'
+    )
+    active_price_id = (row.price_id or '').strip()
+    current_plan = 'free'
+    if on_paid_plan:
+        if yearly_id and active_price_id == yearly_id:
+            current_plan = 'yearly'
+        elif monthly_id and active_price_id == monthly_id:
+            current_plan = 'monthly'
+        else:
+            # Legacy/unknown price still counts as paid; prefer monthly label if present.
+            current_plan = 'monthly' if monthly_id else 'yearly'
+    if current_plan == 'yearly':
+        plan_name = 'Yearly'
+        active_price_label = yearly_info.get('label') or monthly_info.get('label')
+    elif current_plan == 'monthly':
+        plan_name = 'Monthly'
+        active_price_label = monthly_info.get('label') or yearly_info.get('label')
+    else:
+        plan_name = 'Free'
+        active_price_label = None
+    build_fee_label = build_info.get('label') if build_required else None
     plans = [{
         'id': 'free',
         'name': 'Free',
@@ -5347,14 +5414,25 @@ def _billing_status_payload():
         'kind': 'free',
         'current': not on_paid_plan,
     }]
-    if configured:
+    if monthly_id:
         plans.append({
-            'id': 'paid',
-            'name': paid_name,
+            'id': 'monthly',
+            'name': 'Monthly',
             'price_label': monthly_info.get('label'),
             'kind': 'paid',
-            'current': on_paid_plan,
-            'build_fee_label': build_info.get('label') if build_required else None,
+            'interval': 'month',
+            'current': on_paid_plan and current_plan == 'monthly',
+            'build_fee_label': build_fee_label,
+        })
+    if yearly_id:
+        plans.append({
+            'id': 'yearly',
+            'name': 'Yearly',
+            'price_label': yearly_info.get('label'),
+            'kind': 'paid',
+            'interval': 'year',
+            'current': on_paid_plan and current_plan == 'yearly',
+            'build_fee_label': build_fee_label,
         })
     return {
         'configured': configured,
@@ -5362,8 +5440,8 @@ def _billing_status_payload():
         'status': row.status or 'inactive',
         'monthly_ok': monthly_ok,
         'on_paid_plan': on_paid_plan,
-        'current_plan': 'paid' if on_paid_plan else 'free',
-        'plan_name': paid_name if on_paid_plan else 'Free',
+        'current_plan': current_plan,
+        'plan_name': plan_name if on_paid_plan else 'Free',
         'plans': plans,
         'build_fee_paid': bool(row.build_fee_paid),
         'build_fee_paid_at': build_paid_at,
@@ -5372,8 +5450,10 @@ def _billing_status_payload():
         'cancel_at_period_end': bool(row.cancel_at_period_end),
         'current_period_end': period_end,
         'has_customer': bool(row.stripe_customer_id),
-        'price_label': monthly_info.get('label'),
-        'product_name': monthly_info.get('name'),
+        'price_label': active_price_label,
+        'product_name': product_name,
+        'monthly_price_label': monthly_info.get('label'),
+        'yearly_price_label': yearly_info.get('label'),
         'build_fee_label': build_info.get('label'),
         'build_fee_name': build_info.get('name'),
         'customer_email': row.customer_email,
@@ -5397,15 +5477,24 @@ def billing_status():
 @admin_required
 def billing_checkout():
     row = get_site_subscription()
-    monthly = _monthly_price(fresh=True)
-    monthly_id = _price_id_of(monthly)
-    if stripe_sdk is None or not STRIPE_SECRET_KEY or not monthly_id:
-        return jsonify({
-            'error': 'Stripe is not configured. Set a lookup key of "monthly" on the live monthly Price in Stripe (or STRIPE_PRICE_ID as a fallback).'
-        }), 400
+    data = request.get_json(silent=True) or {}
+    plan = _normalize_billing_plan(data.get('plan') or data.get('interval') or 'monthly')
+    if plan is None:
+        return jsonify({'error': 'Choose monthly or yearly.'}), 400
+    price_obj, plan_id, _interval = _subscription_price_for_plan(plan, fresh=True)
+    price_id = _price_id_of(price_obj)
+    if stripe_sdk is None or not STRIPE_SECRET_KEY or not price_id:
+        missing = (
+            'Set a lookup key of "yearly" on the live yearly Price in Stripe '
+            '(or STRIPE_YEARLY_PRICE_ID as a fallback).'
+            if plan_id == 'yearly'
+            else
+            'Set a lookup key of "monthly" on the live monthly Price in Stripe '
+            '(or STRIPE_PRICE_ID as a fallback).'
+        )
+        return jsonify({'error': f'Stripe is not configured. {missing}'}), 400
     build = _build_fee_price(fresh=True)
     build_id = _price_id_of(build)
-    data = request.get_json(silent=True) or {}
     email = (data.get('email') or row.customer_email or '').strip()
     intent = (data.get('intent') or 'auto').strip().lower()
     base = _public_base_url()
@@ -5448,13 +5537,16 @@ def billing_checkout():
         return jsonify({'url': session.url})
 
     if monthly_ok:
-        return jsonify({'error': 'Monthly subscription is already active. Use Manage Plan to change it.'}), 400
+        return jsonify({
+            'error': 'Subscription is already active. Use Update card or cancel to change plan.'
+        }), 400
 
-    line_items = [{'price': monthly_id, 'quantity': 1}]
+    line_items = [{'price': price_id, 'quantity': 1}]
     metadata = {
         'site': 'behavior-tracking',
         'admin_user_id': str(current_user.id),
         'purpose': 'subscription',
+        'plan': plan_id,
     }
     if include_build:
         line_items.append({'price': build_id, 'quantity': 1})
@@ -5469,7 +5561,7 @@ def billing_checkout():
         'client_reference_id': str(current_user.id),
         'allow_promotion_codes': True,
         'metadata': metadata,
-        'integration_identifier': _checkout_integration_id('subscribe'),
+        'integration_identifier': _checkout_integration_id(f'sub-{plan_id[:3]}'),
     }
     if row.stripe_customer_id:
         kwargs['customer'] = row.stripe_customer_id
