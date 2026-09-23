@@ -10546,20 +10546,24 @@ function getPastPointCardPrintOptions() {
         selected[box.value] = !!box.checked;
     });
     const full = !!selected.full;
-    const insights = !!selected.insights;
+    const insightsOnly = !!selected.insights;
+    // Full Point Card always includes Info Insights; insights-only is the summary without the grid.
+    const includeInsights = full || insightsOnly;
     return {
         full,
-        insights,
+        insights: insightsOnly,
         time: full,
         location: full,
         safety: full,
         teamwork: full,
         accountability: full,
         relationships: full,
+        // Keep the Info column compact when insights are printed below.
         info: full,
         percent: full,
-        attendance: full,
-        info_insights: insights,
+        attendance: true,
+        info_insights: includeInsights,
+        compactInfoColumn: full,
     };
 }
 
@@ -10692,6 +10696,11 @@ function buildPastPointCardPrintPercentRow(record, columns, options, includeOver
     return `<tr>${cells.join('')}</tr>`;
 }
 
+function formatPastPointCardInfoMarker(rawInfo) {
+    const info = parsePointCardInfoData(rawInfo);
+    return (info && hasInfoData(info)) ? 'Yes' : '—';
+}
+
 function buildPastPointCardPrintDayHtml(record, studentId, options, previousRecord) {
     const [year, month, day] = String(record.date || '').split('-').map(Number);
     const date = new Date(year, month - 1, day);
@@ -10712,7 +10721,7 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
         { key: 'teamwork', label: 'Teamwork' },
         { key: 'accountability', label: 'Accountability' },
         { key: 'relationships', label: 'Relationships' },
-        { key: 'info', label: 'Period Notes', left: true },
+        { key: 'info', label: 'Info', left: true },
     ].filter((col) => options[col.key]);
 
     const includeOverallColumn = !!(options.percent && !options.info && columns.length);
@@ -10722,10 +10731,10 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
     if (showTable && columns.length === 0 && options.percent) {
         const percents = computePastPointCardPercents(record);
         tableHtml = `
-            <table>
+            <table class="ppc-print-table">
                 <thead><tr><th class="ppc-print-left">Percentages</th></tr></thead>
                 <tbody>
-                    <tr><td class="ppc-print-left">S ${formatPercentCellText(percents.s)} · T ${formatPercentCellText(percents.t)} · A ${formatPercentCellText(percents.a)} · R ${formatPercentCellText(percents.r)} · Overall <strong>${formatPercentCellText(percents.overall)}</strong></td></tr>
+                    <tr><td class="ppc-print-left">Safety ${formatPercentCellText(percents.s)} · Teamwork ${formatPercentCellText(percents.t)} · Accountability ${formatPercentCellText(percents.a)} · Relationships ${formatPercentCellText(percents.r)} · Overall <strong>${formatPercentCellText(percents.overall)}</strong></td></tr>
                 </tbody>
             </table>
         `;
@@ -10744,7 +10753,9 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
                 teamwork: formatPointCardStarCell(record, period.teamwork_points),
                 accountability: formatPointCardStarCell(record, period.accountability_points),
                 relationships: formatPointCardStarCell(record, period.relationships_points),
-                info: formatPastPointCardInfoForPrint(period.info),
+                info: options.compactInfoColumn
+                    ? formatPastPointCardInfoMarker(period.info)
+                    : formatPastPointCardInfoForPrint(period.info),
             };
             const cells = columns.map((col) => {
                 const extra = col.key === 'info' ? ' ppc-print-info-cell' : '';
@@ -10758,7 +10769,7 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
         const percentRow = buildPastPointCardPrintPercentRow(record, columns, options, includeOverallColumn);
 
         tableHtml = `
-            <table>
+            <table class="ppc-print-table">
                 <thead><tr>${headerCells}</tr></thead>
                 <tbody>${bodyRows}${percentRow}</tbody>
             </table>
@@ -10781,8 +10792,10 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
                 <h2>${formattedDate}</h2>
                 ${attendanceBadge}
             </header>
-            ${tableHtml}
-            ${insightsHtml}
+            <div class="ppc-print-day-body">
+                ${tableHtml}
+                ${insightsHtml}
+            </div>
         </section>
     `;
 }
@@ -10829,9 +10842,9 @@ function printPastPointCards() {
     const rangeLabel = firstDate && lastDate && firstDate !== lastDate
         ? `${formatDay(firstDate)} – ${formatDay(lastDate)}`
         : formatDay(lastDate || firstDate);
-    const layoutLabel = options.full && options.insights
-        ? 'Full Point Card and Info Insights'
-        : (options.full ? 'Full Point Card' : 'Info Insights');
+    const layoutLabel = options.full
+        ? 'Full Point Card'
+        : 'Info Insights';
 
     const pages = [];
     for (let i = 0; i < records.length; i += 2) {
@@ -10844,7 +10857,6 @@ function printPastPointCards() {
             const previous = records[recordIndex + 1] || null;
             return buildPastPointCardPrintDayHtml(record, studentId, options, previous);
         }).join('');
-        const filler = pair.length === 1 ? '<section class="ppc-print-day ppc-print-day--empty" aria-hidden="true"></section>' : '';
         return `
             <section class="ppc-print-page">
                 <header class="ppc-print-banner">
@@ -10852,8 +10864,9 @@ function printPastPointCards() {
                     <h1>${safeName}</h1>
                     <p class="ppc-print-meta">${rangeLabel}<span> · ${layoutLabel}</span><span> · Prepared ${printedOn}</span><span> · Page ${pageIndex + 1} of ${pages.length}</span></p>
                 </header>
-                ${daysHtml}
-                ${filler}
+                <div class="ppc-print-stack">
+                    ${daysHtml}
+                </div>
             </section>
         `;
     }).join('');

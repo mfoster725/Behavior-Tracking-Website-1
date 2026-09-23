@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=past-pc-print2">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=past-pc-print3">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -2744,14 +2744,14 @@
                             <input type="checkbox" name="past-pc-print" value="full" checked>
                             <span>
                                 <strong>Full Point Card</strong>
-                                <em>Periods, STAR scores, and percentages</em>
+                                <em>Period scores, percentages, and Info Insights</em>
                             </span>
                         </label>
                         <label class="past-point-card-print-option">
                             <input type="checkbox" name="past-pc-print" value="insights" checked>
                             <span>
                                 <strong>Info Insights</strong>
-                                <em>Daily summary of notes and incidents</em>
+                                <em>Daily summary only</em>
                             </span>
                         </label>
                         <div class="past-point-card-print-menu-actions">
@@ -2967,7 +2967,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=past-pc-print2"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=past-pc-print3"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

@@ -4676,7 +4676,7 @@ table tbody tr:hover {
 @media print {
     @page {
         size: letter portrait;
-        margin: 0.4in;
+        margin: 0.35in;
     }
 
     body.past-point-card-printing > *:not(#past-point-card-print-root) {
@@ -4696,14 +4696,12 @@ table tbody tr:hover {
     }
 
     #past-point-card-print-root .ppc-print-page {
-        height: 10.15in;
         box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        gap: 8pt;
+        width: 100%;
+        display: block;
         break-after: page;
         page-break-after: always;
-        overflow: hidden;
+        overflow: visible;
     }
 
     #past-point-card-print-root .ppc-print-page:last-child {
@@ -4712,16 +4710,14 @@ table tbody tr:hover {
     }
 
     #past-point-card-print-root .ppc-print-banner {
-        flex: 0 0 auto;
-        border-bottom: 1.5pt solid #111;
-        padding-bottom: 4pt;
-        margin: 0;
+        border-bottom: 1.25pt solid #111;
+        padding-bottom: 3pt;
+        margin: 0 0 6pt;
     }
 
     #past-point-card-print-root .ppc-print-kicker {
         margin: 0;
-        font-family: "Times New Roman", Times, serif;
-        font-size: 8pt;
+        font-size: 7.5pt;
         letter-spacing: 0.14em;
         text-transform: uppercase;
         color: #333;
@@ -4729,32 +4725,45 @@ table tbody tr:hover {
 
     #past-point-card-print-root .ppc-print-banner h1 {
         margin: 1pt 0 0;
-        font-size: 16pt;
+        font-size: 14pt;
         font-weight: 700;
-        letter-spacing: 0.01em;
         color: #000 !important;
     }
 
     #past-point-card-print-root .ppc-print-meta {
         margin: 1pt 0 0;
-        font-size: 8.5pt;
+        font-size: 8pt;
         color: #333;
     }
 
+    /* Two cards stacked top-to-bottom, never side-by-side */
+    #past-point-card-print-root .ppc-print-stack {
+        display: flex;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 8pt;
+        width: 100%;
+    }
+
     #past-point-card-print-root .ppc-print-day {
-        flex: 1 1 0;
-        min-height: 0;
-        overflow: hidden;
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
         margin: 0;
-        padding: 6pt 7pt 4pt;
+        padding: 5pt 6pt 4pt;
         border: 0.75pt solid #bbb;
+        overflow: visible;
         break-inside: avoid;
         page-break-inside: avoid;
     }
 
-    #past-point-card-print-root .ppc-print-day--empty {
-        border: none;
-        padding: 0;
+    #past-point-card-print-root .ppc-print-day-body {
+        display: flex;
+        flex-direction: column;
+        gap: 4pt;
+        width: 100%;
     }
 
     #past-point-card-print-root .ppc-print-day-head {
@@ -4762,44 +4771,47 @@ table tbody tr:hover {
         align-items: baseline;
         justify-content: space-between;
         gap: 8pt;
-        margin: 0 0 4pt;
+        margin: 0 0 3pt;
     }
 
     #past-point-card-print-root .ppc-print-day-head h2 {
         margin: 0;
-        font-size: 11pt;
+        font-size: 10pt;
         font-weight: 700;
         color: #000 !important;
     }
 
     #past-point-card-print-root .ppc-print-attendance {
-        font-size: 8pt;
+        font-size: 7.5pt;
         font-weight: 700;
         letter-spacing: 0.04em;
         text-transform: uppercase;
     }
 
-    #past-point-card-print-root table {
+    #past-point-card-print-root .ppc-print-table {
         width: 100%;
+        table-layout: fixed;
         border-collapse: collapse;
-        font-size: 7.5pt;
-        margin: 0 0 4pt;
+        font-size: 7pt;
+        margin: 0;
     }
 
     #past-point-card-print-root th,
     #past-point-card-print-root td {
-        border: 0.6pt solid #999;
-        padding: 1.5pt 3pt;
+        border: 0.5pt solid #999;
+        padding: 1pt 2pt;
         text-align: center;
-        vertical-align: top;
+        vertical-align: middle;
         color: #000;
         background: #fff;
+        word-wrap: break-word;
+        overflow-wrap: anywhere;
     }
 
     #past-point-card-print-root th {
         background: #f3f3f3;
         font-weight: 700;
-        font-size: 7pt;
+        font-size: 6.5pt;
     }
 
     #past-point-card-print-root td.ppc-print-left,
@@ -4808,28 +4820,49 @@ table tbody tr:hover {
     }
 
     #past-point-card-print-root .ppc-print-info-cell {
-        text-align: left;
+        text-align: center;
         font-size: 6.5pt;
-        max-width: 150pt;
+        width: 8%;
     }
 
     #past-point-card-print-root .ppc-print-insights,
     #past-point-card-print-root .point-card-aggregate-card {
-        font-size: 8pt;
+        display: block;
+        width: 100%;
+        font-size: 7pt;
         margin: 0;
-        padding: 0;
+        padding: 2pt 0 0;
         background: #fff !important;
         color: #000 !important;
         border: none !important;
+        border-top: 0.5pt solid #ccc !important;
         height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
     }
 
     #past-point-card-print-root .ppc-print-insights h5,
     #past-point-card-print-root .point-card-aggregate-card h5 {
-        font-size: 9pt;
-        margin: 2pt 0 3pt;
+        font-size: 8pt;
+        margin: 2pt 0 2pt;
         letter-spacing: 0.04em;
         text-transform: uppercase;
+        color: #000 !important;
+    }
+
+    #past-point-card-print-root .point-card-aggregate-row,
+    #past-point-card-print-root .point-card-aggregate-text-row {
+        display: flex !important;
+        justify-content: space-between;
+        gap: 6pt;
+        padding: 0.5pt 0;
+        border-bottom: 0.4pt dotted #ccc;
+        page-break-inside: avoid;
+    }
+
+    #past-point-card-print-root .point-card-aggregate-empty,
+    #past-point-card-print-root .point-card-aggregate-attendance {
+        margin: 1pt 0;
         color: #000 !important;
     }
 }
