@@ -4997,8 +4997,9 @@ function setupEventListeners() {
             });
         }
 
-        // Modal close
-        const closeBtn = document.querySelector('.close');
+        // Modal close — scope to #student-modal; a bare querySelector('.close')
+        // binds the first .close in the document (e.g. curriculum), not this one.
+        const closeBtn = document.querySelector('#student-modal .close');
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
                 document.getElementById('student-modal').style.display = 'none';
