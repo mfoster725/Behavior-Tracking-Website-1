@@ -10705,7 +10705,7 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
     const [year, month, day] = String(record.date || '').split('-').map(Number);
     const date = new Date(year, month - 1, day);
     const formattedDate = date.toLocaleDateString('en-US', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
     });
     const attendance = getPointCardAttendanceStatus(record);
 
@@ -10717,11 +10717,11 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
     const columns = [
         { key: 'time', label: 'Time', left: true },
         { key: 'location', label: 'Location', left: true },
-        { key: 'safety', label: 'Safety' },
-        { key: 'teamwork', label: 'Teamwork' },
-        { key: 'accountability', label: 'Accountability' },
-        { key: 'relationships', label: 'Relationships' },
-        { key: 'info', label: 'Info', left: true },
+        { key: 'safety', label: 'S' },
+        { key: 'teamwork', label: 'T' },
+        { key: 'accountability', label: 'A' },
+        { key: 'relationships', label: 'R' },
+        { key: 'info', label: 'Info' },
     ].filter((col) => options[col.key]);
 
     const includeOverallColumn = !!(options.percent && !options.info && columns.length);
@@ -10845,26 +10845,32 @@ function printPastPointCards() {
     const layoutLabel = options.full
         ? 'Full Point Card'
         : 'Info Insights';
+    // Two day-columns across; pack up to four days (2×2) per page when content allows.
+    const daysPerPage = 4;
 
     const pages = [];
-    for (let i = 0; i < records.length; i += 2) {
-        pages.push(records.slice(i, i + 2));
+    for (let i = 0; i < records.length; i += daysPerPage) {
+        pages.push(records.slice(i, i + daysPerPage));
     }
 
-    const pagesHtml = pages.map((pair, pageIndex) => {
-        const daysHtml = pair.map((record) => {
+    const pagesHtml = pages.map((group, pageIndex) => {
+        const daysHtml = group.map((record) => {
             const recordIndex = records.findIndex((item) => item.id === record.id && item.date === record.date);
             const previous = records[recordIndex + 1] || null;
             return buildPastPointCardPrintDayHtml(record, studentId, options, previous);
         }).join('');
+        const legend = options.full
+            ? '<p class="ppc-print-legend">S = Safety · T = Teamwork · A = Accountability · R = Relationships</p>'
+            : '';
         return `
-            <section class="ppc-print-page">
+            <section class="ppc-print-page${options.full ? ' ppc-print-page--full' : ' ppc-print-page--insights'}">
                 <header class="ppc-print-banner">
                     <p class="ppc-print-kicker">Point Card Report</p>
                     <h1>${safeName}</h1>
                     <p class="ppc-print-meta">${rangeLabel}<span> · ${layoutLabel}</span><span> · Prepared ${printedOn}</span><span> · Page ${pageIndex + 1} of ${pages.length}</span></p>
+                    ${legend}
                 </header>
-                <div class="ppc-print-stack">
+                <div class="ppc-print-columns">
                     ${daysHtml}
                 </div>
             </section>
