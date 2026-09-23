@@ -8644,7 +8644,8 @@ a.dashboard-compare-toggle {
 
 .overview-incident-bar-track {
     height: 100px;
-    background: color-mix(in srgb, var(--text-primary) 5.5%, var(--bg-elevated));
+    /* Solid hex approx of prior color-mix; html2canvas cannot parse color-mix() */
+    background: #E5E3DD;
     border: 1px solid var(--border);
     border-radius: 8px;
     display: flex;
