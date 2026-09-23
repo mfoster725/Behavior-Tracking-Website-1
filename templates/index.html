@@ -1872,9 +1872,18 @@
                         <input type="text" id="student-name" required placeholder="Example: Jane Doe = JD">
                     </div>
                     <div class="form-group">
-                        <label for="student-lunch-number">Lunch Number:</label>
-                        <input type="text" id="student-lunch-number" placeholder="Used to match this student to the import sheet">
-                        <small style="color: #666; font-size: 12px;">Recommended. Without it, this student cannot be matched to a row in the Google Sheet or a CSV import.</small>
+                        <label for="student-lunch-number">Lunch Number: *</label>
+                        <input type="text" id="student-lunch-number" required placeholder="Used to match this student to the import sheet">
+                        <small style="color: #666; font-size: 12px;">Required. Used for the default password ({INITIALS}{lunch}) and to match this student in the Google Sheet or CSV import.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="student-email">Student Email:</label>
+                        <input type="email" id="student-email" placeholder="student@example.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                    </div>
+                    <div class="form-group">
+                        <label>Parent/Guardian Email(s):</label>
+                        <div id="student-parent-emails-container" class="team-member-container"></div>
+                        <small style="color: #666;">Use + to add another, &times; to remove. These addresses receive shared login information.</small>
                     </div>
                     <div class="form-group">
                         <label for="student-grade">Grade:</label>
@@ -1898,8 +1907,7 @@
                     <div class="form-group">
                         <label for="student-card-color">Card Color: *</label>
                         <select id="student-card-color" required>
-                            <option value="">Select card color</option>
-                            <option value="yellow">Yellow</option>
+                            <option value="yellow" selected>Yellow</option>
                             <option value="green">Green</option>
                             <option value="blue">Blue</option>
                         </select>
@@ -2967,7 +2975,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=past-pc-print4"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=add-student-emails1"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}

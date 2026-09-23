@@ -4633,8 +4633,13 @@ function setupEventListeners() {
                 console.log('Add student button clicked');
                 // Clear all fields
                 document.getElementById('student-name').value = '';
+                const lunchInput = document.getElementById('student-lunch-number');
+                if (lunchInput) lunchInput.value = '';
+                const studentEmailInput = document.getElementById('student-email');
+                if (studentEmailInput) studentEmailInput.value = '';
+                populateParentEmailRows('student-parent-emails-container', '');
                 document.getElementById('student-grade').value = '';
-                document.getElementById('student-card-color').value = '';
+                document.getElementById('student-card-color').value = 'yellow';
                 document.getElementById('student-username').value = '';
                 document.getElementById('student-password').value = '';
                 document.getElementById('student-password-confirm').value = '';
@@ -8742,6 +8747,8 @@ async function saveDailyRecord() {
 async function saveStudent() {
     const name = document.getElementById('student-name').value;
     const lunchNumber = document.getElementById('student-lunch-number')?.value || '';
+    const email = (document.getElementById('student-email')?.value || '').trim();
+    const parentEmails = getParentEmails('student-parent-emails-container');
     const grade = document.getElementById('student-grade').value;
     const cardColor = document.getElementById('student-card-color')?.value || '';
     const username = (document.getElementById('student-username').value || '').trim();
@@ -8765,6 +8772,11 @@ async function saveStudent() {
         return;
     }
 
+    if (!lunchNumber.trim()) {
+        alert('Please enter a lunch number');
+        return;
+    }
+
     if (!cardColor || !['yellow', 'green', 'blue'].includes(cardColor)) {
         alert('Please select a card color (yellow, green, or blue)');
         return;
@@ -8783,9 +8795,6 @@ async function saveStudent() {
     } else if (passwordConfirm) {
         alert('Passwords do not match. Please re-enter your password.');
         return;
-    } else if (!lunchNumber.trim()) {
-        alert('Enter a lunch number for the default password ({INITIALS}{lunch}), or set a custom password.');
-        return;
     }
 
     try {
@@ -8795,6 +8804,8 @@ async function saveStudent() {
             body: JSON.stringify({
                 name: name.trim(),
                 lunch_number: lunchNumber.trim(),
+                email: email,
+                parent_emails: parentEmails,
                 grade: grade,
                 card_color: cardColor,
                 username: username,
@@ -8817,8 +8828,11 @@ async function saveStudent() {
             document.getElementById('student-name').value = '';
             const lunchInput = document.getElementById('student-lunch-number');
             if (lunchInput) lunchInput.value = '';
+            const studentEmailInput = document.getElementById('student-email');
+            if (studentEmailInput) studentEmailInput.value = '';
+            populateParentEmailRows('student-parent-emails-container', '');
             document.getElementById('student-grade').value = '';
-            document.getElementById('student-card-color').value = '';
+            document.getElementById('student-card-color').value = 'yellow';
             document.getElementById('student-username').value = '';
             document.getElementById('student-password').value = '';
             document.getElementById('student-password-confirm').value = '';

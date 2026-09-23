@@ -5755,6 +5755,8 @@ def students():
             raise
         
         lunch_number = (data.get('lunch_number') or '').strip() or None
+        if not lunch_number:
+            return jsonify({'error': 'Lunch number is required'}), 400
         parent_emails_raw = data.get('parent_emails')
         if isinstance(parent_emails_raw, list):
             parent_emails_stacked = '\n'.join(
