@@ -10501,7 +10501,6 @@ function bindPastPointCardsModalChrome() {
 
     const printToggle = document.getElementById('past-point-card-print-btn');
     const printConfirm = document.getElementById('past-point-card-print-confirm');
-    const printSelectAll = document.getElementById('past-point-card-print-select-all');
     if (printToggle) {
         printToggle.addEventListener('click', (e) => {
             e.preventDefault();
@@ -10514,18 +10513,6 @@ function bindPastPointCardsModalChrome() {
             e.preventDefault();
             e.stopPropagation();
             printPastPointCards();
-        });
-    }
-    if (printSelectAll) {
-        printSelectAll.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const boxes = document.querySelectorAll('input[name="past-pc-print"]');
-            const allChecked = Array.from(boxes).every((box) => box.checked);
-            boxes.forEach((box) => {
-                box.checked = !allChecked;
-            });
-            printSelectAll.textContent = allChecked ? 'Select all' : 'Clear all';
         });
     }
     document.addEventListener('click', (e) => {
@@ -10558,7 +10545,22 @@ function getPastPointCardPrintOptions() {
     document.querySelectorAll('input[name="past-pc-print"]').forEach((box) => {
         selected[box.value] = !!box.checked;
     });
-    return selected;
+    const full = !!selected.full;
+    const insights = !!selected.insights;
+    return {
+        full,
+        insights,
+        time: full,
+        location: full,
+        safety: full,
+        teamwork: full,
+        accountability: full,
+        relationships: full,
+        info: full,
+        percent: full,
+        attendance: full,
+        info_insights: insights,
+    };
 }
 
 function getVisiblePastPointCardRecords() {
@@ -10697,9 +10699,6 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
     const attendance = getPointCardAttendanceStatus(record);
-    const attendanceHtml = options.attendance && attendance !== 'present'
-        ? ` <span>(${formatPointCardAttendanceLabel(attendance)})</span>`
-        : '';
 
     const periods = expandPointCardPeriods(record.periods, {
         studentId: studentId || record?.student_id,
@@ -10709,11 +10708,11 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
     const columns = [
         { key: 'time', label: 'Time', left: true },
         { key: 'location', label: 'Location', left: true },
-        { key: 'safety', label: 'S' },
-        { key: 'teamwork', label: 'T' },
-        { key: 'accountability', label: 'A' },
-        { key: 'relationships', label: 'R' },
-        { key: 'info', label: 'Info', left: true },
+        { key: 'safety', label: 'Safety' },
+        { key: 'teamwork', label: 'Teamwork' },
+        { key: 'accountability', label: 'Accountability' },
+        { key: 'relationships', label: 'Relationships' },
+        { key: 'info', label: 'Period Notes', left: true },
     ].filter((col) => options[col.key]);
 
     const includeOverallColumn = !!(options.percent && !options.info && columns.length);
@@ -10772,9 +10771,16 @@ function buildPastPointCardPrintDayHtml(record, studentId, options, previousReco
         insightsHtml = `<div class="ppc-print-insights">${aggregate}</div>`;
     }
 
+    const attendanceBadge = options.attendance && attendance !== 'present'
+        ? `<span class="ppc-print-attendance ppc-print-attendance--${attendance}">${formatPointCardAttendanceLabel(attendance)}</span>`
+        : '';
+
     return `
         <section class="ppc-print-day">
-            <h2>${formattedDate}${attendanceHtml}</h2>
+            <header class="ppc-print-day-head">
+                <h2>${formattedDate}</h2>
+                ${attendanceBadge}
+            </header>
             ${tableHtml}
             ${insightsHtml}
         </section>
@@ -10794,9 +10800,8 @@ function ensurePastPointCardPrintRoot() {
 
 function printPastPointCards() {
     const options = getPastPointCardPrintOptions();
-    const hasAny = Object.values(options).some(Boolean);
-    if (!hasAny) {
-        showMessage('Select at least one data option to print.', 'error');
+    if (!options.full && !options.insights) {
+        showMessage('Select Full Point Card, Info Insights, or both.', 'error');
         return;
     }
 
@@ -10809,18 +10814,52 @@ function printPastPointCards() {
     const studentId = window.currentPointCardStudentId;
     const studentName = window.currentPointCardStudentName || 'Student';
     const safeName = typeof escapeHtml === 'function' ? escapeHtml(studentName) : studentName;
-    const printedAt = new Date().toLocaleString();
+    const printedOn = new Date().toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+    });
+    const firstDate = records[records.length - 1]?.date;
+    const lastDate = records[0]?.date;
+    const formatDay = (iso) => {
+        const [year, month, day] = String(iso || '').split('-').map(Number);
+        if (!year || !month || !day) return '';
+        return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+            month: 'long', day: 'numeric', year: 'numeric',
+        });
+    };
+    const rangeLabel = firstDate && lastDate && firstDate !== lastDate
+        ? `${formatDay(firstDate)} – ${formatDay(lastDate)}`
+        : formatDay(lastDate || firstDate);
+    const layoutLabel = options.full && options.insights
+        ? 'Full Point Card and Info Insights'
+        : (options.full ? 'Full Point Card' : 'Info Insights');
 
-    const daysHtml = records.map((record, index) => (
-        buildPastPointCardPrintDayHtml(record, studentId, options, records[index + 1] || null)
-    )).join('');
+    const pages = [];
+    for (let i = 0; i < records.length; i += 2) {
+        pages.push(records.slice(i, i + 2));
+    }
+
+    const pagesHtml = pages.map((pair, pageIndex) => {
+        const daysHtml = pair.map((record) => {
+            const recordIndex = records.findIndex((item) => item.id === record.id && item.date === record.date);
+            const previous = records[recordIndex + 1] || null;
+            return buildPastPointCardPrintDayHtml(record, studentId, options, previous);
+        }).join('');
+        const filler = pair.length === 1 ? '<section class="ppc-print-day ppc-print-day--empty" aria-hidden="true"></section>' : '';
+        return `
+            <section class="ppc-print-page">
+                <header class="ppc-print-banner">
+                    <p class="ppc-print-kicker">Point Card Report</p>
+                    <h1>${safeName}</h1>
+                    <p class="ppc-print-meta">${rangeLabel}<span> · ${layoutLabel}</span><span> · Prepared ${printedOn}</span><span> · Page ${pageIndex + 1} of ${pages.length}</span></p>
+                </header>
+                ${daysHtml}
+                ${filler}
+            </section>
+        `;
+    }).join('');
 
     const root = ensurePastPointCardPrintRoot();
-    root.innerHTML = `
-        <h1>Past Point Cards — ${safeName}</h1>
-        <p class="ppc-print-meta">${records.length} day${records.length === 1 ? '' : 's'} · Printed ${printedAt}</p>
-        ${daysHtml}
-    `;
+    root.innerHTML = pagesHtml;
 
     closePastPointCardPrintMenu();
     document.body.classList.add('past-point-card-printing');
