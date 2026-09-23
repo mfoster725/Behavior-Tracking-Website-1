@@ -10658,11 +10658,21 @@ function openPointCardPrintWindow() {
         const hasCards = dataContainer.querySelector('.point-card-day');
         if (!hasCards) {
             alert('There are no point card days to print.');
+            if (printBtn) {
+                printBtn.disabled = false;
+                printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+                printBtn.dataset.generating = 'false';
+            }
             return;
         }
         targetEl = dataContainer;
     } else {
         alert('No summary or point card data is available to print.');
+        if (printBtn) {
+            printBtn.disabled = false;
+            printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+            printBtn.dataset.generating = 'false';
+        }
         return;
     }
 
@@ -10699,16 +10709,47 @@ function openPointCardPrintWindow() {
 
                 pdf.addImage(imgData, 'PNG', offsetX, offsetY, renderWidth, renderHeight);
                 pdf.save('PointCardSummary.pdf');
-            }).finally(() => {
-                if (printBtn) {
-                    printBtn.disabled = false;
-                    printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
-                    printBtn.dataset.generating = 'false';
-                }
             }).catch(err => {
                 console.error('Error generating snapshot PDF:', err);
-                alert('There was a problem generating the PDF. Please try again.');
-                if (printBtn) {
+                // Fall back to browser print (e.g. if a CSS feature breaks html2canvas)
+                let printRoot = document.getElementById('point-card-print-root');
+                if (!printRoot) {
+                    printRoot = document.createElement('div');
+                    printRoot.id = 'point-card-print-root';
+                    printRoot.className = 'print-root print-view';
+                    printRoot.style.position = 'fixed';
+                    printRoot.style.inset = '0';
+                    printRoot.style.zIndex = '9999';
+                    printRoot.style.background = '#ffffff';
+                    printRoot.style.overflow = 'auto';
+                    printRoot.style.display = 'none';
+                    document.body.appendChild(printRoot);
+                }
+                if (!document.getElementById('point-card-print-style')) {
+                    const styleEl = document.createElement('style');
+                    styleEl.id = 'point-card-print-style';
+                    styleEl.textContent = [
+                        '@page { size: letter; margin: 0.5in; }',
+                        '@media print { body > *:not(#point-card-print-root) { display: none !important; } #point-card-print-root { display: block !important; } }',
+                        '#point-card-print-root { box-sizing: border-box; padding: 0.25in; width: 100%; }'
+                    ].join('\n');
+                    document.head.appendChild(styleEl);
+                }
+                printRoot.innerHTML = targetEl.innerHTML;
+                printRoot.style.display = 'block';
+                setTimeout(() => {
+                    window.print();
+                    setTimeout(() => {
+                        printRoot.style.display = 'none';
+                        if (printBtn) {
+                            printBtn.disabled = false;
+                            printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
+                            printBtn.dataset.generating = 'false';
+                        }
+                    }, 500);
+                }, 250);
+            }).finally(() => {
+                if (printBtn && printBtn.dataset.generating === 'true') {
                     printBtn.disabled = false;
                     printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
                     printBtn.dataset.generating = 'false';
