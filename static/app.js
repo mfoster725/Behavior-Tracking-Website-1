@@ -8743,9 +8743,9 @@ async function saveStudent() {
     const lunchNumber = document.getElementById('student-lunch-number')?.value || '';
     const grade = document.getElementById('student-grade').value;
     const cardColor = document.getElementById('student-card-color')?.value || '';
-    const username = document.getElementById('student-username').value;
-    const password = document.getElementById('student-password').value;
-    const passwordConfirm = document.getElementById('student-password-confirm').value;
+    const username = (document.getElementById('student-username').value || '').trim();
+    const password = document.getElementById('student-password').value || '';
+    const passwordConfirm = document.getElementById('student-password-confirm').value || '';
     
     // Get values from team member containers as arrays
     const caseManager = getSelectedTeamMembers('case-manager-container');
@@ -8764,23 +8764,26 @@ async function saveStudent() {
         return;
     }
 
-    if (!username || !username.trim()) {
-        alert('Please enter a username');
-        return;
-    }
-
     if (!cardColor || !['yellow', 'green', 'blue'].includes(cardColor)) {
         alert('Please select a card color (yellow, green, or blue)');
         return;
     }
 
-    if (!password || password.length < 6) {
-        alert('Password must be at least 6 characters long');
-        return;
-    }
-
-    if (password !== passwordConfirm) {
+    // Credentials are optional. Defaults: username = initials (lower), password = INITIALS + lunch.
+    if (password) {
+        if (password.length < 6) {
+            alert('Password must be at least 6 characters long');
+            return;
+        }
+        if (password !== passwordConfirm) {
+            alert('Passwords do not match. Please re-enter your password.');
+            return;
+        }
+    } else if (passwordConfirm) {
         alert('Passwords do not match. Please re-enter your password.');
+        return;
+    } else if (!lunchNumber.trim()) {
+        alert('Enter a lunch number for the default password ({INITIALS}{lunch}), or set a custom password.');
         return;
     }
 
@@ -8793,7 +8796,7 @@ async function saveStudent() {
                 lunch_number: lunchNumber.trim(),
                 grade: grade,
                 card_color: cardColor,
-                username: username.trim(),
+                username: username,
                 password: password,
                 case_manager: caseManager,
                 practitioner: practitioner,

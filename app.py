@@ -5777,40 +5777,50 @@ def students():
         db.session.add(student)
         db.session.flush()  # Get student ID before committing
         
-        created_user = None
-        # Create user account if username and password provided
-        if data.get('username') and data.get('password'):
-            # Check if username already exists
-            if User.query.filter_by(username=data['username']).first():
+        # Always create a login account. Missing credentials use the same defaults as CSV
+        # import: username = initials (lower), password = {INITIALS}{lunch}.
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        if username:
+            if User.query.filter_by(username=username).first():
                 db.session.rollback()
                 return jsonify({'error': 'Username already exists'}), 400
-            
-            # Audit: Validate password strength
-            password = data['password']
+        else:
+            username = generate_student_username(data['name'])
+
+        if password:
             is_valid, error_msg = validate_password_strength(password)
             if not is_valid:
                 db.session.rollback()
                 return jsonify({'error': error_msg}), 400
-            
-            user = User(
-                name=data['name'],
-                username=data['username'],
-                role='student',
-                student_id=student.id,
-                email=(data.get('email') or '').strip() or None,
-            )
-            # Prefer standard student password {initials}{lunch} when lunch is available
-            db.session.flush()
-            login_username, share_password, _display, share_err = _resolve_share_login_credentials(user)
-            if share_password:
-                user.set_password(share_password)
-                password_for_email = share_password
-            else:
-                user.set_password(password)
-                password_for_email = password
-            db.session.add(user)
-            created_user = user
-            created_user._password_for_email = password_for_email
+
+        user = User(
+            name=data['name'],
+            username=username,
+            role='student',
+            student_id=student.id,
+            email=(data.get('email') or '').strip() or None,
+        )
+        # Prefer standard student password {initials}{lunch} when lunch is available
+        db.session.flush()
+        _login_username, share_password, _display, share_err = _resolve_share_login_credentials(user)
+        if share_password:
+            user.set_password(share_password)
+            password_for_email = share_password
+        elif password:
+            user.set_password(password)
+            password_for_email = password
+        else:
+            db.session.rollback()
+            return jsonify({
+                'error': share_err or (
+                    'Lunch number is required for default login credentials '
+                    '({initials}{lunch}), or provide a password.'
+                )
+            }), 400
+        db.session.add(user)
+        created_user = user
+        created_user._password_for_email = password_for_email
         
         # Save team member info if provided
         team_roles = {

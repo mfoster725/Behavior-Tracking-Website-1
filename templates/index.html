@@ -1906,23 +1906,24 @@
                     </div>
                 </div>
                 
-                <!-- Login Credentials -->
+                <!-- Login Credentials (optional — defaults match CSV import) -->
                 <div class="form-section" style="border-bottom: 1px solid var(--border); padding-bottom: 1rem;">
                     <h3 style="margin-bottom: 15px;">Login Credentials</h3>
+                    <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">Optional. If left blank, username is the initials (lowercase) and password is initials + lunch number (e.g. JD12345).</p>
                     <div class="form-group">
-                        <label for="student-username">Username: *</label>
-                        <input type="text" id="student-username" required placeholder="Enter username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
-                        <small style="color: #666;">Used for student login</small>
+                        <label for="student-username">Username:</label>
+                        <input type="text" id="student-username" placeholder="Leave blank for initials" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                        <small style="color: #666;">Default: student initials, lowercase</small>
                     </div>
                     <div class="form-group">
-                        <label for="student-password">Password: *</label>
-                        <input type="password" id="student-password" required placeholder="Minimum 6 characters" autocomplete="new-password" data-allow-password-manager="false">
-                        <small style="color: #666;">Student will use this to log in</small>
+                        <label for="student-password">Password:</label>
+                        <input type="password" id="student-password" placeholder="Leave blank for default" autocomplete="new-password" data-allow-password-manager="false">
+                        <small style="color: #666;">Default: {INITIALS}{lunch number} — lunch number required when blank</small>
                     </div>
                     <div class="form-group">
-                        <label for="student-password-confirm">Confirm Password: *</label>
-                        <input type="password" id="student-password-confirm" required placeholder="Re-enter password" autocomplete="new-password" data-allow-password-manager="false">
-                        <small style="color: #666;">Passwords must match</small>
+                        <label for="student-password-confirm">Confirm Password:</label>
+                        <input type="password" id="student-password-confirm" placeholder="Re-enter if setting a custom password" autocomplete="new-password" data-allow-password-manager="false">
+                        <small style="color: #666;">Required only when setting a custom password</small>
                     </div>
                 </div>
                 
