@@ -10498,6 +10498,347 @@ function bindPastPointCardsModalChrome() {
             applyPointCardFilters();
         });
     }
+
+    const printToggle = document.getElementById('past-point-card-print-btn');
+    const printConfirm = document.getElementById('past-point-card-print-confirm');
+    const printSelectAll = document.getElementById('past-point-card-print-select-all');
+    if (printToggle) {
+        printToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            togglePastPointCardPrintMenu();
+        });
+    }
+    if (printConfirm) {
+        printConfirm.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            printPastPointCards();
+        });
+    }
+    if (printSelectAll) {
+        printSelectAll.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const boxes = document.querySelectorAll('input[name="past-pc-print"]');
+            const allChecked = Array.from(boxes).every((box) => box.checked);
+            boxes.forEach((box) => {
+                box.checked = !allChecked;
+            });
+            printSelectAll.textContent = allChecked ? 'Select all' : 'Clear all';
+        });
+    }
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('past-point-card-print-menu');
+        const toggle = document.getElementById('past-point-card-print-btn');
+        if (!menu || menu.hidden) return;
+        if (menu.contains(e.target) || (toggle && toggle.contains(e.target))) return;
+        closePastPointCardPrintMenu();
+    });
+}
+
+function closePastPointCardPrintMenu() {
+    const menu = document.getElementById('past-point-card-print-menu');
+    const toggle = document.getElementById('past-point-card-print-btn');
+    if (menu) menu.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+function togglePastPointCardPrintMenu() {
+    const menu = document.getElementById('past-point-card-print-menu');
+    const toggle = document.getElementById('past-point-card-print-btn');
+    if (!menu || !toggle) return;
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
+function getPastPointCardPrintOptions() {
+    const selected = {};
+    document.querySelectorAll('input[name="past-pc-print"]').forEach((box) => {
+        selected[box.value] = !!box.checked;
+    });
+    return selected;
+}
+
+function getVisiblePastPointCardRecords() {
+    const records = window.currentPointCardRecords || [];
+    const container = getPointCardDataContainer();
+    if (!container) return records;
+    return records.filter((record) => {
+        const dayEl = container.querySelector(`.point-card-day[data-date="${record.date}"]`);
+        if (!dayEl) return false;
+        return dayEl.style.display !== 'none';
+    });
+}
+
+function formatPastPointCardInfoForPrint(rawInfo) {
+    const info = parsePointCardInfoData(rawInfo);
+    if (!info || !hasInfoData(info)) return '—';
+    const parts = [];
+    const esc = (val) => {
+        const text = String(val ?? '');
+        return typeof escapeHtml === 'function'
+            ? escapeHtml(text)
+            : text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    };
+    if (info.notes && String(info.notes).trim()) {
+        parts.push(`Notes: ${esc(String(info.notes).trim())}`);
+    }
+    const reminders = [info.reminder1, info.reminder2, info.reminder3].filter(Boolean).length;
+    if (reminders) parts.push(`Reminders: ${reminders}`);
+    if (info.reset) parts.push('Reset');
+    if (info.alternate_location && String(info.alternate_location).trim()) {
+        parts.push(`Alt loc: ${esc(String(info.alternate_location).trim())}`);
+    }
+    const infractions = Array.isArray(info.infractions)
+        ? info.infractions
+        : [info.infraction1, info.infraction2].filter(Boolean);
+    if (infractions.length) {
+        const labels = infractions.map((inf) => {
+            if (inf && typeof inf === 'object') {
+                const label = inf.type || inf.label || '';
+                const count = inf.count || 1;
+                return label ? `${esc(label)} (${count})` : '';
+            }
+            return esc(inf);
+        }).filter(Boolean);
+        if (labels.length) parts.push(`Infractions: ${labels.join(', ')}`);
+    }
+    if (isInfoFrenzyChecked(info)) {
+        const severity = readFrenzySeverityValue(info);
+        parts.push(severity !== null ? `Frenzy (sev ${severity})` : 'Frenzy');
+    }
+    const purposes = Array.isArray(info.purposes)
+        ? info.purposes
+        : [info.purpose1, info.purpose2].filter(Boolean);
+    if (purposes.length) {
+        parts.push(`Purposes: ${purposes.map((p) => esc(p)).join(', ')}`);
+    }
+    if (info.duration) parts.push(`Duration: ${esc(info.duration)} min`);
+    if (info.results && String(info.results).trim()) {
+        parts.push(`Frenzy notes: ${esc(String(info.results).trim())}`);
+    }
+    return parts.length ? parts.join('<br>') : '—';
+}
+
+function computePastPointCardPercents(record) {
+    const periods = Array.isArray(record?.periods) ? record.periods : [];
+    const attendance = getPointCardAttendanceStatus(record);
+    const totals = { s: 0, t: 0, a: 0, r: 0 };
+    const counts = { s: 0, t: 0, a: 0, r: 0 };
+    periods.forEach((period) => {
+        const safetyPoints = starValueForPercentage(period.safety_points);
+        if (safetyPoints !== null) { totals.s += safetyPoints; counts.s++; }
+        const teamworkPoints = starValueForPercentage(period.teamwork_points);
+        if (teamworkPoints !== null) { totals.t += teamworkPoints; counts.t++; }
+        const accountabilityPoints = starValueForPercentage(period.accountability_points);
+        if (accountabilityPoints !== null) { totals.a += accountabilityPoints; counts.a++; }
+        const relationshipsPoints = starValueForPercentage(period.relationships_points);
+        if (relationshipsPoints !== null) { totals.r += relationshipsPoints; counts.r++; }
+    });
+    if (attendance === 'excused') {
+        return { s: 'E', t: 'E', a: 'E', r: 'E', overall: 'E' };
+    }
+    if (attendance === 'unexcused') {
+        return { s: 'U', t: 'U', a: 'U', r: 'U', overall: '0' };
+    }
+    const pct = (total, count) => (count > 0 ? ((total / (count * 2)) * 100).toFixed(0) : '-');
+    const totalPoints = totals.s + totals.t + totals.a + totals.r;
+    const totalCounts = counts.s + counts.t + counts.a + counts.r;
+    return {
+        s: pct(totals.s, counts.s),
+        t: pct(totals.t, counts.t),
+        a: pct(totals.a, counts.a),
+        r: pct(totals.r, counts.r),
+        overall: totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-',
+    };
+}
+
+function buildPastPointCardPrintPercentRow(record, columns, options, includeOverallColumn) {
+    if (!options.percent) return '';
+    const percents = computePastPointCardPercents(record);
+    const percentMap = {
+        safety: percents.s,
+        teamwork: percents.t,
+        accountability: percents.a,
+        relationships: percents.r,
+    };
+    const starKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
+    const textColCount = columns.filter((c) => c.key === 'time' || c.key === 'location').length;
+    const cells = [];
+
+    if (textColCount > 0) {
+        cells.push(`<td class="ppc-print-left" colspan="${textColCount}"><strong>Percent:</strong></td>`);
+    } else {
+        cells.push('<td class="ppc-print-left"><strong>Percent:</strong></td>');
+    }
+
+    columns.forEach((col) => {
+        if (col.key === 'time' || col.key === 'location') return;
+        if (starKeys.includes(col.key)) {
+            cells.push(`<td>${formatPercentCellText(percentMap[col.key])}</td>`);
+        } else if (col.key === 'info') {
+            cells.push(`<td><strong>${formatPercentCellText(percents.overall)}</strong></td>`);
+        }
+    });
+
+    if (includeOverallColumn) {
+        cells.push(`<td><strong>${formatPercentCellText(percents.overall)}</strong></td>`);
+    }
+
+    return `<tr>${cells.join('')}</tr>`;
+}
+
+function buildPastPointCardPrintDayHtml(record, studentId, options, previousRecord) {
+    const [year, month, day] = String(record.date || '').split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    const formattedDate = date.toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
+    const attendance = getPointCardAttendanceStatus(record);
+    const attendanceHtml = options.attendance && attendance !== 'present'
+        ? ` <span>(${formatPointCardAttendanceLabel(attendance)})</span>`
+        : '';
+
+    const periods = expandPointCardPeriods(record.periods, {
+        studentId: studentId || record?.student_id,
+        onDate: record.date,
+    });
+    const sid = studentId || record?.student_id;
+    const columns = [
+        { key: 'time', label: 'Time', left: true },
+        { key: 'location', label: 'Location', left: true },
+        { key: 'safety', label: 'S' },
+        { key: 'teamwork', label: 'T' },
+        { key: 'accountability', label: 'A' },
+        { key: 'relationships', label: 'R' },
+        { key: 'info', label: 'Info', left: true },
+    ].filter((col) => options[col.key]);
+
+    const includeOverallColumn = !!(options.percent && !options.info && columns.length);
+    const showTable = columns.length > 0 || options.percent;
+    let tableHtml = '';
+
+    if (showTable && columns.length === 0 && options.percent) {
+        const percents = computePastPointCardPercents(record);
+        tableHtml = `
+            <table>
+                <thead><tr><th class="ppc-print-left">Percentages</th></tr></thead>
+                <tbody>
+                    <tr><td class="ppc-print-left">S ${formatPercentCellText(percents.s)} · T ${formatPercentCellText(percents.t)} · A ${formatPercentCellText(percents.a)} · R ${formatPercentCellText(percents.r)} · Overall <strong>${formatPercentCellText(percents.overall)}</strong></td></tr>
+                </tbody>
+            </table>
+        `;
+    } else if (showTable && columns.length > 0) {
+        const headerCells = columns.map((col) => (
+            `<th class="${col.left ? 'ppc-print-left' : ''}">${col.label}</th>`
+        )).join('') + (includeOverallColumn ? '<th>Overall</th>' : '');
+
+        const bodyRows = periods.map((period) => {
+            const locationText = period.location
+                || ((sid && isOtherSchoolPeriod(sid, period.time_range)) ? 'Other school' : '');
+            const values = {
+                time: period.time_range || '',
+                location: locationText,
+                safety: formatPointCardStarCell(record, period.safety_points),
+                teamwork: formatPointCardStarCell(record, period.teamwork_points),
+                accountability: formatPointCardStarCell(record, period.accountability_points),
+                relationships: formatPointCardStarCell(record, period.relationships_points),
+                info: formatPastPointCardInfoForPrint(period.info),
+            };
+            const cells = columns.map((col) => {
+                const extra = col.key === 'info' ? ' ppc-print-info-cell' : '';
+                const align = col.left ? ' ppc-print-left' : '';
+                return `<td class="${(align + extra).trim()}">${values[col.key]}</td>`;
+            });
+            if (includeOverallColumn) cells.push('<td></td>');
+            return `<tr>${cells.join('')}</tr>`;
+        }).join('');
+
+        const percentRow = buildPastPointCardPrintPercentRow(record, columns, options, includeOverallColumn);
+
+        tableHtml = `
+            <table>
+                <thead><tr>${headerCells}</tr></thead>
+                <tbody>${bodyRows}${percentRow}</tbody>
+            </table>
+        `;
+    }
+
+    let insightsHtml = '';
+    if (options.info_insights) {
+        const aggregate = renderPointCardInfoAggregate(record, previousRecord || null);
+        insightsHtml = `<div class="ppc-print-insights">${aggregate}</div>`;
+    }
+
+    return `
+        <section class="ppc-print-day">
+            <h2>${formattedDate}${attendanceHtml}</h2>
+            ${tableHtml}
+            ${insightsHtml}
+        </section>
+    `;
+}
+
+function ensurePastPointCardPrintRoot() {
+    let root = document.getElementById('past-point-card-print-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'past-point-card-print-root';
+        root.className = 'print-root print-view';
+        document.body.appendChild(root);
+    }
+    return root;
+}
+
+function printPastPointCards() {
+    const options = getPastPointCardPrintOptions();
+    const hasAny = Object.values(options).some(Boolean);
+    if (!hasAny) {
+        showMessage('Select at least one data option to print.', 'error');
+        return;
+    }
+
+    const records = getVisiblePastPointCardRecords();
+    if (!records.length) {
+        showMessage('There are no point card days to print.', 'error');
+        return;
+    }
+
+    const studentId = window.currentPointCardStudentId;
+    const studentName = window.currentPointCardStudentName || 'Student';
+    const safeName = typeof escapeHtml === 'function' ? escapeHtml(studentName) : studentName;
+    const printedAt = new Date().toLocaleString();
+
+    const daysHtml = records.map((record, index) => (
+        buildPastPointCardPrintDayHtml(record, studentId, options, records[index + 1] || null)
+    )).join('');
+
+    const root = ensurePastPointCardPrintRoot();
+    root.innerHTML = `
+        <h1>Past Point Cards — ${safeName}</h1>
+        <p class="ppc-print-meta">${records.length} day${records.length === 1 ? '' : 's'} · Printed ${printedAt}</p>
+        ${daysHtml}
+    `;
+
+    closePastPointCardPrintMenu();
+    document.body.classList.add('past-point-card-printing');
+
+    let cleaned = false;
+    const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        document.body.classList.remove('past-point-card-printing');
+        root.innerHTML = '';
+        window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+
+    setTimeout(() => {
+        window.print();
+        setTimeout(cleanup, 1000);
+    }, 100);
 }
 
 function openPastPointCardsModal(studentId, studentName) {
@@ -10519,12 +10860,14 @@ function openPastPointCardsModal(studentId, studentName) {
     const title = document.getElementById('past-point-cards-modal-title');
     if (title) title.textContent = `Past Point Cards — ${resolvedName}`;
     resetPointCardFilters();
+    closePastPointCardPrintMenu();
     bindPastPointCardsModalChrome();
     modal.style.display = 'block';
     return loadPointCardData(parsedId);
 }
 
 function closePastPointCardsModal() {
+    closePastPointCardPrintMenu();
     const modal = getPastPointCardsModal();
     if (modal) modal.style.display = 'none';
 }
@@ -10724,8 +11067,7 @@ function openPointCardPrintWindow() {
                     printRoot.style.overflow = 'auto';
                     printRoot.style.display = 'none';
                     document.body.appendChild(printRoot);
-                }
-                if (!document.getElementById('point-card-print-style')) {
+
                     const styleEl = document.createElement('style');
                     styleEl.id = 'point-card-print-style';
                     styleEl.textContent = [
@@ -10749,6 +11091,7 @@ function openPointCardPrintWindow() {
                     }, 500);
                 }, 250);
             }).finally(() => {
+                // Button reset for successful PDF path; fallback path resets itself above
                 if (printBtn && printBtn.dataset.generating === 'true') {
                     printBtn.disabled = false;
                     printBtn.textContent = printBtn.dataset.originalLabel || 'Print';
@@ -10775,25 +11118,11 @@ function openPointCardPrintWindow() {
 
         const styleEl = document.createElement('style');
         styleEl.id = 'point-card-print-style';
-        styleEl.textContent = `
-            @page {
-                size: letter;
-                margin: 0.5in;
-            }
-            @media print {
-                body > *:not(#point-card-print-root) {
-                    display: none !important;
-                }
-                #point-card-print-root {
-                    display: block !important;
-                }
-            }
-            #point-card-print-root {
-                box-sizing: border-box;
-                padding: 0.25in;
-                width: 100%;
-            }
-        `;
+        styleEl.textContent = [
+            '@page { size: letter; margin: 0.5in; }',
+            '@media print { body > *:not(#point-card-print-root) { display: none !important; } #point-card-print-root { display: block !important; } }',
+            '#point-card-print-root { box-sizing: border-box; padding: 0.25in; width: 100%; }'
+        ].join('\n');
         document.head.appendChild(styleEl);
     }
 

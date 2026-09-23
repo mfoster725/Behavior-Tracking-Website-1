@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" autocomplete="off">
 <head>
     <meta charset="UTF-8">
@@ -14,7 +14,7 @@
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    <!-- html2canvas for DOM snapshot → PDF rendering -->
+    <!-- html2canvas for DOM snapshot â†’ PDF rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- Chart.js for marketplace analytics -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -30,7 +30,7 @@
         <div id="billing-unpaid-banner" class="password-change-banner" style="display: none; background: #b45309;">
             <div>
                 <strong>Billing:</strong> Your paid plan needs attention.
-                Open <strong>Admin Panel → Manage Plan</strong> to update payment.
+                Open <strong>Admin Panel â†’ Manage Plan</strong> to update payment.
             </div>
         </div>
         {% if must_change_password %}
@@ -291,7 +291,7 @@
                                 <option value="quarter3">Q3</option>
                                 <option value="quarter4">Q4</option>
                                 <option value="all_time">All Time</option>
-                                <option value="custom_range">Custom Date Range…</option>
+                                <option value="custom_range">Custom Date Rangeâ€¦</option>
                             </select>
                             <div class="dashboard-custom-range" id="summary-custom-range" style="display:none;">
                                 <input type="date" id="summary-custom-start">
@@ -355,7 +355,7 @@
                 <h2>Schedule Management</h2>
                 
                 <div class="schedules-container">
-                    <!-- Titles (grid row 1 — aligned across columns) -->
+                    <!-- Titles (grid row 1 â€” aligned across columns) -->
                     <div class="schedule-section-header schedule-area-title-teacher">
                         <h3>Teacher's Schedule</h3>
                         <div class="schedule-print-menu">
@@ -397,19 +397,19 @@
                                 <div class="schedule-print-menu-row">
                                     <label for="print-student-schedules-staff">By staff</label>
                                     <select id="print-student-schedules-staff">
-                                        <option value="">Select staff…</option>
+                                        <option value="">Select staffâ€¦</option>
                                     </select>
                                 </div>
                                 <div class="schedule-print-menu-row">
                                     <label for="print-student-schedules-grade">By grade</label>
                                     <select id="print-student-schedules-grade">
-                                        <option value="">Select grade…</option>
+                                        <option value="">Select gradeâ€¦</option>
                                     </select>
                                 </div>
                                 <div class="schedule-print-menu-row">
                                     <label for="print-student-schedules-color">By card color</label>
                                     <select id="print-student-schedules-color">
-                                        <option value="">Select color…</option>
+                                        <option value="">Select colorâ€¦</option>
                                         <option value="yellow">Yellow</option>
                                         <option value="green">Green</option>
                                         <option value="blue">Blue</option>
@@ -420,14 +420,14 @@
                         </div>
                     </div>
 
-                    <!-- Controls (grid row 2 — shared height so tables start together) -->
+                    <!-- Controls (grid row 2 â€” shared height so tables start together) -->
                     <div class="schedule-controls schedule-area-controls-teacher">
                         {% if user.role in ['staff', 'admin'] %}
                         <div class="schedule-controls-label-row">
                             <label for="teacher-schedule-staff-search">Select Staff:</label>
                         </div>
                         <select id="teacher-schedule-staff-search" style="max-width: 300px;">
-                            <option value="">Loading…</option>
+                            <option value="">Loadingâ€¦</option>
                         </select>
                         {% endif %}
                     </div>
@@ -446,7 +446,7 @@
                         </select>
                     </div>
 
-                    <!-- Tables (grid row 3 — aligned starts; row heights synced in JS) -->
+                    <!-- Tables (grid row 3 â€” aligned starts; row heights synced in JS) -->
                     <div id="teacher-schedule-container" class="schedule-section schedule-area-table-teacher">
                         <table class="schedule-table teacher-schedule-table">
                             <thead>
@@ -501,7 +501,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-students-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="student-search" placeholder="🔍 Search students by name, username, or grade..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="student-search" placeholder="ðŸ” Search students by name, username, or grade..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -577,7 +577,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-staff-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="staff-search" placeholder="🔍 Search staff by name, username, or role..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="staff-search" placeholder="ðŸ” Search staff by name, username, or role..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -610,7 +610,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-outside-staff-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="outside-staff-search" placeholder="🔍 Search outside staff by name, username, or district..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="outside-staff-search" placeholder="ðŸ” Search outside staff by name, username, or district..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -643,7 +643,7 @@
                     </h3>
                     <div class="user-role-section-body" id="user-section-admin-body">
                         <div class="form-group" style="margin-bottom: 15px;">
-                            <input type="text" id="admin-search" placeholder="🔍 Search admins by name or username..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
+                            <input type="text" id="admin-search" placeholder="ðŸ” Search admins by name or username..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
                         <div class="user-table-scroll">
                         <table class="users-table">
@@ -673,7 +673,7 @@
                     <button id="add-outside-staff-btn" class="btn-primary">Add Outside Staff User</button>
                     <button id="add-admin-btn" class="btn-primary">Add Admin User</button>
                     <div class="users-share-login-bulk-wrap">
-                        <button type="button" id="share-login-bulk-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false">Share login information ▾</button>
+                        <button type="button" id="share-login-bulk-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false">Share login information â–¾</button>
                         <div id="share-login-bulk-menu" class="users-share-login-bulk-menu" role="menu" hidden>
                             <button type="button" role="menuitem" data-share-scope="all">All new users</button>
                             <button type="button" role="menuitem" data-share-scope="students">All new students</button>
@@ -702,7 +702,7 @@
                             <button type="button" id="billing-portal-btn" class="btn-secondary">Manage Plan</button>
                         </div>
                         <div id="billing-status-box" style="margin-top: 12px;">
-                            <p style="color: var(--text-secondary); font-size: 13px;">Loading plan…</p>
+                            <p style="color: var(--text-secondary); font-size: 13px;">Loading planâ€¦</p>
                         </div>
                         <p id="billing-msg" style="display: none; margin-top: 10px; font-size: 13px;"></p>
                     </div>
@@ -855,7 +855,7 @@
                     
                     <!-- System Information -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                        <h3>Manny’s Market economy</h3>
+                        <h3>Mannyâ€™s Market economy</h3>
                         <p style="font-size: 13px; color: #666; margin-bottom: 12px;">School default pay track, late fees, 2026 wages, bill amounts, and miss-fee classes. Students on the complex track pay monthly bills; simple-track students stay on the $100 paycheck.</p>
                         <div id="economy-admin-settings"></div>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
@@ -891,7 +891,7 @@
                         </select>
                     </div>
                     <p id="bonuses-lede" class="starbucks-lede">
-                        Edit each student’s Starbucks count. Running totals appear on the weekly earnings record.
+                        Edit each studentâ€™s Starbucks count. Running totals appear on the weekly earnings record.
                     </p>
 
                     <!-- Per-student counts: Starbucks / Star Student (and future student-level bonuses) -->
@@ -1040,7 +1040,7 @@
                                 id="bank-refresh-btn"
                                 style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;"
                             >
-                                ↻ Refresh
+                                â†» Refresh
                             </button>
                         </div>
                     </div>
@@ -1190,9 +1190,9 @@
 
                                     <h6 class="earnings-record-note-step">Step 1: Find your Point Card Deduction Rate</h6>
                                     <p>Your Point Card Deduction Rate is the amount your Point Card percentage is below <strong>100%</strong>.</p>
-                                    <p class="earnings-record-note-eq"><strong>100% − P = Point Card Deduction Rate</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>100% âˆ’ P = Point Card Deduction Rate</strong></p>
                                     <p class="earnings-record-note-fill">
-                                        <strong>100% − <span id="worksheet-pcd-note-percent">0</span>% =</strong>
+                                        <strong>100% âˆ’ <span id="worksheet-pcd-note-percent">0</span>% =</strong>
                                         <input type="text" inputmode="decimal" id="pcd-note-rate-eq" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate from 100% minus P">
                                         <strong>%</strong>
                                     </p>
@@ -1204,11 +1204,11 @@
 
                                     <h6 class="earnings-record-note-step">Step 2: Calculate your Point Card Deduction</h6>
                                     <p>First convert your Point Card Deduction Rate from a percent to a decimal (divide by 100). Then multiply that decimal by your <strong>GROSS PAY (GP)</strong>.</p>
-                                    <p class="earnings-record-note-eq"><strong>Rate ÷ 100 = decimal</strong></p>
-                                    <p class="earnings-record-note-eq"><strong>decimal × GP = Point Card Deduction</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>Rate Ã· 100 = decimal</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>decimal Ã— GP = Point Card Deduction</strong></p>
                                     <p class="earnings-record-note-fill">
                                         <input type="text" inputmode="decimal" id="pcd-note-rate-step2" class="earnings-record-note-input earnings-record-note-input-pct" placeholder="%" autocomplete="off" aria-label="Point Card Deduction Rate for multiplication">
-                                        <strong>×</strong>
+                                        <strong>Ã—</strong>
                                         <input type="text" inputmode="decimal" id="pcd-note-gp" class="earnings-record-note-input earnings-record-note-input-money" placeholder="$0.00" autocomplete="off" aria-label="Gross Pay for Point Card Deduction">
                                         <strong>=</strong>
                                         <input type="text" inputmode="decimal" id="pcd-note-amount" class="earnings-record-note-input earnings-record-note-input-money" placeholder="$0.00" autocomplete="off" aria-label="Point Card Deduction amount">
@@ -1219,8 +1219,8 @@
                                     <h6 class="earnings-record-note-step">Example</h6>
                                     <p><strong>This is an example only. Your actual Gross Pay may be different.</strong></p>
                                     <p>If a student's Gross Pay is <strong>$200</strong> and the Point Card Deduction Rate is <strong>12.5%</strong>:</p>
-                                    <p class="earnings-record-note-eq"><strong>12.5% = 12.5 ÷ 100 = 0.125</strong></p>
-                                    <p class="earnings-record-note-eq"><strong>0.125 × $200 = $25</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>12.5% = 12.5 Ã· 100 = 0.125</strong></p>
+                                    <p class="earnings-record-note-eq"><strong>0.125 Ã— $200 = $25</strong></p>
                                     <p>The student's <strong>Point Card Deduction would be $25</strong>.</p>
                                 </div>
                                 <div class="earnings-record-table-wrap">
@@ -1258,11 +1258,11 @@
                                                 </td>
                                                 <td>
                                                     <span class="worksheet-tax-gross-label">Gross Pay</span>
-                                                    <span class="worksheet-tax-gross" id="worksheet-point-card-gross">—</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-point-card-gross">â€”</span>
                                                 </td>
                                                 <td>
                                                     <div class="worksheet-input-cell">
-                                                        <span class="worksheet-given-formula">100% − <span id="worksheet-point-card-given-percent">0</span>%</span>
+                                                        <span class="worksheet-given-formula">100% âˆ’ <span id="worksheet-point-card-given-percent">0</span>%</span>
                                                         <input type="text" inputmode="decimal" id="worksheet-point-card-rate" placeholder="%" autocomplete="off" aria-label="Point Card Deduction rate">
                                                     </div>
                                                 </td>
@@ -1304,7 +1304,7 @@
                                                 <td>Federal Income Tax</td>
                                                 <td>
                                                     <span class="worksheet-tax-gross-label">Gross Pay</span>
-                                                    <span class="worksheet-tax-gross" id="worksheet-federal-gross">—</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-federal-gross">â€”</span>
                                                 </td>
                                                 <td id="worksheet-federal-rate">3.0%</td>
                                                 <td>
@@ -1320,7 +1320,7 @@
                                                 <td>Social Security (FICA)</td>
                                                 <td>
                                                     <span class="worksheet-tax-gross-label">Gross Pay</span>
-                                                    <span class="worksheet-tax-gross" id="worksheet-ss-gross">—</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-ss-gross">â€”</span>
                                                 </td>
                                                 <td id="worksheet-ss-rate">6.2%</td>
                                                 <td>
@@ -1336,7 +1336,7 @@
                                                 <td>Medicare (FICA)</td>
                                                 <td>
                                                     <span class="worksheet-tax-gross-label">Gross Pay</span>
-                                                    <span class="worksheet-tax-gross" id="worksheet-medicare-gross">—</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-medicare-gross">â€”</span>
                                                 </td>
                                                 <td id="worksheet-medicare-rate">1.5%</td>
                                                 <td>
@@ -1352,7 +1352,7 @@
                                                 <td>State Income Tax</td>
                                                 <td>
                                                     <span class="worksheet-tax-gross-label">Gross Pay</span>
-                                                    <span class="worksheet-tax-gross" id="worksheet-state-gross">—</span>
+                                                    <span class="worksheet-tax-gross" id="worksheet-state-gross">â€”</span>
                                                 </td>
                                                 <td id="worksheet-state-rate">5.35%</td>
                                                 <td>
@@ -1462,17 +1462,17 @@
                     >
                     <div class="worksheet-calculator-keys" role="group" aria-label="Calculator keys">
                         <button type="button" data-calc="clear">C</button>
-                        <button type="button" data-calc="back">⌫</button>
+                        <button type="button" data-calc="back">âŒ«</button>
                         <button type="button" data-calc="op" data-op="%">%</button>
-                        <button type="button" data-calc="op" data-op="/">÷</button>
+                        <button type="button" data-calc="op" data-op="/">Ã·</button>
                         <button type="button" data-calc="digit">7</button>
                         <button type="button" data-calc="digit">8</button>
                         <button type="button" data-calc="digit">9</button>
-                        <button type="button" data-calc="op" data-op="*">×</button>
+                        <button type="button" data-calc="op" data-op="*">Ã—</button>
                         <button type="button" data-calc="digit">4</button>
                         <button type="button" data-calc="digit">5</button>
                         <button type="button" data-calc="digit">6</button>
-                        <button type="button" data-calc="op" data-op="-">−</button>
+                        <button type="button" data-calc="op" data-op="-">âˆ’</button>
                         <button type="button" data-calc="digit">1</button>
                         <button type="button" data-calc="digit">2</button>
                         <button type="button" data-calc="digit">3</button>
@@ -1494,7 +1494,7 @@
                     <strong>Under construction.</strong> This tab is not ready. Do not use it or judge it.
                 </div>
                 <h2 style="margin-bottom: 8px;">Curriculum</h2>
-                <p class="curriculum-lede">Lessons about the money from your actual week — paychecks, saving, and spending.</p>
+                <p class="curriculum-lede">Lessons about the money from your actual week â€” paychecks, saving, and spending.</p>
 
                 {% if user.role in ['staff', 'admin'] %}
                 <div id="curriculum-staff-bar" class="curriculum-staff-bar">
@@ -1579,7 +1579,7 @@
                     </div>
                     <div id="marketplace-analytics-body">
                     <p style="margin: 0 0 16px 0; color: #64748b; font-size: 14px;">Most purchased, least purchased, and who buys each item (by grade and card color). Counts include approved and fulfilled orders only.</p>
-                    <div id="marketplace-analytics-loading" style="padding: 24px; text-align: center; color: #94a3b8;">Loading analytics…</div>
+                    <div id="marketplace-analytics-loading" style="padding: 24px; text-align: center; color: #94a3b8;">Loading analyticsâ€¦</div>
                     <div id="marketplace-analytics-error" style="display: none; padding: 16px; margin-bottom: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626;"></div>
                     <div id="marketplace-analytics-content" style="display: none;">
                         <div class="marketplace-analytics-charts-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
@@ -1609,7 +1609,7 @@
                             <div style="margin-bottom: 16px;">
                                 <label for="marketplace-analytics-item-select" style="font-size: 13px; color: #64748b;">Item</label>
                                 <select id="marketplace-analytics-item-select" style="margin-left: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; min-width: 260px;">
-                                    <option value="">— Select item —</option>
+                                    <option value="">â€” Select item â€”</option>
                                 </select>
                             </div>
                             <div id="marketplace-analytics-demographics-placeholder" style="padding: 24px; text-align: center; color: #94a3b8; font-size: 14px;">Select an item above.</div>
@@ -1669,7 +1669,7 @@
                                 <p id="marketplace-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
                                 <p id="marketplace-student-name" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
                             </div>
-                            <button type="button" id="marketplace-refresh-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;">↻ Refresh</button>
+                            <button type="button" id="marketplace-refresh-btn" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;">â†» Refresh</button>
                         </div>
                     </div>
                 </div>
@@ -1816,14 +1816,14 @@
                     </div>
 
                     <div id="bills-list-section" style="margin-bottom: 28px;">
-                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;">This month’s bills</h3>
+                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;">This monthâ€™s bills</h3>
                         <div id="bills-list" style="display: grid; gap: 16px;"></div>
                     </div>
 
                     {% if user.role in ['staff', 'admin'] %}
                     <div id="bills-miss-fee-section" style="margin-bottom: 28px;">
                         <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Miss-fee classes</h3>
-                        <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">Match text is compared to the student’s schedule location (contains, case-insensitive). Cafe is seeded at $50; skip-to location defaults to Studio. Daily Entry is not changed.</p>
+                        <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">Match text is compared to the studentâ€™s schedule location (contains, case-insensitive). Cafe is seeded at $50; skip-to location defaults to Studio. Daily Entry is not changed.</p>
                         <div id="bills-miss-fee-list"></div>
                         <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 12px;">
                             <input type="text" id="bills-miss-name" placeholder="Name" style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
@@ -1906,7 +1906,7 @@
                     </div>
                 </div>
                 
-                <!-- Login Credentials (optional — defaults match CSV import) -->
+                <!-- Login Credentials (optional â€” defaults match CSV import) -->
                 <div class="form-section" style="border-bottom: 1px solid var(--border); padding-bottom: 1rem;">
                     <h3 style="margin-bottom: 15px;">Login Credentials</h3>
                     <p style="margin: 0 0 12px 0; color: #666; font-size: 13px;">Optional. If left blank, username is the initials (lowercase) and password is initials + lunch number (e.g. JD12345).</p>
@@ -1918,7 +1918,7 @@
                     <div class="form-group">
                         <label for="student-password">Password:</label>
                         <input type="password" id="student-password" placeholder="Leave blank for default" autocomplete="new-password" data-allow-password-manager="false">
-                        <small style="color: #666;">Default: {INITIALS}{lunch number} — lunch number required when blank</small>
+                        <small style="color: #666;">Default: {INITIALS}{lunch number} â€” lunch number required when blank</small>
                     </div>
                     <div class="form-group">
                         <label for="student-password-confirm">Confirm Password:</label>
@@ -2194,7 +2194,7 @@
                     <div class="form-group" id="edit-user-pay-track-group" style="display: none;">
                         <label for="edit-user-pay-track">Pay track:</label>
                         <select id="edit-user-pay-track">
-                            <option value="simple">Simple ($100 × STAR%)</option>
+                            <option value="simple">Simple ($100 Ã— STAR%)</option>
                             <option value="complex">Complex (wages + tax worksheet)</option>
                         </select>
                     </div>
@@ -2606,9 +2606,9 @@
                         <button type="button" id="marketplace-add-item-image-url-info-btn" class="marketplace-image-url-info-btn" title="How to add an image URL">i</button>
                         <div id="marketplace-add-item-image-url-info" class="marketplace-image-url-info-popover" role="tooltip">
                             <p style="margin: 0 0 8px 0; font-weight: 600;">How to add an image URL</p>
-                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Find an image URL:</strong> On a website (not google images), right‑click the image → <em>Copy image address</em> (or <em>Copy image link</em>). Paste that URL into the box.</p>
-                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Create one:</strong> Upload your image to a host (e.g. Imgur, Google Drive with “Anyone with the link”), then get the direct image link. The URL should end in <code>.jpg</code>, <code>.png</code>, or <code>.gif</code> (or similar) for best results.</p>
-                            <p style="margin: 0; font-size: 12px; color: #64748b;">Leave blank if you don’t have an image.</p>
+                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Find an image URL:</strong> On a website (not google images), rightâ€‘click the image â†’ <em>Copy image address</em> (or <em>Copy image link</em>). Paste that URL into the box.</p>
+                            <p style="margin: 0 0 8px 0; font-size: 13px;"><strong>Create one:</strong> Upload your image to a host (e.g. Imgur, Google Drive with â€œAnyone with the linkâ€), then get the direct image link. The URL should end in <code>.jpg</code>, <code>.png</code>, or <code>.gif</code> (or similar) for best results.</p>
+                            <p style="margin: 0; font-size: 12px; color: #64748b;">Leave blank if you donâ€™t have an image.</p>
                         </div>
                     </span>
                 </div>
@@ -2668,7 +2668,7 @@
             <div id="marketplace-hide-value-color" style="display: none; margin-bottom: 12px;">
                 <label for="marketplace-hide-card-color">Card color</label>
                 <select id="marketplace-hide-card-color" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
-                    <option value="">— Select —</option>
+                    <option value="">â€” Select â€”</option>
                     <option value="yellow">Yellow</option>
                     <option value="green">Green</option>
                     <option value="blue">Blue</option>
@@ -2677,7 +2677,7 @@
             <div id="marketplace-hide-value-grade" style="display: none; margin-bottom: 12px;">
                 <label for="marketplace-hide-grade">Grade section</label>
                 <select id="marketplace-hide-grade" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);">
-                    <option value="">— Select —</option>
+                    <option value="">â€” Select â€”</option>
                     <option value="K-3">K-3</option>
                     <option value="4-8">4-8</option>
                     <option value="9-12">9-12</option>
@@ -2718,9 +2718,9 @@
                 <div><label for="marketplace-edit-item-name">Name *</label><input type="text" id="marketplace-edit-item-name" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"></div>
                 <div><label for="marketplace-edit-item-description">Description</label><textarea id="marketplace-edit-item-description" rows="3" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"></textarea></div>
                 <div><label for="marketplace-edit-item-price">Price ($) *</label><input type="number" id="marketplace-edit-item-price" step="0.01" min="0.01" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"></div>
-                <div><label for="marketplace-edit-item-grade-range">Grade range</label><select id="marketplace-edit-item-grade-range" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="k_3">K–3</option><option value="4_8">4–8</option><option value="9_12">9–12</option><option value="school_wide">School-wide</option></select></div>
-                <div><label for="marketplace-edit-item-type">Type</label><select id="marketplace-edit-item-type" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="">— None —</option></select></div>
-                <div><label for="marketplace-edit-item-category">Category</label><select id="marketplace-edit-item-category" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="">— None —</option></select></div>
+                <div><label for="marketplace-edit-item-grade-range">Grade range</label><select id="marketplace-edit-item-grade-range" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="k_3">Kâ€“3</option><option value="4_8">4â€“8</option><option value="9_12">9â€“12</option><option value="school_wide">School-wide</option></select></div>
+                <div><label for="marketplace-edit-item-type">Type</label><select id="marketplace-edit-item-type" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="">â€” None â€”</option></select></div>
+                <div><label for="marketplace-edit-item-category">Category</label><select id="marketplace-edit-item-category" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"><option value="">â€” None â€”</option></select></div>
                 <div><label for="marketplace-edit-item-image-url">Image URL</label><input type="url" id="marketplace-edit-item-image-url" placeholder="https://..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md);"></div>
             </div>
             <div style="margin-top: 16px; display: flex; gap: 10px;">
@@ -2734,7 +2734,59 @@
     <div id="past-point-cards-modal" class="modal">
         <div class="modal-content past-point-cards-modal-content">
             <span class="close" onclick="closePastPointCardsModal()">&times;</span>
-            <h2 id="past-point-cards-modal-title">Past Point Cards</h2>
+            <div class="past-point-cards-modal-header">
+                <h2 id="past-point-cards-modal-title">Past Point Cards</h2>
+                <div class="past-point-card-print-menu">
+                    <button type="button" id="past-point-card-print-btn" class="btn-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="past-point-card-print-menu">Print</button>
+                    <div id="past-point-card-print-menu" class="past-point-card-print-menu-dropdown" role="menu" hidden>
+                        <p class="past-point-card-print-menu-heading">Include in print</p>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="time" checked>
+                            <span>Time</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="location" checked>
+                            <span>Location</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="safety" checked>
+                            <span>Safety (S)</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="teamwork" checked>
+                            <span>Teamwork (T)</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="accountability" checked>
+                            <span>Accountability (A)</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="relationships" checked>
+                            <span>Relationships (R)</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="info" checked>
+                            <span>Info</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="percent" checked>
+                            <span>Percentages</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="info_insights" checked>
+                            <span>Info Insights</span>
+                        </label>
+                        <label class="past-point-card-print-option">
+                            <input type="checkbox" name="past-pc-print" value="attendance" checked>
+                            <span>Attendance</span>
+                        </label>
+                        <div class="past-point-card-print-menu-actions">
+                            <button type="button" id="past-point-card-print-select-all" class="btn-secondary">Select all</button>
+                            <button type="button" id="past-point-card-print-confirm" class="btn-primary">Print</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="point-card-filters" id="point-card-filters">
                 <label class="point-card-filter-field">
                     <span>Date</span>
@@ -2766,7 +2818,7 @@
                 </label>
                 <label class="point-card-filter-field point-card-filter-search">
                     <span>Search</span>
-                    <input type="search" id="point-card-search-input" placeholder="Times, locations, STAR values, or info…" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
+                    <input type="search" id="point-card-search-input" placeholder="Times, locations, STAR values, or infoâ€¦" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')">
                 </label>
                 <button type="button" class="btn-secondary" id="point-card-filter-clear">Clear</button>
             </div>

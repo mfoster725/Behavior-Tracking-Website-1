@@ -1,5 +1,5 @@
-/* ============================================================
-   DESIGN SYSTEM — CSS Custom Properties
+﻿/* ============================================================
+   DESIGN SYSTEM â€” CSS Custom Properties
    ============================================================ */
 :root {
     --bg-page: #F8F7F4;
@@ -398,7 +398,7 @@ nav {
 }
 
 /* ============================================================
-   TYPOGRAPHY  — Section Headers
+   TYPOGRAPHY  â€” Section Headers
    ============================================================ */
 .form-section {
     margin-bottom: 2rem;
@@ -1764,7 +1764,7 @@ table tbody tr:hover {
     -moz-appearance: none;
 }
 
-/* ⚠️ PROTECTED: STAR category color coding — DO NOT CHANGE */
+/* âš ï¸ PROTECTED: STAR category color coding â€” DO NOT CHANGE */
 .daily-input[data-category="s"] {
     background: rgba(254, 226, 226, 0.5);
 }
@@ -1808,7 +1808,7 @@ table tbody tr:hover {
     border-bottom-right-radius: var(--radius-md);
 }
 
-/* ⚠️ PROTECTED: STAR category header colors — DO NOT CHANGE */
+/* âš ï¸ PROTECTED: STAR category header colors â€” DO NOT CHANGE */
 .star-category-header[data-category="s"] {
     background: #FEE2E2;
     color: #B91C1C;
@@ -2001,7 +2001,7 @@ table tbody tr:hover {
     text-align: left;
 }
 
-/* Header row — full STARI colors */
+/* Header row â€” full STARI colors */
 .info-edit-history-head[data-category="s"] {
     background: #FEE2E2;
     color: #B91C1C;
@@ -2023,7 +2023,7 @@ table tbody tr:hover {
     color: #374151;
 }
 
-/* Data cells — lighter tints than headers */
+/* Data cells â€” lighter tints than headers */
 .info-edit-history-star[data-category="s"] {
     background: rgba(254, 226, 226, 0.45);
     color: #B91C1C;
@@ -2251,7 +2251,7 @@ table tbody tr:hover {
 }
 
 /* ============================================================
-   FRENZY DASHBOARD REDESIGN — Overview Card + Masonry
+   FRENZY DASHBOARD REDESIGN â€” Overview Card + Masonry
    ============================================================ */
 
 /* Overview card: absolute-positioned at top-right like Point Card */
@@ -4576,8 +4576,181 @@ table tbody tr:hover {
     box-sizing: border-box;
 }
 
-.past-point-cards-modal-content h2 {
+.past-point-cards-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
     margin-right: 2rem;
+    flex-shrink: 0;
+}
+
+.past-point-cards-modal-content h2 {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.past-point-card-print-menu {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.past-point-card-print-menu-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    min-width: 220px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+    z-index: 50;
+    padding: 8px;
+}
+
+.past-point-card-print-menu-heading {
+    margin: 0 0 6px;
+    padding: 2px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.past-point-card-print-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.past-point-card-print-option:hover {
+    background: var(--bg-elevated);
+}
+
+.past-point-card-print-option input {
+    margin: 0;
+}
+
+.past-point-card-print-menu-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+
+.past-point-card-print-menu-actions .btn-secondary,
+.past-point-card-print-menu-actions .btn-primary {
+    flex: 1 1 auto;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+#past-point-card-print-root {
+    display: none;
+}
+
+@media print {
+    body.past-point-card-printing > *:not(#past-point-card-print-root) {
+        display: none !important;
+    }
+
+    body.past-point-card-printing #past-point-card-print-root {
+        display: block !important;
+        position: static !important;
+        inset: auto !important;
+        width: 100% !important;
+        background: #fff !important;
+        color: #000 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    #past-point-card-print-root .ppc-print-day {
+        page-break-inside: avoid;
+        break-inside: avoid;
+        margin: 0 0 18pt;
+        padding: 0 0 12pt;
+        border-bottom: 1px solid #ccc;
+    }
+
+    #past-point-card-print-root .ppc-print-day:last-child {
+        border-bottom: none;
+    }
+
+    #past-point-card-print-root h1 {
+        font-size: 16pt;
+        margin: 0 0 4pt;
+    }
+
+    #past-point-card-print-root .ppc-print-meta {
+        font-size: 10pt;
+        color: #444;
+        margin: 0 0 14pt;
+    }
+
+    #past-point-card-print-root h2 {
+        font-size: 12pt;
+        margin: 0 0 6pt;
+    }
+
+    #past-point-card-print-root table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 9pt;
+        margin: 0 0 8pt;
+    }
+
+    #past-point-card-print-root th,
+    #past-point-card-print-root td {
+        border: 1px solid #999;
+        padding: 3pt 5pt;
+        text-align: center;
+        vertical-align: top;
+    }
+
+    #past-point-card-print-root th {
+        background: #eee;
+        font-weight: 700;
+    }
+
+    #past-point-card-print-root td.ppc-print-left,
+    #past-point-card-print-root th.ppc-print-left {
+        text-align: left;
+    }
+
+    #past-point-card-print-root .ppc-print-info-cell {
+        text-align: left;
+        font-size: 8pt;
+        max-width: 180pt;
+    }
+
+    #past-point-card-print-root .ppc-print-insights {
+        font-size: 9pt;
+        margin: 0;
+        padding: 0;
+    }
+
+    #past-point-card-print-root .ppc-print-insights h3,
+    #past-point-card-print-root .ppc-print-insights h5 {
+        font-size: 10pt;
+        margin: 0 0 4pt;
+    }
+
+    #past-point-card-print-root .ppc-print-insights-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8pt;
+        padding: 1pt 0;
+        border-bottom: 1px dotted #ccc;
+    }
 }
 
 .point-card-filters {
@@ -4938,7 +5111,7 @@ table tbody tr:hover {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
-/* Point Card Grid Layout — matches Daily Grid style */
+/* Point Card Grid Layout â€” matches Daily Grid style */
 .pc-grid {
     display: grid;
     margin-top: 0.5rem;
@@ -5113,7 +5286,7 @@ table tbody tr:hover {
     background: rgba(241, 239, 233, 0.5);
 }
 
-/* Point Card Edit Grid — matches Daily Grid input style */
+/* Point Card Edit Grid â€” matches Daily Grid input style */
 .pc-edit-input {
     width: 40px;
     height: 28px;
@@ -5195,7 +5368,7 @@ table tbody tr:hover {
     transform: scale(1.05);
 }
 
-/* Legacy table support — keep for backward compat */
+/* Legacy table support â€” keep for backward compat */
 .point-card-table {
     width: 100%;
     border-collapse: collapse;
@@ -5820,7 +5993,7 @@ table tbody tr:hover {
 }
 
 .worksheet-input-cell input {
-    width: 5.5rem; /* fits $0.00–$9,999.99 */
+    width: 5.5rem; /* fits $0.00â€“$9,999.99 */
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
@@ -6523,7 +6696,7 @@ table tbody tr:hover {
 }
 
 /* ============================================================
-   RESPONSIVE — BANK / MARKETPLACE
+   RESPONSIVE â€” BANK / MARKETPLACE
    ============================================================ */
 @media (max-width: 768px) {
     .marketplace-item-card {
@@ -6643,7 +6816,7 @@ table tbody tr:hover {
 }
 
 /* ============================================================
-   DASHBOARD — Summary & Frenzy Stats Redesign
+   DASHBOARD â€” Summary & Frenzy Stats Redesign
    ============================================================ */
 
 /* Controls bar: search inputs + managed-by-me + filter pills */
@@ -7273,7 +7446,7 @@ a.dashboard-compare-toggle {
     vertical-align: top;
 }
 
-/* Three columns: labels | values | deltas — shared track widths per student row */
+/* Three columns: labels | values | deltas â€” shared track widths per student row */
 .student-performance-metrics-grid {
     display: grid;
     grid-template-columns: max-content max-content max-content;
@@ -8575,7 +8748,7 @@ a.dashboard-compare-toggle {
     flex: 1;
 }
 
-/* Secondary row: Level Up’s + Fenzies side by side. */
+/* Secondary row: Level Upâ€™s + Fenzies side by side. */
 .overview-rich-secondary .overview-beige-panel {
     flex: 1;
     min-width: 0;
@@ -8908,7 +9081,7 @@ a.dashboard-compare-toggle {
 }
 
 .dashboard-card.level-ups-card.overview-extra-card {
-    /* Full column width — override overview-extra-card max-content shrink-wrap. */
+    /* Full column width â€” override overview-extra-card max-content shrink-wrap. */
     width: min(100%, 25.5rem);
     max-width: 100%;
     display: block;
@@ -9640,7 +9813,7 @@ a.dashboard-compare-toggle {
     margin-top: 2px;
 }
 
-/* Summary overview — Reminders / Resets detail card (graph + breakdown tabs) */
+/* Summary overview â€” Reminders / Resets detail card (graph + breakdown tabs) */
 .overview-remres-card--reminders {
     --remres-bar-color: #e87a1e;
     --remres-tab-accent: #e87a1e;
@@ -10074,7 +10247,7 @@ a.dashboard-compare-toggle {
     outline: none;
     box-shadow: none;
 }
-/* Abbreviated weekday labels (Mon, Wed, …); column width matches widest label (Wed) */
+/* Abbreviated weekday labels (Mon, Wed, â€¦); column width matches widest label (Wed) */
 .infractions-card .infractions-vbar-label-slot,
 .overview-remres-card .infractions-vbar-label-slot {
     width: 100%;
@@ -10366,7 +10539,7 @@ a.dashboard-compare-toggle {
 }
 
 /* Single 12px gap between tier 2 tab row and content (tables or tier 3). Override
-   .overview-detail-container’s default top margin/padding/border so nothing invisible adds space. */
+   .overview-detail-containerâ€™s default top margin/padding/border so nothing invisible adds space. */
 .infractions-card .infractions-tier2-tab-panel .overview-detail-container {
     margin-top: 12px;
     padding-top: 0;
@@ -10404,7 +10577,7 @@ a.dashboard-compare-toggle {
     background: rgba(0,0,0,0.06);
 }
 
-/* Reminders card — same tab/drill pattern as Infractions (Time, Day, Infractions tabs + drilldown) */
+/* Reminders card â€” same tab/drill pattern as Infractions (Time, Day, Infractions tabs + drilldown) */
 .reminders-card-header {
     justify-content: flex-start;
     gap: 8px;
@@ -10511,7 +10684,7 @@ a.dashboard-compare-toggle {
     background: rgba(0,0,0,0.06);
 }
 
-/* Resets card — same tab/drill pattern as Reminders/Infractions */
+/* Resets card â€” same tab/drill pattern as Reminders/Infractions */
 .resets-card-header {
     justify-content: flex-start;
     gap: 8px;
@@ -10689,7 +10862,7 @@ a.dashboard-compare-toggle {
     vertical-align: middle;
 }
 
-/* Tabs inside the STAR Performance card (Level 1 — main tabs) */
+/* Tabs inside the STAR Performance card (Level 1 â€” main tabs) */
 .star-performance-card .star-performance-tabs {
     display: flex;
     align-items: flex-end;
@@ -10761,7 +10934,7 @@ a.dashboard-compare-toggle {
     background: rgba(0,0,0,0.06);
 }
 
-/* Level 2 drilldown tabs inside STAR category detail — same look as parent tabs */
+/* Level 2 drilldown tabs inside STAR category detail â€” same look as parent tabs */
 .star-performance-card .star-performance-drilldown-tabs,
 #star-category-details-content .star-performance-drilldown-tabs {
     display: flex;
@@ -10833,7 +11006,7 @@ a.dashboard-compare-toggle {
     background: rgba(0,0,0,0.06);
 }
 
-/* Tables in STAR Performance tab panels — match Infractions card table style */
+/* Tables in STAR Performance tab panels â€” match Infractions card table style */
 .star-performance-card .star-performance-tab-panel table {
     display: inline-table;
     width: auto;
@@ -11625,7 +11798,7 @@ a.dashboard-compare-toggle {
     opacity: 0.9;
 }
 
-/* Trigger Times card Tier 1 tabs (Time / Day) – match other card tabs */
+/* Trigger Times card Tier 1 tabs (Time / Day) â€“ match other card tabs */
 .trigger-times-card .trigger-times-tabs {
     display: flex;
     align-items: flex-end;
@@ -11734,7 +11907,7 @@ a.dashboard-compare-toggle {
     background: rgba(0, 0, 0, 0.06);
 }
 
-/* Trigger Time Overview – 2x taller, chart below text */
+/* Trigger Time Overview â€“ 2x taller, chart below text */
 .trigger-overview-row {
     width: 100%;
 }
@@ -11916,7 +12089,7 @@ tr[data-aggregate-day-label] {
     height: 100% !important;
 }
 
-/* Trigger Times Heatmap – 2D grid: Days (rows) × Time of day (columns) */
+/* Trigger Times Heatmap â€“ 2D grid: Days (rows) Ã— Time of day (columns) */
 .trigger-heatmap-row {
     width: 100%;
 }
@@ -12354,7 +12527,7 @@ tr[data-aggregate-day-label] {
     align-items: stretch;
 }
 
-/* Isolated from `.days-present-legend` so attendance’s :has(5+) → 3 columns never applies
+/* Isolated from `.days-present-legend` so attendanceâ€™s :has(5+) â†’ 3 columns never applies
    inside these narrow quadrant cells (3 cols caused label/value overlap). */
 .infractions-card .infractions-type-legend {
     --infractions-legend-bullet: 10px;
@@ -12374,7 +12547,7 @@ tr[data-aggregate-day-label] {
     max-width: calc(100% - var(--infractions-legend-text-indent));
 }
 
-/* Task: pull legend columns closer — content-sized columns, centered */
+/* Task: pull legend columns closer â€” content-sized columns, centered */
 .infractions-card .infractions-type-legend--task-tight {
     grid-template-columns: max-content max-content;
     column-gap: 10px;
@@ -12390,7 +12563,7 @@ tr[data-aggregate-day-label] {
     display: block;
     min-width: 0;
     flex: 1 1 auto;
-    /* Only explicit <br> from formatInfractionLegendLabel — no soft wrapping */
+    /* Only explicit <br> from formatInfractionLegendLabel â€” no soft wrapping */
     white-space: pre;
     overflow: visible;
     text-overflow: clip;
@@ -12784,7 +12957,7 @@ tr[data-aggregate-day-label] {
     z-index: 10;
 }
 
-/* Overview card – Infractions donut summary */
+/* Overview card â€“ Infractions donut summary */
 .overview-stat-infractions {
     display: flex;
     flex-direction: column;
@@ -12932,7 +13105,7 @@ tr[data-aggregate-day-label] {
     color: var(--delta-trend-neutral);
 }
 
-/* Overview Trends card – small card in header, top-right inline with Overview title */
+/* Overview Trends card â€“ small card in header, top-right inline with Overview title */
 .overview-trends-card.overview-trends-in-header {
     flex-shrink: 0;
     padding: 0.35rem 0.6rem;
@@ -12997,7 +13170,7 @@ tr[data-aggregate-day-label] {
     justify-content: flex-start;
 }
 
-/* STAR Percent box – title first, gauge decoupled below, numbers tight under gauge */
+/* STAR Percent box â€“ title first, gauge decoupled below, numbers tight under gauge */
 .overview-card .overview-stat-star-percent .star-percent-label {
     margin-bottom: 24px;
 }
@@ -13367,7 +13540,7 @@ tr[data-aggregate-day-label] {
     overflow-x: auto;
 }
 
-/* Override generic table { width: 100% } — this table must not stretch */
+/* Override generic table { width: 100% } â€” this table must not stretch */
 #starbucks-table {
     display: inline-table;
     width: fit-content !important;
@@ -13564,7 +13737,7 @@ tr[data-aggregate-day-label] {
 }
 
 /* ============================================================
-   REPORTS TAB — NUMERIC ALIGNMENT
+   REPORTS TAB â€” NUMERIC ALIGNMENT
    ============================================================ */
 /* First column (times, labels) always left-aligned */
 #summary-view table th:first-child,
@@ -13613,7 +13786,7 @@ tr[data-aggregate-day-label] {
     color: var(--text-secondary);
 }
 
-/* ── Graph / Table view-mode toggle ── */
+/* â”€â”€ Graph / Table view-mode toggle â”€â”€ */
 .view-mode-toggle {
     display: inline-flex;
     border: 1px solid var(--border);
@@ -13655,7 +13828,7 @@ tr[data-aggregate-day-label] {
     width: 100% !important;
 }
 
-/* Days Present – Day-of-Week Absence Bar Chart: give it more space */
+/* Days Present â€“ Day-of-Week Absence Bar Chart: give it more space */
 .days-present-chart-wrap {
     width: 100%;
     --days-present-graph-gap: 12px;
@@ -13873,7 +14046,7 @@ tr[data-aggregate-day-label] {
     }
 }
 
-/* Custom legend block for Days Present – Day-of-Week Absence Bar Chart */
+/* Custom legend block for Days Present â€“ Day-of-Week Absence Bar Chart */
 .days-present-bar-legend {
     margin-bottom: 18px;
     display: flex;
@@ -13895,7 +14068,7 @@ tr[data-aggregate-day-label] {
 }
 
 /* ============================================================
-   SUMMARY REPORTS — INLINE INSIGHTS CARD
+   SUMMARY REPORTS â€” INLINE INSIGHTS CARD
    ============================================================ */
 #summary-insights-btn.active {
     background: var(--accent);
@@ -14228,7 +14401,7 @@ ul.chartjs-legend.chartjs-legend--cols-3 li {
     margin-top: 3px;
 }
 
-/* Overview card – Frenzy summary box (Point Card overview) */
+/* Overview card â€“ Frenzy summary box (Point Card overview) */
 .overview-card .overview-frenzy-row {
     width: 100%;
 }
