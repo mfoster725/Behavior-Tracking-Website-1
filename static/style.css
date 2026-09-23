@@ -7113,19 +7113,11 @@ table tbody tr:hover {
     }
 }
 
-/* Keep the timeframe row on one line in the left columns, matching
-   the full-screen toolbar, without widening into the overview card. */
+/* Slightly tighter filter spacing on a shorter window. The timeframe
+   select keeps its natural width so the chosen range is not clipped. */
 @media (max-width: 1280px) and (min-width: 721px) {
     #summary-view .dashboard-filter-pills {
         gap: 4px;
-    }
-
-    #summary-view .dashboard-period-select {
-        min-width: 0;
-        width: 9.75rem;
-        max-width: 9.75rem;
-        padding-left: 0.7rem;
-        padding-right: 1.6rem;
     }
 }
 
@@ -9030,10 +9022,16 @@ a.dashboard-compare-toggle {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.frenzies-card {
+    container-type: inline-size;
+    container-name: frenzies-card;
+}
+
 .frenzies-severity-graph {
     display: flex;
     align-items: center;
-    gap: 24px;
+    flex-wrap: wrap;
+    gap: 16px 24px;
     margin: 16px 0;
 }
 
@@ -9083,13 +9081,15 @@ a.dashboard-compare-toggle {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    flex: 1;
+    flex: 1 1 180px;
+    min-width: min(100%, 180px);
 }
 
 .frenzies-severity-legend-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 8px;
+    column-gap: 8px;
     padding: 6px 8px;
     border-radius: 4px;
     cursor: pointer;
@@ -9101,7 +9101,7 @@ a.dashboard-compare-toggle {
 }
 
 .frenzies-severity-legend-label {
-    flex: 1;
+    min-width: 0;
     font-size: 0.85rem;
 }
 
@@ -9109,6 +9109,30 @@ a.dashboard-compare-toggle {
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* A narrow Frenzies card cannot hold a 175px donut beside the legend.
+   Drop the legend under a smaller donut so each severity row stays intact. */
+@container frenzies-card (max-width: 460px) {
+    .frenzies-card .frenzies-severity-donut-wrap {
+        width: 132px !important;
+        height: 132px !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        max-width: 100%;
+    }
+
+    .frenzies-card .frenzies-severity-donut-wrap .overview-donut-svg {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+    }
+
+    .frenzies-severity-legend {
+        flex: 1 1 100%;
+    }
 }
 
 .frenzies-duration-summary {
@@ -9596,12 +9620,28 @@ a.dashboard-compare-toggle {
 
 .overview-card--rich .overview-infractions-body {
     gap: 10px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+}
+
+.overview-card--rich .overview-rich-bottom {
+    flex-wrap: wrap;
+}
+
+.overview-card--rich .overview-rich-bottom .overview-infractions-panel {
+    flex: 2 1 240px;
+    min-width: min(100%, 240px);
+}
+
+.overview-card--rich .overview-rich-bottom .overview-incidents-panel {
+    flex: 1 1 150px;
+    min-width: min(100%, 150px);
 }
 
 .overview-card--rich .overview-infractions-legend {
+    flex: 1 1 148px;
+    min-width: min(100%, 148px);
     font-size: 0.82rem;
     line-height: 1.15;
     gap: 6px;
@@ -9646,6 +9686,7 @@ a.dashboard-compare-toggle {
 .overview-card--rich .overview-donut-wrap {
     width: 92px;
     height: 92px;
+    flex: 0 0 auto;
     position: relative;
 }
 
@@ -9677,92 +9718,31 @@ a.dashboard-compare-toggle {
     font-weight: 600;
 }
 
-/* Narrow overview column: same arrangement as full screen, scaled so
-   gauges, labels, and the donut stay inside their panels. */
-@container overview-card (max-width: 520px) {
-    .overview-card--rich .overview-rich-row {
-        gap: 6px;
+/* When the overview column cannot hold three stat panels side by side,
+   stack them. Each panel stays the width of its gauge instead of
+   stretching across the card. */
+@container overview-card (max-width: 540px) {
+    .overview-card--rich .overview-rich-gauges {
+        flex-direction: column;
+        align-items: center;
     }
 
-    .overview-card--rich .overview-rich-gauges .overview-beige-panel,
-    .overview-card--rich .overview-rich-bottom .overview-beige-panel,
-    .overview-card--rich .overview-rich-secondary .overview-beige-panel {
-        padding: 6px 5px;
+    .overview-card--rich .overview-rich-gauges .overview-beige-panel {
+        flex: 0 0 auto;
+        width: min(100%, 220px);
+        max-width: 220px;
         min-width: 0;
     }
 
-    .overview-card--rich .overview-rich-gauges .overview-panel-kicker,
-    .overview-card--rich .overview-rich-bottom .overview-panel-kicker {
-        font-size: 0.58rem;
-        letter-spacing: 0.04em;
-        line-height: 1.15;
+    .overview-card--rich .overview-rich-gauges .overview-panel-kicker {
         text-align: center;
-        overflow-wrap: anywhere;
-    }
-
-    .overview-card--rich .overview-gauge-wrap--attendance-donut,
-    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
-        width: min(117px, 100%);
-        max-width: 100%;
-        height: auto;
-        aspect-ratio: 1;
-    }
-
-    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg {
-        width: 100%;
-    }
-
-    .overview-card--rich .overview-gauge-attendance .overview-gauge-big,
-    .overview-card--rich .overview-gauge-star .overview-gauge-big,
-    .overview-card--rich .overview-gauge-plans .overview-gauge-big {
-        font-size: 1rem;
-    }
-
-    .overview-card--rich .overview-gauge-attendance .overview-gauge-small,
-    .overview-card--rich .overview-gauge-star .overview-gauge-small,
-    .overview-card--rich .overview-gauge-plans .overview-gauge-small,
-    .overview-card--rich .overview-plan-stat-sub {
-        font-size: 0.62rem;
-        line-height: 1.15;
-        text-align: center;
-    }
-
-    .overview-card--rich .overview-plan-stat-body {
-        padding: 2px 0 0;
-    }
-
-    .overview-card--rich .overview-donut-wrap {
-        width: 64px;
-        height: 64px;
-    }
-
-    .overview-card--rich .overview-infractions-body {
-        gap: 6px;
-    }
-
-    .overview-card--rich .overview-infractions-legend {
-        min-width: 0;
-        flex: 1 1 auto;
-        font-size: 0.68rem;
-    }
-
-    .overview-card--rich .overview-infractions-legend li {
-        grid-template-columns: 8px minmax(0, 1fr) auto;
-        column-gap: 4px;
-    }
-
-    .overview-card--rich .overview-incidents-panel .overview-incidents-bars {
-        gap: 8px;
-        min-height: 96px;
+        white-space: nowrap;
+        overflow-wrap: normal;
     }
 
     .overview-card--rich .overview-trends-card {
         min-width: 0;
-        padding: 6px;
-    }
-
-    .overview-card--rich .overview-trend-line {
-        font-size: 0.68rem;
+        max-width: 100%;
     }
 }
 
@@ -9798,6 +9778,19 @@ a.dashboard-compare-toggle {
 @media (max-width: 768px) {
     .overview-rich-row {
         flex-direction: column;
+    }
+
+    /* Stacked stat panels stay gauge-width. A full-width beige bar
+       leaves the chart floating in empty space. */
+    .overview-card--rich .overview-rich-gauges {
+        align-items: center;
+    }
+
+    .overview-card--rich .overview-rich-gauges .overview-beige-panel {
+        flex: 0 0 auto;
+        align-self: center;
+        width: min(100%, 220px);
+        max-width: 220px;
     }
 
     .overview-rich-header {

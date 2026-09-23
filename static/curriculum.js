@@ -258,7 +258,7 @@
             '<h4>Weekly Earnings Record</h4>' +
             '<p class="muted">Same math as Bank Account. Examples in Bank Account use different numbers.</p>' +
             '<div class="curriculum-lesson-form">' +
-            field('regular-pay', 'Regular hours amount', 'Days ' + days + excused + ' × rate ' + rate + ' =') +
+            field('regular-pay', 'Regular days amount', 'Days ' + days + excused + ' × rate ' + rate + ' =') +
             field('starbucks-pay', 'Starbucks amount', 'Count ' + sb + ' × $2.00 =') +
             field('star-student-pay', 'Star Student amount', 'Count ' + ss + ' × $50.00 =') +
             field('star-classroom-pay', 'Star Classroom amount', 'Count ' + sc + ' × $50.00 =') +
@@ -828,7 +828,7 @@
             if (!isNaN(enteredGap) && Math.abs(enteredGap) <= 1 && String(gapRateRaw).indexOf('%') === -1 && enteredGap !== 0 && enteredGap !== 1) {
                 enteredGap = enteredGap * 100;
             }
-            if (Math.abs(regular - Number(thisPay.regular_pay || 0)) > tolerance) return 'Check regular hours: days × daily rate.';
+            if (Math.abs(regular - Number(thisPay.regular_pay || 0)) > tolerance) return 'Check regular days: days × daily rate.';
             if (Math.abs(starbucks - Number(thisPay.starbucks_pay || 0)) > tolerance) return 'Starbucks is count × $2.';
             if (Math.abs(starStudent - Number(thisPay.star_student_pay || 0)) > tolerance) return 'Star Student is count × $50.';
             if (Math.abs(starClassroom - Number(thisPay.star_classroom_pay || 0)) > tolerance) return 'Star Classroom is count × $50.';

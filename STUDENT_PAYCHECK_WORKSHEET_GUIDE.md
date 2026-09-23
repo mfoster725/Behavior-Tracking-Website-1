@@ -23,7 +23,7 @@ Each week you earn pay based on days you were present or excused, your card-colo
 
 ## Understanding Your Pay
 
-**Regular hours** = paid days × your daily rate  
+**Regular days** = paid days × your daily rate  
 Paid days are days marked **present** or **excused** in the Monday–Friday pay period. Unexcused or missing days do not count. Your daily rate depends on card color (yellow $74.16, green $129.16, blue $162.76). Every student must have a yellow, green, or blue card — missing or white is not allowed.
 
 **Bonuses**
@@ -32,16 +32,16 @@ Paid days are days marked **present** or **excused** in the Monday–Friday pay 
 - Star Student: count × $50.00
 - Star Classroom: count × $50.00
 
-**GROSS PAY** = regular hours + all bonuses
+**GROSS PAY** = regular days + all bonuses
 
 **Deductions** (each uses GROSS PAY)
 
-- Point Card Loss: D = 100% − P, L = D, amount = L × GP (P is your point card percent, shown in Count). Enter L in Rate.
+- Point Card Loss: D = 100% − P, L = D, amount = (L ÷ 100) × GP (P is your point card percent; Rate shows 100% − P). Enter L in Rate. Count shows your Gross Pay.
 - Citations = enter the count, then Amount = count × $2.00 (from infractions on the point card)
-- Federal Income Tax = 3.0% × gross
-- Social Security (FICA) = 6.2% × gross
-- Medicare (FICA) = 1.5% × gross
-- State Income Tax = 5.35% × gross (Minnesota)
+- Federal Income Tax = (3.0% ÷ 100) × gross = 0.03 × gross
+- Social Security (FICA) = (6.2% ÷ 100) × gross = 0.062 × gross
+- Medicare (FICA) = (1.5% ÷ 100) × gross = 0.015 × gross
+- State Income Tax = (5.35% ÷ 100) × gross = 0.0535 × gross (Minnesota)
 
 **TOTAL DEDUCTIONS** = the six deduction amounts added together  
 **Take-home** = GROSS PAY − TOTAL DEDUCTIONS
@@ -54,16 +54,16 @@ Work top to bottom. Each student box has a **Show example** button. The example 
 
 ### Earnings
 
-1. Regular hours amount: days × rate.
+1. Regular days amount: days × rate.
 2. Starbucks, Star Student, and Star Classroom amounts: count × the rate shown. If a count is 0, enter $0.00.
 3. GROSS PAY: add the four earning amounts.
 
 ### Deductions
 
 4. Point Card Loss rate: subtract the Count formula (100% minus your percent). Enter the difference in Rate. You can type `8`, `8%`, or `0.08` — it will show with `%` after you leave the box.
-5. Point Card Loss amount: that rate × GROSS PAY.
+5. Point Card Loss amount: convert that rate to a decimal (divide by 100), then multiply by GROSS PAY.
 6. Citations: enter the count, then Amount = count × $2.00.
-7. Federal, Social Security, Medicare, and State amounts: each given percent × GROSS PAY.
+7. Federal, Social Security, Medicare, and State amounts: convert each given percent to a decimal (÷ 100), then multiply by GROSS PAY.
 8. TOTAL DEDUCTIONS: add the six deduction amounts.
 
 ### Take-home
@@ -105,13 +105,13 @@ Click the **Submit** button.
 **Star Classroom count: 0**  
 **Point card percent: 90%**
 
-1. Regular hours: 3 × $80.00 = $240.00
+1. Regular days: 3 × $80.00 = $240.00
 2. Starbucks: 2 × $2.00 = $4.00
 3. Star Student: 1 × $50.00 = $50.00
 4. Star Classroom: 0 × $50.00 = $0.00
 5. GROSS PAY: $240.00 + $4.00 + $50.00 + $0.00 = $294.00
-6. Point Card Loss: 100 − 90 = 10%. Amount: 0.10 × $294.00 = $29.40
-7. Federal 3%: $8.82 · Social Security 6.2%: $18.23 · Medicare 1.5%: $4.41 · State 3%: $8.82
+6. Point Card Loss: 100 − 90 = 10%. Convert: 10% = 10 ÷ 100 = 0.10. Amount: 0.10 × $294.00 = $29.40
+7. Federal 3% → 0.03 × $294.00 = $8.82 · Social Security 6.2% → 0.062 × $294.00 = $18.23 · Medicare 1.5% → 0.015 × $294.00 = $4.41 · State 3% → 0.03 × $294.00 = $8.82
 8. TOTAL DEDUCTIONS: $69.68
 9. Take-home: $294.00 − $69.68 = $224.32
 
