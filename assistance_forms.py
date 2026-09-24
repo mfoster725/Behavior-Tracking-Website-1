@@ -298,7 +298,7 @@ FORMS = {
         'agency': 'Lakes Region Housing and Redevelopment Authority',
         'agency_address': 'Serving Pope and Douglas counties',
         'program_name': 'Housing Choice Voucher (Section 8)',
-        'benefit_summary': 'You pay 30% of your income toward rent. The voucher pays the rest, taken off your weekly rent bill.',
+        'benefit_summary': 'You pay 30% of your take-home pay toward rent. The voucher pays the rest, taken off your weekly rent bill.',
         'warning': 'If we are UNABLE TO READ the application or if it is NOT FULLY COMPLETED the application will be returned for you to complete and turn back in.',
         'sections': [
             {'id': 'contact', 'page': 3, 'rows': [

@@ -42,9 +42,11 @@ def register_economy_routes(app):
     def active_products():
         return m.BillProduct.query.filter_by(is_active=True).order_by(m.BillProduct.sort_order, m.BillProduct.id).all()
 
-    def load_catalog():
+    def load_catalog(settings=None):
+        """Catalog as students see it (prices times the cost of living), plus the product rows."""
         rows = active_products()
-        return {p.slug: eco.load_json(p.options_json, {}) for p in rows}, {p.slug: p for p in rows}
+        raw = {p.slug: eco.load_json(p.options_json, {}) for p in rows}
+        return bl.adjusted_catalog(raw, settings or bills_settings()), {p.slug: p for p in rows}
 
     def get_or_create_budget(student_id):
         row = m.StudentBudget.query.filter_by(student_id=student_id).first()
@@ -88,13 +90,53 @@ def register_economy_routes(app):
             return
         m.db.session.add(m.Notification(user_id=user.id, type=ntype, title=title, body=body, student_id=student_id))
 
-    def approved_benefits(student_id, monday):
-        out = {}
-        for application in m.AssistanceApplication.query.filter_by(student_id=student_id, status='approved').all():
-            if application.effective_week and monday and application.effective_week > monday:
-                continue
-            out[application.program] = {'income_weekly': eco.money(application.income_weekly or 0)}
-        return out
+    def paycheck_pay(paycheck):
+        """(gross, take-home) exactly as the student's Weekly Earnings Record shows them."""
+        if paycheck.is_verified or paycheck.deposited_at is not None:
+            gross = paycheck.gross_pay if paycheck.gross_pay is not None else paycheck.base_pay
+            return eco.money(gross or 0), eco.money(paycheck.final_pay or 0)
+        live = m.live_paycheck_amounts(paycheck)
+        gross = live.get('gross') if live.get('gross') is not None else live.get('base_pay')
+        return eco.money(gross or 0), eco.money(live.get('final_pay') or 0)
+
+    def benefit_income(student, as_of, settings=None):
+        """Class rule: assistance uses take-home pay, averaged over the last few paychecks.
+
+        Only weeks that ended before ``as_of`` (and before today, so a week in progress
+        never counts) are used, and weeks with no pay at all (breaks) are skipped.
+        Returns (weekly amount, paychecks used). With no paychecks yet: a full week at 90%.
+        """
+        settings = settings or bills_settings()
+        weeks = int(settings['benefits'].get('income_weeks') or 4)
+        cutoff = min(as_of, now_local().date())
+        rows = m.Paycheck.query.filter(
+            m.Paycheck.student_id == student.id, m.Paycheck.pay_period_end < cutoff,
+        ).order_by(m.Paycheck.pay_period_end.desc()).limit(weeks + 6).all()
+        amounts = []
+        for row in rows:
+            gross, take_home = paycheck_pay(row)
+            if gross > 0:
+                amounts.append(take_home)
+            if len(amounts) == weeks:
+                break
+        if amounts:
+            return eco.money(sum(amounts, Decimal('0')) / len(amounts)), len(amounts)
+        return eco.money(income_summary(student).get('take_home_90') or 0), 0
+
+    def approved_programs(student_id, monday):
+        """Approved programs that pay on the statements for the week of ``monday``."""
+        return sorted(
+            a.program for a in m.AssistanceApplication.query.filter_by(student_id=student_id, status='approved').all()
+            if not (a.effective_week and monday and a.effective_week > monday)
+        )
+
+    def approved_benefits(student, monday, settings=None):
+        """{program: {'income_weekly': ...}} for statement math; help is refigured every week."""
+        programs = approved_programs(student.id, monday)
+        if not programs:
+            return {}
+        income, _count = benefit_income(student, monday, settings)
+        return {program: {'income_weekly': income} for program in programs}
 
     def plan_for(budget, catalog):
         return bl.normalize_plan(eco.load_json(budget.choices_json, {}), catalog)
@@ -115,7 +157,7 @@ def register_economy_routes(app):
     # Weekly statements
     # ------------------------------------------------------------------
 
-    def create_statement(student, budget, product, slug, monday, catalog, plan, settings):
+    def create_statement(student, budget, product, slug, monday, catalog, plan, settings, benefits):
         kind = 'savings' if slug == 'savings' else 'bill'
         existing = m.StudentBill.query.filter_by(
             student_id=student.id, bill_product_id=product.id, period_key=bl.week_key(monday), kind=kind,
@@ -131,10 +173,12 @@ def register_economy_routes(app):
             'student_id': student.id,
             'monday': monday,
             'card_color': color_of(student),
-            'benefits': approved_benefits(student.id, monday),
+            'benefits': benefits,
             'loan_balance': loan_balance,
             'settings': settings,
         })
+        if benefits and any(line.get('kind') == 'credit' and 'roommate' not in line['label'].lower() for line in lines):
+            meta['assistance_income'] = str(next(iter(benefits.values()))['income_weekly'])
         bill = m.StudentBill(
             student_id=student.id,
             bill_product_id=product.id,
@@ -182,13 +226,14 @@ def register_economy_routes(app):
         ).all():
             if not eco.load_json(existing.meta_json, {}).get('final_bill'):
                 return 0
-        catalog, rows = load_catalog()
-        plan = plan_for(budget, catalog)
         settings = bills_settings()
+        catalog, rows = load_catalog(settings)
+        plan = plan_for(budget, catalog)
+        benefits = approved_benefits(student, this_monday, settings)
         created = 0
         for slug in bl.selected_slugs(plan, catalog, color_of(student)):
             product = rows.get(slug)
-            if product and create_statement(student, budget, product, slug, this_monday, catalog, plan, settings):
+            if product and create_statement(student, budget, product, slug, this_monday, catalog, plan, settings, benefits):
                 created += 1
         if created:
             notify_student(student.id, 'bills_ready', 'Your bills are here',
@@ -449,7 +494,7 @@ def register_economy_routes(app):
                 options.append({
                     'id': option.get('id'),
                     'label': option.get('label'),
-                    'detail': option.get('detail'),
+                    'detail': bl.option_detail(option),
                     'payee': option.get('payee') or opts.get('payee'),
                     'weekly': money_f(weekly),
                     'monthly': money_f(bl.monthly_from_weekly(weekly)),
@@ -501,7 +546,30 @@ def register_economy_routes(app):
             'housing_note': (catalog.get('rent') or {}).get('note'),
             'applies_from': next_monday.isoformat(),
             'applies_label': fmt_day(next_monday),
+            'assistance': plan_assistance(student, catalog, settings, next_monday),
         }
+
+    def plan_assistance(student, catalog, settings, monday):
+        """Approved help for each housing choice, so My plan shows what the student will really pay."""
+        benefits = approved_benefits(student, monday, settings)
+        if not benefits:
+            return None
+        income = next(iter(benefits.values()))['income_weekly']
+        out = {'programs': sorted(benefits), 'income_weekly': money_f(income), 'housing': {}, 'snap': {}, 'health': None}
+        for listing in bl.product_options(catalog.get('rent') or {}):
+            rent = eco.money(listing.get('weekly'))
+            voucher = Decimal('0.00')
+            if 'housing' in benefits:
+                voucher = bl.housing_assistance(rent, listing.get('bedrooms'), income, settings)['amount']
+                out['housing'][listing.get('id')] = money_f(voucher)
+            if 'snap' in benefits:
+                out['snap'][listing.get('id')] = money_f(bl.snap_benefit(income, rent - voucher, settings)['amount'])
+        if 'health' in benefits:
+            opts = catalog.get('health') or {}
+            bench = bl.find_option(opts, settings['benefits']['health'].get('benchmark_option', 'silver')) or {}
+            calc = bl.health_help(income, eco.money(bench.get('weekly')), settings)
+            out['health'] = {'kind': calc['kind'], 'amount': money_f(calc['amount'] or 0)}
+        return out
 
     def assistance_payload(student_id):
         apps = {a.program: a for a in m.AssistanceApplication.query.filter_by(student_id=student_id).all()}
@@ -525,8 +593,8 @@ def register_economy_routes(app):
     def economy_payload(student):
         now = now_local()
         budget = get_or_create_budget(student.id)
-        catalog, _rows = load_catalog()
         settings = bills_settings()
+        catalog, _rows = load_catalog(settings)
         account = m.get_or_create_bank_account(student.id)
         pto = get_or_create_pto(student.id)
         this_monday = bl.week_start(now.date())
@@ -582,6 +650,7 @@ def register_economy_routes(app):
             'income': income_summary(student),
             'savings': {'balance': money_f(savings_balance), 'goal': money_f(goal), 'goal_weeks': goal_weeks},
             'assistance': assistance_payload(student.id),
+            'benefit_income_weeks': int(settings['benefits'].get('income_weeks') or 4),
             'pto_days': float(pto.days_remaining or 0),
             'late_fees': settings['late_fees'],
         }
@@ -755,8 +824,19 @@ def register_economy_routes(app):
     # Assistance applications
     # ------------------------------------------------------------------
 
+    def this_week_bill(student_id, slug):
+        """This week's regular statement for one product (not a final bill made only to carry a balance)."""
+        rows = m.StudentBill.query.join(m.BillProduct).filter(
+            m.StudentBill.student_id == student_id,
+            m.StudentBill.schema_version == bl.BILLS_VERSION,
+            m.StudentBill.period_key == bl.week_key(bl.week_start(now_local().date())),
+            m.BillProduct.slug == slug,
+        ).all()
+        return next((row for row in rows if not eco.load_json(row.meta_json, {}).get('final_bill')), None)
+
     def expected_answers(student, program):
-        catalog, _rows = load_catalog()
+        settings = bills_settings()
+        catalog, _rows = load_catalog(settings)
         budget = get_or_create_budget(student.id)
         plan = plan_for(budget, catalog)
         listing = bl.housing_listing(plan, catalog)
@@ -775,11 +855,24 @@ def register_economy_routes(app):
         hours = {str(day_hours * int(eco.SCHOOL_DAYS_PER_WEEK))}
         if last_pay and last_pay.get('days_worked'):
             hours.add(str(day_hours * last_pay['days_worked']))
+        # The form says to use this week's bills; accept that statement or the plan it came from.
         rent_full = eco.money(listing.get('weekly'))
         rent_answers = [rent_full]
+        landlords = [listing.get('payee')]
         if housing_app:
-            voucher = bl.housing_assistance(rent_full, listing.get('bedrooms'), housing_app.income_weekly or 0, bills_settings())
+            income_now, _count = benefit_income(student, bl.week_start(now_local().date()), settings)
+            voucher = bl.housing_assistance(rent_full, listing.get('bedrooms'), income_now, settings)
             rent_answers.append(eco.money(rent_full - voucher['amount']))
+        rent_bill = this_week_bill(student.id, 'rent')
+        if rent_bill:
+            charges = [line for line in eco.load_json(rent_bill.lines_json, []) if line.get('kind') == 'charge']
+            if charges:
+                rent_answers.append(eco.money(charges[0]['amount']))
+            rent_answers.append(eco.money(rent_bill.base_amount))
+            if rent_bill.payee_name:
+                landlords.append(rent_bill.payee_name)
+        rent_answers = sorted(set(rent_answers))
+        landlords = [name for i, name in enumerate(landlords) if name and name not in landlords[:i]]
         return {
             'first_initial': first,
             'last_initial': last,
@@ -805,7 +898,7 @@ def register_economy_routes(app):
             'weekly_gross': weekly_gross,
             'yearly_income': eco.money(weekly_gross * 52),
             'rent_weekly': rent_answers,
-            'landlord': listing.get('payee'),
+            'landlord': landlords,
             'expense_rows': expenses,
             'has_housing_subsidy': 'yes' if housing_app else 'no',
             'has_vehicle': 'yes' if plan.get('vehicle') and plan['vehicle'] != 'none' else 'no',
@@ -825,28 +918,47 @@ def register_economy_routes(app):
             m.db.session.flush()
         return row
 
-    def benefit_preview(student, program, income_weekly):
-        """What the approved benefit is worth right now (shown on the approval notice)."""
-        catalog, _rows = load_catalog()
+    PROGRAM_BILLS = {'housing': 'rent', 'snap': 'groceries', 'health': 'health'}
+
+    def benefit_preview(student, program):
+        """What the benefit takes off next week's bill (shown on the approval notice).
+
+        Uses the same statement math as the real bills, with the student's other approved programs.
+        """
         settings = bills_settings()
-        budget = get_or_create_budget(student.id)
-        plan = plan_for(budget, catalog)
+        catalog, _rows = load_catalog(settings)
+        plan = plan_for(get_or_create_budget(student.id), catalog)
+        monday = bl.week_start(now_local().date()) + timedelta(days=7)
+        income, paychecks = benefit_income(student, monday, settings)
+        programs = set(approved_programs(student.id, monday)) | {program}
+        slug = PROGRAM_BILLS[program]
+        lines, _meta = bl.statement_lines(slug, catalog, plan, {
+            'student_id': student.id, 'monday': monday, 'card_color': color_of(student),
+            'benefits': {p: {'income_weekly': income} for p in programs}, 'loan_balance': None, 'settings': settings,
+        })
+        weekly = -sum((Decimal(str(line['amount'])) for line in lines
+                       if line.get('kind') == 'credit' and 'roommate' not in line['label'].lower()), Decimal('0'))
         listing = bl.housing_listing(plan, catalog)
+        rent = eco.money(listing.get('weekly'))
+        voucher = bl.housing_assistance(rent, listing.get('bedrooms'), income, settings)
+        kind = None
         if program == 'housing':
-            calc = bl.housing_assistance(listing.get('weekly'), listing.get('bedrooms'), income_weekly, settings)
-            return {'weekly': money_f(calc['amount']), 'explain': calc['explain'], 'applies_to': 'rent'}
-        if program == 'snap':
-            calc = bl.snap_benefit(income_weekly, listing.get('weekly'), settings)
-            return {'weekly': money_f(calc['amount']), 'explain': calc['explain'], 'applies_to': 'groceries'}
-        opts = catalog.get('health') or {}
-        bench = bl.find_option(opts, settings['benefits']['health'].get('benchmark_option', 'silver')) or {}
-        chosen = bl.find_option(opts, plan.get('health')) or {}
-        calc = bl.health_help(income_weekly, eco.money(bench.get('weekly')), settings)
-        if calc['kind'] == 'ma':
-            weekly = eco.money(chosen.get('weekly'))
+            explain = voucher['explain']
+        elif program == 'snap':
+            shelter = rent - voucher['amount'] if 'housing' in programs else rent
+            explain = bl.snap_benefit(income, shelter, settings)['explain']
         else:
-            weekly = min(calc['amount'] or Decimal('0'), eco.money(chosen.get('weekly')))
-        return {'weekly': money_f(weekly), 'explain': calc['explain'], 'applies_to': 'health', 'kind': calc['kind']}
+            bench = bl.find_option(catalog.get('health') or {}, settings['benefits']['health'].get('benchmark_option', 'silver')) or {}
+            calc = bl.health_help(income, eco.money(bench.get('weekly')), settings)
+            explain, kind = calc['explain'], calc['kind']
+        if paychecks:
+            source = f"Your take-home pay is the average of your last {paychecks} paycheck{'' if paychecks == 1 else 's'}."
+        else:
+            source = "You don't have a paycheck yet, so this uses a full week at 90%."
+        return {
+            'weekly': money_f(weekly), 'explain': f'{explain} {source}', 'applies_to': slug, 'kind': kind,
+            'income_weekly': money_f(income), 'income_weeks': int(settings['benefits'].get('income_weeks') or 4),
+        }
 
     @app.route('/api/economy/student/<int:student_id>/applications/<program>', methods=['GET'])
     @login_required
@@ -872,7 +984,7 @@ def register_economy_routes(app):
                 'approved_at': m.utc_isoformat(row.approved_at),
                 'effective_week': row.effective_week.isoformat() if row.effective_week else None,
                 'effective_label': fmt_day(row.effective_week),
-                **benefit_preview(student, program, eco.money(row.income_weekly or 0)),
+                **benefit_preview(student, program),
             }
         return jsonify(payload)
 
@@ -918,10 +1030,10 @@ def register_economy_routes(app):
             now = now_local()
             row.status = 'approved'
             row.approved_at = datetime.utcnow()
-            row.income_weekly = expected['weekly_gross']
             row.effective_week = bl.week_start(now.date()) + timedelta(days=7)
+            row.income_weekly, _count = benefit_income(student, row.effective_week)
             spec = af.form_spec(program)
-            preview = benefit_preview(student, program, expected['weekly_gross'])
+            preview = benefit_preview(student, program)
             notify_student(student_id, 'assistance_approved', f"Application approved: {spec['program_name']}",
                            f"Your benefits start with the bills issued {fmt_day(row.effective_week)}.")
             payload['approved'] = True
@@ -1153,17 +1265,21 @@ def register_economy_routes(app):
 
     def settings_payload():
         row = settings_row()
+        settings = bills_settings()
         products = []
         for p in active_products():
             opts = eco.load_json(p.options_json, {})
+            adjusted = bl.adjusted_catalog({p.slug: opts}, settings)[p.slug]
             products.append({
                 'id': p.id, 'slug': p.slug, 'name': p.name, 'is_base': bool(p.is_base),
                 'payee': opts.get('payee'), 'note': opts.get('note'),
                 'options': bl.product_options(opts), 'params': opts.get('params') or {},
+                # What students are charged after the cost of living, for the admin's reference.
+                'student_options': bl.product_options(adjusted), 'student_params': adjusted.get('params') or {},
             })
         return {
             'default_pay_track': row.default_pay_track,
-            'bills': bills_settings(),
+            'bills': settings,
             'products': products,
             'no_show_classes': [{
                 'id': c.id, 'name': c.name, 'match_text': c.match_text,

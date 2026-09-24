@@ -1,10 +1,16 @@
 """Weekly bills for Manny's Market: catalog, statement math, assistance, and late fees.
 
 Everything is weekly. Statements are issued on Monday and are due the following
-Monday at 11:59 PM school time. Prices are real 2025-26 Pope County, MN costs
+Monday at 11:59 PM school time. The catalog holds real 2025-26 Pope County, MN costs
 (HUD FY2026 Fair Market Rents, EIA electricity prices, USDA food plans, MNsure
 premiums, local internet and phone plans) converted from monthly to weekly with
-monthly x 12 / 52. Payee names are fictional.
+monthly x 12 / 52. Students pay those prices times the class cost-of-living setting
+(85% by default, the same for every card). Payee names are fictional.
+
+Class assistance rule: benefits are figured from take-home pay (after taxes and the
+point card deduction), averaged over the last few paychecks and refigured every week.
+With both rules, a yellow card at a 90% average living alone in the default plan on
+all three programs keeps at least $100 a week after every bill.
 """
 
 from __future__ import annotations
@@ -19,6 +25,13 @@ BILLS_VERSION = 2
 WEEKS_PER_YEAR = Decimal('52')
 MONTHS_PER_YEAR = Decimal('12')
 ZERO = Decimal('0.00')
+
+
+# Students pay catalog prices x this. Admins can change it; it is the same for every card.
+DEFAULT_COST_OF_LIVING = '0.85'
+_PRICE_KEYS = frozenset({'weekly', 'loan_weekly', 'upkeep_weekly', 'customer_charge_weekly',
+                         'equipment_weekly', 'fuel_price', 'principal', 'car_price'})
+_RATE_KEYS = frozenset({'rate_per_kwh'})
 
 
 def weekly_from_monthly(monthly):
@@ -99,7 +112,7 @@ BILL_PRODUCTS_V2 = [
                  'detail': 'New kitchen, dishwasher, and a washer and dryer in the unit.',
                  'weekly': '206.54', 'bedrooms': 1, 'kwh_factor': '1.10', 'roommate': False},
                 {'id': 'roommate_2br', 'label': '2-bedroom with a roommate', 'payee': 'Oak Court Apartments', 'unit': 'Apt 7',
-                 'detail': 'Your half of $1,050/month. You also split electricity and internet 50/50.',
+                 'detail': 'Your half of {full_rent}/month. You also split electricity and internet 50/50.',
                  'weekly': '121.15', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': True},
                 {'id': 'apt_2br', 'label': '2-bedroom on your own', 'payee': 'Oak Court Apartments', 'unit': 'Apt 9',
                  'detail': 'An extra bedroom for an office or guests.',
@@ -279,8 +292,10 @@ BILL_PRODUCTS_V2 = [
             'options': [
                 {'id': 'none', 'label': 'No car', 'detail': 'Walk, bike, or get rides.', 'loan_weekly': '0.00', 'upkeep_weekly': '0.00', 'gallons_week': '0'},
                 {'id': 'older', 'label': 'Older car, paid off', 'detail': 'No loan, but more repairs.', 'loan_weekly': '0.00', 'upkeep_weekly': '35.00', 'gallons_week': '11.5'},
-                {'id': 'used', 'label': 'Used car with a loan', 'detail': 'About a $15,000 car over 5 years.', 'loan_weekly': '75.23', 'upkeep_weekly': '25.00', 'gallons_week': '10.5'},
-                {'id': 'newer', 'label': 'Newer car with a loan', 'detail': 'About a $25,000 car over 6 years.', 'loan_weekly': '125.08', 'upkeep_weekly': '15.00', 'gallons_week': '9.5'},
+                {'id': 'used', 'label': 'Used car with a loan', 'detail': 'About a {car_price} car over 5 years.', 'car_price': '15000.00',
+                 'loan_weekly': '75.23', 'upkeep_weekly': '25.00', 'gallons_week': '10.5'},
+                {'id': 'newer', 'label': 'Newer car with a loan', 'detail': 'About a {car_price} car over 6 years.', 'car_price': '25000.00',
+                 'loan_weekly': '125.08', 'upkeep_weekly': '15.00', 'gallons_week': '9.5'},
             ],
         },
     },
@@ -349,9 +364,12 @@ LEGACY_VEHICLE = {'none': 'none', 'beater': 'older', 'average': 'used', 'sports'
 LEGACY_HEALTH = {'none': 'bronze', '6000': 'bronze', '1200': 'silver', '0': 'gold'}
 
 DEFAULT_SETTINGS = {
+    'cost_of_living': DEFAULT_COST_OF_LIVING,
     'late_fees': {'rent_percent': '0.08', 'other_flat': '5.00'},
     'savings_goal_weeks': 13,
     'benefits': {
+        # Take-home pay from this many recent paychecks is averaged each week.
+        'income_weeks': 4,
         'fpl_annual': '15650',
         'snap': {
             'gross_limit_pct_fpl': '200',
@@ -387,9 +405,11 @@ def merged_settings(raw):
     """DEFAULT_SETTINGS overlaid with whatever the admin saved."""
     raw = raw if isinstance(raw, dict) else {}
     out = {
+        'cost_of_living': DEFAULT_SETTINGS['cost_of_living'],
         'late_fees': dict(DEFAULT_SETTINGS['late_fees']),
         'savings_goal_weeks': DEFAULT_SETTINGS['savings_goal_weeks'],
         'benefits': {
+            'income_weeks': DEFAULT_SETTINGS['benefits']['income_weeks'],
             'fpl_annual': DEFAULT_SETTINGS['benefits']['fpl_annual'],
             'snap': dict(DEFAULT_SETTINGS['benefits']['snap']),
             'health': dict(DEFAULT_SETTINGS['benefits']['health']),
@@ -399,10 +419,14 @@ def merged_settings(raw):
             },
         },
     }
+    if raw.get('cost_of_living') not in (None, ''):
+        out['cost_of_living'] = str(cost_of_living(raw))
     out['late_fees'].update({k: v for k, v in (raw.get('late_fees') or {}).items() if v not in (None, '')})
     if raw.get('savings_goal_weeks'):
         out['savings_goal_weeks'] = int(raw['savings_goal_weeks'])
     benefits = raw.get('benefits') or {}
+    if benefits.get('income_weeks'):
+        out['benefits']['income_weeks'] = min(12, max(1, int(benefits['income_weeks'])))
     if benefits.get('fpl_annual'):
         out['benefits']['fpl_annual'] = benefits['fpl_annual']
     for program in ('snap', 'health'):
@@ -412,6 +436,56 @@ def merged_settings(raw):
         out['benefits']['housing']['tenant_share'] = housing['tenant_share']
     out['benefits']['housing']['payment_standard_weekly'].update(housing.get('payment_standard_weekly') or {})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Cost of living
+# ---------------------------------------------------------------------------
+
+def cost_of_living(settings):
+    """Share of the real price students pay (0.85 = 85%). Anything unusable falls back to the default."""
+    factor = _dec((settings or {}).get('cost_of_living'), DEFAULT_COST_OF_LIVING)
+    if factor <= 0 or factor > 2:
+        factor = Decimal(DEFAULT_COST_OF_LIVING)
+    return factor
+
+
+def _scaled(value, factor):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key in _PRICE_KEYS and not isinstance(item, (dict, list)):
+                out[key] = str(money(_dec(item) * factor))
+            elif key in _RATE_KEYS and not isinstance(item, (dict, list)):
+                out[key] = str((_dec(item) * factor).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP))
+            else:
+                out[key] = _scaled(item, factor)
+        return out
+    if isinstance(value, list):
+        return [_scaled(item, factor) for item in value]
+    return value
+
+
+def adjusted_catalog(catalog, settings):
+    """The catalog as students see it: every price times the cost of living. Savings amounts are not prices."""
+    factor = cost_of_living(settings)
+    return {slug: (opts if slug == 'savings' else _scaled(opts, factor)) for slug, opts in (catalog or {}).items()}
+
+
+def option_detail(option):
+    """Option description with its (adjusted) prices filled in."""
+    detail = (option or {}).get('detail') or ''
+    if '{car_price}' in detail:
+        detail = detail.replace('{car_price}', f"${_dec(option.get('car_price')):,.0f}")
+    if '{full_rent}' in detail:
+        detail = detail.replace('{full_rent}', f"${monthly_from_weekly(_dec(option.get('weekly')) * 2):,.0f}")
+    return detail
+
+
+def rate_text(rate):
+    """$/kWh the way a utility prints it: at least two decimals, up to four."""
+    whole, _, frac = f'{_dec(rate):.4f}'.rstrip('0').partition('.')
+    return f"{whole}.{frac.ljust(2, '0')}"
 
 
 # ---------------------------------------------------------------------------
@@ -512,22 +586,30 @@ def fpl_weekly(settings):
     return _dec(settings['benefits']['fpl_annual']) / WEEKS_PER_YEAR
 
 
+def _pct_text(rate):
+    return f"{float(_dec(rate) * 100):g}%"
+
+
 def housing_assistance(rent_weekly, bedrooms, income_weekly, settings):
-    """Section 8: you pay 30% of your income; the voucher pays the rest of the rent, up to the payment standard."""
+    """Section 8: you pay 30% of your income; the voucher pays the rest of the rent, up to the payment standard.
+
+    Payment standards follow local rents, so they move with the cost of living too.
+    """
     params = settings['benefits']['housing']
     standards = params.get('payment_standard_weekly') or {}
     key = str(min(int(bedrooms or 0), 2))
-    standard = _dec(standards.get(key), standards.get('1', '185.31'))
-    share = money(_dec(income_weekly) * _dec(params.get('tenant_share'), '0.30'))
-    covered = min(money(rent_weekly), money(standard))
+    standard = money(_dec(standards.get(key), standards.get('1', '185.31')) * cost_of_living(settings))
+    rate = _dec(params.get('tenant_share'), '0.30')
+    share = money(_dec(income_weekly) * rate)
+    covered = min(money(rent_weekly), standard)
     amount = max(ZERO, money(covered - share))
     return {
         'amount': amount,
         'tenant_share': share,
-        'payment_standard': money(standard),
+        'payment_standard': standard,
         'explain': (
-            f"You pay 30% of your weekly income (${money(income_weekly):,.2f} x 30% = ${share:,.2f}). "
-            f"The voucher pays the rest of your rent, up to ${money(standard):,.2f} a week."
+            f"You pay {_pct_text(rate)} of your take-home pay (${money(income_weekly):,.2f} a week x {_pct_text(rate)} = ${share:,.2f}). "
+            f"The voucher pays the rest of your rent, up to ${standard:,.2f} a week."
         ),
     }
 
@@ -539,7 +621,7 @@ def snap_benefit(income_weekly, shelter_weekly, settings):
     max_weekly = weekly_from_monthly(params['max_allotment_monthly'])
     if income > limit:
         return {'amount': ZERO, 'eligible': False,
-                'explain': f"Your gross income (${money(income):,.2f} a week) is over the SNAP limit of ${money(limit):,.2f} a week."}
+                'explain': f"Your take-home pay (${money(income):,.2f} a week) is over the SNAP limit of ${money(limit):,.2f} a week."}
     adjusted = max(ZERO, income * (Decimal('1') - _dec(params['earned_income_deduction']))
                    - weekly_from_monthly(params['standard_deduction_monthly']))
     shelter = _dec(shelter_weekly) + weekly_from_monthly(params['utility_allowance_monthly'])
@@ -551,8 +633,8 @@ def snap_benefit(income_weekly, shelter_weekly, settings):
         'amount': amount,
         'eligible': amount > 0,
         'explain': (
-            f"The most SNAP pays one person is ${max_weekly:,.2f} a week. It goes down by 30% of your net income "
-            f"after deductions (${money(net):,.2f}), which leaves ${amount:,.2f} a week for groceries."
+            f"The most SNAP pays one person is ${max_weekly:,.2f} a week. It goes down by {_pct_text(params['benefit_reduction'])} of your take-home pay "
+            f"after SNAP's deductions for work, rent, and utilities (${money(net):,.2f}), which leaves ${amount:,.2f} a week for groceries."
         ),
     }
 
@@ -565,17 +647,18 @@ def health_help(income_weekly, benchmark_weekly, settings):
     credit_limit = fpl * _dec(params['credit_limit_pct_fpl']) / Decimal('100')
     if income <= ma_limit:
         return {'kind': 'ma', 'amount': None,
-                'explain': f"Your income (${money(income):,.2f} a week) is under ${money(ma_limit):,.2f}, so Medical Assistance pays your whole premium."}
+                'explain': f"Your take-home pay (${money(income):,.2f} a week) is under ${money(ma_limit):,.2f}, so Medical Assistance pays your whole premium."}
     if income <= credit_limit:
-        expected = money(income * _dec(params['expected_contribution']))
+        rate = _dec(params['expected_contribution'])
+        expected = money(income * rate)
         credit = max(ZERO, money(_dec(benchmark_weekly) - expected))
         return {'kind': 'credit', 'amount': credit,
                 'explain': (
                     f"You're over the Medical Assistance limit, so you get a premium tax credit instead: "
-                    f"the silver plan (${money(benchmark_weekly):,.2f}) minus 8.5% of your income (${expected:,.2f}) = ${credit:,.2f} a week."
+                    f"the silver plan (${money(benchmark_weekly):,.2f}) minus {_pct_text(rate)} of your take-home pay (${expected:,.2f}) = ${credit:,.2f} a week."
                 )}
     return {'kind': None, 'amount': ZERO,
-            'explain': f"Your income is over ${money(credit_limit):,.2f} a week, so you don't qualify for help paying for health insurance."}
+            'explain': f"Your take-home pay is over ${money(credit_limit):,.2f} a week, so you don't qualify for help paying for health insurance."}
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +711,7 @@ def statement_lines(slug, catalog, plan, ctx):
         kwh = electric_usage(opts, listing, ctx['student_id'], ctx['monday'])
         rate = _dec(params.get('rate_per_kwh'), '0.16')
         lines.append(_line('Basic service charge', _dec(params.get('customer_charge_weekly'), '2.00')))
-        lines.append(_line(f'Energy used: {kwh} kWh x ${rate:.2f}', money(Decimal(kwh) * rate)))
+        lines.append(_line(f'Energy used: {kwh} kWh x ${rate_text(rate)}', money(Decimal(kwh) * rate)))
         if roommate:
             half = money(lines_total(lines) / 2)
             lines.append(_line('Your roommate pays half', -half, 'credit'))

@@ -3658,7 +3658,7 @@ class AssistanceApplication(db.Model):
     answers_json = db.Column(db.Text, nullable=True)
     results_json = db.Column(db.Text, nullable=True)
     attempts = db.Column(db.Integer, nullable=False, default=0)
-    # Weekly gross income reported (and checked) on the approved application.
+    # Average weekly take-home pay at approval. Benefits are refigured from recent paychecks every week.
     income_weekly = db.Column(db.Numeric(10, 2), nullable=True)
     submitted_at = db.Column(db.DateTime, nullable=True)
     approved_at = db.Column(db.DateTime, nullable=True)

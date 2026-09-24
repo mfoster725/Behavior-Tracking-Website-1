@@ -411,6 +411,10 @@
             html += ln(line.label, Number(line.amount), line.kind === 'credit' ? 'is-credit' : '');
         });
         if (lines.length) html += ln('Total new charges', bill.new_charges, 'is-total');
+        if (bill.meta && bill.meta.assistance_income) {
+            html += '<p class="bills2-note" style="margin:6px 0 0">Your help on this bill was figured from your average take-home pay: ' +
+                fmt(Number(bill.meta.assistance_income)) + ' a week.</p>';
+        }
         if (bill.slug === 'electric' && bill.usage_history && bill.usage_history.length) {
             html += usageHtml(bill);
         }
@@ -659,7 +663,22 @@
         var spending = items.reduce(function (s, i) { return s + i.amount; }, 0);
         var savings = optionFor('savings', c.savings);
         var saving = savings ? savings.weekly : 0;
-        return { items: items, spending: spending, saving: saving, total: spending + saving };
+        // Approved assistance, figured by the server for each housing choice (same math as the bills).
+        var credits = [];
+        var assist = e.plan.assistance;
+        if (assist) {
+            var voucher = (assist.housing || {})[c.housing] || 0;
+            if (voucher > 0) credits.push({ label: 'Section 8 voucher', amount: voucher });
+            var snap = Math.min((assist.snap || {})[c.housing] || 0, groceries ? groceries.weekly : 0);
+            if (snap > 0) credits.push({ label: 'SNAP', amount: snap });
+            if (assist.health && health) {
+                var ma = assist.health.kind === 'ma';
+                var care = ma ? health.weekly : Math.min(assist.health.amount || 0, health.weekly);
+                if (care > 0) credits.push({ label: ma ? 'Medical Assistance' : 'Premium tax credit', amount: care });
+            }
+        }
+        var help = credits.reduce(function (s, i) { return s + i.amount; }, 0);
+        return { items: items, spending: spending, saving: saving, credits: credits, help: help, total: spending + saving - help };
     }
 
     function planHtml(e) {
@@ -732,8 +751,11 @@
         var html = '<aside class="bills2-plan-side"><h3>Your weekly bills</h3>';
         t.items.forEach(function (i) { html += ln(i.label, i.amount); });
         html += ln('Emergency fund (you keep it)', t.saving);
-        html += ln('Total each week', t.total, 'is-total');
-        html += '<p class="bills2-note" style="margin-top:6px">Electricity changes with the weather. Help from an approved application lowers these bills.</p>';
+        t.credits.forEach(function (i) { html += ln(i.label, -i.amount, 'is-credit'); });
+        html += ln(t.credits.length ? 'You pay each week' : 'Total each week', t.total, 'is-total');
+        html += '<p class="bills2-note" style="margin-top:6px">Electricity changes with the weather. ' + (t.credits.length
+            ? 'Your help is refigured every week from your average take-home pay (' + fmt(e.plan.assistance.income_weekly) + ' now).'
+            : 'Help from an approved application lowers these bills.') + '</p>';
         if (inc.take_home_90 != null) {
             var left = inc.take_home_90 - t.total;
             html += '<div style="margin-top:14px"><h3>Your pay</h3>' +
@@ -857,7 +879,8 @@
 
     function assistanceHtml(e) {
         var html = '<p class="bills2-note" style="margin:0 0 14px">Real programs help people pay for food, health care, and housing. ' +
-            'To get help, fill out the application for each program. Every answer has to be right before it\'s approved, just like a real caseworker would check.</p>' +
+            'To get help, fill out the application for each program. Every answer has to be right before it\'s approved, just like a real caseworker would check. ' +
+            'In our class, help is figured from your take-home pay (the average of your last ' + esc(e.benefit_income_weeks || 4) + ' paychecks) and refigured every week.</p>' +
             '<div class="bills2-programs">';
         (e.assistance || []).forEach(function (p) {
             var status = '', button = 'Start application';
@@ -1126,7 +1149,8 @@
             html += '<div class="gov-amount">$0.00 a week</div><p style="margin:0 0 12px">Your application is complete, but your income is too high for this program to pay anything right now.</p>';
         }
         html += '<h4 style="margin:14px 0 4px">How we figured it</h4><p style="margin:0">' + esc(n.explain || '') + '</p>' +
-            '<p class="bills2-note">If your income or where you live changes, the amount on your bills can change too.</p></div>';
+            '<p class="bills2-note">Your help is refigured every week from your last ' + esc(n.income_weeks || 4) +
+            ' paychecks, so it goes up or down with your pay and where you live.</p></div>';
         return html;
     }
 
@@ -1457,6 +1481,7 @@
         fuel_price: 'Gas price ($/gallon)',
         rate: 'Loan interest rate (0.0652 = 6.52%)'
     };
+    var PRICE_PARAMS = { customer_charge_weekly: true, rate_per_kwh: true, equipment_weekly: true, fuel_price: true };
 
     function adminField(label, id, value, suffix) {
         return '<label>' + esc(label) + '<input type="text" id="' + id + '" value="' + esc(value == null ? '' : value) + '"' + '>' +
@@ -1471,46 +1496,66 @@
         var health = ben.health || {};
         var housing = ben.housing || {};
         var ps = housing.payment_standard_weekly || {};
+        var col = Math.round(Number(b.cost_of_living || 0.85) * 1000) / 10;
         var html = '<div class="econ-admin">';
+        html += '<fieldset><legend>Cost of living</legend><div class="econ-grid">' +
+            adminField('Students pay (% of real prices)', 'econ-col', col,
+                'The same for every card. At 85%, a yellow card at 90% living alone on all three assistance programs keeps at least $100 a week.') +
+            '</div></fieldset>';
         html += '<fieldset><legend>Late fees and savings</legend><div class="econ-grid">' +
             adminField('Emergency fund goal (weeks of bills)', 'econ-goal-weeks', b.savings_goal_weeks) +
             adminField('Rent late fee (% of late rent)', 'econ-rent-pct', (Number(fees.rent_percent || 0.08) * 100).toFixed(1), 'Minnesota allows at most 8%.') +
             adminField('Other bills late fee ($)', 'econ-other-fee', fees.other_flat) + '</div></fieldset>';
-        html += '<fieldset><legend>Weekly prices</legend>';
+        html += '<fieldset><legend>Weekly prices</legend>' +
+            '<p style="margin:0 0 8px;font-size:12px;color:#57534e">Enter real prices. Students pay them times the cost of living ' +
+            '(emergency fund amounts stay the same).</p>';
         (data.products || []).forEach(function (p) {
             var opts = p.options || [];
+            var studentOpts = {};
+            (p.student_options || []).forEach(function (o) { studentOpts[o.id] = o; });
+            var pays = p.slug !== 'savings';
             html += '<div class="econ-product" data-product="' + p.id + '"><h4>' + esc(p.name) + (p.payee ? ' <span style="font-weight:400;color:#78716c">· ' + esc(p.payee) + '</span>' : '') + '</h4>';
             if (opts.length) {
                 var vehicle = p.slug === 'car_loan';
-                html += '<table><thead><tr><th>Option</th>' + (vehicle ? '<th>Loan / week</th><th>Repairs / week</th>' : '<th>Cost / week</th>') + '</tr></thead><tbody>';
+                html += '<table><thead><tr><th>Option</th>' + (vehicle ? '<th>Real loan / week</th><th>Real repairs / week</th>' : '<th>' + (pays ? 'Real cost / week' : 'Amount / week') + '</th>') +
+                    (pays ? '<th>Students pay</th>' : '') + '</tr></thead><tbody>';
                 opts.forEach(function (o) {
+                    var s = studentOpts[o.id] || o;
+                    var paysText = vehicle ? fmt(Number(s.loan_weekly || 0)) + ' + ' + fmt(Number(s.upkeep_weekly || 0)) : fmt(Number(s.weekly || 0));
                     html += '<tr data-option="' + esc(o.id) + '"><td><input type="text" data-k="label" value="' + esc(o.label) + '"></td>' +
                         (vehicle
                             ? '<td><input type="text" data-k="loan_weekly" value="' + esc(o.loan_weekly) + '"></td><td><input type="text" data-k="upkeep_weekly" value="' + esc(o.upkeep_weekly) + '"></td>'
-                            : '<td><input type="text" data-k="weekly" value="' + esc(o.weekly) + '"></td>') + '</tr>';
+                            : '<td><input type="text" data-k="weekly" value="' + esc(o.weekly) + '"></td>') +
+                        (pays ? '<td style="white-space:nowrap;color:#57534e">' + esc(paysText) + '</td>' : '') + '</tr>';
                 });
                 html += '</tbody></table>';
             }
             var params = p.params || {};
+            var studentParams = p.student_params || {};
             var simple = Object.keys(params).filter(function (k) { return typeof params[k] !== 'object'; });
             if (simple.length) {
                 html += '<div class="econ-grid" style="margin-top:6px">' + simple.map(function (k) {
-                    return '<label>' + esc(PARAM_LABELS[k] || k.replace(/_/g, ' ')) + '<input type="text" data-param="' + esc(k) + '" value="' + esc(params[k]) + '"></label>';
+                    var scaled = PRICE_PARAMS[k] && studentParams[k] != null && String(studentParams[k]) !== String(params[k]);
+                    return '<label>' + esc(PARAM_LABELS[k] || k.replace(/_/g, ' ')) + '<input type="text" data-param="' + esc(k) + '" value="' + esc(params[k]) + '">' +
+                        (scaled ? '<span style="font-size:11px;color:#78716c">Students pay ' + esc(studentParams[k]) + '</span>' : '') + '</label>';
                 }).join('') + '</div>';
             }
             html += '</div>';
         });
         html += '</fieldset>';
-        html += '<fieldset><legend>Assistance rules</legend><div class="econ-grid">' +
+        html += '<fieldset><legend>Assistance rules</legend>' +
+            '<p style="margin:0 0 8px;font-size:12px;color:#57534e">Help is figured from take-home pay (after taxes and the point card deduction), averaged over recent paychecks and refigured every week.</p>' +
+            '<div class="econ-grid">' +
+            adminField('Paychecks averaged', 'econ-income-weeks', ben.income_weeks || 4) +
             adminField('Federal poverty guideline (1 person, yearly)', 'econ-fpl', ben.fpl_annual) +
             adminField('SNAP most per month (1 person)', 'econ-snap-max', snap.max_allotment_monthly) +
             adminField('SNAP income limit (% of poverty)', 'econ-snap-limit', snap.gross_limit_pct_fpl) +
             adminField('Medical Assistance limit (% of poverty)', 'econ-ma-limit', health.ma_limit_pct_fpl) +
             adminField('Tax credit limit (% of poverty)', 'econ-credit-limit', health.credit_limit_pct_fpl) +
             adminField('Section 8 tenant share (%)', 'econ-tenant-share', (Number(housing.tenant_share || 0.3) * 100).toFixed(0)) +
-            adminField('Section 8 payment standard, studio ($/week)', 'econ-ps-0', ps['0']) +
-            adminField('Section 8 payment standard, 1 bedroom', 'econ-ps-1', ps['1']) +
-            adminField('Section 8 payment standard, 2 bedroom', 'econ-ps-2', ps['2']) +
+            adminField('Section 8 payment standard, studio (real $/week)', 'econ-ps-0', ps['0'], 'Moves with the cost of living, like rents.') +
+            adminField('Section 8 payment standard, 1 bedroom (real)', 'econ-ps-1', ps['1']) +
+            adminField('Section 8 payment standard, 2 bedroom (real)', 'econ-ps-2', ps['2']) +
             '</div></fieldset>';
         html += '<fieldset><legend>No-show shifts (unpaid time off)</legend>' +
             '<p style="margin:0 0 8px;font-size:12px;color:#57534e">If a student\'s schedule has this class and they go to the skip-to location instead, that day is unpaid on their paycheck. PTO covers it.</p>';
@@ -1555,10 +1600,13 @@
         function val(id) { return ((document.getElementById(id) || {}).value || '').trim(); }
         var pct = parseFloat(val('econ-rent-pct'));
         var share = parseFloat(val('econ-tenant-share'));
+        var col = parseFloat(val('econ-col'));
         var bills = {
+            cost_of_living: isNaN(col) || col <= 0 ? '0.85' : String(col / 100),
             late_fees: { rent_percent: isNaN(pct) ? '0.08' : String(pct / 100), other_flat: val('econ-other-fee') },
             savings_goal_weeks: parseInt(val('econ-goal-weeks'), 10) || 13,
             benefits: {
+                income_weeks: parseInt(val('econ-income-weeks'), 10) || 4,
                 fpl_annual: val('econ-fpl'),
                 snap: { max_allotment_monthly: val('econ-snap-max'), gross_limit_pct_fpl: val('econ-snap-limit') },
                 health: { ma_limit_pct_fpl: val('econ-ma-limit'), credit_limit_pct_fpl: val('econ-credit-limit') },
