@@ -26955,6 +26955,11 @@ async function navigateFromNotificationLink(link) {
                 await switchFn('curriculum');
             }
         }
+
+        if (link.view === 'bills') {
+            window.billsFocusTab = link.section || 'week';
+            if (switchFn) await switchFn('bills');
+        }
     } finally {
         setTimeout(closeNotificationsDropdown, 0);
     }
@@ -27914,11 +27919,14 @@ function formatPercentLabel(rate) {
 
 function formatPaidDays(paycheck) {
     const days = Number(paycheck.days_worked || 0);
+    const notes = [];
     const excused = Number(paycheck.excused_days || 0);
-    if (excused > 0) {
-        return days + ' (' + excused + ' excused)';
-    }
-    return String(days);
+    const pto = Number(paycheck.pto_days || 0);
+    const noShows = Number(paycheck.no_show_days || 0);
+    if (excused > 0) notes.push(excused + ' excused');
+    if (pto > 0) notes.push(pto + ' PTO');
+    if (noShows > 0) notes.push(noShows + ' unpaid no-show' + (noShows === 1 ? '' : 's'));
+    return notes.length ? days + ' (' + notes.join(', ') + ')' : String(days);
 }
 
 function moneyExample(amount) {
@@ -28742,8 +28750,17 @@ function renderTransactions(transactions) {
         .slice()
         .sort((a, b) => (parseApiUtcDateTime(b.created_at) || 0) - (parseApiUtcDateTime(a.created_at) || 0))
         .map(t => {
-            const isDeposit = t.type === 'deposit';
-            const typeLabel = isDeposit ? 'Deposit' : 'Purchase';
+            const isDeposit = Number(t.amount) >= 0;
+            const typeLabels = {
+                deposit: 'Deposit',
+                purchase: 'Purchase',
+                refund: 'Refund',
+                bill: 'Bill payment',
+                fee: 'Fee',
+                savings_deposit: 'To savings',
+                savings_withdrawal: 'From savings'
+            };
+            const typeLabel = typeLabels[t.type] || (isDeposit ? 'Deposit' : 'Purchase');
             const amountStr = (isDeposit ? '+' : '−') + '$' + Math.abs(t.amount).toFixed(2);
             const amtColor = isDeposit ? '#059669' : '#dc2626';
             return `

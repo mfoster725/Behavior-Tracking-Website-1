@@ -176,6 +176,12 @@ def register_economy_routes(app):
         first = first_week_for(budget)
         if first and this_monday < first:
             return 0
+        # A week's bills are issued once. Plan changes made during the week wait for next Monday.
+        for existing in m.StudentBill.query.filter_by(
+            student_id=student.id, schema_version=bl.BILLS_VERSION, period_key=bl.week_key(this_monday),
+        ).all():
+            if not eco.load_json(existing.meta_json, {}).get('final_bill'):
+                return 0
         catalog, rows = load_catalog()
         plan = plan_for(budget, catalog)
         settings = bills_settings()
@@ -449,8 +455,12 @@ def register_economy_routes(app):
             sections.append({'key': key, 'title': title, 'note': note or opts.get('note'), 'selected': plan.get(key), 'options': options,
                              'required': key not in ('cell', 'vehicle', 'car_insurance')})
 
+        internet_params = (catalog.get('internet') or {}).get('params') or {}
+        equipment = eco.money(internet_params.get('equipment_weekly') or 0)
         section('housing', 'Where you live', 'rent')
-        section('internet', 'Internet', 'internet')
+        section('internet', 'Internet', 'internet',
+                f"Every plan also has a {(internet_params.get('equipment_label') or 'modem rental').lower()} of ${equipment:,.2f} a week."
+                if equipment > 0 else None)
         section('health', 'Health insurance', 'health')
         section('groceries', 'Groceries', 'groceries')
         section('renters', 'Renters insurance', 'renters')
@@ -460,8 +470,22 @@ def register_economy_routes(app):
         section('car_insurance', 'Car insurance', 'car_insurance')
         loan = bl.student_loan_spec(catalog, color_of(student))
         next_monday = bl.week_start(now.date()) + timedelta(days=7)
+        electric_params = (catalog.get('electric') or {}).get('params') or {}
+        electric_by_housing = {}
+        for listing in bl.product_options(catalog.get('rent') or {}):
+            kwh = Decimal(str(electric_params.get('base_kwh_week') or '105')) * Decimal(str(listing.get('kwh_factor') or '1'))
+            amount = eco.money(Decimal(str(electric_params.get('customer_charge_weekly') or '2.00'))
+                               + kwh * Decimal(str(electric_params.get('rate_per_kwh') or '0.16')))
+            if listing.get('roommate'):
+                amount = eco.money(amount / 2)
+            electric_by_housing[listing.get('id')] = money_f(amount)
         return {
             'choices': plan,
+            'estimates': {
+                'electric_by_housing': electric_by_housing,
+                'internet_equipment': money_f(((catalog.get('internet') or {}).get('params') or {}).get('equipment_weekly')),
+                'roommate_ids': [o.get('id') for o in bl.product_options(catalog.get('rent') or {}) if o.get('roommate')],
+            },
             'sections': sections,
             'weekly_total': money_f(total),
             'items': [{'slug': i['slug'], 'amount': money_f(i['amount'])} for i in items],

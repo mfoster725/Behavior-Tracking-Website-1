@@ -7,7 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bills-fill3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bills-weekly1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='bills.css') }}?v=bills-weekly1">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -856,7 +857,7 @@
                     <!-- System Information -->
                     <div class="admin-section" style="background: var(--bg-elevated); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                         <h3>Manny's Market economy</h3>
-                        <p style="font-size: 13px; color: #666; margin-bottom: 12px;">School default pay track, late fees, 2026 wages, bill amounts, and miss-fee classes. Students on the complex track pay monthly bills; simple-track students stay on the $100 paycheck.</p>
+                        <p style="font-size: 13px; color: #666; margin-bottom: 12px;">Weekly bill prices, late fees, assistance rules, and no-show shifts. Students with bills turned on get new bills every Monday, due the next Monday at 11:59 PM.</p>
                         <div id="economy-admin-settings"></div>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
                             <button type="button" id="economy-admin-save-btn" class="btn-primary">Save economy settings</button>
@@ -1733,107 +1734,43 @@
             </div>
         </div>
 
-        <!-- Bills View -->
-        <div id="bills-view" class="view" style="min-height: calc(100vh - 64px);">
-            <div class="form-section accounts-ui" style="margin-bottom: 0;">
-                <h2 style="margin-bottom: 8px;">Bills</h2>
-                <p style="margin: 0 0 24px 0; color: #64748b; font-size: 14px;">Pick your budget, then pay each bill by typing the amount. Wrong amounts are not accepted. Unpaid bills after the due date add a late fee.</p>
-
+        <!-- Bills View (weekly bills: rendered by static/economy.js) -->
+        <div id="bills-view" class="view">
+            <div class="form-section bills2" id="bills-root">
+                <div class="bills2-head">
+                    <div class="bills2-head-text">
+                        <h2>Bills</h2>
+                        <p id="bills-subtitle" class="bills2-sub">Loading your bills...</p>
+                    </div>
+                    <div class="bills2-tabs" id="bills-tabs" role="tablist" aria-label="Bills sections">
+                        <button type="button" class="bills2-tab active" data-tab="week" role="tab">This week</button>
+                        <button type="button" class="bills2-tab" data-tab="plan" role="tab">My plan</button>
+                        <button type="button" class="bills2-tab" data-tab="savings" role="tab">Savings</button>
+                        <button type="button" class="bills2-tab" data-tab="assistance" role="tab">Assistance</button>
+                        <button type="button" class="bills2-tab" data-tab="history" role="tab">History</button>
+                    </div>
+                </div>
                 {% if user.role in ['staff', 'admin'] %}
-                <div id="bills-student-select-wrap" style="margin-bottom: 16px;">
-                    <label for="bills-student-search-input" style="display: block; margin-bottom: 8px; font-size: 13px; color: #64748b;">Student</label>
-                    <div class="bank-search-autocomplete-wrapper" style="width: 100%; max-width: 420px; position: relative;">
-                        <input type="text" id="bills-student-search-input" placeholder="Search or select student" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px;">
+                <div id="bills-staff-bar" class="bills2-staff-bar">
+                    <button type="button" id="bills-overview-btn" class="bills2-link-btn">Class overview</button>
+                    <div class="bank-search-autocomplete-wrapper bills2-student-search">
+                        <input type="text" id="bills-student-search-input" placeholder="Search for a student" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" aria-label="Search for a student">
                         <div class="bills-student-autocomplete-dropdown bank-search-autocomplete-dropdown"></div>
                     </div>
-                    <label style="display: inline-flex; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; margin-top: 10px; font-size: 13px; color: #475569;">
-                        <input type="checkbox" id="bills-managed-by-me-checkbox" style="cursor: pointer;">
-                        <span>Show students managed by me</span>
+                    <label class="bills2-check">
+                        <input type="checkbox" id="bills-managed-by-me-checkbox">
+                        <span>Only students managed by me</span>
                     </label>
-                    <p id="bills-no-student-msg" style="margin-top: 8px; color: #64748b;">Select a student to view bills.</p>
                 </div>
                 {% endif %}
+                <div id="bills-body" class="bills2-body"></div>
+            </div>
+        </div>
 
-                <div id="bills-content" style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %}">
-                    <div class="accounts-total-balance" style="background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%); color: white; padding: 24px 28px; border-radius: 16px; box-shadow: 0 4px 14px rgba(13,148,136,0.25); margin-bottom: 24px;">
-                        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
-                            <div>
-                                <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Bank balance</p>
-                                <p id="bills-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
-                                <p id="bills-student-meta" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
-                            </div>
-                            <div style="text-align: right;">
-                                <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Unpaid bills</p>
-                                <p id="bills-unpaid-total" style="margin: 0; font-size: 1.4rem; font-weight: 600;">$0.00</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {% if user.role in ['staff', 'admin'] %}
-                    <div id="bills-staff-controls" style="margin-bottom: 24px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px;">
-                        <h3 style="margin: 0 0 12px 0; font-size: 1.05rem;">Staff controls</h3>
-                        <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: end;">
-                            <label style="font-size: 13px; color: #475569;">
-                                Pay track
-                                <select id="bills-pay-track-select" style="display: block; margin-top: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                                    <option value="simple">Simple</option>
-                                    <option value="complex">Complex</option>
-                                </select>
-                            </label>
-                            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #475569; margin-bottom: 4px;">
-                                <input type="checkbox" id="bills-enrolled-checkbox">
-                                <span>Enrolled in bills</span>
-                            </label>
-                            <button type="button" id="bills-save-track-btn" class="btn-secondary">Save track</button>
-                        </div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 16px;">
-                            <p id="bills-pto-days" style="margin: 0; font-size: 13px; color: #334155;">PTO days: 0</p>
-                            <label style="font-size: 13px; color: #475569;">
-                                Grant days
-                                <input type="number" id="bills-pto-grant-days" min="1" step="1" value="1" style="display: block; margin-top: 6px; width: 80px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            </label>
-                            <button type="button" id="bills-pto-grant-btn" class="btn-secondary">Grant PTO</button>
-                            <label style="font-size: 13px; color: #475569;">
-                                Apply PTO on date
-                                <input type="date" id="bills-pto-apply-date" style="display: block; margin-top: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            </label>
-                            <button type="button" id="bills-pto-apply-btn" class="btn-secondary">Apply PTO</button>
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    <div id="bills-not-enrolled" style="display: none; margin-bottom: 24px; padding: 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-surface); color: #64748b;">
-                        This student is on the simple paycheck track and is not enrolled in monthly bills.
-                    </div>
-
-                    <div id="bills-budget-section" style="margin-bottom: 28px;">
-                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Budget options</h3>
-                        <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">Students choose housing, utilities, and extras. Staff can override. Changing options after a bill is paid this month is staff-only.</p>
-                        <div id="bills-budget-form" style="display: grid; gap: 12px; max-width: 720px;"></div>
-                        <button type="button" id="bills-save-budget-btn" class="btn-primary" style="margin-top: 16px;">Save budget</button>
-                        <p id="bills-budget-msg" style="display: none; margin-top: 8px; font-size: 13px;"></p>
-                    </div>
-
-                    <div id="bills-list-section" style="margin-bottom: 28px;">
-                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;">This month's bills</h3>
-                        <div id="bills-list" style="display: grid; gap: 16px;"></div>
-                    </div>
-
-                    {% if user.role in ['staff', 'admin'] %}
-                    <div id="bills-miss-fee-section" style="margin-bottom: 28px;">
-                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Miss-fee classes</h3>
-                        <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">Match text is compared to the student's schedule location (contains, case-insensitive). Cafe is seeded at $50; skip-to location defaults to Studio. Daily Entry is not changed.</p>
-                        <div id="bills-miss-fee-list"></div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 12px;">
-                            <input type="text" id="bills-miss-name" placeholder="Name" style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            <input type="text" id="bills-miss-match" placeholder="Match text (e.g. cafe)" style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            <input type="number" id="bills-miss-amount" placeholder="Amount" step="0.01" style="width: 100px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            <input type="text" id="bills-miss-skip" placeholder="Skip-to (Studio)" style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);">
-                            <button type="button" id="bills-miss-add-btn" class="btn-secondary">Add class</button>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
+        <div id="bills-modal" class="modal bills2-modal" aria-hidden="true">
+            <div class="modal-content bills2-modal-content" role="dialog" aria-modal="true" aria-labelledby="bills-modal-title">
+                <button type="button" class="close bills2-modal-close" aria-label="Close">&times;</button>
+                <div id="bills-modal-body"></div>
             </div>
         </div>
 
@@ -2974,8 +2911,8 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=past-pc-print8"></script>
-    <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=bills-weekly1"></script>
+    <script src="{{ url_for('static', filename='economy.js') }}?v=bills-weekly1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric8"></script>
