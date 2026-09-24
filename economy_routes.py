@@ -264,7 +264,8 @@ def register_economy_routes(app):
                 target.previous_balance = eco.money((target.previous_balance or 0) + left)
                 meta = eco.load_json(target.meta_json, {})
                 carried = meta.get('carried_from') or []
-                carried.append({'bill_id': bill.id, 'week': bill.period_key, 'amount': str(left)})
+                carried.append({'bill_id': bill.id, 'week': bill.period_key, 'amount': str(left),
+                                'late_fee': str(eco.money(bill.late_fee_amount or 0))})
                 meta['carried_from'] = carried
                 if slug == 'student_loan':
                     src_meta = eco.load_json(bill.meta_json, {})
@@ -412,9 +413,12 @@ def register_economy_routes(app):
             })
         last = m.Paycheck.query.filter_by(student_id=student.id).order_by(m.Paycheck.pay_period_end.desc()).first()
         if last:
+            # Same numbers the student sees on their Weekly Earnings Record.
+            live = m.live_paycheck_amounts(last)
             info['last_paycheck'] = {
-                'gross': money_f(last.gross_pay if last.gross_pay is not None else last.base_pay),
-                'final_pay': money_f(last.final_pay),
+                'gross': money_f(live.get('gross') if live.get('gross') is not None else live.get('base_pay')),
+                'final_pay': money_f(live.get('final_pay')),
+                'days_worked': int(live.get('days_worked') or 0),
                 'pay_period_end': last.pay_period_end.isoformat() if last.pay_period_end else None,
                 'deposited': last.deposited_at is not None,
             }
@@ -767,6 +771,15 @@ def register_economy_routes(app):
         expenses = {'rent', 'electricity'}
         if plan.get('cell') and plan['cell'] != 'none':
             expenses.add('phone')
+        day_hours = int(eco.SCHOOL_DAY_HOURS)
+        hours = {str(day_hours * int(eco.SCHOOL_DAYS_PER_WEEK))}
+        if last_pay and last_pay.get('days_worked'):
+            hours.add(str(day_hours * last_pay['days_worked']))
+        rent_full = eco.money(listing.get('weekly'))
+        rent_answers = [rent_full]
+        if housing_app:
+            voucher = bl.housing_assistance(rent_full, listing.get('bedrooms'), housing_app.income_weekly or 0, bills_settings())
+            rent_answers.append(eco.money(rent_full - voucher['amount']))
         return {
             'first_initial': first,
             'last_initial': last,
@@ -788,10 +801,10 @@ def register_economy_routes(app):
             'income_expect': 'continue',
             'employer': "Manny's Market",
             'pay_frequency': 'weekly',
-            'hours_per_week': str(int(eco.SCHOOL_DAY_HOURS * eco.SCHOOL_DAYS_PER_WEEK)),
+            'hours_per_week': sorted(hours),
             'weekly_gross': weekly_gross,
             'yearly_income': eco.money(weekly_gross * 52),
-            'rent_weekly': eco.money(listing.get('weekly')),
+            'rent_weekly': rent_answers,
             'landlord': listing.get('payee'),
             'expense_rows': expenses,
             'has_housing_subsidy': 'yes' if housing_app else 'no',

@@ -385,8 +385,16 @@
 
         html += '<div class="bills2-stmt-cols"><div><h4>Account summary</h4>';
         if (bill.previous_balance > 0) {
-            var from = (bill.meta && bill.meta.carried_from) ? bill.meta.carried_from.map(function (c) { return shortDate(c.week); }).join(', ') : '';
-            html += ln('Past due from last bill' + (from ? ' (' + from + ')' : ''), bill.previous_balance, 'is-late');
+            var carried = (bill.meta && bill.meta.carried_from) || [];
+            if (carried.length) {
+                carried.forEach(function (c) {
+                    var fee = Number(c.late_fee || 0);
+                    html += ln('Unpaid from ' + shortDate(c.week) + ' bill', Number(c.amount || 0) - fee, 'is-late');
+                    if (fee > 0) html += ln('Late fee on ' + shortDate(c.week) + ' bill', fee, 'is-late');
+                });
+            } else {
+                html += ln('Past due from last bill', bill.previous_balance, 'is-late');
+            }
         }
         html += ln(isSavings ? 'Deposit this week' : 'New charges', bill.new_charges);
         if (bill.late_fee > 0) html += ln('Late fee', bill.late_fee, 'is-late');
@@ -1464,12 +1472,8 @@
         var housing = ben.housing || {};
         var ps = housing.payment_standard_weekly || {};
         var html = '<div class="econ-admin">';
-        html += '<fieldset><legend>Students</legend><div class="econ-grid">' +
-            '<label>New students start with bills<select id="econ-default-track" style="padding:6px 9px;border:1px solid var(--border-strong);border-radius:6px">' +
-            '<option value="simple"' + (data.default_pay_track === 'simple' ? ' selected' : '') + '>Off</option>' +
-            '<option value="complex"' + (data.default_pay_track === 'complex' ? ' selected' : '') + '>On</option></select></label>' +
-            adminField('Emergency fund goal (weeks of bills)', 'econ-goal-weeks', b.savings_goal_weeks) + '</div></fieldset>';
-        html += '<fieldset><legend>Late fees</legend><div class="econ-grid">' +
+        html += '<fieldset><legend>Late fees and savings</legend><div class="econ-grid">' +
+            adminField('Emergency fund goal (weeks of bills)', 'econ-goal-weeks', b.savings_goal_weeks) +
             adminField('Rent late fee (% of late rent)', 'econ-rent-pct', (Number(fees.rent_percent || 0.08) * 100).toFixed(1), 'Minnesota allows at most 8%.') +
             adminField('Other bills late fee ($)', 'econ-other-fee', fees.other_flat) + '</div></fieldset>';
         html += '<fieldset><legend>Weekly prices</legend>';
@@ -1576,7 +1580,7 @@
             box.querySelectorAll('input[data-param]').forEach(function (input) { params[input.getAttribute('data-param')] = input.value; });
             return { id: p.id, options: options, params: params };
         }).filter(Boolean);
-        return { default_pay_track: val('econ-default-track'), bills: bills, products: products };
+        return { bills: bills, products: products };
     }
 
     function bindAdminButtons() {

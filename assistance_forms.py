@@ -414,15 +414,24 @@ def _as_set(value):
 
 
 def check_field(field, raw, expected):
-    """True if the student's answer matches what the student's own records say."""
+    """True if the student's answer matches what the student's own records say.
+
+    A list target means any of those answers is right (e.g. rent before or after a
+    housing subsidy). A blank target means the school has no record to check against,
+    so any answer counts.
+    """
     match = field.get('match') or 'text'
     key = field.get('answer')
     if key in ('yes', 'no', 'true', 'false', 'any', 'empty'):
         target = {'yes': 'yes', 'no': 'no', 'true': True, 'false': False, 'any': None, 'empty': set()}[key]
     else:
         target = expected.get(key)
+    if isinstance(target, list):
+        return any(check_field(dict(field, answer='_one'), raw, {'_one': one}) for one in target)
     if match == 'any_set':
         return bool(_as_set(raw))
+    if match in ('letters', 'digits', 'int', 'text') and (target is None or str(target).strip() == ''):
+        return raw is not None and str(raw).strip() != ''
     if match == 'checked':
         return bool(raw) == bool(target)
     if match == 'set':

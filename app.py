@@ -18300,8 +18300,12 @@ def no_show_dates_for_student(student_id, start_date, end_date):
 
     A no-show is unpaid time off: that day drops out of the paycheck. Days covered by
     PTO are not no-shows. Unexcused absences are already unpaid, so they aren't listed.
+    Like the old Cafe miss fee, this only applies to students with bills turned on.
     """
     import economy_lib as eco
+    budget = StudentBudget.query.filter_by(student_id=student_id).first()
+    if not budget or not budget.enrolled:
+        return []
     classes = MissFeeClass.query.filter_by(is_active=True).order_by(MissFeeClass.sort_order, MissFeeClass.id).all()
     if not classes:
         return []

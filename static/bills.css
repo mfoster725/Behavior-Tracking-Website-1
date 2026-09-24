@@ -1780,6 +1780,10 @@
     .bills2-row > :nth-child(4) { grid-area: status; }
     .bills2-row > :nth-child(5) { grid-area: amount; }
     .bills2-row > :nth-child(6) { grid-area: action; }
+    .bills2-row .bills2-payee,
+    .bills2-row .bills2-service {
+        white-space: normal;
+    }
     .bills2-plan,
     .bills2-savings {
         grid-template-columns: minmax(0, 1fr);
