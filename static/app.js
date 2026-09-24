@@ -2002,12 +2002,13 @@ function expandPointCardPeriods(periods, options = {}) {
         if (!existing) {
             const created = defaultPointCardPeriod(sp);
             if (studentId != null) {
-                const scheduled = formatStudentScheduleLocation(
+                // Use this student's schedule only — never keep the school-wide
+                // STANDARD_PERIODS default (e.g. Phys Ed) when their slot is empty.
+                created.location = formatStudentScheduleLocation(
                     getStudentScheduleItems(studentId),
                     sp.time,
                     onDate || currentDate || null
-                );
-                if (scheduled) created.location = scheduled;
+                ) || '';
             }
             expanded.push(created);
             return;
@@ -11364,7 +11365,7 @@ function renderPointCardGrid(record, studentId) {
 
         const otherClass = (sid && shouldGreyTransitionPeriod(sid, period.time_range)) ? ' other-school-period' : '';
         const attendanceLockedClass = (attendance === 'excused' || attendance === 'unexcused') ? ' attendance-locked-period' : '';
-        const locationText = period.location || ((sid && isOtherSchoolPeriod(sid, period.time_range)) ? 'Other school' : '');
+        const locationText = getPointCardDisplayLocation(period, sid);
 
         html += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
@@ -11398,6 +11399,17 @@ function parsePointCardInfoData(rawInfo) {
     } catch (e) {
         return { notes: String(rawInfo).trim() };
     }
+}
+
+/** Location shown on the point card grid: alternate (where they were) wins over schedule snapshot. */
+function getPointCardDisplayLocation(period, studentId = null) {
+    const info = parsePointCardInfoData(period?.info || '');
+    const alt = info && String(info.alternate_location || '').trim();
+    if (alt) return alt;
+    const loc = String(period?.location || '').trim();
+    if (loc) return loc;
+    if (studentId != null && isOtherSchoolPeriod(studentId, period?.time_range)) return 'Other school';
+    return '';
 }
 
 function isInfoFrenzyChecked(infoData) {
@@ -11755,7 +11767,7 @@ function showEditPointCardModal(record, studentId, studentName, date) {
         const infoLabel = canEditStarPeriod(studentId, period.time_range) ? (hasInfo ? 'Edit' : 'Add') : (hasInfo ? 'View' : 'Info');
         gridRows += `
             <div class="pc-cell pc-time-cell${otherClass}">${period.time_range}</div>
-            <div class="pc-cell pc-location-cell${otherClass}">${period.location || (isOtherSchoolPeriod(studentId, period.time_range) ? 'Other school' : '')}</div>
+            <div class="pc-cell pc-location-cell${otherClass}">${getPointCardDisplayLocation(period, studentId)}</div>
             <div class="pc-cell pc-data-cell${otherClass}${attendanceLockedClass}" data-category="s" style="padding: 2px; justify-content: center;">
                 ${buildSelectHtml(index, 'safety', period.safety_points, period.time_range)}
             </div>
@@ -16417,10 +16429,9 @@ function getStudentScheduleLocationForPeriod(studentId, timePeriod, onDate = nul
     const location = formatStudentScheduleLocation(items, timePeriod, onDate || currentDate || null);
     if (location) return location;
     if (isOtherSchoolPeriod(studentId, timePeriod)) return 'Other school';
-    // Do not invent a Bus location when the schedule slot is empty.
-    if (isBusPeriodTime(timePeriod)) return '';
-    const standard = STANDARD_PERIODS.find((period) => period.time === timePeriod);
-    return standard ? standard.location : timePeriod;
+    // Do not invent a school-wide default (e.g. Phys Ed for 12:00-12:30) when
+    // this student's schedule slot is empty — that mislabels the point card.
+    return '';
 }
 
 async function loadStudentSchedulesForIds(studentIds) {

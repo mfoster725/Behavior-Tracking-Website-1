@@ -1941,7 +1941,12 @@ def _student_schedule_rows_by_student(student_ids):
 
 
 def _student_location_for_period(student_id, time_period, schedule_rows=None, fallback='', on_date=None):
-    """Resolve location text from a student's schedule, with optional fallback."""
+    """Resolve location text from a student's schedule, with optional fallback.
+
+    Never invent a school-wide POINT_CARD_DEFAULT_LOCATIONS label (e.g. Phys Ed
+    for 12:00-12:30) when this student's schedule slot is empty — that mislabels
+    the point card Location column.
+    """
     rows = schedule_rows if schedule_rows is not None else _student_schedule_rows(student_id)
     location = _format_student_schedule_location(rows, time_period, on_date=on_date)
     if location:
@@ -1952,10 +1957,7 @@ def _student_location_for_period(student_id, time_period, schedule_rows=None, fa
     transition = _get_student_transition(student_id)
     if not is_home_period(transition, time_period):
         return 'Other school'
-    # Do not invent a Bus location when the schedule slot is empty.
-    if _is_bus_period(time_period):
-        return ''
-    return POINT_CARD_DEFAULT_LOCATIONS.get((time_period or '').strip(), '')
+    return ''
 
 
 STAR_POINT_FIELDS = (
@@ -2156,7 +2158,7 @@ def _ensure_full_point_card_periods(daily_record):
     }
     schedule_rows = _student_schedule_rows(daily_record.student_id)
     on_date = getattr(daily_record, 'date', None)
-    for time_range, default_location in POINT_CARD_PERIODS:
+    for time_range, _default_location in POINT_CARD_PERIODS:
         if time_range in existing:
             continue
         if not _should_include_bus_period_on_point_card(
@@ -2170,7 +2172,7 @@ def _ensure_full_point_card_periods(daily_record):
             daily_record.student_id,
             time_range,
             schedule_rows=schedule_rows,
-            fallback=default_location,
+            fallback='',
             on_date=on_date,
         )
         db.session.add(PeriodRecord(
@@ -2283,7 +2285,7 @@ def _upsert_period_record(daily_record, period_data, *, merge=False, default_loc
             location = _student_location_for_period(
                 daily_record.student_id,
                 time_range,
-                fallback=default_location or POINT_CARD_DEFAULT_LOCATIONS.get(time_range, ''),
+                fallback=(default_location or '').strip(),
                 on_date=getattr(daily_record, 'date', None),
             )
         period_record = PeriodRecord(
