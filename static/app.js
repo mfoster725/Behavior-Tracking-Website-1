@@ -27922,10 +27922,8 @@ function formatPaidDays(paycheck) {
     const notes = [];
     const excused = Number(paycheck.excused_days || 0);
     const pto = Number(paycheck.pto_days || 0);
-    const noShows = Number(paycheck.no_show_days || 0);
     if (excused > 0) notes.push(excused + ' excused');
     if (pto > 0) notes.push(pto + ' PTO');
-    if (noShows > 0) notes.push(noShows + ' unpaid no-show' + (noShows === 1 ? '' : 's'));
     return notes.length ? days + ' (' + notes.join(', ') + ')' : String(days);
 }
 

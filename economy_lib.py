@@ -214,17 +214,6 @@ WAGE_RATE_SEEDS = [
     {'card_color': 'white', 'hourly_rate': '41.00', 'education_label': "Bachelor's degree"},
 ]
 
-MISS_FEE_CLASS_SEEDS = [
-    {
-        'name': 'Cafe',
-        'match_text': 'cafe',
-        'amount': '50.00',
-        'skip_to_location': 'Studio',
-        'is_active': True,
-        'sort_order': 1,
-    },
-]
-
 MARKETPLACE_TYPE_SEEDS = [
     ('Food', 1),
     ('Activity', 2),
@@ -291,10 +280,6 @@ def load_json(value, default=None):
         return json.loads(value)
     except (TypeError, ValueError):
         return default if default is not None else {}
-
-
-def location_contains(haystack, needle):
-    return (needle or '').strip().lower() in (haystack or '').strip().lower()
 
 
 def card_color_key(student):

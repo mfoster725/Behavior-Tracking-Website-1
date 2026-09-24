@@ -13,6 +13,7 @@ import economy_lib as eco
 
 OPEN_STATUSES = ('unpaid', 'partial')
 HISTORY_WEEKS = 8
+SAVINGS_FULL_REASON = 'Emergency fund goal met'
 
 
 def register_economy_routes(app):
@@ -230,8 +231,11 @@ def register_economy_routes(app):
         catalog, rows = load_catalog(settings)
         plan = plan_for(budget, catalog)
         benefits = approved_benefits(student, this_monday, settings)
+        slugs = bl.selected_slugs(plan, catalog, color_of(student))
+        if 'savings' in slugs and savings_full(student, plan, catalog, settings):
+            slugs.remove('savings')
         created = 0
-        for slug in bl.selected_slugs(plan, catalog, color_of(student)):
+        for slug in slugs:
             product = rows.get(slug)
             if product and create_statement(student, budget, product, slug, this_monday, catalog, plan, settings, benefits):
                 created += 1
@@ -331,10 +335,37 @@ def register_economy_routes(app):
                            f'{listed}. What you still owed moved onto this week\'s bills.')
         return len(late_titles)
 
+    def savings_full(student, plan, catalog, settings):
+        """The emergency fund has reached its goal, so no weekly deposit is owed."""
+        goal, _weeks = bl.savings_goal(plan, catalog, color_of(student), settings)
+        balance = eco.money(m.get_or_create_bank_account(student.id).savings_balance or 0)
+        return goal > 0 and balance >= goal
+
+    def close_savings_if_full(student):
+        """Once the fund reaches its goal (say, after an extra transfer), this week's open deposit isn't owed."""
+        slips = m.StudentBill.query.filter(
+            m.StudentBill.student_id == student.id,
+            m.StudentBill.schema_version == bl.BILLS_VERSION,
+            m.StudentBill.kind == 'savings',
+            m.StudentBill.status.in_(OPEN_STATUSES),
+        ).all()
+        if not slips:
+            return 0
+        settings = bills_settings()
+        catalog, _rows = load_catalog(settings)
+        if not savings_full(student, plan_for(get_or_create_budget(student.id), catalog), catalog, settings):
+            return 0
+        for slip in slips:
+            slip.status = 'waived'
+            slip.waived_reason = SAVINGS_FULL_REASON
+            slip.paid_at = datetime.utcnow()
+        return len(slips)
+
     def refresh_student(student, now=None):
         now = now or now_local()
         created = ensure_statements(student, now)
         late = process_overdue(student, now)
+        close_savings_if_full(student)
         return created, late
 
     def enrolled_students():
@@ -382,6 +413,8 @@ def register_economy_routes(app):
         if status == 'carried':
             return 'late', 'Late: moved to next bill'
         if status == 'waived':
+            if bill.kind == 'savings' and bill.waived_reason == SAVINGS_FULL_REASON:
+                return 'waived', 'Not needed: fund is full'
             return 'waived', 'Waived'
         if status == 'skipped':
             return 'skipped', 'Skipped'
@@ -648,7 +681,8 @@ def register_economy_routes(app):
             'history': [{'week': week, 'bills': sorted(items, key=sort_key)} for week, items in sorted(history.items(), reverse=True)],
             'plan': plan_payload(budget, student, catalog, settings, now),
             'income': income_summary(student),
-            'savings': {'balance': money_f(savings_balance), 'goal': money_f(goal), 'goal_weeks': goal_weeks},
+            'savings': {'balance': money_f(savings_balance), 'goal': money_f(goal), 'goal_weeks': goal_weeks,
+                        'met': bool(goal > 0 and savings_balance >= goal)},
             'assistance': assistance_payload(student.id),
             'benefit_income_weeks': int(settings['benefits'].get('income_weeks') or 4),
             'pto_days': float(pto.days_remaining or 0),
@@ -764,6 +798,8 @@ def register_economy_routes(app):
             principal = Decimal(str(meta.get('principal') or 0)) + Decimal(str(meta.get('carried_principal') or 0))
             if budget.loan_balance is not None:
                 budget.loan_balance = eco.money(max(Decimal('0'), budget.loan_balance - principal))
+        if is_savings and bill.status != 'paid':
+            close_savings_if_full(student)
         code = bl.product_code(slug, {slug: eco.load_json(bill.product.options_json, {})}) if bill.product else 'PMT'
         confirmation = bl.confirmation_number(code, tx.id)
         m.db.session.commit()
@@ -817,6 +853,8 @@ def register_economy_routes(app):
             student_id=student_id, bank_account_id=account.id, transaction_type=tx_type,
             amount=tx_amount, balance_after=account.balance, description=desc,
         ))
+        m.db.session.flush()
+        close_savings_if_full(student)
         m.db.session.commit()
         return jsonify({'ok': True, 'economy': economy_payload(student)})
 
@@ -1281,10 +1319,6 @@ def register_economy_routes(app):
             'default_pay_track': row.default_pay_track,
             'bills': settings,
             'products': products,
-            'no_show_classes': [{
-                'id': c.id, 'name': c.name, 'match_text': c.match_text,
-                'skip_to_location': c.skip_to_location, 'is_active': bool(c.is_active), 'sort_order': c.sort_order,
-            } for c in m.MissFeeClass.query.order_by(m.MissFeeClass.sort_order, m.MissFeeClass.id).all()],
         }
 
     @app.route('/api/economy/settings', methods=['GET'])
@@ -1327,45 +1361,6 @@ def register_economy_routes(app):
             product.options_json = eco.dump_json(opts)
         m.db.session.commit()
         return jsonify(settings_payload())
-
-    @app.route('/api/economy/miss-fee-classes', methods=['POST'])
-    @login_required
-    @m.staff_required
-    def create_no_show_class():
-        data = request.get_json(silent=True) or {}
-        name = (data.get('name') or '').strip()
-        match_text = (data.get('match_text') or name or '').strip()
-        if not name or not match_text:
-            return jsonify({'error': 'Name and schedule match text are required.'}), 400
-        row = m.MissFeeClass(
-            name=name,
-            match_text=match_text,
-            amount=Decimal('0.00'),
-            skip_to_location=(data.get('skip_to_location') or 'Studio').strip() or 'Studio',
-            is_active=True,
-            sort_order=int(data.get('sort_order') or 0),
-        )
-        m.db.session.add(row)
-        m.db.session.commit()
-        return jsonify({'id': row.id, 'name': row.name}), 201
-
-    @app.route('/api/economy/miss-fee-classes/<int:class_id>', methods=['PUT', 'DELETE'])
-    @login_required
-    @m.staff_required
-    def update_no_show_class(class_id):
-        row = m.MissFeeClass.query.get_or_404(class_id)
-        if request.method == 'DELETE':
-            row.is_active = False
-            m.db.session.commit()
-            return jsonify({'ok': True})
-        data = request.get_json(silent=True) or {}
-        for field in ('name', 'match_text', 'skip_to_location'):
-            if field in data and str(data[field]).strip():
-                setattr(row, field, str(data[field]).strip())
-        if 'is_active' in data:
-            row.is_active = bool(data['is_active'])
-        m.db.session.commit()
-        return jsonify({'ok': True})
 
     @app.route('/api/economy/generate', methods=['POST'])
     @login_required

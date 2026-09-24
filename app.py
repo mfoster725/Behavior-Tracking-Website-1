@@ -3257,9 +3257,6 @@ class Paycheck(db.Model):
     point_card_deduction = db.Column(db.Numeric(10, 2), nullable=True)
     total_deductions = db.Column(db.Numeric(10, 2), nullable=True)
     student_worksheet_json = db.Column(db.Text, nullable=True)
-    # Unpaid time off: days the student skipped a scheduled shift (e.g. Cafe).
-    no_show_days = db.Column(db.Integer, nullable=True)
-    no_show_dates_json = db.Column(db.Text, nullable=True)
     # Paid time off used on days that would otherwise be unpaid.
     pto_days = db.Column(db.Integer, nullable=True)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
@@ -3562,17 +3559,6 @@ class StudentBudget(db.Model):
     updated_by = db.relationship('User', foreign_keys=[updated_by_user_id])
 
 
-class MissFeeClass(db.Model):
-    __tablename__ = 'miss_fee_classes'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    match_text = db.Column(db.String(100), nullable=False)
-    amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('50.00'))
-    skip_to_location = db.Column(db.String(100), nullable=False, default='Studio')
-    is_active = db.Column(db.Boolean, default=True, nullable=False)
-    sort_order = db.Column(db.Integer, default=0, nullable=False)
-
-
 class StudentPtoBalance(db.Model):
     __tablename__ = 'student_pto_balances'
     id = db.Column(db.Integer, primary_key=True)
@@ -3605,7 +3591,6 @@ class StudentBill(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
     bill_product_id = db.Column(db.Integer, db.ForeignKey('bill_products.id'), nullable=True)
-    miss_fee_class_id = db.Column(db.Integer, db.ForeignKey('miss_fee_classes.id'), nullable=True)
     kind = db.Column(db.String(20), nullable=False, default='bill')  # bill | savings | fee (legacy)
     # Weekly statements: the Monday (YYYY-MM-DD) they were issued. Legacy monthly bills: YYYY-MM.
     period_key = db.Column(db.String(20), nullable=False)
@@ -3640,7 +3625,6 @@ class StudentBill(db.Model):
 
     student = db.relationship('Student', backref='bills')
     product = db.relationship('BillProduct', backref='student_bills')
-    miss_fee_class = db.relationship('MissFeeClass', backref='student_bills')
 
     __table_args__ = (
         db.Index('ix_student_bills_student_period', 'student_id', 'period_key'),
@@ -3948,8 +3932,6 @@ def ensure_economy_schema():
                 ('point_card_deduction', 'NUMERIC(10, 2)'),
                 ('total_deductions', 'NUMERIC(10, 2)'),
                 ('student_worksheet_json', 'TEXT'),
-                ('no_show_days', 'INTEGER'),
-                ('no_show_dates_json', 'TEXT'),
                 ('pto_days', 'INTEGER'),
             ]:
                 _economy_add_column(conn, is_postgres, 'paychecks', col, typ)
@@ -4038,7 +4020,9 @@ def migrate_bills_v2():
 
     Replaces the bill catalog, maps each student's old budget choices onto the new
     plan, and closes legacy monthly bills and miss fees (their per-day late fees
-    were never realistic). Safe to call on every startup.
+    were never realistic). Students who already had bills on get their first weekly
+    bills on the Monday on or after the switch, so the deploy day never shortens a
+    week. Safe to call on every startup.
     """
     import bills_lib as bl
     from economy_lib import dump_json, load_json
@@ -4067,10 +4051,12 @@ def migrate_bills_v2():
                 row.is_active = False
         db.session.flush()
         catalog = {p.slug: load_json(p.options_json, {}) for p in BillProduct.query.filter(BillProduct.slug.in_(v2_slugs)).all()}
+        now = datetime.utcnow()
         for budget in StudentBudget.query.all():
             plan = bl.normalize_plan(load_json(budget.choices_json, {}), catalog)
             budget.choices_json = dump_json(plan)
-        now = datetime.utcnow()
+            if budget.enrolled and budget.enrolled_at is None:
+                budget.enrolled_at = now
         for bill in StudentBill.query.filter(
             db.or_(StudentBill.schema_version.is_(None), StudentBill.schema_version < bl.BILLS_VERSION),
             StudentBill.status == 'unpaid',
@@ -4090,14 +4076,13 @@ def migrate_bills_v2():
 
 
 def seed_economy(commit=True):
-    """Insert default wage rates, bill products, miss-fee classes, and market catalog."""
+    """Insert default wage rates, bill products, and market catalog."""
     from bills_lib import BILL_PRODUCTS_V2 as BILL_PRODUCT_SEEDS
     from economy_lib import (
         DEFAULT_TAX_TABLE,
         MARKETPLACE_CATEGORY_SEEDS,
         MARKETPLACE_ITEM_SEEDS,
         MARKETPLACE_TYPE_SEEDS,
-        MISS_FEE_CLASS_SEEDS,
         WAGE_RATE_SEEDS,
         dump_json,
     )
@@ -4130,18 +4115,6 @@ def seed_economy(commit=True):
                 prompt=spec.get('prompt'),
                 sort_order=spec.get('sort_order') or 0,
                 is_active=True,
-            ))
-        for spec in MISS_FEE_CLASS_SEEDS:
-            existing = MissFeeClass.query.filter_by(match_text=spec['match_text']).first()
-            if existing:
-                continue
-            db.session.add(MissFeeClass(
-                name=spec['name'],
-                match_text=spec['match_text'],
-                amount=Decimal(spec['amount']),
-                skip_to_location=spec.get('skip_to_location') or 'Studio',
-                is_active=spec.get('is_active', True),
-                sort_order=spec.get('sort_order') or 0,
             ))
         type_ids = {}
         for name, sort_order in MARKETPLACE_TYPE_SEEDS:
@@ -18295,63 +18268,8 @@ def count_pay_period_attendance(student_id, start_date, end_date):
     }
 
 
-def no_show_dates_for_student(student_id, start_date, end_date):
-    """Days the student came to school but skipped a scheduled shift (e.g. Cafe for Studio).
-
-    A no-show is unpaid time off: that day drops out of the paycheck. Days covered by
-    PTO are not no-shows. Unexcused absences are already unpaid, so they aren't listed.
-    Like the old Cafe miss fee, this only applies to students with bills turned on.
-    """
-    import economy_lib as eco
-    budget = StudentBudget.query.filter_by(student_id=student_id).first()
-    if not budget or not budget.enrolled:
-        return []
-    classes = MissFeeClass.query.filter_by(is_active=True).order_by(MissFeeClass.sort_order, MissFeeClass.id).all()
-    if not classes:
-        return []
-    records = DailyRecord.query.filter(
-        DailyRecord.student_id == student_id,
-        DailyRecord.date >= start_date,
-        DailyRecord.date <= end_date,
-    ).all()
-    pto_dates = {
-        use.use_date for use in StudentPtoUse.query.filter(
-            StudentPtoUse.student_id == student_id,
-            StudentPtoUse.use_date >= start_date,
-            StudentPtoUse.use_date <= end_date,
-        ).all()
-    }
-    schedule_rows = None
-    dates = []
-    for record in records:
-        if _record_attendance_status_norm(record) != 'present' or record.date in pto_dates:
-            continue
-        if schedule_rows is None:
-            schedule_rows = _student_schedule_rows(student_id)
-        periods_by_time = {(p.time_range or '').strip(): p for p in record.periods}
-        missed = False
-        for time_range, _default in POINT_CARD_PERIODS:
-            period = periods_by_time.get(time_range)
-            if not period:
-                continue
-            alternate = str(eco.load_json(period.info, {}).get('alternate_location') or '').strip()
-            if not alternate:
-                continue
-            scheduled = _student_location_for_period(student_id, time_range, schedule_rows=schedule_rows, on_date=record.date)
-            for shift in classes:
-                if (eco.location_contains(scheduled, shift.match_text)
-                        and eco.location_contains(alternate, shift.skip_to_location or 'Studio')):
-                    missed = True
-                    break
-            if missed:
-                break
-        if missed:
-            dates.append(record.date)
-    return sorted(dates)
-
-
 def pay_period_days(student_id, start_date, end_date):
-    """Paid days for the weekly earnings record: present + excused - no-shows + PTO."""
+    """Paid days for the weekly earnings record: present + excused + PTO (paid days off)."""
     records = DailyRecord.query.filter(
         DailyRecord.student_id == student_id,
         DailyRecord.date >= start_date,
@@ -18368,7 +18286,6 @@ def pay_period_days(student_id, start_date, end_date):
         elif status == 'excused':
             excused += 1
             paid_dates.add(record.date)
-    no_shows = no_show_dates_for_student(student_id, start_date, end_date)
     pto_dates = sorted({
         use.use_date for use in StudentPtoUse.query.filter(
             StudentPtoUse.student_id == student_id,
@@ -18380,9 +18297,8 @@ def pay_period_days(student_id, start_date, end_date):
     return {
         'present': present,
         'excused': excused,
-        'no_show_dates': no_shows,
         'pto_dates': pto_dates,
-        'days_worked': max(0, present + excused - len(no_shows) + len(pto_dates)),
+        'days_worked': present + excused + len(pto_dates),
     }
 
 
@@ -18436,8 +18352,6 @@ def _compute_stub_for_student(student, start_date, end_date, star_percent=None, 
     )
     computed['avg_pct'] = star_percent
     computed['present_days'] = days_info['present']
-    computed['no_show_dates'] = [d.isoformat() for d in days_info['no_show_dates']]
-    computed['no_show_days'] = len(days_info['no_show_dates'])
     computed['pto_days'] = len(days_info['pto_dates'])
     return computed
 
@@ -18448,8 +18362,6 @@ def _apply_stub_to_paycheck(paycheck, computed, avg_star=None):
     paycheck.daily_rate = computed['daily_rate']
     paycheck.days_worked = computed['days_worked']
     paycheck.excused_days = computed['excused_days']
-    paycheck.no_show_days = int(computed.get('no_show_days') or 0)
-    paycheck.no_show_dates_json = eco.dump_json(computed.get('no_show_dates') or [])
     paycheck.pto_days = int(computed.get('pto_days') or 0)
     paycheck.starbucks_count = computed['starbucks_count']
     paycheck.star_student_count = computed['star_student_count']
@@ -18540,8 +18452,6 @@ def live_paycheck_amounts(paycheck):
         'days_worked': int(days_worked or 0),
         'excused_days': excused,
         'present_days': present,
-        'no_show_days': int(paycheck.no_show_days or 0),
-        'no_show_dates': eco.load_json(paycheck.no_show_dates_json, []),
         'pto_days': int(paycheck.pto_days or 0),
         'starbucks_count': int(paycheck.starbucks_count or 0),
         'star_student_count': int(paycheck.star_student_count or 0),
@@ -18615,8 +18525,6 @@ def serialize_paycheck_payload(p, include_student_calcs=False):
         'days_worked': int(days_worked or 0),
         'excused_days': int(excused_days or 0),
         'present_days': int(live.get('present_days') or 0),
-        'no_show_days': int(live.get('no_show_days') or 0),
-        'no_show_dates': live.get('no_show_dates') or [],
         'pto_days': int(live.get('pto_days') or 0),
         'starbucks_count': int(live.get('starbucks_count') or 0),
         'star_student_count': int(live.get('star_student_count') or 0),

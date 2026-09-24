@@ -291,7 +291,8 @@
             tile('Checking', fmt(e.balances.checking), 'Money you can spend or pay bills with') +
             tile('Due this week', fmt(s.due_now), s.open_count ? (s.open_count + ' open ' + (s.open_count === 1 ? 'bill' : 'bills')) : 'All paid') +
             tile('Left after bills', fmt(left), left < 0 ? 'Not enough yet' : 'For the Marketplace and savings', left < 0 ? 'bills2-bad' : 'bills2-good') +
-            tile('Emergency fund', fmt(e.balances.savings), goal ? ('Goal: ' + fmt(goal)) : 'Savings') +
+            tile('Emergency fund', fmt(e.balances.savings), e.savings.met ? 'Goal met: no deposit due' : (goal ? ('Goal: ' + fmt(goal)) : 'Savings'),
+                e.savings.met ? 'bills2-good' : '') +
             '</div>';
     }
 
@@ -573,9 +574,12 @@
             '<div><dt>Amount</dt><dd>' + fmt(receipt.amount) + '</dd></div>' +
             '<div><dt>Date</dt><dd>' + esc(dateTime(receipt.paid_at)) + '</dd></div>' +
             '<div><dt>Checking balance now</dt><dd>' + fmt(receipt.new_balance) + '</dd></div>' +
-            (partial ? '<div><dt>Still owed on this bill</dt><dd style="color:#b91c1c">' + fmt(receipt.remaining) + '</dd></div>' : '') +
+            (partial ? '<div><dt>' + (savings ? 'Left to move this week' : 'Still owed on this bill') + '</dt><dd style="color:' + (savings ? 'inherit' : '#b91c1c') + '">' +
+                fmt(receipt.remaining) + '</dd></div>' : '') +
             '</dl>' +
-            (partial ? '<p class="bills2-note" style="margin-bottom:14px">Pay the rest before the due date to avoid a late fee.</p>' : '') +
+            (partial ? '<p class="bills2-note" style="margin-bottom:14px">' + (savings
+                ? 'Move the rest when you can. The emergency fund never has a late fee.'
+                : 'Pay the rest before the due date to avoid a late fee.') + '</p>' : '') +
             '<button type="button" class="bills2-btn bills2-btn-primary" data-close-modal>Done</button></div>';
     }
 
@@ -662,7 +666,8 @@
         }
         var spending = items.reduce(function (s, i) { return s + i.amount; }, 0);
         var savings = optionFor('savings', c.savings);
-        var saving = savings ? savings.weekly : 0;
+        var fundFull = !!(e.savings && e.savings.met);
+        var saving = savings && !fundFull ? savings.weekly : 0;
         // Approved assistance, figured by the server for each housing choice (same math as the bills).
         var credits = [];
         var assist = e.plan.assistance;
@@ -678,7 +683,7 @@
             }
         }
         var help = credits.reduce(function (s, i) { return s + i.amount; }, 0);
-        return { items: items, spending: spending, saving: saving, credits: credits, help: help, total: spending + saving - help };
+        return { items: items, spending: spending, saving: saving, fundFull: fundFull, credits: credits, help: help, total: spending + saving - help };
     }
 
     function planHtml(e) {
@@ -722,7 +727,9 @@
         var tag = sec.key === 'car_insurance' ? 'required with a car' : (sec.required ? '' : 'optional');
         var html = '<div class="bills2-plan-section"><h3>' + esc(sec.title) + (tag ? ' <span style="font-weight:400;font-size:13px;color:#6b6560">(' + tag + ')</span>' : '') + '</h3>';
         if (sec.key === 'housing' && state.economy.plan.housing_note) html += '<p>' + esc(state.economy.plan.housing_note) + '</p>';
-        else if (sec.note) html += '<p>' + esc(sec.note) + '</p>';
+        else if (sec.key === 'savings' && state.economy.savings && state.economy.savings.met) {
+            html += '<p>Your emergency fund reached its goal, so no deposit is due. If it drops below the goal, this deposit starts again.</p>';
+        } else if (sec.note) html += '<p>' + esc(sec.note) + '</p>';
         html += '<div class="bills2-options" role="radiogroup" aria-label="' + esc(sec.title) + '">';
         sec.options.forEach(function (o) {
             var selected = choices[sec.key] === o.id;
@@ -750,7 +757,7 @@
         var inc = e.income || {};
         var html = '<aside class="bills2-plan-side"><h3>Your weekly bills</h3>';
         t.items.forEach(function (i) { html += ln(i.label, i.amount); });
-        html += ln('Emergency fund (you keep it)', t.saving);
+        html += ln(t.fundFull ? 'Emergency fund (goal met, none due)' : 'Emergency fund (you keep it)', t.saving);
         t.credits.forEach(function (i) { html += ln(i.label, -i.amount, 'is-credit'); });
         html += ln(t.credits.length ? 'You pay each week' : 'Total each week', t.total, 'is-total');
         html += '<p class="bills2-note" style="margin-top:6px">Electricity changes with the weather. ' + (t.credits.length
@@ -832,7 +839,10 @@
             '<form class="bills2-inline-form" data-savings="to_savings" novalidate><div class="bills2-field" data-field="amount">' +
             '<label for="sav-in">Add extra to savings</label><input type="text" id="sav-in" inputmode="decimal" placeholder="$0.00">' +
             '<div class="bills2-error" hidden></div></div><button type="submit" class="bills2-btn">Move to savings</button></form>' +
-            '<p class="bills2-note">Your weekly emergency fund deposit is on your bills list. You pick the amount in My plan.</p></div></div>';
+            '<p class="bills2-note">' + (s.met
+                ? 'You reached your goal, so no weekly deposit is due. If your fund drops below the goal, the deposit starts again the next Monday.'
+                : 'Your weekly emergency fund deposit is on your bills list until you reach your goal. You pick the amount in My plan. It never has a late fee.') +
+            '</p></div></div>';
         return html;
     }
 
@@ -1466,7 +1476,6 @@
             }
             wrap._economySettings = res.data;
             wrap.innerHTML = adminHtml(res.data);
-            bindAdminWrap(wrap);
         });
         bindAdminButtons();
     }
@@ -1557,42 +1566,8 @@
             adminField('Section 8 payment standard, 1 bedroom (real)', 'econ-ps-1', ps['1']) +
             adminField('Section 8 payment standard, 2 bedroom (real)', 'econ-ps-2', ps['2']) +
             '</div></fieldset>';
-        html += '<fieldset><legend>No-show shifts (unpaid time off)</legend>' +
-            '<p style="margin:0 0 8px;font-size:12px;color:#57534e">If a student\'s schedule has this class and they go to the skip-to location instead, that day is unpaid on their paycheck. PTO covers it.</p>';
-        (data.no_show_classes || []).forEach(function (c) {
-            html += '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">' +
-                '<b>' + esc(c.name) + '</b><span style="color:#78716c">schedule has "' + esc(c.match_text) + '", skipped to ' + esc(c.skip_to_location) + (c.is_active ? '' : ' (off)') + '</span>' +
-                (c.is_active ? '<button type="button" class="bills2-btn" data-disable-shift="' + c.id + '" style="margin-left:auto">Turn off</button>' : '') + '</div>';
-        });
-        html += '<div class="econ-grid" style="margin-top:8px">' +
-            adminField('Name', 'econ-shift-name', '') + adminField('Schedule contains', 'econ-shift-match', '') +
-            adminField('Skipped to', 'econ-shift-skip', 'Studio') +
-            '<label>&nbsp;<button type="button" class="bills2-btn" data-add-shift>Add no-show shift</button></label></div></fieldset>';
         html += '</div>';
         return html;
-    }
-
-    function bindAdminWrap(wrap) {
-        if (wrap._bound) return;
-        wrap._bound = true;
-        wrap.addEventListener('click', function (ev) {
-            var disable = ev.target.closest('[data-disable-shift]');
-            if (disable) {
-                api('/api/economy/miss-fee-classes/' + disable.getAttribute('data-disable-shift'), { method: 'DELETE' }).then(loadEconomyAdminSettings);
-                return;
-            }
-            if (ev.target.closest('[data-add-shift]')) {
-                var name = (document.getElementById('econ-shift-name') || {}).value || '';
-                var match = (document.getElementById('econ-shift-match') || {}).value || '';
-                var skip = (document.getElementById('econ-shift-skip') || {}).value || 'Studio';
-                api('/api/economy/miss-fee-classes', { method: 'POST', body: JSON.stringify({ name: name, match_text: match || name, skip_to_location: skip }) })
-                    .then(function (res) {
-                        var msg = document.getElementById('economy-admin-msg');
-                        if (!res.ok && msg) { msg.textContent = res.data.error || 'Could not add that shift.'; msg.style.display = 'block'; msg.style.color = '#b91c1c'; }
-                        loadEconomyAdminSettings();
-                    });
-            }
-        });
     }
 
     function readAdminPayload(wrap) {
