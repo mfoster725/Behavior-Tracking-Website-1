@@ -10653,8 +10653,6 @@ function printPastPointCards() {
 
     for (let i = 0; i < dayEls.length; i += daysPerPage) {
         const group = dayEls.slice(i, i + daysPerPage);
-        const pageIndex = Math.floor(i / daysPerPage);
-        const pageCount = Math.ceil(dayEls.length / daysPerPage);
 
         const page = document.createElement('section');
         page.className = 'ppc-print-page';
@@ -10662,9 +10660,8 @@ function printPastPointCards() {
         const banner = document.createElement('header');
         banner.className = 'ppc-print-banner';
         banner.innerHTML = [
-            '<p class="ppc-print-kicker">Point Card Report</p>',
-            `<h1>${safeName}</h1>`,
-            `<p class="ppc-print-meta">${rangeLabel} · ${layoutLabel} · Prepared ${printedOn} · Page ${pageIndex + 1} of ${pageCount}</p>`,
+            `<h1>Point Card Report — ${safeName}</h1>`,
+            `<p class="ppc-print-meta">${rangeLabel} · ${layoutLabel} · Prepared ${printedOn}</p>`,
         ].join('');
         page.appendChild(banner);
 

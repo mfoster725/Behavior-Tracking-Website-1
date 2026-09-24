@@ -4733,28 +4733,27 @@ table tbody tr:hover {
         margin: 0 0 0.75rem;
         padding: 0 0 0.5rem;
         border-bottom: 1px solid var(--border, #e2e0d8);
-    }
-
-    #past-point-card-print-root .ppc-print-kicker {
-        margin: 0;
-        font-size: 0.7rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-secondary, #64748b);
-    }
-
-    #past-point-card-print-root .ppc-print-banner h1 {
-        margin: 0.15rem 0 0;
-        font-size: 1.25rem;
-        font-weight: 700;
+        background: transparent !important;
+        background-color: transparent !important;
         color: var(--text-primary, #0f172a) !important;
     }
 
+    #past-point-card-print-root .ppc-print-banner h1 {
+        margin: 0;
+        padding: 0;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text-primary, #0f172a) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+
     #past-point-card-print-root .ppc-print-meta {
-        margin: 0.2rem 0 0;
+        margin: 0.25rem 0 0;
+        padding: 0;
         font-size: 0.75rem;
-        color: var(--text-secondary, #64748b);
+        color: var(--text-secondary, #64748b) !important;
+        background: transparent !important;
     }
 
     /* Same two-column day containers as the Past Point Cards view */
