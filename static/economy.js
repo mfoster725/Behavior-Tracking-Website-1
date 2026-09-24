@@ -1563,8 +1563,7 @@
             adminField('Tax credit limit (% of poverty)', 'econ-credit-limit', health.credit_limit_pct_fpl) +
             adminField('Section 8 tenant share (%)', 'econ-tenant-share', (Number(housing.tenant_share || 0.3) * 100).toFixed(0)) +
             adminField('Section 8 payment standard, studio (real $/week)', 'econ-ps-0', ps['0'], 'Moves with the cost of living, like rents.') +
-            adminField('Section 8 payment standard, 1 bedroom (real)', 'econ-ps-1', ps['1']) +
-            adminField('Section 8 payment standard, 2 bedroom (real)', 'econ-ps-2', ps['2']) +
+            adminField('Section 8 payment standard, 1 bedroom (real)', 'econ-ps-1', ps['1'], 'Also used for bigger units, since one person gets a 1-bedroom voucher.') +
             '</div></fieldset>';
         html += '</div>';
         return html;
@@ -1587,7 +1586,7 @@
                 health: { ma_limit_pct_fpl: val('econ-ma-limit'), credit_limit_pct_fpl: val('econ-credit-limit') },
                 housing: {
                     tenant_share: isNaN(share) ? '0.30' : String(share / 100),
-                    payment_standard_weekly: { '0': val('econ-ps-0'), '1': val('econ-ps-1'), '2': val('econ-ps-2') }
+                    payment_standard_weekly: { '0': val('econ-ps-0'), '1': val('econ-ps-1') }
                 }
             }
         };

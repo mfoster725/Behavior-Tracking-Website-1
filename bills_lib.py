@@ -388,7 +388,7 @@ DEFAULT_SETTINGS = {
         },
         'housing': {
             'tenant_share': '0.30',
-            'payment_standard_weekly': {'0': '167.54', '1': '185.31', '2': '243.00'},
+            'payment_standard_weekly': {'0': '167.54', '1': '185.31'},
         },
     },
 }
@@ -434,7 +434,9 @@ def merged_settings(raw):
     housing = benefits.get('housing') or {}
     if housing.get('tenant_share'):
         out['benefits']['housing']['tenant_share'] = housing['tenant_share']
-    out['benefits']['housing']['payment_standard_weekly'].update(housing.get('payment_standard_weekly') or {})
+    standards = out['benefits']['housing']['payment_standard_weekly']
+    # Older saved settings also have a '2' (2-bedroom) standard; one-person vouchers never use it, so it is dropped.
+    standards.update({k: v for k, v in (housing.get('payment_standard_weekly') or {}).items() if k in standards and v not in (None, '')})
     return out
 
 
@@ -597,20 +599,26 @@ def housing_assistance(rent_weekly, bedrooms, income_weekly, settings):
     """
     params = settings['benefits']['housing']
     standards = params.get('payment_standard_weekly') or {}
-    key = str(min(int(bedrooms or 0), 2))
+    # One person gets a 1-bedroom voucher; HUD uses the lower of voucher size and unit size (24 CFR 982.505(c)(1)).
+    key = str(min(int(bedrooms or 0), 1))
     standard = money(_dec(standards.get(key), standards.get('1', '185.31')) * cost_of_living(settings))
     rate = _dec(params.get('tenant_share'), '0.30')
     share = money(_dec(income_weekly) * rate)
     covered = min(money(rent_weekly), standard)
     amount = max(ZERO, money(covered - share))
+    explain = (
+        f"You pay {_pct_text(rate)} of your take-home pay (${money(income_weekly):,.2f} a week x {_pct_text(rate)} = ${share:,.2f}). "
+        f"The voucher pays the rest of your rent, up to ${standard:,.2f} a week."
+    )
+    over = money(rent_weekly) - standard
+    if over > 0:
+        why = 'A voucher for one person is a 1-bedroom voucher, so you' if int(bedrooms or 0) > 1 else 'You'
+        explain += f" {why} also pay the ${over:,.2f} your rent is over that."
     return {
         'amount': amount,
         'tenant_share': share,
         'payment_standard': standard,
-        'explain': (
-            f"You pay {_pct_text(rate)} of your take-home pay (${money(income_weekly):,.2f} a week x {_pct_text(rate)} = ${share:,.2f}). "
-            f"The voucher pays the rest of your rent, up to ${standard:,.2f} a week."
-        ),
+        'explain': explain,
     }
 
 
