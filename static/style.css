@@ -52,7 +52,7 @@ input:-webkit-autofill {
 
 body {
     font-family: var(--font-body);
-    background: var(--bg-page);
+    background: var(--bg-surface);
     min-height: 100vh;
     padding: 0;
     color: var(--text-primary);
@@ -68,8 +68,13 @@ body {
     max-width: none;
     margin: 0;
     background: var(--bg-surface);
-    overflow: hidden;
+    overflow-x: hidden;
     min-height: 100vh;
+}
+
+/* Short tabs (Bills, etc.): fill remaining viewport under the header */
+#bills-view.view.active {
+    min-height: calc(100vh - 64px);
 }
 
 /* ============================================================

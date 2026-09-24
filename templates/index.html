@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bills-fill1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bills-fill3">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -25,8 +25,8 @@
         }
     </script>
 </head>
-<body autocomplete="off">
-    <div class="container">
+<body autocomplete="off" style="background: var(--bg-surface);">
+    <div class="container" style="min-height: 100vh;">
         <div id="billing-unpaid-banner" class="password-change-banner" style="display: none; background: #b45309;">
             <div>
                 <strong>Billing:</strong> Your paid plan needs attention.
@@ -1734,8 +1734,8 @@
         </div>
 
         <!-- Bills View -->
-        <div id="bills-view" class="view">
-            <div class="form-section accounts-ui">
+        <div id="bills-view" class="view" style="min-height: calc(100vh - 64px);">
+            <div class="form-section accounts-ui" style="margin-bottom: 0;">
                 <h2 style="margin-bottom: 8px;">Bills</h2>
                 <p style="margin: 0 0 24px 0; color: #64748b; font-size: 14px;">Pick your budget, then pay each bill by typing the amount. Wrong amounts are not accepted. Unpaid bills after the due date add a late fee.</p>
 
