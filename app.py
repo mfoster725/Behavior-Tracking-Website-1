@@ -17871,73 +17871,94 @@ def notify_support_team_purchase_order_pending(student_id, purchase_order_id, it
 
 def notification_link_payload(notification):
     """Return a frontend deep-link target for a notification click."""
-    ntype = notification.type or ''
-    student_id = notification.student_id
-    student_name = None
-    if notification.student:
-        student_name = notification.student.name
-    elif student_id:
-        student = Student.query.get(student_id)
-        student_name = student.name if student else None
-    if student_id is None and notification.purchase_order_id and notification.purchase_order:
-        student_id = notification.purchase_order.student_id
-        if notification.purchase_order.student:
-            student_name = notification.purchase_order.student.name
-    record_date = notification.record_date.isoformat() if notification.record_date else None
+    try:
+        ntype = notification.type or ''
+        title = notification.title or ''
+        student_id = getattr(notification, 'student_id', None)
+        student_name = None
+        try:
+            if getattr(notification, 'student', None) is not None:
+                student_name = notification.student.name
+        except Exception:
+            student_name = None
+        if student_name is None and student_id:
+            student = Student.query.get(student_id)
+            student_name = student.name if student else None
+        if student_id is None and notification.purchase_order_id:
+            try:
+                order = notification.purchase_order or PurchaseOrder.query.get(notification.purchase_order_id)
+            except Exception:
+                order = PurchaseOrder.query.get(notification.purchase_order_id)
+            if order:
+                student_id = order.student_id
+                if order.student:
+                    student_name = order.student.name
+        if not student_name and title.startswith('Missing points:'):
+            student_name = title.split(':', 1)[1].strip() or None
+            if student_name and student_id is None:
+                match = Student.query.filter(Student.name == student_name).first()
+                if match:
+                    student_id = match.id
+        record_date = None
+        raw_date = getattr(notification, 'record_date', None)
+        if raw_date:
+            record_date = raw_date.isoformat()
 
-    if ntype == 'purchase_order_pending':
-        return {
-            'view': 'marketplace',
-            'section': 'po-approvals',
-            'purchase_order_id': notification.purchase_order_id,
-            'student_id': student_id,
-            'student_name': student_name,
-        }
-    if ntype in ('purchase_approved', 'purchase_denied') or (
-        notification.purchase_order_id and ntype.startswith('purchase_')
-    ):
-        return {
-            'view': 'marketplace',
-            'section': 'my-orders',
-            'purchase_order_id': notification.purchase_order_id,
-            'student_id': student_id,
-            'student_name': student_name,
-        }
-    if ntype == 'marketplace_item_assigned':
-        return {
-            'view': 'marketplace',
-            'section': 'add-items',
-        }
-    if ntype == 'missing_point_card':
-        return {
-            'view': 'entry',
-            'student_id': student_id,
-            'student_name': student_name,
-            'date': record_date,
-        }
-    if ntype in ('point_card_submitted', 'point_card_past'):
-        return {
-            'view': 'past-point-cards',
-            'student_id': student_id,
-            'student_name': student_name,
-            'date': record_date,
-        }
-    if ntype in ('curriculum_paycheck', 'curriculum_assigned') or notification.curriculum_assignment_id:
-        return {
-            'view': 'curriculum',
-            'curriculum_assignment_id': notification.curriculum_assignment_id,
-            'student_id': student_id,
-            'student_name': student_name,
-        }
-    if notification.purchase_order_id:
-        return {
-            'view': 'marketplace',
-            'section': 'po-approvals',
-            'purchase_order_id': notification.purchase_order_id,
-            'student_id': student_id,
-            'student_name': student_name,
-        }
-    return None
+        if ntype == 'purchase_order_pending':
+            return {
+                'view': 'marketplace',
+                'section': 'po-approvals',
+                'purchase_order_id': notification.purchase_order_id,
+                'student_id': student_id,
+                'student_name': student_name,
+            }
+        if ntype in ('purchase_approved', 'purchase_denied') or (
+            notification.purchase_order_id and ntype.startswith('purchase_')
+        ):
+            return {
+                'view': 'marketplace',
+                'section': 'my-orders',
+                'purchase_order_id': notification.purchase_order_id,
+                'student_id': student_id,
+                'student_name': student_name,
+            }
+        if ntype == 'marketplace_item_assigned':
+            return {
+                'view': 'marketplace',
+                'section': 'add-items',
+            }
+        if ntype == 'missing_point_card' or title.startswith('Missing points:'):
+            return {
+                'view': 'entry',
+                'student_id': student_id,
+                'student_name': student_name,
+                'date': record_date,
+            }
+        if ntype in ('point_card_submitted', 'point_card_past'):
+            return {
+                'view': 'past-point-cards',
+                'student_id': student_id,
+                'student_name': student_name,
+                'date': record_date,
+            }
+        if ntype in ('curriculum_paycheck', 'curriculum_assigned') or notification.curriculum_assignment_id:
+            return {
+                'view': 'curriculum',
+                'curriculum_assignment_id': notification.curriculum_assignment_id,
+                'student_id': student_id,
+                'student_name': student_name,
+            }
+        if notification.purchase_order_id:
+            return {
+                'view': 'marketplace',
+                'section': 'po-approvals',
+                'purchase_order_id': notification.purchase_order_id,
+                'student_id': student_id,
+                'student_name': student_name,
+            }
+        return None
+    except Exception:
+        return None
 
 
 def calculate_weekly_star_percent(student_id, start_date, end_date):

@@ -16275,6 +16275,7 @@ window.flushPendingPointCardSaves = flushPendingPointCardSaves;
 window.showInfoViewPopup = showInfoViewPopup;
 window.openPastPointCardsModal = openPastPointCardsModal;
 window.closePastPointCardsModal = closePastPointCardsModal;
+window.switchView = switchView;
 
 // Schedule Management Functions
 let teacherScheduleData = [];
@@ -26610,17 +26611,25 @@ function escapeNotificationText(value) {
 
 function openNotificationsDropdown() {
     var dropdown = document.getElementById('notifications-dropdown');
-    if (dropdown) dropdown.style.display = 'block';
+    if (!dropdown) return;
+    dropdown.style.display = 'block';
+    dropdown.style.visibility = '';
+    dropdown.style.pointerEvents = '';
 }
 
 function closeNotificationsDropdown() {
     var dropdown = document.getElementById('notifications-dropdown');
-    if (dropdown) dropdown.style.display = 'none';
+    if (!dropdown) return;
+    dropdown.style.display = 'none';
+    dropdown.style.visibility = '';
+    dropdown.style.pointerEvents = '';
 }
 
 function findNotificationById(id) {
+    var nid = parseInt(id, 10);
+    if (!Number.isFinite(nid)) return null;
     for (var i = 0; i < notificationsCache.length; i++) {
-        if (notificationsCache[i].id === id) return notificationsCache[i];
+        if (notificationsCache[i].id === nid) return notificationsCache[i];
     }
     return null;
 }
@@ -26665,13 +26674,36 @@ function setPointCardDateFromNotification(dateStr) {
     if (typeof updateQuarterDisplay === 'function') updateQuarterDisplay();
 }
 
-function focusDailyEntryStudent(studentId, studentName) {
+function resolveNotificationStudentId(studentId, studentName) {
     var sid = parseInt(studentId, 10);
-    if (!Number.isFinite(sid)) return;
+    if (Number.isFinite(sid)) return sid;
+    var name = (studentName || '').trim().toLowerCase();
+    if (!name || !Array.isArray(allStudents)) return null;
+    for (var i = 0; i < allStudents.length; i++) {
+        var s = allStudents[i];
+        if (s && s.name && String(s.name).trim().toLowerCase() === name) {
+            return s.id;
+        }
+    }
+    return null;
+}
+
+function focusDailyEntryStudent(studentId, studentName) {
+    var sid = resolveNotificationStudentId(studentId, studentName);
+    if (!sid) return;
     var searchInput = document.getElementById('daily-search-input');
-    if (searchInput && studentName) {
-        searchInput.value = studentName;
-        dailyEntrySearchQuery = studentName;
+    var nameForSearch = studentName;
+    if (!nameForSearch && Array.isArray(allStudents)) {
+        for (var i = 0; i < allStudents.length; i++) {
+            if (allStudents[i] && allStudents[i].id === sid) {
+                nameForSearch = allStudents[i].name;
+                break;
+            }
+        }
+    }
+    if (searchInput && nameForSearch) {
+        searchInput.value = nameForSearch;
+        dailyEntrySearchQuery = nameForSearch;
         dailyEntrySearchCommitted = true;
         var managedCheckbox = document.getElementById('daily-managed-by-me-checkbox');
         if (managedCheckbox && managedCheckbox.checked) {
@@ -26698,92 +26730,163 @@ function focusDailyEntryStudent(studentId, studentName) {
     setTimeout(tryScroll, 350);
 }
 
+function buildNotificationLink(notification, assignmentId) {
+    if (!notification && !assignmentId) return null;
+    if (notification && notification.link && notification.link.view) {
+        return notification.link;
+    }
+    var n = notification || {};
+    var type = n.type || '';
+    var title = n.title || '';
+    var poId = n.purchase_order_id || null;
+    var curriculumId = n.curriculum_assignment_id || assignmentId || null;
+    var studentId = n.student_id || null;
+    var studentName = (n.link && n.link.student_name) || null;
+    var recordDate = n.record_date || (n.link && n.link.date) || null;
+
+    if (!studentName && title.indexOf('Missing points:') === 0) {
+        studentName = title.slice('Missing points:'.length).trim();
+    }
+
+    if (type === 'purchase_order_pending' || (poId && type === 'purchase_order_pending')) {
+        return {
+            view: 'marketplace',
+            section: 'po-approvals',
+            purchase_order_id: poId,
+            student_id: studentId,
+            student_name: studentName,
+        };
+    }
+    if (type === 'purchase_approved' || type === 'purchase_denied' || (poId && String(type).indexOf('purchase_') === 0)) {
+        return {
+            view: 'marketplace',
+            section: 'my-orders',
+            purchase_order_id: poId,
+            student_id: studentId,
+            student_name: studentName,
+        };
+    }
+    if (poId) {
+        return {
+            view: 'marketplace',
+            section: 'po-approvals',
+            purchase_order_id: poId,
+            student_id: studentId,
+            student_name: studentName,
+        };
+    }
+    if (type === 'marketplace_item_assigned' || title.indexOf('marketplace item') !== -1) {
+        return { view: 'marketplace', section: 'add-items' };
+    }
+    if (type === 'missing_point_card' || title.indexOf('Missing points:') === 0) {
+        return {
+            view: 'entry',
+            student_id: studentId,
+            student_name: studentName,
+            date: recordDate,
+        };
+    }
+    if (type === 'point_card_submitted' || type === 'point_card_past') {
+        return {
+            view: 'past-point-cards',
+            student_id: studentId,
+            student_name: studentName,
+            date: recordDate,
+        };
+    }
+    if (type === 'curriculum_paycheck' || type === 'curriculum_assigned' || curriculumId) {
+        return {
+            view: 'curriculum',
+            curriculum_assignment_id: curriculumId,
+            student_id: studentId,
+            student_name: studentName,
+        };
+    }
+    return null;
+}
+
+function getSwitchViewFn() {
+    if (typeof window.switchView === 'function') return window.switchView;
+    if (typeof switchView === 'function') return switchView;
+    return null;
+}
+
 async function navigateFromNotificationLink(link) {
     if (!link || !link.view) return;
-    closeNotificationsDropdown();
-
-    if (link.view === 'marketplace') {
-        if (link.purchase_order_id) setNotificationFocusPurchaseOrder(link.purchase_order_id);
-        window.notificationFocusMarketplaceSection = link.section || null;
-        if (typeof switchView === 'function') await switchView('marketplace');
-        setTimeout(function () {
-            var sectionId = null;
-            if (link.section === 'po-approvals') sectionId = 'marketplace-po-approvals-section';
-            else if (link.section === 'my-orders') sectionId = 'marketplace-my-orders-section';
-            else if (link.section === 'add-items') sectionId = 'marketplace-add-items-section';
-            var section = sectionId ? document.getElementById(sectionId) : null;
-            if (section) flashNotificationFocusTarget(section);
-            var listId = link.section === 'my-orders'
-                ? 'marketplace-my-orders-list'
-                : 'marketplace-po-approvals-list';
-            applyNotificationPurchaseOrderFocus(document.getElementById(listId));
-        }, 400);
-        return;
+    var switchFn = getSwitchViewFn();
+    var dropdown = document.getElementById('notifications-dropdown');
+    // Avoid click-through: disable pointer events before hiding so the same click
+    // cannot land on whatever was underneath the dropdown.
+    if (dropdown) {
+        dropdown.style.pointerEvents = 'none';
+        dropdown.style.visibility = 'hidden';
     }
 
-    if (link.view === 'entry') {
-        if (link.date) setPointCardDateFromNotification(link.date);
-        if (typeof switchView === 'function') await switchView('entry');
-        focusDailyEntryStudent(link.student_id, link.student_name);
-        return;
-    }
+    try {
+        if (link.view === 'marketplace') {
+            if (link.purchase_order_id) setNotificationFocusPurchaseOrder(link.purchase_order_id);
+            window.notificationFocusMarketplaceSection = link.section || null;
+            if (switchFn) await switchFn('marketplace');
+            setTimeout(function () {
+                var sectionId = null;
+                if (link.section === 'po-approvals') sectionId = 'marketplace-po-approvals-section';
+                else if (link.section === 'my-orders') sectionId = 'marketplace-my-orders-section';
+                else if (link.section === 'add-items') sectionId = 'marketplace-add-items-section';
+                var section = sectionId ? document.getElementById(sectionId) : null;
+                if (section) flashNotificationFocusTarget(section);
+                var listId = link.section === 'my-orders'
+                    ? 'marketplace-my-orders-list'
+                    : 'marketplace-po-approvals-list';
+                applyNotificationPurchaseOrderFocus(document.getElementById(listId));
+            }, 400);
+            return;
+        }
 
-    if (link.view === 'past-point-cards') {
-        if (typeof openPastPointCardsModal === 'function' && link.student_id) {
-            openPastPointCardsModal(link.student_id, link.student_name || '');
+        if (link.view === 'entry') {
+            if (link.date) setPointCardDateFromNotification(link.date);
+            if (switchFn) await switchFn('entry');
+            focusDailyEntryStudent(link.student_id, link.student_name);
+            return;
         }
-        return;
-    }
 
-    if (link.view === 'curriculum') {
-        if (link.curriculum_assignment_id) {
-            window.curriculumFocusAssignmentId = link.curriculum_assignment_id;
+        if (link.view === 'past-point-cards') {
+            var pastSid = resolveNotificationStudentId(link.student_id, link.student_name);
+            if (typeof openPastPointCardsModal === 'function' && pastSid) {
+                openPastPointCardsModal(pastSid, link.student_name || '');
+            }
+            return;
         }
-        if (document.getElementById('curriculum-view') && typeof switchView === 'function') {
-            await switchView('curriculum');
+
+        if (link.view === 'curriculum') {
+            if (link.curriculum_assignment_id) {
+                window.curriculumFocusAssignmentId = link.curriculum_assignment_id;
+            }
+            if (document.getElementById('curriculum-view') && switchFn) {
+                await switchFn('curriculum');
+            }
         }
-        return;
+    } finally {
+        setTimeout(closeNotificationsDropdown, 0);
     }
 }
 
-function handleNotificationItemClick(notificationOrId, assignmentId) {
+function handleNotificationItemClick(notificationOrId, assignmentId, evt) {
+    if (evt && typeof evt.stopPropagation === 'function') {
+        evt.preventDefault();
+        evt.stopPropagation();
+    }
+
     var notification = (notificationOrId && typeof notificationOrId === 'object')
         ? notificationOrId
-        : findNotificationById(parseInt(notificationOrId, 10));
+        : findNotificationById(notificationOrId);
     var id = notification ? notification.id : parseInt(notificationOrId, 10);
-    if (!Number.isFinite(id)) return;
+    if (!Number.isFinite(Number(id))) return;
 
     fetch('/api/notifications/' + id + '/read', { method: 'PATCH' }).then(function () {
         loadNotifications({ silent: true });
-    });
+    }).catch(function () {});
 
-    var link = notification && notification.link ? notification.link : null;
-    if (!link && assignmentId) {
-        link = { view: 'curriculum', curriculum_assignment_id: assignmentId };
-    }
-    if (!link && notification) {
-        if (notification.purchase_order_id) {
-            link = {
-                view: 'marketplace',
-                section: notification.type === 'purchase_order_pending' ? 'po-approvals' : 'my-orders',
-                purchase_order_id: notification.purchase_order_id,
-                student_id: notification.student_id,
-            };
-        } else if (notification.type === 'missing_point_card') {
-            link = {
-                view: 'entry',
-                student_id: notification.student_id,
-                date: notification.record_date,
-            };
-        } else if (notification.curriculum_assignment_id) {
-            link = {
-                view: 'curriculum',
-                curriculum_assignment_id: notification.curriculum_assignment_id,
-            };
-        } else if (notification.type === 'marketplace_item_assigned') {
-            link = { view: 'marketplace', section: 'add-items' };
-        }
-    }
+    var link = buildNotificationLink(notification, assignmentId);
     if (link) {
         navigateFromNotificationLink(link);
         return;
@@ -26792,7 +26895,8 @@ function handleNotificationItemClick(notificationOrId, assignmentId) {
     // Legacy curriculum-only path
     if (assignmentId && typeof isAdmin === 'function' && isAdmin()) {
         window.curriculumFocusAssignmentId = assignmentId;
-        if (typeof switchView === 'function') switchView('curriculum');
+        var switchFn = getSwitchViewFn();
+        if (switchFn) switchFn('curriculum');
         closeNotificationsDropdown();
     }
 }
@@ -26817,9 +26921,10 @@ function showIncomingNotificationToasts(items) {
             '<div class="notification-toast-title">' + escapeNotificationText(n.title) + '</div>' +
             (n.body ? '<div class="notification-toast-body">' + escapeNotificationText(n.body) + '</div>' : '');
         toast.addEventListener('click', function (e) {
+            e.preventDefault();
             e.stopPropagation();
             toast.remove();
-            handleNotificationItemClick(n);
+            handleNotificationItemClick(n, null, e);
         });
         host.appendChild(toast);
         setTimeout(function () {
@@ -26844,15 +26949,21 @@ function renderNotificationsList() {
         return;
     }
     listEl.innerHTML = visible.slice(0, 30).map(function (n) {
-        return '<div style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
+        return '<div role="button" tabindex="0" style="padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px; cursor:pointer;' + (n.read_at ? '' : ' background:#f0f9ff;') + '" data-notification-id="' + n.id + '">' +
             '<div style="font-weight:600;">' + escapeNotificationText(n.title) + '</div>' +
             '<div style="color:#64748b; white-space:pre-wrap;">' + escapeNotificationText(n.body) + '</div>' +
             '</div>';
     }).join('');
     listEl.querySelectorAll('[data-notification-id]').forEach(function (el) {
-        el.addEventListener('click', function () {
+        el.addEventListener('click', function (e) {
             var id = parseInt(el.getAttribute('data-notification-id'), 10);
-            handleNotificationItemClick(findNotificationById(id) || id);
+            handleNotificationItemClick(findNotificationById(id) || id, null, e);
+        });
+        el.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            var id = parseInt(el.getAttribute('data-notification-id'), 10);
+            handleNotificationItemClick(findNotificationById(id) || id, null, e);
         });
     });
 }
