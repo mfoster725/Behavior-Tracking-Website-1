@@ -10561,257 +10561,43 @@ function getPastPointCardPrintOptions() {
     });
     const full = !!selected.full;
     const insightsOnly = !!selected.insights;
-    // Full Point Card always includes Info Insights; insights-only is the summary without the grid.
-    const includeInsights = full || insightsOnly;
     return {
         full,
         insights: insightsOnly,
-        time: full,
-        location: full,
-        safety: full,
-        teamwork: full,
-        accountability: full,
-        relationships: full,
-        // Keep the Info column compact when insights are printed below.
-        info: full,
-        percent: full,
-        attendance: true,
-        info_insights: includeInsights,
-        compactInfoColumn: full,
+        // Full Point Card always includes Info Insights.
+        info_insights: full || insightsOnly,
     };
 }
 
-function getVisiblePastPointCardRecords() {
-    const records = window.currentPointCardRecords || [];
+function getVisiblePastPointCardDayElements() {
     const container = getPointCardDataContainer();
-    if (!container) return records;
-    return records.filter((record) => {
-        const dayEl = container.querySelector(`.point-card-day[data-date="${record.date}"]`);
-        if (!dayEl) return false;
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('.point-card-day')).filter((dayEl) => {
         return dayEl.style.display !== 'none';
     });
 }
 
-function formatPastPointCardInfoForPrint(rawInfo) {
-    const info = parsePointCardInfoData(rawInfo);
-    if (!info || !hasInfoData(info)) return '—';
-    const parts = [];
-    const esc = (val) => {
-        const text = String(val ?? '');
-        return typeof escapeHtml === 'function'
-            ? escapeHtml(text)
-            : text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    };
-    if (info.notes && String(info.notes).trim()) {
-        parts.push(`Notes: ${esc(String(info.notes).trim())}`);
-    }
-    const reminders = [info.reminder1, info.reminder2, info.reminder3].filter(Boolean).length;
-    if (reminders) parts.push(`Reminders: ${reminders}`);
-    if (info.reset) parts.push('Reset');
-    if (info.alternate_location && String(info.alternate_location).trim()) {
-        parts.push(`Alt loc: ${esc(String(info.alternate_location).trim())}`);
-    }
-    const infractions = Array.isArray(info.infractions)
-        ? info.infractions
-        : [info.infraction1, info.infraction2].filter(Boolean);
-    if (infractions.length) {
-        const labels = infractions.map((inf) => {
-            if (inf && typeof inf === 'object') {
-                const label = inf.type || inf.label || '';
-                const count = inf.count || 1;
-                return label ? `${esc(label)} (${count})` : '';
-            }
-            return esc(inf);
-        }).filter(Boolean);
-        if (labels.length) parts.push(`Infractions: ${labels.join(', ')}`);
-    }
-    if (isInfoFrenzyChecked(info)) {
-        const severity = readFrenzySeverityValue(info);
-        parts.push(severity !== null ? `Frenzy (sev ${severity})` : 'Frenzy');
-    }
-    const purposes = Array.isArray(info.purposes)
-        ? info.purposes
-        : [info.purpose1, info.purpose2].filter(Boolean);
-    if (purposes.length) {
-        parts.push(`Purposes: ${purposes.map((p) => esc(p)).join(', ')}`);
-    }
-    if (info.duration) parts.push(`Duration: ${esc(info.duration)} min`);
-    if (info.results && String(info.results).trim()) {
-        parts.push(`Frenzy notes: ${esc(String(info.results).trim())}`);
-    }
-    return parts.length ? parts.join('<br>') : '—';
-}
-
-function computePastPointCardPercents(record) {
-    const periods = Array.isArray(record?.periods) ? record.periods : [];
-    const attendance = getPointCardAttendanceStatus(record);
-    const totals = { s: 0, t: 0, a: 0, r: 0 };
-    const counts = { s: 0, t: 0, a: 0, r: 0 };
-    periods.forEach((period) => {
-        const safetyPoints = starValueForPercentage(period.safety_points);
-        if (safetyPoints !== null) { totals.s += safetyPoints; counts.s++; }
-        const teamworkPoints = starValueForPercentage(period.teamwork_points);
-        if (teamworkPoints !== null) { totals.t += teamworkPoints; counts.t++; }
-        const accountabilityPoints = starValueForPercentage(period.accountability_points);
-        if (accountabilityPoints !== null) { totals.a += accountabilityPoints; counts.a++; }
-        const relationshipsPoints = starValueForPercentage(period.relationships_points);
-        if (relationshipsPoints !== null) { totals.r += relationshipsPoints; counts.r++; }
+function clonePastPointCardDayForPrint(dayEl, options) {
+    const clone = dayEl.cloneNode(true);
+    clone.style.display = '';
+    clone.querySelectorAll('.edit-day-btn, button.btn-secondary.edit-day-btn').forEach((btn) => btn.remove());
+    clone.querySelectorAll('button.info-view-btn, button.pc-info-view-btn').forEach((btn) => {
+        const mark = document.createElement('span');
+        mark.className = 'ppc-print-info-mark';
+        mark.textContent = 'Info';
+        btn.replaceWith(mark);
     });
-    if (attendance === 'excused') {
-        return { s: 'E', t: 'E', a: 'E', r: 'E', overall: 'E' };
+    if (!options.full) {
+        clone.querySelectorAll('.point-card-grid').forEach((el) => el.remove());
+        const content = clone.querySelector('.point-card-day-content');
+        if (content) content.classList.add('ppc-print-insights-only');
     }
-    if (attendance === 'unexcused') {
-        return { s: 'U', t: 'U', a: 'U', r: 'U', overall: '0' };
+    if (!options.info_insights) {
+        clone.querySelectorAll('.point-card-info-aggregate').forEach((el) => el.remove());
     }
-    const pct = (total, count) => (count > 0 ? ((total / (count * 2)) * 100).toFixed(0) : '-');
-    const totalPoints = totals.s + totals.t + totals.a + totals.r;
-    const totalCounts = counts.s + counts.t + counts.a + counts.r;
-    return {
-        s: pct(totals.s, counts.s),
-        t: pct(totals.t, counts.t),
-        a: pct(totals.a, counts.a),
-        r: pct(totals.r, counts.r),
-        overall: totalCounts > 0 ? ((totalPoints / (totalCounts * 2)) * 100).toFixed(0) : '-',
-    };
-}
-
-function buildPastPointCardPrintPercentRow(record, columns, options, includeOverallColumn) {
-    if (!options.percent) return '';
-    const percents = computePastPointCardPercents(record);
-    const percentMap = {
-        safety: percents.s,
-        teamwork: percents.t,
-        accountability: percents.a,
-        relationships: percents.r,
-    };
-    const starKeys = ['safety', 'teamwork', 'accountability', 'relationships'];
-    const textColCount = columns.filter((c) => c.key === 'time' || c.key === 'location').length;
-    const cells = [];
-
-    if (textColCount > 0) {
-        cells.push(`<td class="ppc-print-left" colspan="${textColCount}"><strong>Percent:</strong></td>`);
-    } else {
-        cells.push('<td class="ppc-print-left"><strong>Percent:</strong></td>');
-    }
-
-    columns.forEach((col) => {
-        if (col.key === 'time' || col.key === 'location') return;
-        if (starKeys.includes(col.key)) {
-            cells.push(`<td>${formatPercentCellText(percentMap[col.key])}</td>`);
-        } else if (col.key === 'info') {
-            cells.push(`<td><strong>${formatPercentCellText(percents.overall)}</strong></td>`);
-        }
-    });
-
-    if (includeOverallColumn) {
-        cells.push(`<td><strong>${formatPercentCellText(percents.overall)}</strong></td>`);
-    }
-
-    return `<tr>${cells.join('')}</tr>`;
-}
-
-function formatPastPointCardInfoMarker(rawInfo) {
-    const info = parsePointCardInfoData(rawInfo);
-    return (info && hasInfoData(info)) ? 'Yes' : '—';
-}
-
-function buildPastPointCardPrintDayHtml(record, studentId, options, previousRecord) {
-    const [year, month, day] = String(record.date || '').split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    const formattedDate = date.toLocaleDateString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-    });
-    const attendance = getPointCardAttendanceStatus(record);
-
-    const periods = expandPointCardPeriods(record.periods, {
-        studentId: studentId || record?.student_id,
-        onDate: record.date,
-    });
-    const sid = studentId || record?.student_id;
-    const columns = [
-        { key: 'time', label: 'Time', left: true },
-        { key: 'location', label: 'Location', left: true },
-        { key: 'safety', label: 'S' },
-        { key: 'teamwork', label: 'T' },
-        { key: 'accountability', label: 'A' },
-        { key: 'relationships', label: 'R' },
-        { key: 'info', label: 'Info' },
-    ].filter((col) => options[col.key]);
-
-    const includeOverallColumn = !!(options.percent && !options.info && columns.length);
-    const showTable = columns.length > 0 || options.percent;
-    let tableHtml = '';
-
-    if (showTable && columns.length === 0 && options.percent) {
-        const percents = computePastPointCardPercents(record);
-        tableHtml = `
-            <table class="ppc-print-table">
-                <thead><tr><th class="ppc-print-left">Percentages</th></tr></thead>
-                <tbody>
-                    <tr><td class="ppc-print-left">Safety ${formatPercentCellText(percents.s)} · Teamwork ${formatPercentCellText(percents.t)} · Accountability ${formatPercentCellText(percents.a)} · Relationships ${formatPercentCellText(percents.r)} · Overall <strong>${formatPercentCellText(percents.overall)}</strong></td></tr>
-                </tbody>
-            </table>
-        `;
-    } else if (showTable && columns.length > 0) {
-        const headerCells = columns.map((col) => (
-            `<th class="${col.left ? 'ppc-print-left' : ''}">${col.label}</th>`
-        )).join('') + (includeOverallColumn ? '<th>Overall</th>' : '');
-
-        const bodyRows = periods.map((period) => {
-            const locationText = period.location
-                || ((sid && isOtherSchoolPeriod(sid, period.time_range)) ? 'Other school' : '');
-            const values = {
-                time: period.time_range || '',
-                location: locationText,
-                safety: formatPointCardStarCell(record, period.safety_points),
-                teamwork: formatPointCardStarCell(record, period.teamwork_points),
-                accountability: formatPointCardStarCell(record, period.accountability_points),
-                relationships: formatPointCardStarCell(record, period.relationships_points),
-                info: options.compactInfoColumn
-                    ? formatPastPointCardInfoMarker(period.info)
-                    : formatPastPointCardInfoForPrint(period.info),
-            };
-            const cells = columns.map((col) => {
-                const extra = col.key === 'info' ? ' ppc-print-info-cell' : '';
-                const align = col.left ? ' ppc-print-left' : '';
-                return `<td class="${(align + extra).trim()}">${values[col.key]}</td>`;
-            });
-            if (includeOverallColumn) cells.push('<td></td>');
-            return `<tr>${cells.join('')}</tr>`;
-        }).join('');
-
-        const percentRow = buildPastPointCardPrintPercentRow(record, columns, options, includeOverallColumn);
-
-        tableHtml = `
-            <table class="ppc-print-table">
-                <thead><tr>${headerCells}</tr></thead>
-                <tbody>${bodyRows}${percentRow}</tbody>
-            </table>
-        `;
-    }
-
-    let insightsHtml = '';
-    if (options.info_insights) {
-        const aggregate = renderPointCardInfoAggregate(record, previousRecord || null);
-        insightsHtml = `<div class="ppc-print-insights">${aggregate}</div>`;
-    }
-
-    const attendanceBadge = options.attendance && attendance !== 'present'
-        ? `<span class="ppc-print-attendance ppc-print-attendance--${attendance}">${formatPointCardAttendanceLabel(attendance)}</span>`
-        : '';
-
-    return `
-        <section class="ppc-print-day">
-            <header class="ppc-print-day-head">
-                <h2>${formattedDate}</h2>
-                ${attendanceBadge}
-            </header>
-            <div class="ppc-print-day-body">
-                ${tableHtml}
-                ${insightsHtml}
-            </div>
-        </section>
-    `;
+    // Drop ids so cloned grids do not collide with live view.
+    clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    return clone;
 }
 
 function ensurePastPointCardPrintRoot() {
@@ -10832,20 +10618,18 @@ function printPastPointCards() {
         return;
     }
 
-    const records = getVisiblePastPointCardRecords();
-    if (!records.length) {
+    const dayEls = getVisiblePastPointCardDayElements();
+    if (!dayEls.length) {
         showMessage('There are no point card days to print.', 'error');
         return;
     }
 
-    const studentId = window.currentPointCardStudentId;
     const studentName = window.currentPointCardStudentName || 'Student';
     const safeName = typeof escapeHtml === 'function' ? escapeHtml(studentName) : studentName;
     const printedOn = new Date().toLocaleDateString('en-US', {
         year: 'numeric', month: 'long', day: 'numeric',
     });
-    const firstDate = records[records.length - 1]?.date;
-    const lastDate = records[0]?.date;
+    const dates = dayEls.map((el) => el.dataset.date).filter(Boolean);
     const formatDay = (iso) => {
         const [year, month, day] = String(iso || '').split('-').map(Number);
         if (!year || !month || !day) return '';
@@ -10853,46 +10637,45 @@ function printPastPointCards() {
             month: 'long', day: 'numeric', year: 'numeric',
         });
     };
+    const firstDate = dates[dates.length - 1];
+    const lastDate = dates[0];
     const rangeLabel = firstDate && lastDate && firstDate !== lastDate
         ? `${formatDay(firstDate)} – ${formatDay(lastDate)}`
         : formatDay(lastDate || firstDate);
-    const layoutLabel = options.full
-        ? 'Full Point Card'
-        : 'Info Insights';
-    // Two day-columns across; pack up to four days (2×2) per page when content allows.
+    const layoutLabel = options.full ? 'Full Point Card' : 'Info Insights';
+    const modeClass = options.full ? 'ppc-print-mode-full' : 'ppc-print-mode-insights';
+    // Match on-screen two-column day layout; pack up to four cards per page.
     const daysPerPage = 4;
 
-    const pages = [];
-    for (let i = 0; i < records.length; i += daysPerPage) {
-        pages.push(records.slice(i, i + daysPerPage));
-    }
-
-    const pagesHtml = pages.map((group, pageIndex) => {
-        const daysHtml = group.map((record) => {
-            const recordIndex = records.findIndex((item) => item.id === record.id && item.date === record.date);
-            const previous = records[recordIndex + 1] || null;
-            return buildPastPointCardPrintDayHtml(record, studentId, options, previous);
-        }).join('');
-        const legend = options.full
-            ? '<p class="ppc-print-legend">S = Safety · T = Teamwork · A = Accountability · R = Relationships</p>'
-            : '';
-        return `
-            <section class="ppc-print-page${options.full ? ' ppc-print-page--full' : ' ppc-print-page--insights'}">
-                <header class="ppc-print-banner">
-                    <p class="ppc-print-kicker">Point Card Report</p>
-                    <h1>${safeName}</h1>
-                    <p class="ppc-print-meta">${rangeLabel}<span> · ${layoutLabel}</span><span> · Prepared ${printedOn}</span><span> · Page ${pageIndex + 1} of ${pages.length}</span></p>
-                    ${legend}
-                </header>
-                <div class="ppc-print-columns">
-                    ${daysHtml}
-                </div>
-            </section>
-        `;
-    }).join('');
-
     const root = ensurePastPointCardPrintRoot();
-    root.innerHTML = pagesHtml;
+    root.innerHTML = '';
+    root.className = `print-root print-view ${modeClass}`;
+
+    for (let i = 0; i < dayEls.length; i += daysPerPage) {
+        const group = dayEls.slice(i, i + daysPerPage);
+        const pageIndex = Math.floor(i / daysPerPage);
+        const pageCount = Math.ceil(dayEls.length / daysPerPage);
+
+        const page = document.createElement('section');
+        page.className = 'ppc-print-page';
+
+        const banner = document.createElement('header');
+        banner.className = 'ppc-print-banner';
+        banner.innerHTML = [
+            '<p class="ppc-print-kicker">Point Card Report</p>',
+            `<h1>${safeName}</h1>`,
+            `<p class="ppc-print-meta">${rangeLabel} · ${layoutLabel} · Prepared ${printedOn} · Page ${pageIndex + 1} of ${pageCount}</p>`,
+        ].join('');
+        page.appendChild(banner);
+
+        const grid = document.createElement('div');
+        grid.className = 'point-card-days-grid ppc-print-columns';
+        group.forEach((dayEl) => {
+            grid.appendChild(clonePastPointCardDayForPrint(dayEl, options));
+        });
+        page.appendChild(grid);
+        root.appendChild(page);
+    }
 
     closePastPointCardPrintMenu();
     document.body.classList.add('past-point-card-printing');
@@ -10903,6 +10686,7 @@ function printPastPointCards() {
         cleaned = true;
         document.body.classList.remove('past-point-card-printing');
         root.innerHTML = '';
+        root.className = 'print-root print-view';
         window.removeEventListener('afterprint', cleanup);
     };
     window.addEventListener('afterprint', cleanup);
@@ -10910,9 +10694,8 @@ function printPastPointCards() {
     setTimeout(() => {
         window.print();
         setTimeout(cleanup, 1000);
-    }, 100);
+    }, 150);
 }
-
 function openPastPointCardsModal(studentId, studentName) {
     const modal = getPastPointCardsModal();
     if (!modal) {
