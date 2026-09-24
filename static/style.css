@@ -345,6 +345,13 @@ nav {
     80% { transform: rotate(-4deg); }
 }
 
+.notification-focus-target {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+    transition: outline-color 0.2s ease, box-shadow 0.2s ease;
+}
+
 #notifications-bell-btn.notifications-bell-attention svg {
     transform-origin: top center;
     animation: notifications-bell-pulse 0.7s ease;

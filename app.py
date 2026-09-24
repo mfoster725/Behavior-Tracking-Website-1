@@ -2458,6 +2458,8 @@ def notify_missing_point_card_entries(dates):
                     type='missing_point_card',
                     title=f'Missing points: {student.name}',
                     body=_missing_points_body(student.name, record_date, gaps, False),
+                    student_id=student_id,
+                    record_date=record_date,
                 ))
                 skip_staff_ids.add(case_manager.id)
 
@@ -2483,6 +2485,8 @@ def notify_missing_point_card_entries(dates):
                     type='missing_point_card',
                     title=f'Missing points: {student.name}',
                     body=_missing_points_body(student.name, record_date, staff_gaps, True),
+                    student_id=student_id,
+                    record_date=record_date,
                 ))
 
             db.session.add(MissingPointCardNotice(
@@ -3449,12 +3453,15 @@ class Notification(db.Model):
     body = db.Column(db.Text, nullable=True)
     purchase_order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True)
     curriculum_assignment_id = db.Column(db.Integer, db.ForeignKey('curriculum_assignments.id'), nullable=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=True)
+    record_date = db.Column(db.Date, nullable=True)
     read_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     user = db.relationship('User', backref='notifications')
     purchase_order = db.relationship('PurchaseOrder', backref='notification_records')
     curriculum_assignment = db.relationship('CurriculumAssignment', backref='notification_records')
+    student = db.relationship('Student', backref='notification_records')
 
 
 class MissingPointCardNotice(db.Model):
@@ -3797,6 +3804,48 @@ def ensure_curriculum_schema():
             app.logger.warning(f"Failed to ensure curriculum schema: {e}")
         except Exception:
             print(f"Failed to ensure curriculum schema: {e}")
+
+
+ensure_curriculum_schema()
+
+
+def ensure_notification_link_columns():
+    """Add student_id / record_date on notifications for click-through deep links."""
+    try:
+        is_postgres = 'postgresql' in str(db.engine.url).lower()
+        with db.engine.connect() as conn:
+            if is_postgres:
+                conn.execute(text(
+                    "ALTER TABLE notifications "
+                    "ADD COLUMN IF NOT EXISTS student_id INTEGER"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE notifications "
+                    "ADD COLUMN IF NOT EXISTS record_date DATE"
+                ))
+            else:
+                try:
+                    rows = conn.execute(text("PRAGMA table_info(notifications)")).fetchall()
+                    cols = {row[1] for row in rows}
+                    if rows and 'student_id' not in cols:
+                        conn.execute(text(
+                            "ALTER TABLE notifications ADD COLUMN student_id INTEGER"
+                        ))
+                    if rows and 'record_date' not in cols:
+                        conn.execute(text(
+                            "ALTER TABLE notifications ADD COLUMN record_date DATE"
+                        ))
+                except Exception:
+                    pass
+            conn.commit()
+    except Exception as e:
+        try:
+            app.logger.warning(f"Failed to ensure notification link columns: {e}")
+        except Exception:
+            print(f"Failed to ensure notification link columns: {e}")
+
+
+ensure_notification_link_columns()
 
 
 def _economy_add_column(conn, is_postgres, table, column, col_type):
@@ -4212,6 +4261,7 @@ def init_db():
                 print(f"Note: plan if library seed skipped: {seed_err}", flush=True)
             try:
                 ensure_curriculum_schema()
+                ensure_notification_link_columns()
                 seed_curriculum_lessons()
             except Exception as seed_err:
                 print(f"Note: curriculum seed skipped: {seed_err}", flush=True)
@@ -17785,8 +17835,12 @@ def get_student_case_manager(student_id):
     return None
 
 
-def create_purchase_notification(student_user_id, notification_type, title, body, purchase_order_id=None, curriculum_assignment_id=None):
+def create_purchase_notification(student_user_id, notification_type, title, body, purchase_order_id=None, curriculum_assignment_id=None, student_id=None):
     """Create an in-app notification for a user (usually the student's login)."""
+    if student_id is None and purchase_order_id:
+        order = PurchaseOrder.query.get(purchase_order_id)
+        if order:
+            student_id = order.student_id
     n = Notification(
         user_id=student_user_id,
         type=notification_type,
@@ -17794,6 +17848,7 @@ def create_purchase_notification(student_user_id, notification_type, title, body
         body=body,
         purchase_order_id=purchase_order_id,
         curriculum_assignment_id=curriculum_assignment_id,
+        student_id=student_id,
     )
     db.session.add(n)
     return n
@@ -17809,8 +17864,80 @@ def notify_support_team_purchase_order_pending(student_id, purchase_order_id, it
             type='purchase_order_pending',
             title='New purchase order',
             body=f'{student_name} submitted a purchase order for {item_name}.',
-            purchase_order_id=purchase_order_id
+            purchase_order_id=purchase_order_id,
+            student_id=student_id,
         ))
+
+
+def notification_link_payload(notification):
+    """Return a frontend deep-link target for a notification click."""
+    ntype = notification.type or ''
+    student_id = notification.student_id
+    student_name = None
+    if notification.student:
+        student_name = notification.student.name
+    elif student_id:
+        student = Student.query.get(student_id)
+        student_name = student.name if student else None
+    if student_id is None and notification.purchase_order_id and notification.purchase_order:
+        student_id = notification.purchase_order.student_id
+        if notification.purchase_order.student:
+            student_name = notification.purchase_order.student.name
+    record_date = notification.record_date.isoformat() if notification.record_date else None
+
+    if ntype == 'purchase_order_pending':
+        return {
+            'view': 'marketplace',
+            'section': 'po-approvals',
+            'purchase_order_id': notification.purchase_order_id,
+            'student_id': student_id,
+            'student_name': student_name,
+        }
+    if ntype in ('purchase_approved', 'purchase_denied') or (
+        notification.purchase_order_id and ntype.startswith('purchase_')
+    ):
+        return {
+            'view': 'marketplace',
+            'section': 'my-orders',
+            'purchase_order_id': notification.purchase_order_id,
+            'student_id': student_id,
+            'student_name': student_name,
+        }
+    if ntype == 'marketplace_item_assigned':
+        return {
+            'view': 'marketplace',
+            'section': 'add-items',
+        }
+    if ntype == 'missing_point_card':
+        return {
+            'view': 'entry',
+            'student_id': student_id,
+            'student_name': student_name,
+            'date': record_date,
+        }
+    if ntype in ('point_card_submitted', 'point_card_past'):
+        return {
+            'view': 'past-point-cards',
+            'student_id': student_id,
+            'student_name': student_name,
+            'date': record_date,
+        }
+    if ntype in ('curriculum_paycheck', 'curriculum_assigned') or notification.curriculum_assignment_id:
+        return {
+            'view': 'curriculum',
+            'curriculum_assignment_id': notification.curriculum_assignment_id,
+            'student_id': student_id,
+            'student_name': student_name,
+        }
+    if notification.purchase_order_id:
+        return {
+            'view': 'marketplace',
+            'section': 'po-approvals',
+            'purchase_order_id': notification.purchase_order_id,
+            'student_id': student_id,
+            'student_name': student_name,
+        }
+    return None
 
 
 def calculate_weekly_star_percent(student_id, start_date, end_date):
@@ -18437,6 +18564,7 @@ def ensure_paycheck_curriculum_assignment(paycheck, notify=False):
                 'Your paycheck is ready',
                 f'Complete your paycheck worksheet for {start} to {end}, then your lesson.',
                 curriculum_assignment_id=assignment.id,
+                student_id=paycheck.student_id,
             )
     return assignment
 
@@ -19219,6 +19347,7 @@ def curriculum_assign():
                 'New money lesson',
                 f'You have a new lesson: {lesson.title}.',
                 curriculum_assignment_id=assignment.id,
+                student_id=sid,
             )
         created.append(_serialize_curriculum_assignment(assignment))
     db.session.commit()
@@ -20555,6 +20684,9 @@ def get_notifications():
         'body': n.body,
         'purchase_order_id': n.purchase_order_id,
         'curriculum_assignment_id': n.curriculum_assignment_id,
+        'student_id': n.student_id,
+        'record_date': n.record_date.isoformat() if n.record_date else None,
+        'link': notification_link_payload(n),
         'read_at': utc_isoformat(n.read_at),
         'created_at': utc_isoformat(n.created_at)
     } for n in notifications])
@@ -22030,6 +22162,7 @@ if __name__ == '__main__':
         ensure_daily_query_indexes()
         try:
             ensure_curriculum_schema()
+            ensure_notification_link_columns()
             seed_curriculum_lessons()
         except Exception as seed_err:
             print(f"Note: curriculum seed skipped: {seed_err}", flush=True)

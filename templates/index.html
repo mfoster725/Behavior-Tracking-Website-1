@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=notif-nav1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=past-pc-print6">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -1724,7 +1724,7 @@
                 </div>
 
                 <!-- My orders (student's purchase orders) -->
-                <div style="margin-top: 28px;">
+                <div id="marketplace-my-orders-section" style="margin-top: 28px;">
                     <h3 style="margin-bottom: 16px; font-size: 1.1rem;">My orders</h3>
                     <div id="marketplace-my-orders-list" style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg-surface); padding: 16px;">
                         <p style="margin: 0; color: #94a3b8;">No orders yet.</p>
@@ -2974,7 +2974,7 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=notif-nav1"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=past-pc-print6"></script>
     <script src="{{ url_for('static', filename='economy.js') }}?v=economy1"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
