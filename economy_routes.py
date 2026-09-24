@@ -146,7 +146,8 @@ def register_economy_routes(app):
         return float(eco.money(value or 0))
 
     def amount_due(bill):
-        return eco.money((bill.previous_balance or 0) + (bill.base_amount or 0) + (bill.late_fee_amount or 0))
+        return eco.money((bill.previous_balance or 0) + (bill.base_amount or 0) + (bill.late_fee_amount or 0)
+                          + (bill.convenience_fee_amount or 0))
 
     def remaining(bill):
         return eco.money(amount_due(bill) - (bill.paid_amount or 0))
@@ -200,6 +201,7 @@ def register_economy_routes(app):
             late_fee_amount=Decimal('0.00'),
             paid_amount=Decimal('0.00'),
             status='unpaid',
+            worksheet_eligible=(kind == 'bill' and len(lines) > 1),
         )
         try:
             with m.db.session.begin_nested():
@@ -424,6 +426,7 @@ def register_economy_routes(app):
         slug = bill.product.slug if bill.product else None
         tone, label = status_label(bill, now)
         meta = eco.load_json(bill.meta_json, {})
+        needs_worksheet = bool(bill.worksheet_eligible) and not bill.worksheet_completed and bill.status in OPEN_STATUSES
         payload = {
             'id': bill.id,
             'slug': slug,
@@ -436,21 +439,37 @@ def register_economy_routes(app):
             'period_start': bill.period_start.isoformat() if bill.period_start else None,
             'period_end': bill.period_end.isoformat() if bill.period_end else None,
             'due_date': bill.due_date.isoformat() if bill.due_date else None,
-            'lines': eco.load_json(bill.lines_json, []),
-            'meta': meta,
             'previous_balance': money_f(bill.previous_balance),
-            'new_charges': money_f(bill.base_amount),
             'late_fee': money_f(bill.late_fee_amount),
-            'amount_due': money_f(amount_due(bill)),
             'paid_amount': money_f(bill.paid_amount),
-            'remaining': money_f(remaining(bill)),
             'status': bill.status,
             'status_tone': tone,
             'status_label': label,
             'waived_reason': bill.waived_reason,
             'payments': bill_payments(bill),
             'code': bl.product_code(slug, {slug: eco.load_json(bill.product.options_json, {})}) if bill.product else 'PMT',
+            'worksheet_eligible': bool(bill.worksheet_eligible),
+            'worksheet_completed': bool(bill.worksheet_completed),
+            'worksheet_mode': bill.worksheet_mode,
         }
+        if needs_worksheet:
+            # Protect the answer: no computed lines or totals until the worksheet is resolved.
+            payload['lines'] = []
+            payload['meta'] = {}
+            payload['new_charges'] = None
+            payload['amount_due'] = None
+            payload['remaining'] = None
+            spec = bl.worksheet_spec(slug, meta)
+            spec['last_answers'] = eco.load_json(bill.worksheet_answers_json, {})
+            payload['worksheet'] = spec
+        else:
+            payload['lines'] = eco.load_json(bill.lines_json, [])
+            payload['meta'] = meta
+            payload['new_charges'] = money_f(bill.base_amount)
+            payload['amount_due'] = money_f(amount_due(bill))
+            payload['remaining'] = money_f(remaining(bill))
+            if bill.convenience_fee_amount:
+                payload['convenience_fee'] = money_f(bill.convenience_fee_amount)
         if slug == 'electric' and history is not None:
             payload['usage_history'] = history
         return payload
@@ -639,6 +658,7 @@ def register_economy_routes(app):
         ).order_by(m.StudentBill.period_key.desc(), m.StudentBill.id).all()
         current, history = [], {}
         this_key = bl.week_key(this_monday)
+        open_bills = []
         for bill in bills:
             usage = electric_history(student.id, bill.period_key) if bill.product and bill.product.slug == 'electric' else None
             item = serialize_bill(bill, now, usage)
@@ -646,10 +666,13 @@ def register_economy_routes(app):
                 current.append(item)
             else:
                 history.setdefault(bill.period_key, []).append(item)
+            if bill.status in OPEN_STATUSES:
+                open_bills.append(bill)
         current.sort(key=sort_key)
         open_items = [b for b in current if b['status'] in OPEN_STATUSES]
-        due_now = eco.money(sum((Decimal(str(b['remaining'])) for b in open_items if b['kind'] == 'bill'), Decimal('0')))
-        savings_due = eco.money(sum((Decimal(str(b['remaining'])) for b in open_items if b['kind'] == 'savings'), Decimal('0')))
+        # Sum the real (possibly worksheet-masked) bills, not the serialized dicts sent to the browser.
+        due_now = eco.money(sum((remaining(b) for b in open_bills if b.kind == 'bill'), Decimal('0')))
+        savings_due = eco.money(sum((remaining(b) for b in open_bills if b.kind == 'savings'), Decimal('0')))
         checking = eco.money(account.balance)
         savings_balance = eco.money(account.savings_balance or 0)
         goal, goal_weeks = bl.savings_goal(plan_for(budget, catalog), catalog, color_of(student), settings)
@@ -747,6 +770,9 @@ def register_economy_routes(app):
             return jsonify({'error': 'This bill was late, so it moved onto this week\'s bill. Pay it there.'}), 400
         if bill.status not in OPEN_STATUSES:
             return jsonify({'error': 'This bill is already taken care of.'}), 400
+        if bill.worksheet_eligible and not bill.worksheet_completed:
+            m.db.session.commit()
+            return jsonify({'error': 'Work out this bill first, or have it filled in.'}), 400
         data = request.get_json(silent=True) or {}
         mode = (data.get('mode') or 'full').strip().lower()
         amount = eco.parse_money(data.get('amount'))
@@ -816,6 +842,54 @@ def register_economy_routes(app):
             },
             'economy': economy_payload(student),
         })
+
+    @app.route('/api/economy/bills/<int:bill_id>/worksheet/auto', methods=['POST'])
+    @login_required
+    def auto_fill_bill_worksheet(bill_id):
+        bill = m.StudentBill.query.get_or_404(bill_id)
+        denied = require_student_access(bill.student_id)
+        if denied:
+            return denied
+        if bill.status not in OPEN_STATUSES:
+            return jsonify({'error': 'This bill is already taken care of.'}), 400
+        if not bill.worksheet_eligible:
+            return jsonify({'error': 'This bill does not need a worksheet.'}), 400
+        if bill.worksheet_completed:
+            return jsonify({'error': 'This bill is already worked out.'}), 400
+        bill.worksheet_mode = 'auto'
+        bill.worksheet_completed = True
+        bill.convenience_fee_amount = bl.convenience_fee(bill.base_amount, bills_settings())
+        m.db.session.commit()
+        student = m.Student.query.get_or_404(bill.student_id)
+        return jsonify({'ok': True, 'bill': serialize_bill(bill, now_local()), 'economy': economy_payload(student)})
+
+    @app.route('/api/economy/bills/<int:bill_id>/worksheet/submit', methods=['POST'])
+    @login_required
+    def submit_bill_worksheet(bill_id):
+        bill = m.StudentBill.query.get_or_404(bill_id)
+        denied = require_student_access(bill.student_id)
+        if denied:
+            return denied
+        if bill.status not in OPEN_STATUSES:
+            return jsonify({'error': 'This bill is already taken care of.'}), 400
+        if not bill.worksheet_eligible:
+            return jsonify({'error': 'This bill does not need a worksheet.'}), 400
+        if bill.worksheet_completed:
+            return jsonify({'error': 'This bill is already worked out.'}), 400
+        data = request.get_json(silent=True) or {}
+        answers = data.get('answers') if isinstance(data.get('answers'), dict) else {}
+        slug = bill.product.slug if bill.product else ''
+        meta = eco.load_json(bill.meta_json, {})
+        all_ok, errors = bl.grade_worksheet(slug, meta, bill.base_amount, answers)
+        bill.worksheet_answers_json = eco.dump_json(answers)
+        if all_ok:
+            bill.worksheet_mode = 'manual'
+            bill.worksheet_completed = True
+            m.db.session.commit()
+            student = m.Student.query.get_or_404(bill.student_id)
+            return jsonify({'ok': True, 'bill': serialize_bill(bill, now_local()), 'economy': economy_payload(student)})
+        m.db.session.commit()
+        return jsonify({'ok': False, 'errors': errors}), 400
 
     @app.route('/api/economy/student/<int:student_id>/savings/transfer', methods=['POST'])
     @login_required

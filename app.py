@@ -83,6 +83,13 @@ except ImportError:
     stripe_sdk = None
 
 app = Flask(__name__)
+# Route modules (economy_routes.py, etc.) do `import app as m`. Run directly (`python app.py`),
+# this file loads as __main__, so that later `import app` would re-execute the whole module from
+# scratch under a second name, giving those routes a second, un-initialized `db`/model set and
+# breaking every request they handle. Aliasing this already-running module as 'app' first makes
+# that later import resolve to this same module instead. No-op under gunicorn (`app:app`), which
+# already imports this file as 'app'.
+sys.modules.setdefault('app', sys.modules[__name__])
 SUMMARY_API_BUILD = 'frenzies-card-v3'
 FRENZY_MISSING_LABEL = 'Not recorded'
 # "Unknown" was never a real location option — only an old empty-field fallback in reports code.
@@ -3622,6 +3629,12 @@ class StudentBill(db.Model):
     carried_to_bill_id = db.Column(db.Integer, nullable=True)
     waived_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # True when this bill's amount involves real math (not just a flat plan lookup).
+    worksheet_eligible = db.Column(db.Boolean, default=False, nullable=False)
+    worksheet_mode = db.Column(db.String(10), nullable=True)  # None | auto | manual
+    worksheet_completed = db.Column(db.Boolean, default=False, nullable=False)
+    convenience_fee_amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    worksheet_answers_json = db.Column(db.Text, nullable=True)  # last-submitted answers, for a retry
 
     student = db.relationship('Student', backref='bills')
     product = db.relationship('BillProduct', backref='student_bills')
@@ -3959,6 +3972,11 @@ def ensure_economy_schema():
                 ('late_fee_applied_at', 'TIMESTAMP'),
                 ('carried_to_bill_id', 'INTEGER'),
                 ('waived_by_user_id', 'INTEGER'),
+                ('worksheet_eligible', 'BOOLEAN DEFAULT FALSE'),
+                ('worksheet_mode', 'VARCHAR(10)'),
+                ('worksheet_completed', 'BOOLEAN DEFAULT FALSE'),
+                ('convenience_fee_amount', 'NUMERIC(10, 2) DEFAULT 0'),
+                ('worksheet_answers_json', 'TEXT'),
             ]:
                 _economy_add_column(conn, is_postgres, 'student_bills', col, typ)
             conn.commit()

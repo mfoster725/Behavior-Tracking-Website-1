@@ -252,14 +252,16 @@
     function billRowHtml(bill, options) {
         options = options || {};
         var open = bill.status === 'unpaid' || bill.status === 'partial';
+        var needsWorksheet = open && bill.worksheet_eligible && !bill.worksheet_completed;
         var amount = open ? bill.remaining : bill.amount_due;
+        var amountHtml = needsWorksheet ? '<span class="bills2-worksheet-flag">Needs worksheet</span>' : fmt(amount);
         var note = '';
         if (open && bill.paid_amount > 0) note = '<small>' + fmt(bill.paid_amount) + ' paid</small>';
         else if (open && bill.previous_balance > 0) note = '<small>incl. ' + fmt(bill.previous_balance) + ' past due</small>';
         var action = '';
         if (!options.readOnly && open) {
             action = '<button type="button" class="bills2-btn ' + (bill.kind === 'savings' ? '' : 'bills2-btn-primary') + '" data-open-bill="' + bill.id + '">' +
-                (bill.kind === 'savings' ? 'Save' : 'Pay') + '</button>';
+                (needsWorksheet ? 'Work it out' : (bill.kind === 'savings' ? 'Save' : 'Pay')) + '</button>';
         } else {
             action = '<button type="button" class="bills2-btn" data-open-bill="' + bill.id + '">View</button>';
         }
@@ -269,7 +271,7 @@
             '<div class="bills2-service">' + esc(serviceText(bill)) + '</div></div>' +
             '<div class="bills2-service">Week of ' + esc(shortDate(bill.week)) + '</div>' +
             '<div><span class="bills2-chip tone-' + esc(bill.status_tone) + '">' + esc(bill.status_label) + '</span></div>' +
-            '<div class="bills2-amount">' + fmt(amount) + note + '</div>' +
+            '<div class="bills2-amount">' + amountHtml + note + '</div>' +
             '<div class="bills2-row-action">' + action + '</div>' +
             '</div>';
     }
@@ -398,6 +400,7 @@
             }
         }
         html += ln(isSavings ? 'Deposit this week' : 'New charges', bill.new_charges);
+        if (bill.convenience_fee > 0) html += ln('Convenience fee (auto-filled)', bill.convenience_fee, 'is-late');
         if (bill.late_fee > 0) html += ln('Late fee', bill.late_fee, 'is-late');
         if (paymentsTotal > 0) html += ln('Payments received - thank you', -paymentsTotal, 'is-credit');
         html += ln(open ? 'Amount due' : 'Balance', open ? bill.remaining : Math.max(0, bill.amount_due - paymentsTotal), 'is-total');
@@ -506,7 +509,96 @@
     function openStatement(id) {
         var bill = findBill(id);
         if (!bill) return;
+        var open = bill.status === 'unpaid' || bill.status === 'partial';
+        if (open && bill.worksheet_eligible && !bill.worksheet_completed) {
+            openModal(worksheetHtml(bill));
+            return;
+        }
         openModal(statementHtml(bill));
+    }
+
+    function worksheetHtml(bill) {
+        var ws = bill.worksheet || { given: [], fields: [], last_answers: {} };
+        var color = colorFor(bill.slug);
+        var html = '<div class="bills2-stmt bills2-worksheet" style="--stmt-color:' + color + '">';
+        html += '<div class="bills2-stmt-head"><div class="bills2-stmt-brand">' + logoHtml(bill) +
+            '<div><p class="bills2-stmt-company" id="bills-modal-title">' + esc(bill.payee) + '</p>' +
+            '<p class="bills2-stmt-kicker">Work this bill out before you can pay it &middot; Due ' + esc(dayDate(bill.due_date)) + '</p></div></div></div>';
+        html += '<div class="bills2-worksheet-given"><h4>What you know</h4>';
+        (ws.given || []).forEach(function (pair) {
+            html += '<div class="bills2-ln"><span>' + esc(pair[0]) + '</span><span>' + esc(pair[1]) + '</span></div>';
+        });
+        html += '</div>';
+        html += '<form class="bills2-coupon bills2-worksheet-form" data-worksheet-submit="' + bill.id + '" novalidate>' +
+            '<p class="bills2-help">Work out each step below. If something is wrong, fix it and check again &mdash; there is no limit on tries.</p>' +
+            '<div class="bills2-coupon-grid">';
+        (ws.fields || []).forEach(function (field) {
+            var saved = ws.last_answers && ws.last_answers[field.id] != null ? ws.last_answers[field.id] : '';
+            html += '<div class="bills2-field" data-field="' + esc(field.id) + '"><label for="ws-' + esc(field.id) + '">' + esc(field.label) + '</label>' +
+                '<input type="text" id="ws-' + esc(field.id) + '" inputmode="decimal" autocomplete="off" placeholder="$0.00" value="' + esc(saved) + '">' +
+                '<div class="bills2-error" hidden></div></div>';
+        });
+        html += '</div><div class="bills2-coupon-actions"><button type="button" class="bills2-btn" data-close-modal>Cancel</button>' +
+            '<button type="submit" class="bills2-btn bills2-btn-primary">Check my work</button></div>' +
+            '</form>';
+        html += '<div class="bills2-worksheet-skip"><p class="bills2-help">Rather not work it out?</p>' +
+            '<button type="button" class="bills2-btn" data-worksheet-auto="' + bill.id + '">Have it filled in (a convenience fee applies)</button></div>';
+        html += '</div>';
+        return html;
+    }
+
+    function autoFillWorksheet(id) {
+        var trigger = document.querySelector('[data-worksheet-auto="' + id + '"]');
+        if (trigger) trigger.disabled = true;
+        api('/api/economy/bills/' + id + '/worksheet/auto', { method: 'POST' }).then(function (res) {
+            if (trigger) trigger.disabled = false;
+            if (!res.ok) return;
+            state.economy = res.data.economy;
+            render();
+            openStatement(id);
+        }).catch(function () {
+            if (trigger) trigger.disabled = false;
+        });
+    }
+
+    function submitWorksheet(form) {
+        var billId = Number(form.getAttribute('data-worksheet-submit'));
+        var bill = findBill(billId);
+        if (!bill) return;
+        var fields = (bill.worksheet && bill.worksheet.fields) || [];
+        var answers = {};
+        var bad = false;
+        fields.forEach(function (field) {
+            showFieldError(form, field.id, '');
+            var input = form.querySelector('#ws-' + field.id);
+            var raw = input ? input.value : '';
+            if (isNaN(parseAmount(raw))) {
+                showFieldError(form, field.id, 'Enter an amount, like 25.50.');
+                bad = true;
+            }
+            answers[field.id] = raw;
+        });
+        if (bad) return;
+        var button = form.querySelector('button[type="submit"]');
+        if (button) button.disabled = true;
+        api('/api/economy/bills/' + billId + '/worksheet/submit', {
+            method: 'POST',
+            body: JSON.stringify({ answers: answers })
+        }).then(function (res) {
+            if (button) button.disabled = false;
+            if (!res.ok) {
+                var errors = res.data.errors || {};
+                var any = false;
+                Object.keys(errors).forEach(function (fieldId) { showFieldError(form, fieldId, errors[fieldId]); any = true; });
+                if (!any) showFieldError(form, (fields[0] || {}).id, res.data.error || 'That did not check out.');
+                return;
+            }
+            state.economy = res.data.economy;
+            render();
+            openStatement(billId);
+        }).catch(function () {
+            if (button) button.disabled = false;
+        });
     }
 
     function showFieldError(form, field, message) {
@@ -1422,10 +1514,14 @@
                 if (waiveBtn) { staffWaive(Number(waiveBtn.getAttribute('data-staff-waive'))); return; }
                 var confirmBtn = t.closest('[data-confirm-savings]');
                 if (confirmBtn) { doSavingsTransfer('to_checking', confirmBtn.getAttribute('data-confirm-savings'), true); }
+                var autoBtn = t.closest('[data-worksheet-auto]');
+                if (autoBtn) { autoFillWorksheet(Number(autoBtn.getAttribute('data-worksheet-auto'))); }
             });
             modal.addEventListener('submit', function (ev) {
-                var form = ev.target.closest('[data-pay-bill]');
-                if (form) { ev.preventDefault(); submitPayment(form); }
+                var payForm = ev.target.closest('[data-pay-bill]');
+                if (payForm) { ev.preventDefault(); submitPayment(payForm); return; }
+                var wsForm = ev.target.closest('[data-worksheet-submit]');
+                if (wsForm) { ev.preventDefault(); submitWorksheet(wsForm); }
             });
             modal.addEventListener('input', function (ev) {
                 var field = ev.target.closest('.bills2-field');
@@ -1514,7 +1610,9 @@
         html += '<fieldset><legend>Late fees and savings</legend><div class="econ-grid">' +
             adminField('Emergency fund goal (weeks of bills)', 'econ-goal-weeks', b.savings_goal_weeks) +
             adminField('Rent late fee (% of late rent)', 'econ-rent-pct', (Number(fees.rent_percent || 0.08) * 100).toFixed(1), 'Minnesota allows at most 8%.') +
-            adminField('Other bills late fee ($)', 'econ-other-fee', fees.other_flat) + '</div></fieldset>';
+            adminField('Other bills late fee ($)', 'econ-other-fee', fees.other_flat) +
+            adminField('Convenience fee (% to auto-fill a worksheet bill)', 'econ-convenience-pct', (Number(b.convenience_fee_percent || 0.20) * 100).toFixed(0)) +
+            '</div></fieldset>';
         html += '<fieldset><legend>Weekly prices</legend>' +
             '<p style="margin:0 0 8px;font-size:12px;color:#57534e">Enter real prices. Students pay them times the cost of living ' +
             '(emergency fund amounts stay the same).</p>';
@@ -1573,11 +1671,13 @@
         var data = wrap._economySettings;
         function val(id) { return ((document.getElementById(id) || {}).value || '').trim(); }
         var pct = parseFloat(val('econ-rent-pct'));
+        var conveniencePct = parseFloat(val('econ-convenience-pct'));
         var share = parseFloat(val('econ-tenant-share'));
         var col = parseFloat(val('econ-col'));
         var bills = {
             cost_of_living: isNaN(col) || col <= 0 ? '0.85' : String(col / 100),
             late_fees: { rent_percent: isNaN(pct) ? '0.08' : String(pct / 100), other_flat: val('econ-other-fee') },
+            convenience_fee_percent: isNaN(conveniencePct) ? '0.20' : String(conveniencePct / 100),
             savings_goal_weeks: parseInt(val('econ-goal-weeks'), 10) || 3,
             benefits: {
                 income_weeks: parseInt(val('econ-income-weeks'), 10) || 4,

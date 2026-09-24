@@ -685,6 +685,49 @@
     margin-top: 4px;
 }
 
+.bills2-worksheet-given {
+    background: #f7f5f2;
+    border: 1px solid #e5e1da;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0;
+}
+
+.bills2-worksheet-given h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #78716c;
+}
+
+.bills2-worksheet-form {
+    border-top: none;
+    background: transparent;
+    padding: 6px 0 0;
+}
+
+.bills2-worksheet-skip {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #e5e1da;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.bills2-worksheet-skip p {
+    margin: 0;
+}
+
+.bills2-worksheet-flag {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--bills-amber);
+}
+
 .bills2-radio-row {
     display: flex;
     gap: 16px;

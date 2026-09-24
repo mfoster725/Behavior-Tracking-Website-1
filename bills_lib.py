@@ -19,7 +19,7 @@ import hashlib
 from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from economy_lib import money
+from economy_lib import amounts_close, money, parse_money
 
 BILLS_VERSION = 2
 WEEKS_PER_YEAR = Decimal('52')
@@ -366,6 +366,8 @@ LEGACY_HEALTH = {'none': 'bronze', '6000': 'bronze', '1200': 'silver', '0': 'gol
 DEFAULT_SETTINGS = {
     'cost_of_living': DEFAULT_COST_OF_LIVING,
     'late_fees': {'rent_percent': '0.08', 'other_flat': '5.00'},
+    # Charged when a student has a worksheet bill auto-filled instead of working it out.
+    'convenience_fee_percent': '0.20',
     # Emergency fund goal in weeks of bills; once it is met, no weekly deposit is billed.
     'savings_goal_weeks': 3,
     'benefits': {
@@ -408,6 +410,7 @@ def merged_settings(raw):
     out = {
         'cost_of_living': DEFAULT_SETTINGS['cost_of_living'],
         'late_fees': dict(DEFAULT_SETTINGS['late_fees']),
+        'convenience_fee_percent': DEFAULT_SETTINGS['convenience_fee_percent'],
         'savings_goal_weeks': DEFAULT_SETTINGS['savings_goal_weeks'],
         'benefits': {
             'income_weeks': DEFAULT_SETTINGS['benefits']['income_weeks'],
@@ -423,6 +426,8 @@ def merged_settings(raw):
     if raw.get('cost_of_living') not in (None, ''):
         out['cost_of_living'] = str(cost_of_living(raw))
     out['late_fees'].update({k: v for k, v in (raw.get('late_fees') or {}).items() if v not in (None, '')})
+    if raw.get('convenience_fee_percent') not in (None, ''):
+        out['convenience_fee_percent'] = str(raw['convenience_fee_percent'])
     if raw.get('savings_goal_weeks'):
         out['savings_goal_weeks'] = int(raw['savings_goal_weeks'])
     benefits = raw.get('benefits') or {}
@@ -710,21 +715,29 @@ def statement_lines(slug, catalog, plan, ctx):
         rent = money(listing.get('weekly'))
         lines.append(_line(f"Rent: {listing.get('label', 'Apartment')} ({listing.get('unit', '')})".replace(' ()', ''), rent))
         housing = benefits.get('housing')
+        housing_credit = ZERO
         if housing and housing.get('income_weekly') is not None:
             calc = housing_assistance(rent, listing.get('bedrooms'), housing['income_weekly'], ctx['settings'])
             if calc['amount'] > 0:
                 lines.append(_line('Housing assistance payment (Section 8 voucher)', -calc['amount'], 'credit'))
+                housing_credit = calc['amount']
         meta['payee'] = listing.get('payee')
+        meta['rent_base'] = str(rent)
+        meta['housing_credit'] = str(housing_credit)
     elif slug == 'electric':
         params = opts.get('params') or {}
         kwh = electric_usage(opts, listing, ctx['student_id'], ctx['monday'])
         rate = _dec(params.get('rate_per_kwh'), '0.16')
-        lines.append(_line('Basic service charge', _dec(params.get('customer_charge_weekly'), '2.00')))
+        customer_charge = _dec(params.get('customer_charge_weekly'), '2.00')
+        lines.append(_line('Basic service charge', customer_charge))
         lines.append(_line(f'Energy used: {kwh} kWh x ${rate_text(rate)}', money(Decimal(kwh) * rate)))
         if roommate:
             half = money(lines_total(lines) / 2)
             lines.append(_line('Your roommate pays half', -half, 'credit'))
         meta['kwh'] = kwh
+        meta['rate_per_kwh'] = str(rate)
+        meta['customer_charge'] = str(money(customer_charge))
+        meta['roommate'] = roommate
     elif slug == 'internet':
         opt = find_option(opts, plan.get('internet')) or {}
         params = opts.get('params') or {}
@@ -734,6 +747,9 @@ def statement_lines(slug, catalog, plan, ctx):
         if roommate:
             half = money(lines_total(lines) / 2)
             lines.append(_line('Your roommate pays half', -half, 'credit'))
+        meta['plan_price'] = str(money(opt.get('weekly')))
+        meta['equipment_price'] = str(money(params.get('equipment_weekly'))) if _dec(params.get('equipment_weekly')) > 0 else '0.00'
+        meta['roommate'] = roommate
     elif slug == 'groceries':
         opt = find_option(opts, plan.get('groceries')) or {}
         total = money(opt.get('weekly'))
@@ -754,19 +770,27 @@ def statement_lines(slug, catalog, plan, ctx):
             if amount > 0:
                 lines.append(_line('SNAP EBT card', -amount, 'credit'))
         meta['plan'] = opt.get('label')
+        meta['weekly_budget'] = str(total)
+        meta['category_label'] = cats[0][0]
+        meta['category_share'] = str(cats[0][1])
     elif slug == 'health':
         opt = find_option(opts, plan.get('health')) or {}
         premium = money(opt.get('weekly'))
         lines.append(_line(f"{opt.get('label', 'Health plan')} premium ({opt.get('detail', '').rstrip('.')})".replace(' ()', ''), premium))
         health = benefits.get('health')
+        health_credit = ZERO
         if health and health.get('income_weekly') is not None:
             bench = find_option(opts, ctx['settings']['benefits']['health'].get('benchmark_option', 'silver')) or opt
             calc = health_help(health['income_weekly'], money(bench.get('weekly')), ctx['settings'])
             if calc['kind'] == 'ma':
                 lines.append(_line('Medical Assistance pays your premium', -premium, 'credit'))
+                health_credit = premium
             elif calc['kind'] == 'credit' and calc['amount'] > 0:
-                lines.append(_line('Premium tax credit', -min(calc['amount'], premium), 'credit'))
+                health_credit = min(calc['amount'], premium)
+                lines.append(_line('Premium tax credit', -health_credit, 'credit'))
         meta['plan'] = opt.get('label')
+        meta['premium'] = str(premium)
+        meta['health_credit'] = str(health_credit)
     elif slug == 'savings':
         opt = find_option(opts, plan.get('savings')) or {}
         lines.append(_line('Deposit to your emergency fund', opt.get('weekly')))
@@ -781,7 +805,10 @@ def statement_lines(slug, catalog, plan, ctx):
         principal = max(ZERO, min(money(balance), money(payment - interest)))
         lines.append(_line('Principal', principal))
         lines.append(_line(f'Interest ({(rate * 100):.2f}% a year)', interest))
-        meta.update({'balance_before': str(money(balance)), 'principal': str(principal), 'loan_label': spec.get('label')})
+        meta.update({
+            'balance_before': str(money(balance)), 'principal': str(principal), 'loan_label': spec.get('label'),
+            'rate': str(rate), 'payment': str(payment),
+        })
     elif slug == 'renters':
         opt = find_option(opts, plan.get('renters')) or {}
         lines.append(_line(f"Renters insurance premium ({opt.get('label', 'coverage')})", opt.get('weekly')))
@@ -800,6 +827,9 @@ def statement_lines(slug, catalog, plan, ctx):
         gallons = _dec(vehicle.get('gallons_week'), '10')
         lines.append(_line(f'Unleaded fuel: {gallons.normalize()} gal x ${price:.2f}', money(gallons * price)))
         lines.append(_line('Oil changes, tires, and repairs', vehicle.get('upkeep_weekly')))
+        meta['gallons'] = str(gallons)
+        meta['fuel_price'] = str(price)
+        meta['upkeep'] = str(money(vehicle.get('upkeep_weekly')))
     return lines, meta
 
 
@@ -855,3 +885,139 @@ def late_fee(slug, overdue, rent_charge, settings):
         base = min(overdue, money(rent_charge)) if rent_charge else overdue
         return money(base * _dec(fees.get('rent_percent'), '0.08'))
     return money(_dec(fees.get('other_flat'), '5.00'))
+
+
+# ---------------------------------------------------------------------------
+# Worksheets: work the bill's math out by hand, or pay a fee to skip it
+# ---------------------------------------------------------------------------
+
+def convenience_fee(base_amount, settings):
+    """20% (by default) to have a worksheet bill filled in instead of worked out."""
+    rate = _dec((settings or {}).get('convenience_fee_percent'), '0.20')
+    return money(_dec(base_amount) * rate)
+
+
+def worksheet_spec(slug, meta):
+    """Answer-free worksheet for the browser: the given numbers, and blank fields to fill in.
+
+    Only reads ``meta`` (frozen on the bill at statement time), never the catalog or
+    settings, so what a student sees can never drift from what they're graded against.
+    """
+    meta = meta or {}
+    if slug == 'electric':
+        given = [
+            ('Energy used', f"{meta.get('kwh', 0)} kWh"),
+            ('Rate', f"${rate_text(_dec(meta.get('rate_per_kwh')))} per kWh"),
+            ('Basic service charge', f"${_dec(meta.get('customer_charge')):,.2f}"),
+        ]
+        fields = [
+            {'id': 'energy_charge', 'label': 'Energy charge (kWh x rate)'},
+            {'id': 'total', 'label': 'Total due' + (', split with your roommate' if meta.get('roommate') else '')},
+        ]
+    elif slug == 'groceries':
+        given = [
+            ('Weekly grocery budget', f"${_dec(meta.get('weekly_budget')):,.2f}"),
+            (f"{meta.get('category_label') or 'First category'} share", f"{_dec(meta.get('category_share')) * 100:.0f}% of the budget"),
+        ]
+        fields = [
+            {'id': 'category_amount', 'label': f"{meta.get('category_label') or 'That category'} amount"},
+            {'id': 'total', 'label': 'Total due (after any SNAP credit)'},
+        ]
+    elif slug == 'student_loan':
+        given = [
+            ('Balance before this payment', f"${_dec(meta.get('balance_before')):,.2f}"),
+            ('Interest rate', f"{_dec(meta.get('rate')) * 100:.2f}% a year"),
+            ('Weekly payment', f"${_dec(meta.get('payment')):,.2f}"),
+        ]
+        fields = [
+            {'id': 'interest', 'label': 'Interest (balance x rate / 52)'},
+            {'id': 'principal', 'label': 'Principal (payment - interest)'},
+        ]
+    elif slug == 'fuel':
+        given = [
+            ('Gallons used', str(_dec(meta.get('gallons')).normalize())),
+            ('Price per gallon', f"${_dec(meta.get('fuel_price')):,.2f}"),
+            ('Oil changes, tires, and repairs', f"${_dec(meta.get('upkeep')):,.2f}"),
+        ]
+        fields = [
+            {'id': 'fuel_cost', 'label': 'Fuel cost (gallons x price)'},
+            {'id': 'total', 'label': 'Total due (fuel cost + upkeep)'},
+        ]
+    elif slug == 'internet':
+        given = [
+            ('Plan price', f"${_dec(meta.get('plan_price')):,.2f}"),
+            ('Equipment', f"${_dec(meta.get('equipment_price')):,.2f}"),
+        ]
+        fields = [
+            {'id': 'subtotal', 'label': 'Subtotal (plan + equipment)'},
+            {'id': 'total', 'label': 'Total due' + (', split with your roommate' if meta.get('roommate') else '')},
+        ]
+    elif slug == 'rent':
+        given = [
+            ('Rent', f"${_dec(meta.get('rent_base')):,.2f}"),
+            ('Housing assistance credit', f"${_dec(meta.get('housing_credit')):,.2f}"),
+        ]
+        fields = [{'id': 'total', 'label': 'Total due (rent - assistance credit)'}]
+    elif slug == 'health':
+        given = [
+            ('Premium', f"${_dec(meta.get('premium')):,.2f}"),
+            ('Assistance credit', f"${_dec(meta.get('health_credit')):,.2f}"),
+        ]
+        fields = [{'id': 'total', 'label': 'Total due (premium - assistance credit)'}]
+    else:
+        given, fields = [], []
+    return {'given': given, 'fields': fields}
+
+
+def grade_worksheet(slug, meta, base_amount, answers):
+    """Grade a student's worksheet answers against the numbers frozen on this bill.
+
+    ``answers``: {field_id: raw string}. Returns (all_correct, errors), where errors
+    maps field_id -> message for any missing or wrong answer.
+    """
+    meta = meta or {}
+    answers = answers or {}
+    errors = {}
+    base_amount = money(base_amount)
+
+    def check(field_id, expected, message):
+        value = parse_money(answers.get(field_id))
+        if value is None:
+            errors[field_id] = 'Enter an amount.'
+        elif not amounts_close(value, expected):
+            errors[field_id] = message
+
+    if slug == 'electric':
+        energy_charge = money(_dec(meta.get('kwh')) * _dec(meta.get('rate_per_kwh')))
+        check('energy_charge', energy_charge, 'Multiply kWh used by the rate per kWh.')
+        check('total', base_amount, 'Add the basic service charge to the energy charge'
+              + (', then split it with your roommate.' if meta.get('roommate') else '.'))
+    elif slug == 'groceries':
+        category_amount = money(_dec(meta.get('weekly_budget')) * _dec(meta.get('category_share')))
+        check('category_amount', category_amount, "Multiply the weekly budget by that category's share.")
+        check('total', base_amount, 'Start from the weekly budget and subtract any SNAP credit.')
+    elif slug == 'student_loan':
+        balance = _dec(meta.get('balance_before'))
+        rate = _dec(meta.get('rate'))
+        payment = _dec(meta.get('payment'))
+        interest = money(balance * rate / WEEKS_PER_YEAR)
+        principal = max(ZERO, min(money(balance), money(payment - interest)))
+        check('interest', interest, 'Multiply the balance by the interest rate, then divide by 52 weeks.')
+        check('principal', principal, 'Subtract the interest from the weekly payment.')
+    elif slug == 'fuel':
+        fuel_cost = money(_dec(meta.get('gallons')) * _dec(meta.get('fuel_price')))
+        check('fuel_cost', fuel_cost, 'Multiply gallons used by the price per gallon.')
+        check('total', base_amount, 'Add the fuel cost to the upkeep cost.')
+    elif slug == 'internet':
+        subtotal = money(_dec(meta.get('plan_price')) + _dec(meta.get('equipment_price')))
+        check('subtotal', subtotal, 'Add the plan price and the equipment cost.')
+        check('total', base_amount, 'Split the subtotal with your roommate.' if meta.get('roommate') else 'The subtotal is the total due.')
+    elif slug == 'rent':
+        check('total', money(_dec(meta.get('rent_base')) - _dec(meta.get('housing_credit'))),
+              'Subtract your housing assistance credit from the rent.')
+    elif slug == 'health':
+        check('total', money(_dec(meta.get('premium')) - _dec(meta.get('health_credit'))),
+              'Subtract your assistance credit from the premium.')
+    else:
+        return True, {}
+    return (not errors), errors
