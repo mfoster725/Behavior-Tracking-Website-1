@@ -1130,6 +1130,74 @@ function canEditPointCardForStudent(studentId) {
     return isOutsideStaff() && !!getStudentTransition(studentId);
 }
 
+/** Absent (excused/unexcused) or split-day transition students pin to the right in daily overview. */
+function shouldPinPointCardRight(studentId) {
+    return isAttendanceStarLocked(studentId) || !!getStudentTransition(studentId);
+}
+
+function comparePointCardStudentOrder(a, b) {
+    const pinA = shouldPinPointCardRight(a && a.id) ? 1 : 0;
+    const pinB = shouldPinPointCardRight(b && b.id) ? 1 : 0;
+    if (pinA !== pinB) return pinA - pinB;
+    const nameA = ((a && a.name) || '').toLowerCase();
+    const nameB = ((b && b.name) || '').toLowerCase();
+    return nameA.localeCompare(nameB);
+}
+
+function sortPointCardStudents(students) {
+    return Array.isArray(students) ? [...students].sort(comparePointCardStudentOrder) : [];
+}
+
+/** Hide from period entry when absent or in a transition period the current user cannot score. */
+function shouldHideFromPeriodEntry(studentId, period) {
+    if (isAttendanceStarLocked(studentId)) return true;
+    if (!period) return false;
+    return shouldGreyTransitionPeriod(studentId, period);
+}
+
+function getBasePeriodEntryStudents() {
+    if (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) {
+        return Array.isArray(filteredStudentsForPeriod) ? filteredStudentsForPeriod : [];
+    }
+    return Array.isArray(allStudents) ? allStudents : [];
+}
+
+function getPeriodEntryVisibleStudents() {
+    const period = currentPeriod || '';
+    return getBasePeriodEntryStudents().filter((student) => !shouldHideFromPeriodEntry(student.id, period));
+}
+
+async function ensureAttendanceDataForCurrentDate() {
+    if (!currentDate) return;
+    if (!attendanceData[currentDate]) {
+        attendanceData[currentDate] = {};
+    }
+    try {
+        const response = await fetch(
+            `/api/daily-records?start_date=${encodeURIComponent(currentDate)}&end_date=${encodeURIComponent(currentDate)}&include_details=false`
+        );
+        if (!response.ok) return;
+        const records = await response.json();
+        if (!Array.isArray(records)) return;
+        records.forEach((record) => {
+            const studentId = record && record.student_id;
+            if (studentId == null) return;
+            if (typeof isAttendanceFieldDirty === 'function' && isAttendanceFieldDirty(studentId)) {
+                return;
+            }
+            let status = record.attendance_status;
+            if (!status && record.present !== undefined) {
+                status = record.present ? 'present' : 'unexcused';
+            }
+            if (status) {
+                attendanceData[currentDate][studentId] = status;
+            }
+        });
+    } catch (error) {
+        console.error('Error loading attendance for point cards:', error);
+    }
+}
+
 function formatTransitionClock(hhmm) {
     const minutes = clockTokenToMinutes(hhmm);
     if (minutes == null) return String(hhmm || '');
@@ -2401,6 +2469,7 @@ function applyPeriodServerSnapshot(items) {
 function applyDailyServerSnapshot(records) {
     if (!Array.isArray(records) || !currentDate) return false;
     const changedStudentIds = new Set();
+    let attendanceOrderChanged = false;
     const pastSubmitTime = isPastPointCardSubmitTime(currentDate);
     if (!attendanceData[currentDate]) {
         attendanceData[currentDate] = {};
@@ -2426,6 +2495,7 @@ function applyDailyServerSnapshot(records) {
         if (attendanceStatus && !isAttendanceFieldDirty(studentId) && !studentHasFocusedPointCardControl(studentId)) {
             const previous = attendanceData[currentDate][studentId];
             if (previous !== attendanceStatus) {
+                const wasPinned = shouldPinPointCardRight(studentId);
                 attendanceData[currentDate][studentId] = attendanceStatus;
                 const attendanceSelect = document.querySelector(
                     `.attendance-select[data-student-id="${studentId}"]`
@@ -2435,6 +2505,9 @@ function applyDailyServerSnapshot(records) {
                 }
                 applyAttendanceStarCellState(studentId);
                 changedStudentIds.add(studentId);
+                if (wasPinned !== shouldPinPointCardRight(studentId)) {
+                    attendanceOrderChanged = true;
+                }
             }
         }
 
@@ -2478,6 +2551,11 @@ function applyDailyServerSnapshot(records) {
 
     if (!changedStudentIds.size) return false;
     updateDailyPercentageRow();
+    // Re-sort when attendance changes move cards left/right (skip if user is mid-edit)
+    if (attendanceOrderChanged
+        && !document.querySelector('#daily-grid .daily-input:focus, #daily-grid .attendance-select:focus')) {
+        renderDailyGrid();
+    }
     return true;
 }
 
@@ -2562,6 +2640,14 @@ function handleDailyAttendanceChange(e) {
 
     applyAttendanceStarCellState(studentId);
     updateDailyPercentageRow();
+
+    // Re-sort so absent cards move to the right immediately
+    if (document.getElementById('entry-view')?.classList.contains('active')) {
+        renderDailyGrid();
+    }
+    if (document.getElementById('period-entry-view')?.classList.contains('active')) {
+        renderStudentsGrid();
+    }
 
     // Schedule an autosave of the current daily grid state
     scheduleDailyAutosave();
@@ -5716,6 +5802,11 @@ async function loadPeriodData() {
         filteredStudentsForPeriod = allStudents;
     }
 
+    // Attendance + transition status drive period-entry visibility
+    await ensureAttendanceDataForCurrentDate();
+    const periodRosterIds = (filteredStudentsForPeriod || []).map((s) => s.id);
+    await loadStudentSchedulesForIds(periodRosterIds);
+
     // Load existing data for this period
     try {
         const response = await fetch(`/api/period-data?date=${currentDate}&period=${encodeURIComponent(currentPeriod)}`);
@@ -5744,9 +5835,9 @@ async function loadPeriodData() {
 
 function updatePeriodPercentageRow() {
     // Update percentage cells for all students in the period entry
-    // Use filtered students for period entry view, otherwise use all students
+    // Use visible (non-absent / non-transitioning) students for period entry view
     const studentsToUpdate = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
-        ? filteredStudentsForPeriod 
+        ? getPeriodEntryVisibleStudents() 
         : allStudents;
     studentsToUpdate.forEach((student) => {
         const lockValue = getAttendanceStarLockValue(student.id);
@@ -5808,9 +5899,9 @@ function renderStudentsGrid() {
     header.innerHTML = '';
     grid.innerHTML = '';
 
-    // Use filtered students for period entry view, otherwise use all students
+    // Use visible students for period entry (hide absent / transitioning-away cards)
     const studentsToDisplay = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
-        ? filteredStudentsForPeriod 
+        ? getPeriodEntryVisibleStudents() 
         : allStudents;
 
     if (!studentsToDisplay || studentsToDisplay.length === 0) {
@@ -6225,7 +6316,7 @@ async function savePeriodData(options = {}) {
     const locationInput = document.getElementById('location-input');
 
     const studentsToSave = (canEdit() && document.getElementById('period-entry-view')?.classList.contains('active')) 
-        ? filteredStudentsForPeriod 
+        ? getPeriodEntryVisibleStudents() 
         : allStudents;
     const allowedStudentIds = new Set(studentsToSave.map(s => s.id));
 
@@ -6613,13 +6704,16 @@ function isDailyStudentFilterActive() {
 
 function getVisibleDailyStudents() {
     // When a search / managed-by-me filter is active, never fall back to the full roster.
+    let students;
     if (isDailyStudentFilterActive()) {
-        return Array.isArray(filteredDailyStudents) ? filteredDailyStudents : [];
+        students = Array.isArray(filteredDailyStudents) ? filteredDailyStudents : [];
+    } else if (Array.isArray(filteredDailyStudents) && filteredDailyStudents.length > 0) {
+        students = filteredDailyStudents;
+    } else {
+        students = Array.isArray(allStudents) ? allStudents : [];
     }
-    if (Array.isArray(filteredDailyStudents) && filteredDailyStudents.length > 0) {
-        return filteredDailyStudents;
-    }
-    return Array.isArray(allStudents) ? allStudents : [];
+    // Absent / transitioning students stay visible but sort furthest right.
+    return sortPointCardStudents(students);
 }
 
 function renderDailyGrid() {
@@ -7671,14 +7765,10 @@ function initStarNavModals() {
 
 function getStudentsForStarNav() {
     if (isDailyEntryViewActive()) {
-        return Array.isArray(filteredDailyStudents) && filteredDailyStudents.length
-            ? filteredDailyStudents
-            : allStudents;
+        return getVisibleDailyStudents();
     }
     if (isPeriodEntryViewActive()) {
-        return Array.isArray(filteredStudentsForPeriod) && filteredStudentsForPeriod.length
-            ? filteredStudentsForPeriod
-            : allStudents;
+        return getPeriodEntryVisibleStudents();
     }
     return allStudents;
 }
