@@ -827,7 +827,7 @@
             '<p class="bills2-plan-big">' + fmt(s.balance) + '</p>' +
             '<div class="bills2-progress" aria-hidden="true"><span style="width:' + pct + '%"></span></div>' +
             '<p class="bills2-note" style="margin:0">' + pct + '% of your goal: ' + fmt(s.goal) + ' (' + s.goal_weeks +
-            ' weeks of bills). Experts say to save 3 months of expenses for surprises like a car repair or a medical bill.</p>';
+            ' weeks of bills), for surprises like a car repair, a doctor bill, or a week you can\'t work. Once you reach it, the weekly deposit stops.</p>';
         if (state.savingsMessage) {
             html += '<div class="bills2-banner ' + (state.savingsMessage.good ? 'is-good' : 'is-bad') + '" style="margin:12px 0 0">' + esc(state.savingsMessage.text) + '</div>';
         }
@@ -1578,7 +1578,7 @@
         var bills = {
             cost_of_living: isNaN(col) || col <= 0 ? '0.85' : String(col / 100),
             late_fees: { rent_percent: isNaN(pct) ? '0.08' : String(pct / 100), other_flat: val('econ-other-fee') },
-            savings_goal_weeks: parseInt(val('econ-goal-weeks'), 10) || 13,
+            savings_goal_weeks: parseInt(val('econ-goal-weeks'), 10) || 3,
             benefits: {
                 income_weeks: parseInt(val('econ-income-weeks'), 10) || 4,
                 fpl_annual: val('econ-fpl'),

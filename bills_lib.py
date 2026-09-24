@@ -366,7 +366,8 @@ LEGACY_HEALTH = {'none': 'bronze', '6000': 'bronze', '1200': 'silver', '0': 'gol
 DEFAULT_SETTINGS = {
     'cost_of_living': DEFAULT_COST_OF_LIVING,
     'late_fees': {'rent_percent': '0.08', 'other_flat': '5.00'},
-    'savings_goal_weeks': 13,
+    # Emergency fund goal in weeks of bills; once it is met, no weekly deposit is billed.
+    'savings_goal_weeks': 3,
     'benefits': {
         # Take-home pay from this many recent paychecks is averaged each week.
         'income_weeks': 4,
@@ -840,7 +841,7 @@ def weekly_plan_total(plan, catalog, card_color, loan_balance=None):
 def savings_goal(plan, catalog, card_color, settings):
     total, items = weekly_plan_total(plan, catalog, card_color)
     spending = money(sum((item['amount'] for item in items if item['slug'] != 'savings'), ZERO))
-    weeks = int(settings.get('savings_goal_weeks') or 13)
+    weeks = int(settings.get('savings_goal_weeks') or DEFAULT_SETTINGS['savings_goal_weeks'])
     return money(spending * weeks), weeks
 
 
