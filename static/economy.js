@@ -1543,7 +1543,8 @@
     function loadBillsView() {
         bindUi();
         if (window.billsFocusTab) {
-            state.tab = window.billsFocusTab === 'assistance' ? 'assistance' : 'week';
+            state.tab = (window.billsFocusTab === 'assistance' || window.billsFocusTab === 'savings')
+                ? window.billsFocusTab : 'week';
             window.billsFocusTab = null;
         }
         if (window.currentUser && window.currentUser.role === 'student') {
@@ -1552,6 +1553,10 @@
             return Promise.resolve();
         }
         setupStudentSearch();
+        if (window.billsFocusStudentId) {
+            state.studentId = window.billsFocusStudentId;
+            window.billsFocusStudentId = null;
+        }
         if (state.studentId && !state.showOverview) return loadEconomy(state.studentId, true);
         state.overview = null;
         render();

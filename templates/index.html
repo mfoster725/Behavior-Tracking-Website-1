@@ -1026,22 +1026,42 @@
                     id="bank-balance-section"
                     style="{% if user.role == 'student' %}display: block;{% else %}display: none;{% endif %} margin-bottom: 28px;"
                 >
-                    <div
-                        class="accounts-total-balance"
-                        style="background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(37,99,235,0.25);"
-                    >
-                        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
-                            <div>
-                                <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Current balance</p>
-                                <p id="bank-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
-                                <p id="bank-student-name" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 16px;">
+                        <div
+                            class="accounts-total-balance"
+                            style="flex: 1 1 260px; background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%); color: white; padding: 24px 28px; border-radius: 16px; margin-bottom: 0; box-shadow: 0 4px 14px rgba(37,99,235,0.25);"
+                        >
+                            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+                                <div>
+                                    <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Current balance</p>
+                                    <p id="bank-balance-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
+                                    <p id="bank-student-name" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
+                                </div>
+                                <button
+                                    type="button"
+                                    id="bank-refresh-btn"
+                                    style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;"
+                                >Refresh
+                                </button>
                             </div>
-                            <button
-                                type="button"
-                                id="bank-refresh-btn"
-                                style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;"
-                            >Refresh
-                            </button>
+                        </div>
+                        <div
+                            id="bank-savings-section"
+                            style="display: none; flex: 1 1 260px; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 24px 28px; border-radius: 16px; box-shadow: 0 4px 14px rgba(5,150,105,0.25);"
+                        >
+                            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+                                <div>
+                                    <p style="margin: 0 0 4px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9;">Emergency fund</p>
+                                    <p id="bank-savings-amount" style="margin: 0; font-size: 2rem; font-weight: bold;">$0.00</p>
+                                    <p id="bank-savings-meta" style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;"></p>
+                                </div>
+                                <button
+                                    type="button"
+                                    id="bank-savings-manage-btn"
+                                    style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; background: rgba(255,255,255,0.2); border: none; color: white; cursor: pointer; font-weight: 500;"
+                                >Manage
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2911,8 +2931,8 @@
     <iframe id="schedule-print-frame" title="Schedule print" aria-hidden="true"></iframe>
     <div id="notification-toasts" class="notification-toasts" aria-live="polite" aria-relevant="additions"></div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=bills-weekly3"></script>
-    <script src="{{ url_for('static', filename='economy.js') }}?v=bills-weekly5"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=bills-weekly6"></script>
+    <script src="{{ url_for('static', filename='economy.js') }}?v=bills-weekly6"></script>
     <script src="{{ url_for('static', filename='student_plans.js') }}?v=plan5"></script>
     {% if user.role == 'admin' %}
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric8"></script>

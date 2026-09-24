@@ -27162,12 +27162,15 @@ async function loadBankAccount(studentId) {
         const studentName = document.getElementById('bank-student-name');
         if (balanceAmount) balanceAmount.textContent = '$0.00';
         if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-        
+
         const transactionsList = document.getElementById('transactions-list');
         if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        renderBankSavingsTile(null);
         return;
     }
-    
+
+    loadBankSavingsTile(studentId);
+
     try {
         const response = await fetch(`/api/bank-account/${studentId}`);
         if (!response.ok) {
@@ -27181,12 +27184,12 @@ async function loadBankAccount(studentId) {
             if (student) studentName.textContent = student.name;
             else studentName.textContent = window.currentUser.name || 'Student';
         }
-            
+
             const transactionsList = document.getElementById('transactions-list');
             if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
             return;
         }
-        
+
         const data = await response.json();
         
         // Update balance display
@@ -27244,9 +27247,47 @@ async function loadBankAccount(studentId) {
         const studentName = document.getElementById('bank-student-name');
         if (balanceAmount) balanceAmount.textContent = '$0.00';
         if (studentName) studentName.textContent = window.currentUser.name || 'Student';
-        
+
         const transactionsList = document.getElementById('transactions-list');
         if (transactionsList) transactionsList.innerHTML = '<p>No transactions yet.</p>';
+        renderBankSavingsTile(null);
+    }
+}
+
+// Emergency fund tile on the Bank Account page (same balance the Bills > Savings tab manages).
+function renderBankSavingsTile(economy) {
+    const section = document.getElementById('bank-savings-section');
+    if (!section) return;
+    const savings = economy && economy.enrolled ? economy.savings : null;
+    if (!savings) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = 'block';
+    const amountEl = document.getElementById('bank-savings-amount');
+    const metaEl = document.getElementById('bank-savings-meta');
+    if (amountEl) amountEl.textContent = `$${Number(savings.balance || 0).toFixed(2)}`;
+    if (metaEl) {
+        metaEl.textContent = savings.met
+            ? 'Goal met: no deposit due'
+            : (savings.goal ? `Goal: $${Number(savings.goal).toFixed(2)}` : 'Pay yourself first');
+    }
+}
+
+async function loadBankSavingsTile(studentId) {
+    if (!studentId) {
+        renderBankSavingsTile(null);
+        return;
+    }
+    try {
+        const response = await fetch(`/api/economy/student/${studentId}`);
+        if (!response.ok) {
+            renderBankSavingsTile(null);
+            return;
+        }
+        renderBankSavingsTile(await response.json());
+    } catch (error) {
+        renderBankSavingsTile(null);
     }
 }
 
@@ -27261,6 +27302,19 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
                 loadBankBalancesPreview();
             }
+        });
+    }
+
+    const savingsManageBtn = document.getElementById('bank-savings-manage-btn');
+    if (savingsManageBtn && !savingsManageBtn._bankBound) {
+        savingsManageBtn._bankBound = true;
+        savingsManageBtn.addEventListener('click', () => {
+            window.billsFocusTab = 'savings';
+            if (typeof currentBankStudentId !== 'undefined' && currentBankStudentId &&
+                window.currentUser && ['staff', 'admin'].includes(window.currentUser.role)) {
+                window.billsFocusStudentId = currentBankStudentId;
+            }
+            if (typeof switchView === 'function') switchView('bills');
         });
     }
 });
