@@ -1,0 +1,765 @@
+"""Weekly bills for Manny's Market: catalog, statement math, assistance, and late fees.
+
+Everything is weekly. Statements are issued on Monday and are due the following
+Monday at 11:59 PM school time. Prices are real 2025-26 Pope County, MN costs
+(HUD FY2026 Fair Market Rents, EIA electricity prices, USDA food plans, MNsure
+premiums, local internet and phone plans) converted from monthly to weekly with
+monthly x 12 / 52. Payee names are fictional.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, time, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+
+from economy_lib import money
+
+BILLS_VERSION = 2
+WEEKS_PER_YEAR = Decimal('52')
+MONTHS_PER_YEAR = Decimal('12')
+ZERO = Decimal('0.00')
+
+
+def weekly_from_monthly(monthly):
+    return money(Decimal(str(monthly)) * MONTHS_PER_YEAR / WEEKS_PER_YEAR)
+
+
+def monthly_from_weekly(weekly):
+    return money(Decimal(str(weekly)) * WEEKS_PER_YEAR / MONTHS_PER_YEAR)
+
+
+# ---------------------------------------------------------------------------
+# Week math
+# ---------------------------------------------------------------------------
+
+def week_start(day):
+    """Monday of the week containing ``day``."""
+    return day - timedelta(days=day.weekday())
+
+
+def week_key(monday):
+    return monday.isoformat()
+
+
+def due_date_for_week(monday):
+    """A statement issued Monday is due the next Monday."""
+    return monday + timedelta(days=7)
+
+
+def due_moment(due_date, tzinfo):
+    return datetime.combine(due_date, time(23, 59, 59), tzinfo=tzinfo)
+
+
+def is_past_due(due_date, now_local):
+    return now_local > due_moment(due_date, now_local.tzinfo)
+
+
+def _stable_fraction(*parts):
+    """Deterministic 0..1 value so a student's usage looks real but never changes on reload."""
+    digest = hashlib.sha256(':'.join(str(p) for p in parts).encode('utf-8')).hexdigest()
+    return int(digest[:8], 16) / float(0xFFFFFFFF)
+
+
+def account_number(slug, student_id):
+    digest = hashlib.sha256(f'acct:{slug}:{student_id}'.encode('utf-8')).hexdigest()
+    digits = str(int(digest[:12], 16)).zfill(10)[-10:]
+    return f'{digits[:4]}-{digits[4:8]}-{digits[8:10]}'
+
+
+def confirmation_number(code, transaction_id):
+    return f'{code}-{int(transaction_id):06d}'
+
+
+# ---------------------------------------------------------------------------
+# Catalog (seeded into bill_products; admins can edit option prices)
+# ---------------------------------------------------------------------------
+
+HOUSING_NOTE = 'Heat, water, sewer, and trash are included in rent. You pay electricity and internet.'
+
+BILL_PRODUCTS_V2 = [
+    {
+        'slug': 'rent',
+        'name': 'Rent',
+        'category': 'housing',
+        'is_base': True,
+        'formula_kind': 'rent',
+        'sort_order': 10,
+        'options_json': {
+            'code': 'RNT',
+            'note': HOUSING_NOTE,
+            'options': [
+                {'id': 'studio', 'label': 'Studio apartment', 'payee': 'Lakeshore Lofts', 'unit': 'Unit 2',
+                 'detail': 'One room plus a bathroom, about 450 sq ft.',
+                 'weekly': '144.23', 'bedrooms': 0, 'kwh_factor': '0.75', 'roommate': False},
+                {'id': 'apt_1br', 'label': '1-bedroom apartment', 'payee': 'Maple Street Apartments', 'unit': 'Apt 4',
+                 'detail': 'Bedroom, kitchen, and living room, about 650 sq ft.',
+                 'weekly': '178.85', 'bedrooms': 1, 'kwh_factor': '1.00', 'roommate': False},
+                {'id': 'apt_1br_updated', 'label': '1-bedroom, updated', 'payee': 'Pine Ridge Apartments', 'unit': 'Apt 12',
+                 'detail': 'New kitchen, dishwasher, and a washer and dryer in the unit.',
+                 'weekly': '206.54', 'bedrooms': 1, 'kwh_factor': '1.10', 'roommate': False},
+                {'id': 'roommate_2br', 'label': '2-bedroom with a roommate', 'payee': 'Oak Court Apartments', 'unit': 'Apt 7',
+                 'detail': 'Your half of $1,050/month. You also split electricity and internet 50/50.',
+                 'weekly': '121.15', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': True},
+                {'id': 'apt_2br', 'label': '2-bedroom on your own', 'payee': 'Oak Court Apartments', 'unit': 'Apt 9',
+                 'detail': 'An extra bedroom for an office or guests.',
+                 'weekly': '242.31', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': False},
+                {'id': 'house', 'label': 'Small house', 'payee': 'Cedar Lane Rentals', 'unit': '2-bedroom house',
+                 'detail': 'A 2-bedroom house with a yard and a garage.',
+                 'weekly': '288.46', 'bedrooms': 2, 'kwh_factor': '1.80', 'roommate': False},
+            ],
+        },
+    },
+    {
+        'slug': 'electric',
+        'name': 'Electricity',
+        'category': 'utility',
+        'is_base': True,
+        'formula_kind': 'electric',
+        'sort_order': 20,
+        'options_json': {
+            'code': 'PPL',
+            'payee': 'Prairie Power & Light',
+            'note': 'Your bill changes every week with how much electricity you use. Summer and winter cost more.',
+            'params': {
+                'customer_charge_weekly': '2.00',
+                'rate_per_kwh': '0.16',
+                'base_kwh_week': '105',
+                'jitter': '0.08',
+                'season': {'1': '1.25', '2': '1.20', '3': '1.05', '4': '0.95', '5': '0.95', '6': '1.30',
+                           '7': '1.40', '8': '1.35', '9': '1.05', '10': '0.95', '11': '1.05', '12': '1.25'},
+            },
+        },
+    },
+    {
+        'slug': 'internet',
+        'name': 'Internet',
+        'category': 'utility',
+        'is_base': True,
+        'formula_kind': 'internet',
+        'sort_order': 30,
+        'options_json': {
+            'code': 'LAB',
+            'payee': 'Lakes Area Broadband',
+            'params': {'equipment_weekly': '0.92', 'equipment_label': 'Modem rental'},
+            'options': [
+                {'id': 'basic', 'label': 'Basic 25 Mbps', 'detail': 'DSL. Fine for school work and one video stream.', 'weekly': '11.53'},
+                {'id': 'standard', 'label': 'Standard 50 Mbps', 'detail': 'Streaming on a couple of devices.', 'weekly': '13.83'},
+                {'id': 'fast', 'label': 'Fast 100 Mbps', 'detail': 'Gaming and HD streaming.', 'weekly': '17.31'},
+                {'id': 'fiber', 'label': 'Fiber 100+ Mbps', 'detail': 'Fastest and most reliable.', 'weekly': '19.71'},
+            ],
+        },
+    },
+    {
+        'slug': 'renters',
+        'name': 'Renters insurance',
+        'category': 'insurance',
+        'is_base': True,
+        'formula_kind': 'choice',
+        'sort_order': 40,
+        'options_json': {
+            'code': 'HMI',
+            'payee': 'Harbor Mutual Insurance',
+            'note': 'Pays to replace your things after a fire, theft, or water damage.',
+            'options': [
+                {'id': 'basic', 'label': '$15,000 coverage', 'detail': 'Covers your belongings up to $15,000.', 'weekly': '2.77'},
+                {'id': 'plus', 'label': '$30,000 coverage', 'detail': 'Covers your belongings up to $30,000.', 'weekly': '3.92'},
+            ],
+        },
+    },
+    {
+        'slug': 'groceries',
+        'name': 'Groceries',
+        'category': 'food',
+        'is_base': True,
+        'formula_kind': 'groceries',
+        'sort_order': 50,
+        'options_json': {
+            'code': 'MSM',
+            'payee': 'Main Street Market',
+            'note': 'Your weekly grocery receipt. Based on USDA food plans for one adult living alone.',
+            'params': {
+                'categories': [
+                    ['Produce', '0.22'], ['Meat, fish, and eggs', '0.24'], ['Dairy', '0.14'],
+                    ['Bread, cereal, and grains', '0.12'], ['Pantry and snacks', '0.20'], ['Household basics', '0.08'],
+                ],
+            },
+            'options': [
+                {'id': 'thrifty', 'label': 'Thrifty', 'detail': 'Store brands, cooking at home.', 'weekly': '80.00'},
+                {'id': 'moderate', 'label': 'Moderate', 'detail': 'Some name brands and convenience foods.', 'weekly': '100.00'},
+                {'id': 'liberal', 'label': 'Liberal', 'detail': 'Name brands, snacks, and ready-made meals.', 'weekly': '125.00'},
+            ],
+        },
+    },
+    {
+        'slug': 'health',
+        'name': 'Health insurance',
+        'category': 'insurance',
+        'is_base': True,
+        'formula_kind': 'choice',
+        'sort_order': 60,
+        'options_json': {
+            'code': 'PHP',
+            'payee': 'Pinewood Health Plan',
+            'note': 'A lower premium means a higher deductible: you pay more yourself when you get care.',
+            'options': [
+                {'id': 'bronze', 'label': 'Bronze plan', 'detail': '$7,400 deductible.', 'weekly': '79.62'},
+                {'id': 'silver', 'label': 'Silver plan', 'detail': '$3,600 deductible.', 'weekly': '94.62'},
+                {'id': 'gold', 'label': 'Gold plan', 'detail': '$1,900 deductible.', 'weekly': '107.31'},
+            ],
+        },
+    },
+    {
+        'slug': 'savings',
+        'name': 'Emergency fund',
+        'category': 'savings',
+        'is_base': True,
+        'formula_kind': 'savings',
+        'sort_order': 70,
+        'options_json': {
+            'code': 'SAV',
+            'payee': 'Your savings account',
+            'note': 'Pay yourself first. This money moves to your savings and stays yours.',
+            'options': [
+                {'id': 's5', 'label': '$5 a week', 'weekly': '5.00'},
+                {'id': 's10', 'label': '$10 a week', 'weekly': '10.00'},
+                {'id': 's25', 'label': '$25 a week', 'weekly': '25.00'},
+                {'id': 's50', 'label': '$50 a week', 'weekly': '50.00'},
+            ],
+        },
+    },
+    {
+        'slug': 'student_loan',
+        'name': 'Student loan',
+        'category': 'loan',
+        'is_base': True,
+        'formula_kind': 'student_loan',
+        'sort_order': 80,
+        'options_json': {
+            'code': 'CLS',
+            'payee': 'Cornerstone Loan Servicing',
+            'note': 'Standard 10-year federal student loan plan.',
+            'params': {
+                'rate': '0.0652',
+                'by_color': {
+                    'blue': {'principal': '19500.00', 'weekly': '51.14', 'label': 'Associate degree loan'},
+                    'white': {'principal': '29560.00', 'weekly': '77.54', 'label': "Bachelor's degree loan"},
+                },
+            },
+        },
+    },
+    {
+        'slug': 'cell',
+        'name': 'Cell phone',
+        'category': 'utility',
+        'is_base': False,
+        'formula_kind': 'choice',
+        'sort_order': 90,
+        'options_json': {
+            'code': 'LPW',
+            'payee': 'Loop Wireless',
+            'options': [
+                {'id': 'none', 'label': 'No cell phone', 'weekly': '0.00'},
+                {'id': 'prepaid', 'label': 'Prepaid 5 GB', 'detail': 'Talk, text, and 5 GB of data. Taxes included.', 'weekly': '8.08'},
+                {'id': 'unlimited', 'label': 'Unlimited', 'detail': 'Unlimited talk, text, and data. Taxes included.', 'weekly': '17.31'},
+            ],
+        },
+    },
+    {
+        'slug': 'car_loan',
+        'name': 'Car loan',
+        'category': 'vehicle',
+        'is_base': False,
+        'formula_kind': 'car_loan',
+        'sort_order': 100,
+        'options_json': {
+            'code': 'LAF',
+            'payee': 'Lakes Area Auto Finance',
+            'note': 'A car also means insurance, gas, and repairs every week.',
+            'options': [
+                {'id': 'none', 'label': 'No car', 'detail': 'Walk, bike, or get rides.', 'loan_weekly': '0.00', 'upkeep_weekly': '0.00', 'gallons_week': '0'},
+                {'id': 'older', 'label': 'Older car, paid off', 'detail': 'No loan, but more repairs.', 'loan_weekly': '0.00', 'upkeep_weekly': '35.00', 'gallons_week': '11.5'},
+                {'id': 'used', 'label': 'Used car with a loan', 'detail': 'About a $15,000 car over 5 years.', 'loan_weekly': '75.23', 'upkeep_weekly': '25.00', 'gallons_week': '10.5'},
+                {'id': 'newer', 'label': 'Newer car with a loan', 'detail': 'About a $25,000 car over 6 years.', 'loan_weekly': '125.08', 'upkeep_weekly': '15.00', 'gallons_week': '9.5'},
+            ],
+        },
+    },
+    {
+        'slug': 'car_insurance',
+        'name': 'Car insurance',
+        'category': 'vehicle',
+        'is_base': False,
+        'formula_kind': 'choice',
+        'sort_order': 110,
+        'options_json': {
+            'code': 'GPA',
+            'payee': 'Great Plains Auto Insurance',
+            'note': 'Minnesota law requires insurance on every car. Lenders require full coverage on a car with a loan.',
+            'options': [
+                {'id': 'liability', 'label': 'Liability only', 'detail': "Pays for damage you cause to others. Not your own car.", 'weekly': '17.31'},
+                {'id': 'full', 'label': 'Full coverage', 'detail': 'Also pays to fix or replace your car.', 'weekly': '40.38'},
+            ],
+        },
+    },
+    {
+        'slug': 'fuel',
+        'name': 'Gas and upkeep',
+        'category': 'vehicle',
+        'is_base': False,
+        'formula_kind': 'fuel',
+        'sort_order': 120,
+        'options_json': {
+            'code': 'CFS',
+            'payee': 'Corner Fuel & Service',
+            'params': {'fuel_price': '4.37'},
+        },
+    },
+]
+
+PRODUCT_ORDER = [spec['slug'] for spec in BILL_PRODUCTS_V2]
+
+DEFAULT_PLAN = {
+    'version': 2,
+    'housing': 'apt_1br',
+    'internet': 'basic',
+    'renters': 'basic',
+    'groceries': 'thrifty',
+    'health': 'bronze',
+    'savings': 's10',
+    'cell': 'none',
+    'vehicle': 'none',
+    'car_insurance': 'liability',
+}
+
+# Plan key -> product slug whose options it picks from.
+PLAN_KEYS = {
+    'housing': 'rent',
+    'internet': 'internet',
+    'renters': 'renters',
+    'groceries': 'groceries',
+    'health': 'health',
+    'savings': 'savings',
+    'cell': 'cell',
+    'vehicle': 'car_loan',
+    'car_insurance': 'car_insurance',
+}
+
+LEGACY_HOUSING = {'apt_1br': 'apt_1br', 'apt_2br': 'apt_2br', 'house': 'house', 'homeless': 'studio'}
+LEGACY_VEHICLE = {'none': 'none', 'beater': 'older', 'average': 'used', 'sports': 'newer'}
+LEGACY_HEALTH = {'none': 'bronze', '6000': 'bronze', '1200': 'silver', '0': 'gold'}
+
+DEFAULT_SETTINGS = {
+    'late_fees': {'rent_percent': '0.08', 'other_flat': '5.00'},
+    'savings_goal_weeks': 13,
+    'benefits': {
+        'fpl_annual': '15650',
+        'snap': {
+            'gross_limit_pct_fpl': '200',
+            'max_allotment_monthly': '298',
+            'earned_income_deduction': '0.20',
+            'standard_deduction_monthly': '209',
+            'utility_allowance_monthly': '100',
+            'shelter_cap_monthly': '744',
+            'benefit_reduction': '0.30',
+        },
+        'health': {
+            'ma_limit_pct_fpl': '138',
+            'credit_limit_pct_fpl': '400',
+            'expected_contribution': '0.085',
+            'benchmark_option': 'silver',
+        },
+        'housing': {
+            'tenant_share': '0.30',
+            'payment_standard_weekly': {'0': '167.54', '1': '185.31', '2': '243.00'},
+        },
+    },
+}
+
+
+def _dec(value, default='0'):
+    try:
+        return Decimal(str(value if value is not None and value != '' else default))
+    except Exception:
+        return Decimal(str(default))
+
+
+def merged_settings(raw):
+    """DEFAULT_SETTINGS overlaid with whatever the admin saved."""
+    raw = raw if isinstance(raw, dict) else {}
+    out = {
+        'late_fees': dict(DEFAULT_SETTINGS['late_fees']),
+        'savings_goal_weeks': DEFAULT_SETTINGS['savings_goal_weeks'],
+        'benefits': {
+            'fpl_annual': DEFAULT_SETTINGS['benefits']['fpl_annual'],
+            'snap': dict(DEFAULT_SETTINGS['benefits']['snap']),
+            'health': dict(DEFAULT_SETTINGS['benefits']['health']),
+            'housing': {
+                'tenant_share': DEFAULT_SETTINGS['benefits']['housing']['tenant_share'],
+                'payment_standard_weekly': dict(DEFAULT_SETTINGS['benefits']['housing']['payment_standard_weekly']),
+            },
+        },
+    }
+    out['late_fees'].update({k: v for k, v in (raw.get('late_fees') or {}).items() if v not in (None, '')})
+    if raw.get('savings_goal_weeks'):
+        out['savings_goal_weeks'] = int(raw['savings_goal_weeks'])
+    benefits = raw.get('benefits') or {}
+    if benefits.get('fpl_annual'):
+        out['benefits']['fpl_annual'] = benefits['fpl_annual']
+    for program in ('snap', 'health'):
+        out['benefits'][program].update({k: v for k, v in (benefits.get(program) or {}).items() if v not in (None, '')})
+    housing = benefits.get('housing') or {}
+    if housing.get('tenant_share'):
+        out['benefits']['housing']['tenant_share'] = housing['tenant_share']
+    out['benefits']['housing']['payment_standard_weekly'].update(housing.get('payment_standard_weekly') or {})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Plans
+# ---------------------------------------------------------------------------
+
+def product_options(product_opts):
+    return list((product_opts or {}).get('options') or [])
+
+
+def find_option(product_opts, option_id):
+    for opt in product_options(product_opts):
+        if str(opt.get('id')) == str(option_id):
+            return opt
+    return None
+
+
+def normalize_plan(raw, catalog):
+    """Return a valid v2 plan. Accepts old v1 budget choices and maps them over.
+
+    ``catalog`` maps product slug -> options dict (from bill_products.options_json).
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    plan = dict(DEFAULT_PLAN)
+    if raw.get('version') != 2:
+        if raw.get('housing_kind'):
+            housing = LEGACY_HOUSING.get(raw.get('housing_kind'), 'apt_1br')
+            if housing == 'apt_2br' and raw.get('roommate'):
+                housing = 'roommate_2br'
+            plan['housing'] = housing
+        if 'cell' in raw:
+            plan['cell'] = 'prepaid' if raw.get('cell') else 'none'
+        if raw.get('vehicle'):
+            plan['vehicle'] = LEGACY_VEHICLE.get(raw.get('vehicle'), 'none')
+        if raw.get('car_insurance') in ('liability', 'full'):
+            plan['car_insurance'] = raw['car_insurance']
+        if raw.get('health') is not None:
+            plan['health'] = LEGACY_HEALTH.get(str(raw.get('health')), 'bronze')
+        if raw.get('emergency_fund') is False:
+            plan['savings'] = 's5'
+    else:
+        for key in PLAN_KEYS:
+            if raw.get(key) is not None:
+                plan[key] = str(raw[key])
+    for key, slug in PLAN_KEYS.items():
+        opts = catalog.get(slug)
+        if opts is None:
+            continue
+        if find_option(opts, plan[key]) is None:
+            fallback = DEFAULT_PLAN[key]
+            if find_option(opts, fallback) is None and product_options(opts):
+                fallback = product_options(opts)[0].get('id')
+            plan[key] = fallback
+    vehicle = find_option(catalog.get('car_loan') or {}, plan['vehicle']) or {}
+    if _dec(vehicle.get('loan_weekly')) > 0:
+        plan['car_insurance'] = 'full'
+    plan['version'] = 2
+    return plan
+
+
+def plan_problems(raw_plan, catalog):
+    """Explain choices normalize_plan would have to change (shown to the student)."""
+    problems = []
+    vehicle = find_option(catalog.get('car_loan') or {}, (raw_plan or {}).get('vehicle')) or {}
+    if _dec(vehicle.get('loan_weekly')) > 0 and (raw_plan or {}).get('car_insurance') == 'liability':
+        problems.append('A car with a loan needs full coverage insurance, so we switched it to full coverage.')
+    return problems
+
+
+def student_loan_spec(catalog, card_color):
+    params = (catalog.get('student_loan') or {}).get('params') or {}
+    return (params.get('by_color') or {}).get((card_color or '').lower())
+
+
+def selected_slugs(plan, catalog, card_color):
+    slugs = ['rent', 'electric', 'internet', 'renters', 'groceries', 'health', 'savings']
+    if student_loan_spec(catalog, card_color):
+        slugs.append('student_loan')
+    if plan.get('cell') and plan['cell'] != 'none':
+        slugs.append('cell')
+    if plan.get('vehicle') and plan['vehicle'] != 'none':
+        vehicle = find_option(catalog.get('car_loan') or {}, plan['vehicle']) or {}
+        if _dec(vehicle.get('loan_weekly')) > 0:
+            slugs.append('car_loan')
+        slugs.extend(['car_insurance', 'fuel'])
+    return [slug for slug in PRODUCT_ORDER if slug in slugs and slug in catalog]
+
+
+def housing_listing(plan, catalog):
+    return find_option(catalog.get('rent') or {}, plan.get('housing')) or find_option(catalog.get('rent') or {}, 'apt_1br') or {}
+
+
+# ---------------------------------------------------------------------------
+# Assistance math (realistic, simplified; parameters are admin-editable)
+# ---------------------------------------------------------------------------
+
+def fpl_weekly(settings):
+    return _dec(settings['benefits']['fpl_annual']) / WEEKS_PER_YEAR
+
+
+def housing_assistance(rent_weekly, bedrooms, income_weekly, settings):
+    """Section 8: you pay 30% of your income; the voucher pays the rest of the rent, up to the payment standard."""
+    params = settings['benefits']['housing']
+    standards = params.get('payment_standard_weekly') or {}
+    key = str(min(int(bedrooms or 0), 2))
+    standard = _dec(standards.get(key), standards.get('1', '185.31'))
+    share = money(_dec(income_weekly) * _dec(params.get('tenant_share'), '0.30'))
+    covered = min(money(rent_weekly), money(standard))
+    amount = max(ZERO, money(covered - share))
+    return {
+        'amount': amount,
+        'tenant_share': share,
+        'payment_standard': money(standard),
+        'explain': (
+            f"You pay 30% of your weekly income (${money(income_weekly):,.2f} x 30% = ${share:,.2f}). "
+            f"The voucher pays the rest of your rent, up to ${money(standard):,.2f} a week."
+        ),
+    }
+
+
+def snap_benefit(income_weekly, shelter_weekly, settings):
+    params = settings['benefits']['snap']
+    income = _dec(income_weekly)
+    limit = fpl_weekly(settings) * _dec(params['gross_limit_pct_fpl']) / Decimal('100')
+    max_weekly = weekly_from_monthly(params['max_allotment_monthly'])
+    if income > limit:
+        return {'amount': ZERO, 'eligible': False,
+                'explain': f"Your gross income (${money(income):,.2f} a week) is over the SNAP limit of ${money(limit):,.2f} a week."}
+    adjusted = max(ZERO, income * (Decimal('1') - _dec(params['earned_income_deduction']))
+                   - weekly_from_monthly(params['standard_deduction_monthly']))
+    shelter = _dec(shelter_weekly) + weekly_from_monthly(params['utility_allowance_monthly'])
+    excess = max(ZERO, shelter - adjusted / Decimal('2'))
+    excess = min(excess, weekly_from_monthly(params['shelter_cap_monthly']))
+    net = max(ZERO, adjusted - excess)
+    amount = max(ZERO, money(max_weekly - net * _dec(params['benefit_reduction'])))
+    return {
+        'amount': amount,
+        'eligible': amount > 0,
+        'explain': (
+            f"The most SNAP pays one person is ${max_weekly:,.2f} a week. It goes down by 30% of your net income "
+            f"after deductions (${money(net):,.2f}), which leaves ${amount:,.2f} a week for groceries."
+        ),
+    }
+
+
+def health_help(income_weekly, benchmark_weekly, settings):
+    params = settings['benefits']['health']
+    income = _dec(income_weekly)
+    fpl = fpl_weekly(settings)
+    ma_limit = fpl * _dec(params['ma_limit_pct_fpl']) / Decimal('100')
+    credit_limit = fpl * _dec(params['credit_limit_pct_fpl']) / Decimal('100')
+    if income <= ma_limit:
+        return {'kind': 'ma', 'amount': None,
+                'explain': f"Your income (${money(income):,.2f} a week) is under ${money(ma_limit):,.2f}, so Medical Assistance pays your whole premium."}
+    if income <= credit_limit:
+        expected = money(income * _dec(params['expected_contribution']))
+        credit = max(ZERO, money(_dec(benchmark_weekly) - expected))
+        return {'kind': 'credit', 'amount': credit,
+                'explain': (
+                    f"You're over the Medical Assistance limit, so you get a premium tax credit instead: "
+                    f"the silver plan (${money(benchmark_weekly):,.2f}) minus 8.5% of your income (${expected:,.2f}) = ${credit:,.2f} a week."
+                )}
+    return {'kind': None, 'amount': ZERO,
+            'explain': f"Your income is over ${money(credit_limit):,.2f} a week, so you don't qualify for help paying for health insurance."}
+
+
+# ---------------------------------------------------------------------------
+# Statement lines
+# ---------------------------------------------------------------------------
+
+def _line(label, amount, kind='charge'):
+    return {'label': label, 'amount': str(money(amount)), 'kind': kind}
+
+
+def lines_total(lines):
+    return money(sum((Decimal(str(line['amount'])) for line in lines), ZERO))
+
+
+def electric_usage(product_opts, listing, student_id, monday):
+    params = product_opts.get('params') or {}
+    season = params.get('season') or {}
+    factor = _dec(season.get(str(monday.month)), '1')
+    jitter = _dec(params.get('jitter'), '0.08')
+    wobble = Decimal(str(round(_stable_fraction(student_id, monday.isoformat(), 'kwh') * 2 - 1, 4))) * jitter
+    kwh = _dec(params.get('base_kwh_week'), '105') * _dec(listing.get('kwh_factor'), '1') * factor * (Decimal('1') + wobble)
+    return int(kwh.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def statement_lines(slug, catalog, plan, ctx):
+    """Line items for one product's weekly statement.
+
+    ctx: student_id, monday, card_color, benefits (dict program -> approved info),
+    loan_balance (Decimal or None), settings.
+    Returns (lines, meta).
+    """
+    opts = catalog.get(slug) or {}
+    listing = housing_listing(plan, catalog)
+    roommate = bool(listing.get('roommate'))
+    lines = []
+    meta = {}
+    benefits = ctx.get('benefits') or {}
+
+    if slug == 'rent':
+        rent = money(listing.get('weekly'))
+        lines.append(_line(f"Rent: {listing.get('label', 'Apartment')} ({listing.get('unit', '')})".replace(' ()', ''), rent))
+        housing = benefits.get('housing')
+        if housing and housing.get('income_weekly') is not None:
+            calc = housing_assistance(rent, listing.get('bedrooms'), housing['income_weekly'], ctx['settings'])
+            if calc['amount'] > 0:
+                lines.append(_line('Housing assistance payment (Section 8 voucher)', -calc['amount'], 'credit'))
+        meta['payee'] = listing.get('payee')
+    elif slug == 'electric':
+        params = opts.get('params') or {}
+        kwh = electric_usage(opts, listing, ctx['student_id'], ctx['monday'])
+        rate = _dec(params.get('rate_per_kwh'), '0.16')
+        lines.append(_line('Basic service charge', _dec(params.get('customer_charge_weekly'), '2.00')))
+        lines.append(_line(f'Energy used: {kwh} kWh x ${rate:.2f}', money(Decimal(kwh) * rate)))
+        if roommate:
+            half = money(lines_total(lines) / 2)
+            lines.append(_line('Your roommate pays half', -half, 'credit'))
+        meta['kwh'] = kwh
+    elif slug == 'internet':
+        opt = find_option(opts, plan.get('internet')) or {}
+        params = opts.get('params') or {}
+        lines.append(_line(f"{opt.get('label', 'Internet')} plan", opt.get('weekly')))
+        if _dec(params.get('equipment_weekly')) > 0:
+            lines.append(_line(params.get('equipment_label') or 'Equipment', params.get('equipment_weekly')))
+        if roommate:
+            half = money(lines_total(lines) / 2)
+            lines.append(_line('Your roommate pays half', -half, 'credit'))
+    elif slug == 'groceries':
+        opt = find_option(opts, plan.get('groceries')) or {}
+        total = money(opt.get('weekly'))
+        cats = (opts.get('params') or {}).get('categories') or [['Groceries', '1']]
+        running = ZERO
+        for idx, (label, share) in enumerate(cats):
+            amount = total - running if idx == len(cats) - 1 else money(total * _dec(share))
+            running += amount
+            lines.append(_line(label, amount))
+        snap = benefits.get('snap')
+        if snap and snap.get('income_weekly') is not None:
+            shelter = money(listing.get('weekly'))
+            housing = benefits.get('housing')
+            if housing and housing.get('income_weekly') is not None:
+                shelter = money(shelter - housing_assistance(shelter, listing.get('bedrooms'), housing['income_weekly'], ctx['settings'])['amount'])
+            calc = snap_benefit(snap['income_weekly'], shelter, ctx['settings'])
+            amount = min(calc['amount'], total)
+            if amount > 0:
+                lines.append(_line('SNAP EBT card', -amount, 'credit'))
+        meta['plan'] = opt.get('label')
+    elif slug == 'health':
+        opt = find_option(opts, plan.get('health')) or {}
+        premium = money(opt.get('weekly'))
+        lines.append(_line(f"{opt.get('label', 'Health plan')} premium ({opt.get('detail', '').rstrip('.')})".replace(' ()', ''), premium))
+        health = benefits.get('health')
+        if health and health.get('income_weekly') is not None:
+            bench = find_option(opts, ctx['settings']['benefits']['health'].get('benchmark_option', 'silver')) or opt
+            calc = health_help(health['income_weekly'], money(bench.get('weekly')), ctx['settings'])
+            if calc['kind'] == 'ma':
+                lines.append(_line('Medical Assistance pays your premium', -premium, 'credit'))
+            elif calc['kind'] == 'credit' and calc['amount'] > 0:
+                lines.append(_line('Premium tax credit', -min(calc['amount'], premium), 'credit'))
+        meta['plan'] = opt.get('label')
+    elif slug == 'savings':
+        opt = find_option(opts, plan.get('savings')) or {}
+        lines.append(_line('Deposit to your emergency fund', opt.get('weekly')))
+    elif slug == 'student_loan':
+        spec = student_loan_spec(catalog, ctx.get('card_color')) or {}
+        rate = _dec((opts.get('params') or {}).get('rate'), '0.0652')
+        balance = ctx.get('loan_balance')
+        if balance is None:
+            balance = _dec(spec.get('principal'))
+        payment = money(spec.get('weekly'))
+        interest = money(_dec(balance) * rate / WEEKS_PER_YEAR)
+        principal = max(ZERO, min(money(balance), money(payment - interest)))
+        lines.append(_line('Principal', principal))
+        lines.append(_line(f'Interest ({(rate * 100):.2f}% a year)', interest))
+        meta.update({'balance_before': str(money(balance)), 'principal': str(principal), 'loan_label': spec.get('label')})
+    elif slug == 'renters':
+        opt = find_option(opts, plan.get('renters')) or {}
+        lines.append(_line(f"Renters insurance premium ({opt.get('label', 'coverage')})", opt.get('weekly')))
+    elif slug == 'cell':
+        opt = find_option(opts, plan.get('cell')) or {}
+        lines.append(_line(f"{opt.get('label', 'Phone')} plan", opt.get('weekly')))
+    elif slug == 'car_loan':
+        vehicle = find_option(opts, plan.get('vehicle')) or {}
+        lines.append(_line(f"Loan payment: {vehicle.get('label', 'Car')}", vehicle.get('loan_weekly')))
+    elif slug == 'car_insurance':
+        opt = find_option(opts, plan.get('car_insurance')) or {}
+        lines.append(_line(f"{opt.get('label', 'Coverage')} premium", opt.get('weekly')))
+    elif slug == 'fuel':
+        vehicle = find_option(catalog.get('car_loan') or {}, plan.get('vehicle')) or {}
+        price = _dec((opts.get('params') or {}).get('fuel_price'), '4.37')
+        gallons = _dec(vehicle.get('gallons_week'), '10')
+        lines.append(_line(f'Unleaded fuel: {gallons.normalize()} gal x ${price:.2f}', money(gallons * price)))
+        lines.append(_line('Oil changes, tires, and repairs', vehicle.get('upkeep_weekly')))
+    return lines, meta
+
+
+def payee_for(slug, catalog, plan):
+    opts = catalog.get(slug) or {}
+    if slug == 'rent':
+        return housing_listing(plan, catalog).get('payee') or 'Your landlord'
+    return opts.get('payee') or slug.replace('_', ' ').title()
+
+
+def product_code(slug, catalog):
+    return (catalog.get(slug) or {}).get('code') or slug[:3].upper()
+
+
+def weekly_plan_total(plan, catalog, card_color, loan_balance=None):
+    """Estimated weekly total for the plan page (no assistance, typical usage)."""
+    total = ZERO
+    items = []
+    listing = housing_listing(plan, catalog)
+    for slug in selected_slugs(plan, catalog, card_color):
+        opts = catalog.get(slug) or {}
+        if slug == 'electric':
+            params = opts.get('params') or {}
+            kwh = _dec(params.get('base_kwh_week'), '105') * _dec(listing.get('kwh_factor'), '1')
+            amount = money(_dec(params.get('customer_charge_weekly'), '2.00') + kwh * _dec(params.get('rate_per_kwh'), '0.16'))
+            if listing.get('roommate'):
+                amount = money(amount / 2)
+        else:
+            lines, _meta = statement_lines(slug, catalog, plan, {
+                'student_id': 0, 'monday': None, 'card_color': card_color, 'benefits': {},
+                'loan_balance': loan_balance, 'settings': merged_settings({}),
+            })
+            amount = lines_total(lines)
+        total += amount
+        items.append({'slug': slug, 'amount': amount})
+    return money(total), items
+
+
+def savings_goal(plan, catalog, card_color, settings):
+    total, items = weekly_plan_total(plan, catalog, card_color)
+    spending = money(sum((item['amount'] for item in items if item['slug'] != 'savings'), ZERO))
+    weeks = int(settings.get('savings_goal_weeks') or 13)
+    return money(spending * weeks), weeks
+
+
+def late_fee(slug, overdue, rent_charge, settings):
+    """Minnesota caps rent late fees at 8% of the overdue rent payment (Minn. Stat. 504B.177)."""
+    fees = settings.get('late_fees') or {}
+    overdue = money(overdue)
+    if overdue <= 0:
+        return ZERO
+    if slug == 'rent':
+        base = min(overdue, money(rent_charge)) if rent_charge else overdue
+        return money(base * _dec(fees.get('rent_percent'), '0.08'))
+    return money(_dec(fees.get('other_flat'), '5.00'))

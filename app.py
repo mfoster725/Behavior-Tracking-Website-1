@@ -3066,6 +3066,8 @@ class BankAccount(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
     balance = db.Column(db.Numeric(10, 2), default=Decimal('0.00'), nullable=False)
+    # Emergency fund: money the student saved from weekly bills. Still theirs.
+    savings_balance = db.Column(db.Numeric(10, 2), default=Decimal('0.00'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -3255,10 +3257,15 @@ class Paycheck(db.Model):
     point_card_deduction = db.Column(db.Numeric(10, 2), nullable=True)
     total_deductions = db.Column(db.Numeric(10, 2), nullable=True)
     student_worksheet_json = db.Column(db.Text, nullable=True)
+    # Unpaid time off: days the student skipped a scheduled shift (e.g. Cafe).
+    no_show_days = db.Column(db.Integer, nullable=True)
+    no_show_dates_json = db.Column(db.Text, nullable=True)
+    # Paid time off used on days that would otherwise be unpaid.
+    pto_days = db.Column(db.Integer, nullable=True)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
     deposited_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     student = db.relationship('Student', backref='paychecks')
     transactions = db.relationship('Transaction', backref='paycheck', lazy=True)
@@ -3505,6 +3512,10 @@ class EconomySettings(db.Model):
     default_pay_track = db.Column(db.String(20), nullable=False, default='simple')
     late_fee_per_day = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('20.00'))
     tax_table_json = db.Column(db.Text, nullable=True)
+    # 2 = weekly bills (bills_lib). Legacy monthly bills were closed when this moved to 2.
+    bills_version = db.Column(db.Integer, nullable=True, default=1)
+    # Late fees, savings goal, and assistance parameters (see bills_lib.DEFAULT_SETTINGS).
+    bills_config_json = db.Column(db.Text, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -3538,7 +3549,11 @@ class StudentBudget(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, unique=True)
     enrolled = db.Column(db.Boolean, default=False, nullable=False)
+    # First weekly statements go out the Monday after this.
+    enrolled_at = db.Column(db.DateTime, nullable=True)
     choices_json = db.Column(db.Text, nullable=True)
+    # Remaining student-loan principal (blue/white cards).
+    loan_balance = db.Column(db.Numeric(10, 2), nullable=True)
     updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -3591,19 +3606,36 @@ class StudentBill(db.Model):
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
     bill_product_id = db.Column(db.Integer, db.ForeignKey('bill_products.id'), nullable=True)
     miss_fee_class_id = db.Column(db.Integer, db.ForeignKey('miss_fee_classes.id'), nullable=True)
-    kind = db.Column(db.String(20), nullable=False, default='bill')  # bill | fee
+    kind = db.Column(db.String(20), nullable=False, default='bill')  # bill | savings | fee (legacy)
+    # Weekly statements: the Monday (YYYY-MM-DD) they were issued. Legacy monthly bills: YYYY-MM.
     period_key = db.Column(db.String(20), nullable=False)
     due_date = db.Column(db.Date, nullable=False)
     fee_date = db.Column(db.Date, nullable=True)
     description = db.Column(db.String(500), nullable=True)
     prompt = db.Column(db.Text, nullable=True)
     steps_json = db.Column(db.Text, nullable=True)
+    # For weekly statements this is the week's new charges (after assistance credits).
     base_amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
     late_fee_amount = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    status = db.Column(db.String(20), nullable=False, default='unpaid')  # unpaid | paid | waived
+    # unpaid | partial | paid | carried (rolled into next week) | waived | skipped (savings)
+    status = db.Column(db.String(20), nullable=False, default='unpaid')
     paid_at = db.Column(db.DateTime, nullable=True)
+    # Total paid so far (partial payments add up).
     paid_amount = db.Column(db.Numeric(10, 2), nullable=True)
     waived_reason = db.Column(db.String(200), nullable=True)
+    schema_version = db.Column(db.Integer, nullable=True, default=1)
+    statement_date = db.Column(db.Date, nullable=True)
+    period_start = db.Column(db.Date, nullable=True)
+    period_end = db.Column(db.Date, nullable=True)
+    payee_name = db.Column(db.String(120), nullable=True)
+    account_number = db.Column(db.String(40), nullable=True)
+    lines_json = db.Column(db.Text, nullable=True)
+    meta_json = db.Column(db.Text, nullable=True)
+    # Unpaid balance (and late fees) rolled in from last week's statement.
+    previous_balance = db.Column(db.Numeric(10, 2), nullable=True, default=Decimal('0.00'))
+    late_fee_applied_at = db.Column(db.DateTime, nullable=True)
+    carried_to_bill_id = db.Column(db.Integer, nullable=True)
+    waived_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     student = db.relationship('Student', backref='bills')
@@ -3612,6 +3644,34 @@ class StudentBill(db.Model):
 
     __table_args__ = (
         db.Index('ix_student_bills_student_period', 'student_id', 'period_key'),
+    )
+
+
+class AssistanceApplication(db.Model):
+    """A student's practice application for SNAP, health coverage, or a housing voucher."""
+    __tablename__ = 'assistance_applications'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
+    program = db.Column(db.String(20), nullable=False)  # snap | health | housing
+    # draft | approved | revoked
+    status = db.Column(db.String(20), nullable=False, default='draft')
+    answers_json = db.Column(db.Text, nullable=True)
+    results_json = db.Column(db.Text, nullable=True)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    # Weekly gross income reported (and checked) on the approved application.
+    income_weekly = db.Column(db.Numeric(10, 2), nullable=True)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    # Benefits start on this Monday's statements.
+    effective_week = db.Column(db.Date, nullable=True)
+    decided_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    student = db.relationship('Student', backref='assistance_applications')
+
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'program', name='unique_student_assistance_program'),
     )
 
 
@@ -3888,6 +3948,9 @@ def ensure_economy_schema():
                 ('point_card_deduction', 'NUMERIC(10, 2)'),
                 ('total_deductions', 'NUMERIC(10, 2)'),
                 ('student_worksheet_json', 'TEXT'),
+                ('no_show_days', 'INTEGER'),
+                ('no_show_dates_json', 'TEXT'),
+                ('pto_days', 'INTEGER'),
             ]:
                 _economy_add_column(conn, is_postgres, 'paychecks', col, typ)
             _economy_add_column(conn, is_postgres, 'transactions', 'student_bill_id', 'INTEGER')
@@ -3896,7 +3959,37 @@ def ensure_economy_schema():
                 ('star_classroom_count', 'INTEGER DEFAULT 0'),
             ]:
                 _economy_add_column(conn, is_postgres, 'starbucks_balances', col, typ)
+            _economy_add_column(conn, is_postgres, 'bank_accounts', 'savings_balance', 'NUMERIC(10, 2) DEFAULT 0')
+            _economy_add_column(conn, is_postgres, 'student_budgets', 'enrolled_at', 'TIMESTAMP')
+            _economy_add_column(conn, is_postgres, 'student_budgets', 'loan_balance', 'NUMERIC(10, 2)')
+            _economy_add_column(conn, is_postgres, 'economy_settings', 'bills_version', 'INTEGER DEFAULT 1')
+            _economy_add_column(conn, is_postgres, 'economy_settings', 'bills_config_json', 'TEXT')
+            for col, typ in [
+                ('schema_version', 'INTEGER DEFAULT 1'),
+                ('statement_date', 'DATE'),
+                ('period_start', 'DATE'),
+                ('period_end', 'DATE'),
+                ('payee_name', 'VARCHAR(120)'),
+                ('account_number', 'VARCHAR(40)'),
+                ('lines_json', 'TEXT'),
+                ('meta_json', 'TEXT'),
+                ('previous_balance', 'NUMERIC(10, 2) DEFAULT 0'),
+                ('late_fee_applied_at', 'TIMESTAMP'),
+                ('carried_to_bill_id', 'INTEGER'),
+                ('waived_by_user_id', 'INTEGER'),
+            ]:
+                _economy_add_column(conn, is_postgres, 'student_bills', col, typ)
             conn.commit()
+        # One weekly statement per student, product, and week (guards double page loads).
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    'CREATE UNIQUE INDEX IF NOT EXISTS ux_student_bills_weekly '
+                    'ON student_bills (student_id, bill_product_id, period_key, kind)'
+                ))
+                conn.commit()
+        except Exception as index_err:
+            print(f'Note: weekly bill unique index not created: {index_err}', flush=True)
     except Exception as e:
         try:
             app.logger.warning(f"Failed to ensure economy schema: {e}")
@@ -3919,28 +4012,87 @@ def _economy_settings_row():
 
 
 def _apply_student_pay_track(student, track):
-    """Set simple vs complex depositing track. Complex auto-enrolls in monthly bills."""
+    """Set simple vs complex depositing track. Complex auto-enrolls in weekly bills."""
     if not student or track not in ('simple', 'complex'):
         return
     student.pay_track = track
-    from economy_lib import DEFAULT_BUDGET_CHOICES, dump_json
+    from bills_lib import DEFAULT_PLAN
+    from economy_lib import dump_json
     budget = StudentBudget.query.filter_by(student_id=student.id).first()
     if not budget:
         budget = StudentBudget(
             student_id=student.id,
             enrolled=(track == 'complex'),
-            choices_json=dump_json(DEFAULT_BUDGET_CHOICES),
+            enrolled_at=datetime.utcnow() if track == 'complex' else None,
+            choices_json=dump_json(DEFAULT_PLAN),
         )
         db.session.add(budget)
         return
-    if track == 'complex':
+    if track == 'complex' and not budget.enrolled:
         budget.enrolled = True
+        budget.enrolled_at = datetime.utcnow()
+
+
+def migrate_bills_v2():
+    """One-time switch from monthly bills to weekly bills (bills_lib).
+
+    Replaces the bill catalog, maps each student's old budget choices onto the new
+    plan, and closes legacy monthly bills and miss fees (their per-day late fees
+    were never realistic). Safe to call on every startup.
+    """
+    import bills_lib as bl
+    from economy_lib import dump_json, load_json
+    try:
+        settings = _economy_settings_row()
+        if (settings.bills_version or 1) >= bl.BILLS_VERSION:
+            return
+        v2_slugs = set()
+        for spec in bl.BILL_PRODUCTS_V2:
+            v2_slugs.add(spec['slug'])
+            row = BillProduct.query.filter_by(slug=spec['slug']).first()
+            if not row:
+                row = BillProduct(slug=spec['slug'])
+                db.session.add(row)
+            row.name = spec['name']
+            row.category = spec['category']
+            row.is_base = spec['is_base']
+            row.formula_kind = spec['formula_kind']
+            row.amount = Decimal('0.00')
+            row.options_json = dump_json(spec['options_json'])
+            row.prompt = None
+            row.sort_order = spec['sort_order']
+            row.is_active = True
+        for row in BillProduct.query.all():
+            if row.slug not in v2_slugs:
+                row.is_active = False
+        db.session.flush()
+        catalog = {p.slug: load_json(p.options_json, {}) for p in BillProduct.query.filter(BillProduct.slug.in_(v2_slugs)).all()}
+        for budget in StudentBudget.query.all():
+            plan = bl.normalize_plan(load_json(budget.choices_json, {}), catalog)
+            budget.choices_json = dump_json(plan)
+        now = datetime.utcnow()
+        for bill in StudentBill.query.filter(
+            db.or_(StudentBill.schema_version.is_(None), StudentBill.schema_version < bl.BILLS_VERSION),
+            StudentBill.status == 'unpaid',
+        ).all():
+            bill.status = 'waived'
+            bill.waived_reason = 'Closed when weekly bills started'
+            bill.paid_at = now
+        settings.bills_version = bl.BILLS_VERSION
+        db.session.commit()
+        print('Weekly bills: catalog replaced and legacy monthly bills closed.', flush=True)
+    except Exception as e:
+        db.session.rollback()
+        try:
+            app.logger.warning(f"migrate_bills_v2 failed: {e}")
+        except Exception:
+            print(f"migrate_bills_v2 failed: {e}")
 
 
 def seed_economy(commit=True):
     """Insert default wage rates, bill products, miss-fee classes, and market catalog."""
+    from bills_lib import BILL_PRODUCTS_V2 as BILL_PRODUCT_SEEDS
     from economy_lib import (
-        BILL_PRODUCT_SEEDS,
         DEFAULT_TAX_TABLE,
         MARKETPLACE_CATEGORY_SEEDS,
         MARKETPLACE_ITEM_SEEDS,
@@ -4268,6 +4420,7 @@ def init_db():
             try:
                 ensure_economy_schema()
                 seed_economy()
+                migrate_bills_v2()
             except Exception as seed_err:
                 print(f"Note: economy seed skipped: {seed_err}", flush=True)
             print("Database tables created/verified", flush=True)
@@ -17948,6 +18101,13 @@ def notification_link_payload(notification):
                 'student_id': student_id,
                 'student_name': student_name,
             }
+        if ntype.startswith('bills_') or ntype.startswith('assistance_'):
+            return {
+                'view': 'bills',
+                'section': 'assistance' if ntype.startswith('assistance_') else 'week',
+                'student_id': student_id,
+                'student_name': student_name,
+            }
         if notification.purchase_order_id:
             return {
                 'view': 'marketplace',
@@ -18135,6 +18295,93 @@ def count_pay_period_attendance(student_id, start_date, end_date):
     }
 
 
+def no_show_dates_for_student(student_id, start_date, end_date):
+    """Days the student came to school but skipped a scheduled shift (e.g. Cafe for Studio).
+
+    A no-show is unpaid time off: that day drops out of the paycheck. Days covered by
+    PTO are not no-shows. Unexcused absences are already unpaid, so they aren't listed.
+    """
+    import economy_lib as eco
+    classes = MissFeeClass.query.filter_by(is_active=True).order_by(MissFeeClass.sort_order, MissFeeClass.id).all()
+    if not classes:
+        return []
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date,
+    ).all()
+    pto_dates = {
+        use.use_date for use in StudentPtoUse.query.filter(
+            StudentPtoUse.student_id == student_id,
+            StudentPtoUse.use_date >= start_date,
+            StudentPtoUse.use_date <= end_date,
+        ).all()
+    }
+    schedule_rows = None
+    dates = []
+    for record in records:
+        if _record_attendance_status_norm(record) != 'present' or record.date in pto_dates:
+            continue
+        if schedule_rows is None:
+            schedule_rows = _student_schedule_rows(student_id)
+        periods_by_time = {(p.time_range or '').strip(): p for p in record.periods}
+        missed = False
+        for time_range, _default in POINT_CARD_PERIODS:
+            period = periods_by_time.get(time_range)
+            if not period:
+                continue
+            alternate = str(eco.load_json(period.info, {}).get('alternate_location') or '').strip()
+            if not alternate:
+                continue
+            scheduled = _student_location_for_period(student_id, time_range, schedule_rows=schedule_rows, on_date=record.date)
+            for shift in classes:
+                if (eco.location_contains(scheduled, shift.match_text)
+                        and eco.location_contains(alternate, shift.skip_to_location or 'Studio')):
+                    missed = True
+                    break
+            if missed:
+                break
+        if missed:
+            dates.append(record.date)
+    return sorted(dates)
+
+
+def pay_period_days(student_id, start_date, end_date):
+    """Paid days for the weekly earnings record: present + excused - no-shows + PTO."""
+    records = DailyRecord.query.filter(
+        DailyRecord.student_id == student_id,
+        DailyRecord.date >= start_date,
+        DailyRecord.date <= end_date,
+    ).all()
+    paid_dates = set()
+    present = 0
+    excused = 0
+    for record in records:
+        status = _record_attendance_status_norm(record)
+        if status == 'present':
+            present += 1
+            paid_dates.add(record.date)
+        elif status == 'excused':
+            excused += 1
+            paid_dates.add(record.date)
+    no_shows = no_show_dates_for_student(student_id, start_date, end_date)
+    pto_dates = sorted({
+        use.use_date for use in StudentPtoUse.query.filter(
+            StudentPtoUse.student_id == student_id,
+            StudentPtoUse.use_date >= start_date,
+            StudentPtoUse.use_date <= end_date,
+        ).all()
+        if use.use_date.weekday() < 5 and use.use_date not in paid_dates
+    })
+    return {
+        'present': present,
+        'excused': excused,
+        'no_show_dates': no_shows,
+        'pto_dates': pto_dates,
+        'days_worked': max(0, present + excused - len(no_shows) + len(pto_dates)),
+    }
+
+
 def _safe_bonus_int(value):
     try:
         return max(0, int(value or 0))
@@ -18164,7 +18411,7 @@ def _starbucks_count_for_student(student_id):
 
 def _compute_stub_for_student(student, start_date, end_date, star_percent=None, citation_count=None):
     import economy_lib as eco
-    days_info = count_pay_period_attendance(student.id, start_date, end_date)
+    days_info = pay_period_days(student.id, start_date, end_date)
     if star_percent is None:
         star_percent = calculate_weekly_star_percent(student.id, start_date, end_date)
     if citation_count is None:
@@ -18185,14 +18432,21 @@ def _compute_stub_for_student(student, start_date, end_date, star_percent=None, 
     )
     computed['avg_pct'] = star_percent
     computed['present_days'] = days_info['present']
+    computed['no_show_dates'] = [d.isoformat() for d in days_info['no_show_dates']]
+    computed['no_show_days'] = len(days_info['no_show_dates'])
+    computed['pto_days'] = len(days_info['pto_dates'])
     return computed
 
 
 def _apply_stub_to_paycheck(paycheck, computed, avg_star=None):
+    import economy_lib as eco
     paycheck.average_star_percent = avg_star if avg_star is not None else computed.get('star_percent')
     paycheck.daily_rate = computed['daily_rate']
     paycheck.days_worked = computed['days_worked']
     paycheck.excused_days = computed['excused_days']
+    paycheck.no_show_days = int(computed.get('no_show_days') or 0)
+    paycheck.no_show_dates_json = eco.dump_json(computed.get('no_show_dates') or [])
+    paycheck.pto_days = int(computed.get('pto_days') or 0)
     paycheck.starbucks_count = computed['starbucks_count']
     paycheck.star_student_count = computed['star_student_count']
     paycheck.star_classroom_count = computed['star_classroom_count']
@@ -18282,6 +18536,9 @@ def live_paycheck_amounts(paycheck):
         'days_worked': int(days_worked or 0),
         'excused_days': excused,
         'present_days': present,
+        'no_show_days': int(paycheck.no_show_days or 0),
+        'no_show_dates': eco.load_json(paycheck.no_show_dates_json, []),
+        'pto_days': int(paycheck.pto_days or 0),
         'starbucks_count': int(paycheck.starbucks_count or 0),
         'star_student_count': int(paycheck.star_student_count or 0),
         'star_classroom_count': int(paycheck.star_classroom_count or 0),
@@ -18354,6 +18611,9 @@ def serialize_paycheck_payload(p, include_student_calcs=False):
         'days_worked': int(days_worked or 0),
         'excused_days': int(excused_days or 0),
         'present_days': int(live.get('present_days') or 0),
+        'no_show_days': int(live.get('no_show_days') or 0),
+        'no_show_dates': live.get('no_show_dates') or [],
+        'pto_days': int(live.get('pto_days') or 0),
         'starbucks_count': int(live.get('starbucks_count') or 0),
         'star_student_count': int(live.get('star_student_count') or 0),
         'star_classroom_count': int(live.get('star_classroom_count') or 0),
@@ -22190,6 +22450,7 @@ if __name__ == '__main__':
         try:
             ensure_economy_schema()
             seed_economy()
+            migrate_bills_v2()
         except Exception as seed_err:
             print(f"Note: economy seed skipped: {seed_err}", flush=True)
         # Ensure OutsideStaffStudent table exists

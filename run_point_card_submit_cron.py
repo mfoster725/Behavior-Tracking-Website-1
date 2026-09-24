@@ -20,6 +20,13 @@ def main():
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)
             sys.exit(1)
+        # Weekly bills: issue Monday statements and roll late bills forward even if nobody opens the page.
+        try:
+            if hasattr(app, 'run_economy_maintenance'):
+                result = app.run_economy_maintenance() or {}
+                print(f"OK: Weekly bills {result}")
+        except Exception as e:
+            print(f"Weekly bills maintenance failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
