@@ -1,31 +1,35 @@
-# Teacher Presentation: Manny's Market (Pay, Bills, Marketplace)
+# Presentation Decks: Manny's Market
 
-A 15-slide deck for introducing students to how they get paid, pay bills, and shop at Manny's Market. Built from the app's own code (`economy_lib.py`, `bills_lib.py`, `app.py`, `economy_routes.py`, `assistance_forms.py` at commit `48b7e16`) and verified by re-running that code — see `verify_numbers.py` below.
+Two separate decks — one for staff, one for students — for introducing the classroom economy (getting paid, paying bills, the Marketplace). Built from the app's own code (`economy_lib.py`, `bills_lib.py`, `app.py`, `economy_routes.py`, `assistance_forms.py` at commit `48b7e16`) and verified by re-running that code — see the script at the bottom.
 
-**Live deck:** https://claude.ai/artifact/YAkDctD1uHpPUsS5gpMDmL (private — share it from the deck's Share menu before handing the link to anyone else). Downloads as PowerPoint or PDF from that page.
+## The two decks
 
-## Outline
+| Deck | Audience | Covers |
+|---|---|---|
+| **[Teacher Guide](https://claude.ai/artifact/T2Xt7J3vFuurHyMJB2yftu)** | Staff and admins | Why the system is designed this way (a token economy needs a felt consequence, and the money has to matter), and the controls you use to run it: turning bills on, generating paychecks, managing bonuses, approving level-ups, staff bill tools, assistance staff actions, marketplace setup, and admin-only Economy settings. |
+| **[Student Guide](https://claude.ai/artifact/YAkDctD1uHpPUsS5gpMDmL)** | Students | What Manny's Market is and how to use it: where things live in the app, how a paycheck is calculated and how to complete the worksheet, how weekly bills work, and how to shop the Marketplace. Ends with a placeholder slide for tutorial videos (in production, not yet linked). |
 
-**Getting paid**
-1. Cover
-2. How money moves every week (point card → Monday paycheck + bills → worksheet → deposit → bills due next Monday)
-3. Your card color sets your pay (yellow/green/blue rates; the 30-day, 90%-average level-up rule)
-4. Gross pay: paid days + bonuses (Starbucks $2, Star Student $50, Star Classroom $50)
-5. The six deductions (Point Card, Citations, Federal, Social Security, Medicare, MN state)
-6. A full worked example
-7. Completing the Weekly Earnings Record (where to click, Submit, retries)
+Both are private — share each from its own Share menu before handing the link to anyone else. Both download as PowerPoint or PDF from that page.
 
-**Paying bills**
-8. Bills arrive every Monday (a teacher must turn them on; required vs. optional bills)
-9. My Plan (weekly price ranges for housing, internet, groceries, health, etc.)
-10. Your plan has to fit your paycheck (take-home vs. bills by card color, with and without assistance)
-11. Paying a bill, step by step (work it out or pay a 20% fee → coupon → receipt)
-12. Late bills (rent 8% / other bills flat $5) and the emergency fund (3-week goal)
-13. Assistance programs (SNAP, health coverage, Section 8 — modeled on real MN forms)
+**A note on the Teacher deck's philosophy slides:** the "why this exists" framing (behavior needs a felt consequence; the money has to matter) is a synthesis of why the system is built this way, based on its design — not a document the school wrote elsewhere. Reword those two slides if you have specific program language already in use.
 
-**Marketplace**
-14. Shopping the Marketplace (browse → cart → checkout → fulfilled/denied; sample prices)
-15. Closing: the weekly money routine, with a discussion prompt
+## Student deck outline
+
+**Getting paid:** cover, where to find it in the app, how money moves every week, card colors and leveling up, gross pay and bonuses, the six deductions, a full worked example, completing the Weekly Earnings Record.
+
+**Paying bills:** bills arrive every Monday, My Plan price ranges, a statement slide showing take-home vs. bills by card color (with and without assistance), paying a bill step by step, late fees and the emergency fund, the assistance programs.
+
+**Marketplace:** shopping the Marketplace, video walkthroughs (coming soon), closing recap with a discussion prompt.
+
+## Teacher deck outline
+
+**Why this exists:** cover, why a token economy needs a felt consequence, why the money has to matter, the three systems at a glance.
+
+**Running paychecks:** turning it on for a student, generating paychecks (automatic vs. manual), managing bonuses (and the reset gotcha), approving a level-up.
+
+**Running bills and the Marketplace:** staff tools on any bill (pay it, waive it, PTO), assistance staff actions (revoke/reset), creating marketplace items and handling purchase orders, admin-only Economy settings.
+
+**Before you run it:** a few known gotchas, then a closing slide pointing to the Student deck.
 
 ## Key verified numbers (defaults — an admin may have changed Economy settings)
 
@@ -43,8 +47,8 @@ Default weekly plan ≈ **$326.61** (yellow/green) or **$370.08** (blue, with th
 
 ## Known app behavior worth knowing (not fixed — outside a presentation's scope)
 
-- **Bonus counts never reset automatically.** An undeposited paycheck recalculates from the *current* Starbucks/Star Student/Star Classroom counts, so if staff don't zero them after a deposit, the same bonus can be paid again the next week.
-- **Admins can't see or fulfill marketplace purchase orders** — only staff listed on the student's support team can (`get_support_team_user_ids` only returns staff; `get_purchase_orders` returns nothing for the `admin` role).
+- **Bonus counts never reset automatically.** An undeposited paycheck recalculates from the *current* Starbucks/Star Student/Star Classroom counts, so if staff don't zero them after a deposit, the same bonus can be paid again the next week. (This is on the Teacher deck's "watch for" slide.)
+- **Admins can't see or fulfill marketplace purchase orders** — only staff listed on the student's support team can (`get_support_team_user_ids` only returns staff; `get_purchase_orders` returns nothing for the `admin` role). (Also on the "watch for" slide.)
 - `MARKETPLACE_IMPLEMENTATION_PLAN.md` describes an approval-then-charge flow; the code actually charges checking at checkout and refunds automatically on denial.
 
 ## Re-verifying the numbers
