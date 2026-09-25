@@ -111,9 +111,9 @@ Click the **Submit** button.
 4. Star Classroom: 0 × $50.00 = $0.00
 5. GROSS PAY: $240.00 + $4.00 + $50.00 + $0.00 = $294.00
 6. Point Card Loss: 100 − 90 = 10%. Convert: 10% = 10 ÷ 100 = 0.10. Amount: 0.10 × $294.00 = $29.40
-7. Federal 3% → 0.03 × $294.00 = $8.82 · Social Security 6.2% → 0.062 × $294.00 = $18.23 · Medicare 1.5% → 0.015 × $294.00 = $4.41 · State 3% → 0.03 × $294.00 = $8.82
-8. TOTAL DEDUCTIONS: $69.68
-9. Take-home: $294.00 − $69.68 = $224.32
+7. Federal 3% → 0.03 × $294.00 = $8.82 · Social Security 6.2% → 0.062 × $294.00 = $18.23 · Medicare 1.5% → 0.015 × $294.00 = $4.41 · State 5.35% → 0.0535 × $294.00 = $15.73
+8. TOTAL DEDUCTIONS: $76.59
+9. Take-home: $294.00 − $76.59 = $217.41
 
 Your worksheet uses your days, rate, bonuses, and percent — not this example.
 
