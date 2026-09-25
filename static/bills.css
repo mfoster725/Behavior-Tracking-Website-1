@@ -902,6 +902,13 @@
     line-height: 1.35;
 }
 
+.bills2-option-impact {
+    font-size: 12px;
+    color: var(--bills-green);
+    line-height: 1.35;
+    font-weight: 600;
+}
+
 .bills2-option-price {
     margin-top: auto;
     padding-top: 6px;
@@ -1279,6 +1286,21 @@
 .econ-admin .econ-product h4 {
     margin: 6px 0;
     font-size: 14px;
+}
+
+.econ-admin .econ-product.is-off {
+    opacity: 0.6;
+}
+
+.econ-admin .econ-product-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.econ-admin .econ-product-toggle input {
+    width: auto;
 }
 
 /* ============================================================

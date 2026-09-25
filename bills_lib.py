@@ -104,22 +104,27 @@ BILL_PRODUCTS_V2 = [
             'options': [
                 {'id': 'studio', 'label': 'Studio apartment', 'payee': 'Lakeshore Lofts', 'unit': 'Unit 2',
                  'detail': 'One room plus a bathroom, about 450 sq ft.',
+                 'impact': 'Your teacher picks your desk and where it sits. You cannot move your desk or choose your chair.',
                  'weekly': '144.23', 'bedrooms': 0, 'kwh_factor': '0.75', 'roommate': False},
                 {'id': 'apt_1br', 'label': '1-bedroom apartment', 'payee': 'Maple Street Apartments', 'unit': 'Apt 4',
                  'detail': 'Bedroom, kitchen, and living room, about 650 sq ft.',
+                 'impact': 'You choose your desk and can move it anywhere within your assigned zone. You cannot choose your chair.',
                  'weekly': '178.85', 'bedrooms': 1, 'kwh_factor': '1.00', 'roommate': False},
-                {'id': 'apt_1br_updated', 'label': '1-bedroom, updated', 'payee': 'Pine Ridge Apartments', 'unit': 'Apt 12',
-                 'detail': 'New kitchen, dishwasher, and a washer and dryer in the unit.',
-                 'weekly': '206.54', 'bedrooms': 1, 'kwh_factor': '1.10', 'roommate': False},
-                {'id': 'roommate_2br', 'label': '2-bedroom with a roommate', 'payee': 'Oak Court Apartments', 'unit': 'Apt 7',
-                 'detail': 'Your half of {full_rent}/month. You also split electricity and internet 50/50.',
-                 'weekly': '121.15', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': True},
-                {'id': 'apt_2br', 'label': '2-bedroom on your own', 'payee': 'Oak Court Apartments', 'unit': 'Apt 9',
-                 'detail': 'An extra bedroom for an office or guests.',
-                 'weekly': '242.31', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': False},
                 {'id': 'house', 'label': 'Small house', 'payee': 'Cedar Lane Rentals', 'unit': '2-bedroom house',
                  'detail': 'A 2-bedroom house with a yard and a garage.',
+                 'impact': "You choose your desk and can put it anywhere in the classroom (your teacher can veto the spot). "
+                           "You can choose any chair that isn't already taken by an adult, and you can have as many chairs at "
+                           "your desk as you want.",
                  'weekly': '288.46', 'bedrooms': 2, 'kwh_factor': '1.80', 'roommate': False},
+                {'id': 'apt_2br', 'label': '2-bedroom apartment', 'payee': 'Oak Court Apartments', 'unit': 'Apt 9',
+                 'detail': 'An extra bedroom for an office or guests.',
+                 'impact': 'You choose your desk and can move it anywhere within your assigned zone. You choose between two chairs.',
+                 'weekly': '242.31', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': False},
+                {'id': 'roommate_2br', 'label': '2-bedroom with a roommate', 'payee': 'Oak Court Apartments', 'unit': 'Apt 7',
+                 'detail': 'Your half of {full_rent}/month. You also split electricity and internet 50/50.',
+                 'impact': 'You choose your desk and can move it anywhere within your assigned zone. You must have a roommate: '
+                           'you get two chairs, but you share one desk.',
+                 'weekly': '121.15', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': True},
             ],
         },
     },
@@ -148,18 +153,19 @@ BILL_PRODUCTS_V2 = [
         'slug': 'internet',
         'name': 'Internet',
         'category': 'utility',
-        'is_base': True,
+        'is_base': False,
         'formula_kind': 'internet',
         'sort_order': 30,
         'options_json': {
             'code': 'LAB',
             'payee': 'Lakes Area Broadband',
+            'note': 'Optional. Paying for internet is what lets you use a school computer during free time.',
             'params': {'equipment_weekly': '0.92', 'equipment_label': 'Modem rental'},
             'options': [
-                {'id': 'basic', 'label': 'Basic 25 Mbps', 'detail': 'DSL. Fine for school work and one video stream.', 'weekly': '11.53'},
-                {'id': 'standard', 'label': 'Standard 50 Mbps', 'detail': 'Streaming on a couple of devices.', 'weekly': '13.83'},
-                {'id': 'fast', 'label': 'Fast 100 Mbps', 'detail': 'Gaming and HD streaming.', 'weekly': '17.31'},
-                {'id': 'fiber', 'label': 'Fiber 100+ Mbps', 'detail': 'Fastest and most reliable.', 'weekly': '19.71'},
+                {'id': 'none', 'label': 'No internet', 'detail': 'You skip the internet bill.',
+                 'impact': "You can't use a school computer during free time.", 'weekly': '0.00'},
+                {'id': 'service', 'label': 'Internet service', 'detail': 'Home internet, fast enough for schoolwork and streaming.',
+                 'impact': 'Paying this bill gives you computer access during free time.', 'weekly': '13.83'},
             ],
         },
     },
@@ -173,10 +179,13 @@ BILL_PRODUCTS_V2 = [
         'options_json': {
             'code': 'HMI',
             'payee': 'Harbor Mutual Insurance',
-            'note': 'Pays to replace your things after a fire, theft, or water damage.',
+            'note': "Renters insurance pays to replace your belongings if they're damaged or stolen, such as in a fire, "
+                    "theft, or water damage. Starting soon, a random event each Wednesday may test whether you're covered.",
             'options': [
-                {'id': 'basic', 'label': '$15,000 coverage', 'detail': 'Covers your belongings up to $15,000.', 'weekly': '2.77'},
-                {'id': 'plus', 'label': '$30,000 coverage', 'detail': 'Covers your belongings up to $30,000.', 'weekly': '3.92'},
+                {'id': 'basic', 'label': '$15,000 coverage', 'detail': 'Covers your belongings up to $15,000.',
+                 'impact': "Covers up to $15,000 to replace your things if Wednesday's event damages or steals them.", 'weekly': '2.77'},
+                {'id': 'plus', 'label': '$30,000 coverage', 'detail': 'Covers your belongings up to $30,000.',
+                 'impact': "Covers up to $30,000 to replace your things if Wednesday's event damages or steals them.", 'weekly': '3.92'},
             ],
         },
     },
@@ -184,13 +193,13 @@ BILL_PRODUCTS_V2 = [
         'slug': 'groceries',
         'name': 'Groceries',
         'category': 'food',
-        'is_base': True,
+        'is_base': False,
         'formula_kind': 'groceries',
         'sort_order': 50,
         'options_json': {
             'code': 'MSM',
             'payee': 'Main Street Market',
-            'note': 'Your weekly grocery receipt. Based on USDA food plans for one adult living alone.',
+            'note': 'Optional. Your weekly grocery receipt, based on USDA food plans for one adult living alone.',
             'params': {
                 'categories': [
                     ['Produce', '0.22'], ['Meat, fish, and eggs', '0.24'], ['Dairy', '0.14'],
@@ -198,9 +207,15 @@ BILL_PRODUCTS_V2 = [
                 ],
             },
             'options': [
-                {'id': 'thrifty', 'label': 'Thrifty', 'detail': 'Store brands, cooking at home.', 'weekly': '80.00'},
-                {'id': 'moderate', 'label': 'Moderate', 'detail': 'Some name brands and convenience foods.', 'weekly': '100.00'},
-                {'id': 'liberal', 'label': 'Liberal', 'detail': 'Name brands, snacks, and ready-made meals.', 'weekly': '125.00'},
+                {'id': 'none', 'label': 'No groceries budget', 'detail': 'You skip your weekly grocery bill.',
+                 'impact': 'No snacks of any kind in class.', 'weekly': '0.00'},
+                {'id': 'thrifty', 'label': 'Thrifty', 'detail': 'Store brands, cooking at home.',
+                 'impact': 'No snacks in class.', 'weekly': '80.00'},
+                {'id': 'moderate', 'label': 'Moderate', 'detail': 'Some name brands and convenience foods.',
+                 'impact': "You can have snacks in class, but only school-provided ones, not from home, and you can't use the fridge.",
+                 'weekly': '100.00'},
+                {'id': 'liberal', 'label': 'Liberal', 'detail': 'Name brands, snacks, and ready-made meals.',
+                 'impact': 'You can bring snacks from home and use the classroom or school fridge.', 'weekly': '125.00'},
             ],
         },
     },
@@ -214,11 +229,16 @@ BILL_PRODUCTS_V2 = [
         'options_json': {
             'code': 'PHP',
             'payee': 'Pinewood Health Plan',
-            'note': 'A lower premium means a higher deductible: you pay more yourself when you get care.',
+            'note': 'Health insurance helps pay your medical bills if you get sick or hurt. A lower weekly premium means a '
+                    'higher deductible, so you pay more out of pocket when you need care. Starting soon, a random event '
+                    'each Wednesday may send you to the doctor, and your plan decides how much of that you pay.',
             'options': [
-                {'id': 'bronze', 'label': 'Bronze plan', 'detail': '$7,400 deductible.', 'weekly': '79.62'},
-                {'id': 'silver', 'label': 'Silver plan', 'detail': '$3,600 deductible.', 'weekly': '94.62'},
-                {'id': 'gold', 'label': 'Gold plan', 'detail': '$1,900 deductible.', 'weekly': '107.31'},
+                {'id': 'bronze', 'label': 'Bronze plan', 'detail': '$7,400 deductible.',
+                 'impact': "If Wednesday's health event happens to you, you pay the most out of pocket.", 'weekly': '79.62'},
+                {'id': 'silver', 'label': 'Silver plan', 'detail': '$3,600 deductible.',
+                 'impact': "If Wednesday's health event happens to you, you pay a moderate amount out of pocket.", 'weekly': '94.62'},
+                {'id': 'gold', 'label': 'Gold plan', 'detail': '$1,900 deductible.',
+                 'impact': "If Wednesday's health event happens to you, you pay the least out of pocket.", 'weekly': '107.31'},
             ],
         },
     },
@@ -232,7 +252,8 @@ BILL_PRODUCTS_V2 = [
         'options_json': {
             'code': 'SAV',
             'payee': 'Your savings account',
-            'note': 'Pay yourself first. This money moves to your savings and stays yours.',
+            'note': 'Pay yourself first. This money moves to your savings and stays yours. This deposit is required every '
+                    'week until your emergency fund reaches its goal; once it does, it pauses automatically.',
             'options': [
                 {'id': 's5', 'label': '$5 a week', 'weekly': '5.00'},
                 {'id': 's10', 'label': '$10 a week', 'weekly': '10.00'},
@@ -271,10 +292,12 @@ BILL_PRODUCTS_V2 = [
         'options_json': {
             'code': 'LPW',
             'payee': 'Loop Wireless',
+            'note': 'Optional. Paying for a cell phone plan is what lets you check email at school.',
             'options': [
-                {'id': 'none', 'label': 'No cell phone', 'weekly': '0.00'},
-                {'id': 'prepaid', 'label': 'Prepaid 5 GB', 'detail': 'Talk, text, and 5 GB of data. Taxes included.', 'weekly': '8.08'},
-                {'id': 'unlimited', 'label': 'Unlimited', 'detail': 'Unlimited talk, text, and data. Taxes included.', 'weekly': '17.31'},
+                {'id': 'none', 'label': 'No cell phone', 'detail': 'You skip the cell phone bill.',
+                 'impact': "You can't check email at school.", 'weekly': '0.00'},
+                {'id': 'plan', 'label': 'Cell phone plan', 'detail': 'Talk, text, and data. Taxes included.',
+                 'impact': 'Paying this bill lets you check email at school.', 'weekly': '8.08'},
             ],
         },
     },
@@ -290,11 +313,16 @@ BILL_PRODUCTS_V2 = [
             'payee': 'Lakes Area Auto Finance',
             'note': 'A car also means insurance, gas, and repairs every week.',
             'options': [
-                {'id': 'none', 'label': 'No car', 'detail': 'Walk, bike, or get rides.', 'loan_weekly': '0.00', 'upkeep_weekly': '0.00', 'gallons_week': '0'},
-                {'id': 'older', 'label': 'Older car, paid off', 'detail': 'No loan, but more repairs.', 'loan_weekly': '0.00', 'upkeep_weekly': '35.00', 'gallons_week': '11.5'},
+                {'id': 'none', 'label': 'No car', 'detail': 'Walk, bike, or get rides.',
+                 'impact': 'No extra break in class.', 'loan_weekly': '0.00', 'upkeep_weekly': '0.00', 'gallons_week': '0'},
+                {'id': 'older', 'label': 'Older car, paid off', 'detail': 'No loan, but more repairs.',
+                 'impact': 'You can take an extra 5-minute break in class each day.',
+                 'loan_weekly': '0.00', 'upkeep_weekly': '35.00', 'gallons_week': '11.5'},
                 {'id': 'used', 'label': 'Used car with a loan', 'detail': 'About a {car_price} car over 5 years.', 'car_price': '15000.00',
+                 'impact': 'You can take an extra 5-minute break in class each day.',
                  'loan_weekly': '75.23', 'upkeep_weekly': '25.00', 'gallons_week': '10.5'},
                 {'id': 'newer', 'label': 'Newer car with a loan', 'detail': 'About a {car_price} car over 6 years.', 'car_price': '25000.00',
+                 'impact': 'You can take an extra 5-minute break in class each day.',
                  'loan_weekly': '125.08', 'upkeep_weekly': '15.00', 'gallons_week': '9.5'},
             ],
         },
@@ -336,7 +364,7 @@ PRODUCT_ORDER = [spec['slug'] for spec in BILL_PRODUCTS_V2]
 DEFAULT_PLAN = {
     'version': 2,
     'housing': 'apt_1br',
-    'internet': 'basic',
+    'internet': 'service',
     'renters': 'basic',
     'groceries': 'thrifty',
     'health': 'bronze',
@@ -525,7 +553,7 @@ def normalize_plan(raw, catalog):
                 housing = 'roommate_2br'
             plan['housing'] = housing
         if 'cell' in raw:
-            plan['cell'] = 'prepaid' if raw.get('cell') else 'none'
+            plan['cell'] = 'plan' if raw.get('cell') else 'none'
         if raw.get('vehicle'):
             plan['vehicle'] = LEGACY_VEHICLE.get(raw.get('vehicle'), 'none')
         if raw.get('car_insurance') in ('liability', 'full'):
@@ -569,9 +597,13 @@ def student_loan_spec(catalog, card_color):
 
 
 def selected_slugs(plan, catalog, card_color):
-    slugs = ['rent', 'electric', 'internet', 'renters', 'groceries', 'health', 'savings']
+    slugs = ['rent', 'electric', 'renters', 'health', 'savings']
     if student_loan_spec(catalog, card_color):
         slugs.append('student_loan')
+    if plan.get('internet') and plan['internet'] != 'none':
+        slugs.append('internet')
+    if plan.get('groceries') and plan['groceries'] != 'none':
+        slugs.append('groceries')
     if plan.get('cell') and plan['cell'] != 'none':
         slugs.append('cell')
     if plan.get('vehicle') and plan['vehicle'] != 'none':

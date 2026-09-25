@@ -43,6 +43,10 @@ def register_economy_routes(app):
     def active_products():
         return m.BillProduct.query.filter_by(is_active=True).order_by(m.BillProduct.sort_order, m.BillProduct.id).all()
 
+    def all_products():
+        """Every bill category, including ones a teacher turned off, so they can be turned back on."""
+        return m.BillProduct.query.order_by(m.BillProduct.sort_order, m.BillProduct.id).all()
+
     def load_catalog(settings=None):
         """Catalog as students see it (prices times the cost of living), plus the product rows."""
         rows = active_products()
@@ -527,6 +531,8 @@ def register_economy_routes(app):
         sections = []
 
         def section(key, title, slug, note=None):
+            if slug not in catalog:
+                return  # A teacher turned this whole bill category off.
             opts = catalog.get(slug) or {}
             options = []
             for option in bl.product_options(opts):
@@ -547,6 +553,7 @@ def register_economy_routes(app):
                     'id': option.get('id'),
                     'label': option.get('label'),
                     'detail': bl.option_detail(option),
+                    'impact': option.get('impact'),
                     'payee': option.get('payee') or opts.get('payee'),
                     'weekly': money_f(weekly),
                     'monthly': money_f(bl.monthly_from_weekly(weekly)),
@@ -554,14 +561,16 @@ def register_economy_routes(app):
                     **extra,
                 })
             sections.append({'key': key, 'title': title, 'note': note or opts.get('note'), 'selected': plan.get(key), 'options': options,
-                             'required': key not in ('cell', 'vehicle', 'car_insurance')})
+                             'required': key not in ('cell', 'vehicle', 'car_insurance', 'internet', 'groceries')})
 
         internet_params = (catalog.get('internet') or {}).get('params') or {}
         equipment = eco.money(internet_params.get('equipment_weekly') or 0)
         section('housing', 'Where you live', 'rent')
         section('internet', 'Internet', 'internet',
-                f"Every plan also has a {(internet_params.get('equipment_label') or 'modem rental').lower()} of ${equipment:,.2f} a week."
-                if equipment > 0 else None)
+                (((catalog.get('internet') or {}).get('note') or '') + (
+                    f" Paying for it also includes a {(internet_params.get('equipment_label') or 'modem rental').lower()} "
+                    f"of ${equipment:,.2f} a week." if equipment > 0 else ''
+                )).strip() or None)
         section('health', 'Health insurance', 'health')
         section('groceries', 'Groceries', 'groceries')
         section('renters', 'Renters insurance', 'renters')
@@ -1379,11 +1388,11 @@ def register_economy_routes(app):
         row = settings_row()
         settings = bills_settings()
         products = []
-        for p in active_products():
+        for p in all_products():
             opts = eco.load_json(p.options_json, {})
             adjusted = bl.adjusted_catalog({p.slug: opts}, settings)[p.slug]
             products.append({
-                'id': p.id, 'slug': p.slug, 'name': p.name, 'is_base': bool(p.is_base),
+                'id': p.id, 'slug': p.slug, 'name': p.name, 'is_base': bool(p.is_base), 'is_active': bool(p.is_active),
                 'payee': opts.get('payee'), 'note': opts.get('note'),
                 'options': bl.product_options(opts), 'params': opts.get('params') or {},
                 # What students are charged after the cost of living, for the admin's reference.
@@ -1414,6 +1423,8 @@ def register_economy_routes(app):
             product = m.BillProduct.query.get(spec.get('id')) if spec.get('id') else None
             if not product:
                 continue
+            if 'is_active' in spec:
+                product.is_active = bool(spec['is_active'])
             opts = eco.load_json(product.options_json, {})
             incoming = {str(o.get('id')): o for o in (spec.get('options') or [])}
             for option in opts.get('options') or []:

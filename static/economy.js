@@ -837,6 +837,7 @@
                 '<span class="bills2-option-check"></span>' +
                 '<span class="bills2-option-name">' + esc(o.label) + '</span>' +
                 '<span class="bills2-option-detail">' + esc(detail) + '</span>' +
+                (o.impact ? '<span class="bills2-option-impact">Gets you: ' + esc(o.impact) + '</span>' : '') +
                 '<span class="bills2-option-price">' + (o.weekly > 0 ? fmt(o.weekly) + ' <small>a week' + (o.monthly && sec.key !== 'savings' ? ' · about $' + Math.round(o.monthly).toLocaleString('en-US') + '/mo' : '') + '</small>' : '$0 <small>a week</small>') + '</span>' +
                 '</label>';
         });
@@ -1626,7 +1627,10 @@
             var studentOpts = {};
             (p.student_options || []).forEach(function (o) { studentOpts[o.id] = o; });
             var pays = p.slug !== 'savings';
-            html += '<div class="econ-product" data-product="' + p.id + '"><h4>' + esc(p.name) + (p.payee ? ' <span style="font-weight:400;color:#78716c">· ' + esc(p.payee) + '</span>' : '') + '</h4>';
+            html += '<div class="econ-product' + (p.is_active ? '' : ' is-off') + '" data-product="' + p.id + '">' +
+                '<h4><label class="econ-product-toggle"><input type="checkbox" data-active-toggle' + (p.is_active ? ' checked' : '') + '> ' +
+                esc(p.name) + '</label>' + (p.payee ? ' <span style="font-weight:400;color:#78716c">· ' + esc(p.payee) + '</span>' : '') +
+                (p.is_active ? '' : ' <span style="font-weight:400;color:#b91c1c">(off for students)</span>') + '</h4>';
             if (opts.length) {
                 var vehicle = p.slug === 'car_loan';
                 html += '<table><thead><tr><th>Option</th>' + (vehicle ? '<th>Real loan / week</th><th>Real repairs / week</th>' : '<th>' + (pays ? 'Real cost / week' : 'Amount / week') + '</th>') +
@@ -1705,7 +1709,8 @@
             });
             var params = {};
             box.querySelectorAll('input[data-param]').forEach(function (input) { params[input.getAttribute('data-param')] = input.value; });
-            return { id: p.id, options: options, params: params };
+            var activeToggle = box.querySelector('input[data-active-toggle]');
+            return { id: p.id, options: options, params: params, is_active: activeToggle ? activeToggle.checked : true };
         }).filter(Boolean);
         return { bills: bills, products: products };
     }
