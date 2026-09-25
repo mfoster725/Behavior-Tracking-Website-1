@@ -741,6 +741,8 @@
         var internetTotal = internet ? internet.weekly + (est.internet_equipment || 0) : 0;
         if (roommate) internetTotal = Math.round(internetTotal / 2 * 100) / 100;
         add('Internet', internetTotal);
+        var trash = optionFor('trash', c.trash);
+        add('Trash', trash ? trash.weekly : 0);
         var health = optionFor('health', c.health);
         add('Health insurance', health ? health.weekly : 0);
         var groceries = optionFor('groceries', c.groceries);

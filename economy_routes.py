@@ -44,8 +44,14 @@ def register_economy_routes(app):
         return m.BillProduct.query.filter_by(is_active=True).order_by(m.BillProduct.sort_order, m.BillProduct.id).all()
 
     def all_products():
-        """Every bill category, including ones a teacher turned off, so they can be turned back on."""
-        return m.BillProduct.query.order_by(m.BillProduct.sort_order, m.BillProduct.id).all()
+        """Every current bill category, including ones a teacher turned off, so they can be turned back on.
+
+        Filtered to bl.PRODUCT_ORDER so rows left over from before the weekly-bills rewrite (old
+        slugs like 'housing' or 'electricity', long superseded by 'rent'/'electric') never resurface
+        here -- they're still in the table for old bills' history, but they're dead weight otherwise.
+        """
+        return m.BillProduct.query.filter(m.BillProduct.slug.in_(bl.PRODUCT_ORDER)).order_by(
+            m.BillProduct.sort_order, m.BillProduct.id).all()
 
     def load_catalog(settings=None):
         """Catalog as students see it (prices times the cost of living), plus the product rows."""
@@ -561,7 +567,7 @@ def register_economy_routes(app):
                     **extra,
                 })
             sections.append({'key': key, 'title': title, 'note': note or opts.get('note'), 'selected': plan.get(key), 'options': options,
-                             'required': key not in ('cell', 'vehicle', 'car_insurance', 'internet')})
+                             'required': key not in ('cell', 'vehicle', 'car_insurance', 'internet', 'trash')})
 
         internet_params = (catalog.get('internet') or {}).get('params') or {}
         equipment = eco.money(internet_params.get('equipment_weekly') or 0)
@@ -571,6 +577,7 @@ def register_economy_routes(app):
                     f" Paying for it also includes a {(internet_params.get('equipment_label') or 'modem rental').lower()} "
                     f"of ${equipment:,.2f} a week." if equipment > 0 else ''
                 )).strip() or None)
+        section('trash', 'Trash', 'trash')
         section('health', 'Health insurance', 'health')
         section('groceries', 'Groceries', 'groceries')
         section('renters', 'Renters insurance', 'renters')

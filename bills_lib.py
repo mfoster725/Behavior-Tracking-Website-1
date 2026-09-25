@@ -88,7 +88,7 @@ def confirmation_number(code, transaction_id):
 # Catalog (seeded into bill_products; admins can edit option prices)
 # ---------------------------------------------------------------------------
 
-HOUSING_NOTE = 'Heat, water, sewer, and trash are included in rent. You pay electricity and internet.'
+HOUSING_NOTE = 'Heat, water, and sewer are included in rent. You pay electricity, internet, and trash pickup.'
 
 BILL_PRODUCTS_V2 = [
     {
@@ -166,6 +166,23 @@ BILL_PRODUCTS_V2 = [
                  'impact': "You can't use a school computer during free time.", 'weekly': '0.00'},
                 {'id': 'service', 'label': 'Internet service', 'detail': 'Home internet, fast enough for schoolwork and streaming.',
                  'impact': 'Paying this bill gives you computer access during free time.', 'weekly': '13.83'},
+            ],
+        },
+    },
+    {
+        'slug': 'trash',
+        'name': 'Trash',
+        'category': 'utility',
+        'is_base': False,
+        'formula_kind': 'choice',
+        'sort_order': 35,
+        'options_json': {
+            'code': 'PSW',
+            'payee': 'Prairie Sanitation & Waste',
+            'note': 'Optional. Weekly curbside pickup of trash and recycling.',
+            'options': [
+                {'id': 'none', 'label': 'No trash pickup', 'detail': 'You haul your own trash to the dump.', 'weekly': '0.00'},
+                {'id': 'service', 'label': 'Trash pickup', 'detail': 'Weekly curbside pickup of trash and recycling.', 'weekly': '4.62'},
             ],
         },
     },
@@ -357,6 +374,7 @@ DEFAULT_PLAN = {
     'version': 2,
     'housing': 'apt_1br',
     'internet': 'service',
+    'trash': 'none',
     'renters': 'basic',
     'groceries': 'thrifty',
     'health': 'bronze',
@@ -370,6 +388,7 @@ DEFAULT_PLAN = {
 PLAN_KEYS = {
     'housing': 'rent',
     'internet': 'internet',
+    'trash': 'trash',
     'renters': 'renters',
     'groceries': 'groceries',
     'health': 'health',
@@ -594,6 +613,8 @@ def selected_slugs(plan, catalog, card_color):
         slugs.append('student_loan')
     if plan.get('internet') and plan['internet'] != 'none':
         slugs.append('internet')
+    if plan.get('trash') and plan['trash'] != 'none':
+        slugs.append('trash')
     if plan.get('cell') and plan['cell'] != 'none':
         slugs.append('cell')
     if plan.get('vehicle') and plan['vehicle'] != 'none':
@@ -831,6 +852,9 @@ def statement_lines(slug, catalog, plan, ctx):
             'balance_before': str(money(balance)), 'principal': str(principal), 'loan_label': spec.get('label'),
             'rate': str(rate), 'payment': str(payment),
         })
+    elif slug == 'trash':
+        opt = find_option(opts, plan.get('trash')) or {}
+        lines.append(_line(opt.get('label', 'Trash pickup'), opt.get('weekly')))
     elif slug == 'renters':
         opt = find_option(opts, plan.get('renters')) or {}
         lines.append(_line(f"Renters insurance premium ({opt.get('label', 'coverage')})", opt.get('weekly')))
