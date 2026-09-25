@@ -70,22 +70,22 @@ const TUTORIAL_VIDEOS = {
     'marketplace-shopping': {
         title: 'Marketplace: Shopping & Checkout',
         description: 'Searching and filtering items, adding to cart, checking out, and viewing My Orders.',
-        duration: '',
-        videoFile: '', // TODO: 'marketplace-shopping.mp4' once recorded
+        duration: '0:39',
+        videoFile: 'marketplace-shopping.mp4',
         youtubeId: ''
     },
     'marketplace-fulfilling': {
         title: 'Marketplace: Fulfilling Orders',
         description: 'Working the purchase-order queue to approve and fulfill student orders.',
-        duration: '',
-        videoFile: '', // TODO: 'marketplace-fulfilling.mp4' once recorded
+        duration: '0:35',
+        videoFile: 'marketplace-fulfilling.mp4',
         youtubeId: ''
     },
     'marketplace-managing': {
         title: 'Marketplace: Managing Items & Analytics',
         description: 'Adding marketplace items, hiding/unhiding in bulk, and reading the purchase-analytics panel.',
-        duration: '',
-        videoFile: '', // TODO: 'marketplace-managing.mp4' once recorded
+        duration: '0:51',
+        videoFile: 'marketplace-managing.mp4',
         youtubeId: ''
     },
     'users-accounts': {

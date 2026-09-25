@@ -41,6 +41,9 @@ VIDEOS = {
     'schedules': ('narration-07-schedules.md', 'schedules.mp4'),
     'bank-account-bonuses': ('narration-08-bank-account-bonuses.md', 'bank-account-bonuses.mp4'),
     'bank-account-balances': ('narration-09-bank-account-balances.md', 'bank-account-balances.mp4'),
+    'marketplace-shopping': ('narration-10-marketplace-shopping.md', 'marketplace-shopping.mp4'),
+    'marketplace-fulfilling': ('narration-11-marketplace-fulfilling.md', 'marketplace-fulfilling.mp4'),
+    'marketplace-managing': ('narration-12-marketplace-managing.md', 'marketplace-managing.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

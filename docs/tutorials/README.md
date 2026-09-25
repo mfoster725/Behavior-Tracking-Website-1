@@ -15,6 +15,9 @@ One topic per video — these are not chapters of a single longer video.
 | `schedules.mp4` | 68s | `narration-07-schedules.md` | Schedules: looking up a teacher/student schedule side by side, adding a time period and class, saving, Transition, Export |
 | `bank-account-bonuses.mp4` | 57s | `narration-08-bank-account-bonuses.md` | Bank Account: Staff Bonuses — Starbucks/Star Student counts, Submit Table, Star Classroom caseload award |
 | `bank-account-balances.mp4` | 51s | `narration-09-bank-account-balances.md` | Bank Account: Balances & Paychecks — balance, emergency fund, undeposited paychecks, Weekly Earnings Record worksheet |
+| `marketplace-shopping.mp4` | 39s | `narration-10-marketplace-shopping.md` | Marketplace: Shopping & Checkout (student view) — search/filter, add to cart, checkout, My Orders |
+| `marketplace-fulfilling.mp4` | 35s | `narration-11-marketplace-fulfilling.md` | Marketplace: Fulfilling Orders — the purchase-order approval queue, Fulfill / Deny with a reason |
+| `marketplace-managing.mp4` | 51s | `narration-12-marketplace-managing.md` | Marketplace: Managing Items & Analytics — Add item, bulk hide/unhide, purchase analytics |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
