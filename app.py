@@ -7354,6 +7354,56 @@ def period_data():
         
         return jsonify(result)
 
+
+@app.route('/api/period-infractions', methods=['GET'])
+@login_required
+def period_infractions():
+    """Infraction-table rows for one student/date/period.
+
+    The Info popup (Period Entry / Daily Entry / Edit Point Card) only ever
+    read `period.info`'s embedded infractions array, so infractions saved via
+    a full point-card snapshot (stored as Infraction rows, not in `info`)
+    never showed up there even though report totals include them. This lets
+    the popup fetch and surface those rows on demand, without paying the cost
+    of eager-loading Infraction for every period on the daily/period grids.
+    """
+    try:
+        student_id = int(request.args.get('student_id'))
+        record_date = datetime.strptime(request.args.get('date'), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return jsonify({'error': 'student_id and date are required'}), 400
+    period = request.args.get('period')
+    if not period:
+        return jsonify({'error': 'period is required'}), 400
+
+    if current_user.role == 'student':
+        if current_user.student_id != student_id:
+            return jsonify({'error': 'Access denied'}), 403
+    elif current_user.role == 'staff' and current_user.is_outside_staff:
+        if not has_student_access(current_user, student_id):
+            return jsonify({'error': 'Access denied'}), 403
+
+    period_record = (
+        PeriodRecord.query
+        .join(DailyRecord, PeriodRecord.daily_record_id == DailyRecord.id)
+        .filter(
+            DailyRecord.student_id == student_id,
+            DailyRecord.date == record_date,
+            PeriodRecord.time_range == period,
+        )
+        .first()
+    )
+    if not period_record:
+        return jsonify([])
+
+    return jsonify([{
+        'type': i.infraction_type,
+        'count': i.count,
+        'is_general': i.is_general,
+        'is_harmful': i.is_harmful,
+    } for i in period_record.infractions])
+
+
 @app.route('/api/daily-records', methods=['GET', 'POST'])
 @login_required
 def daily_records():

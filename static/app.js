@@ -14440,7 +14440,10 @@ function bindAlternateLocationInput() {
     });
 }
 
+let infoModalRequestToken = 0;
+
 async function showInfoModal(event) {
+    const requestToken = ++infoModalRequestToken;
     const rawTarget = event && (event.currentTarget || event.target);
     let button = resolveInfoButtonFromEvent(event);
     if (!button || !button.dataset) {
@@ -14535,6 +14538,33 @@ async function showInfoModal(event) {
     const infoContextDate = (button.dataset.isEditPointCard === 'true' && window.editingPointCardRecord?.date)
         ? window.editingPointCardRecord.date
         : (currentDate || null);
+    const recordedInfractionsEl = document.getElementById('info-recorded-infractions');
+    if (recordedInfractionsEl) {
+        recordedInfractionsEl.style.display = 'none';
+        recordedInfractionsEl.textContent = '';
+    }
+    if (recordedInfractionsEl && studentId && period && infoContextDate) {
+        try {
+            const params = new URLSearchParams({ student_id: studentId, date: infoContextDate, period });
+            const infResponse = await fetch(`/api/period-infractions?${params.toString()}`);
+            if (requestToken !== infoModalRequestToken) {
+                // A newer showInfoModal call superseded this one; don't paint stale data.
+            } else if (infResponse.ok) {
+                const recordedInfractions = await infResponse.json();
+                if (Array.isArray(recordedInfractions) && recordedInfractions.length) {
+                    const summary = recordedInfractions
+                        .map((inf) => `${inf.type} (×${inf.count ?? 1})`)
+                        .join(', ');
+                    recordedInfractionsEl.textContent =
+                        `Also recorded on this student's point card, not editable here: ${summary}`;
+                    recordedInfractionsEl.style.display = 'block';
+                }
+            }
+        } catch (err) {
+            console.warn('Could not load point-card infractions for info modal:', err);
+        }
+    }
+
     const scheduledLocation = getScheduledLocationForStudentPeriod(studentId, period, infoContextDate);
     if (!isAlternateLocationManual() && isDetectedLocationScheduled(alternateLocationInput.value, scheduledLocation)) {
         alternateLocationInput.value = '';
