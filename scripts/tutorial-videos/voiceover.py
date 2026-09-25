@@ -38,6 +38,9 @@ VIDEOS = {
     'reports-navigation': ('narration-04-reports-navigation.md', 'reports-navigation.mp4'),
     'report-sections': ('narration-05-report-sections.md', 'report-sections.mp4'),
     'bills': ('narration-06-bills.md', 'bills.mp4'),
+    'schedules': ('narration-07-schedules.md', 'schedules.mp4'),
+    'bank-account-bonuses': ('narration-08-bank-account-bonuses.md', 'bank-account-bonuses.mp4'),
+    'bank-account-balances': ('narration-09-bank-account-balances.md', 'bank-account-balances.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

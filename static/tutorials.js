@@ -49,22 +49,22 @@ const TUTORIAL_VIDEOS = {
     'schedules': {
         title: 'Schedules: Teacher & Student Setup',
         description: 'Look up a teacher or student schedule, add a period, save, and export (print/CSV, with or without rosters).',
-        duration: '',
-        videoFile: '', // TODO: 'schedules.mp4' once recorded
+        duration: '1:08',
+        videoFile: 'schedules.mp4',
         youtubeId: ''
     },
     'bank-account-bonuses': {
         title: 'Bank Account: Staff Bonuses',
         description: 'Awarding Starbucks/Star Student counts per student and Star Classroom per caseload, then submitting the table.',
-        duration: '',
-        videoFile: '', // TODO: 'bank-account-bonuses.mp4' once recorded
+        duration: '0:57',
+        videoFile: 'bank-account-bonuses.mp4',
         youtubeId: ''
     },
     'bank-account-balances': {
         title: 'Bank Account: Balances & Paychecks',
         description: "Viewing a student's balance, emergency fund, and paychecks, plus the Weekly Earnings Record worksheet.",
-        duration: '',
-        videoFile: '', // TODO: 'bank-account-balances.mp4' once recorded
+        duration: '0:51',
+        videoFile: 'bank-account-balances.mp4',
         youtubeId: ''
     },
     'marketplace-shopping': {

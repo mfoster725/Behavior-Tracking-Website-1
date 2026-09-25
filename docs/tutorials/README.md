@@ -12,6 +12,9 @@ One topic per video — these are not chapters of a single longer video.
 | `reports-navigation.mp4` | 92s | `narration-04-reports-navigation.md` | Reports controls: student vs. group, timeframe, Compare / Incentive Tracking show-hide, Insights View, Print |
 | `report-sections.mp4` | 80s | `narration-05-report-sections.md` | What each report tile shows: Attendance, STAR Percent, Plan Thresholds, Trigger Time, Infractions, Incidents, Level Up's, Frenzies |
 | `bills.mp4` | 92s | `narration-06-bills.md` | Bills: class overview, turning bills on for a student, This week / Pay / worksheets, My Plan, Savings, Assistance, History |
+| `schedules.mp4` | 68s | `narration-07-schedules.md` | Schedules: looking up a teacher/student schedule side by side, adding a time period and class, saving, Transition, Export |
+| `bank-account-bonuses.mp4` | 57s | `narration-08-bank-account-bonuses.md` | Bank Account: Staff Bonuses — Starbucks/Star Student counts, Submit Table, Star Classroom caseload award |
+| `bank-account-balances.mp4` | 51s | `narration-09-bank-account-balances.md` | Bank Account: Balances & Paychecks — balance, emergency fund, undeposited paychecks, Weekly Earnings Record worksheet |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
