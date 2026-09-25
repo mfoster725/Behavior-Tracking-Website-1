@@ -561,7 +561,7 @@ def register_economy_routes(app):
                     **extra,
                 })
             sections.append({'key': key, 'title': title, 'note': note or opts.get('note'), 'selected': plan.get(key), 'options': options,
-                             'required': key not in ('cell', 'vehicle', 'car_insurance', 'internet', 'groceries')})
+                             'required': key not in ('cell', 'vehicle', 'car_insurance', 'internet')})
 
         internet_params = (catalog.get('internet') or {}).get('params') or {}
         equipment = eco.money(internet_params.get('equipment_weekly') or 0)

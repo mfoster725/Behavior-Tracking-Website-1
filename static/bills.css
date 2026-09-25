@@ -907,6 +907,7 @@
     color: var(--bills-green);
     line-height: 1.35;
     font-weight: 600;
+    margin: 8px 0;
 }
 
 .bills2-option-price {

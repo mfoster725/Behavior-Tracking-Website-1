@@ -837,7 +837,7 @@
                 '<span class="bills2-option-check"></span>' +
                 '<span class="bills2-option-name">' + esc(o.label) + '</span>' +
                 '<span class="bills2-option-detail">' + esc(detail) + '</span>' +
-                (o.impact ? '<span class="bills2-option-impact">Gets you: ' + esc(o.impact) + '</span>' : '') +
+                (o.impact ? '<span class="bills2-option-impact">' + esc(o.impact) + '</span>' : '') +
                 '<span class="bills2-option-price">' + (o.weekly > 0 ? fmt(o.weekly) + ' <small>a week' + (o.monthly && sec.key !== 'savings' ? ' · about $' + Math.round(o.monthly).toLocaleString('en-US') + '/mo' : '') + '</small>' : '$0 <small>a week</small>') + '</span>' +
                 '</label>';
         });

@@ -110,12 +110,6 @@ BILL_PRODUCTS_V2 = [
                  'detail': 'Bedroom, kitchen, and living room, about 650 sq ft.',
                  'impact': 'You choose your desk and can move it anywhere within your assigned zone. You cannot choose your chair.',
                  'weekly': '178.85', 'bedrooms': 1, 'kwh_factor': '1.00', 'roommate': False},
-                {'id': 'house', 'label': 'Small house', 'payee': 'Cedar Lane Rentals', 'unit': '2-bedroom house',
-                 'detail': 'A 2-bedroom house with a yard and a garage.',
-                 'impact': "You choose your desk and can put it anywhere in the classroom (your teacher can veto the spot). "
-                           "You can choose any chair that isn't already taken by an adult, and you can have as many chairs at "
-                           "your desk as you want.",
-                 'weekly': '288.46', 'bedrooms': 2, 'kwh_factor': '1.80', 'roommate': False},
                 {'id': 'apt_2br', 'label': '2-bedroom apartment', 'payee': 'Oak Court Apartments', 'unit': 'Apt 9',
                  'detail': 'An extra bedroom for an office or guests.',
                  'impact': 'You choose your desk and can move it anywhere within your assigned zone. You choose between two chairs.',
@@ -125,6 +119,12 @@ BILL_PRODUCTS_V2 = [
                  'impact': 'You choose your desk and can move it anywhere within your assigned zone. You must have a roommate: '
                            'you get two chairs, but you share one desk.',
                  'weekly': '121.15', 'bedrooms': 2, 'kwh_factor': '1.35', 'roommate': True},
+                {'id': 'house', 'label': 'Small house', 'payee': 'Cedar Lane Rentals', 'unit': '2-bedroom house',
+                 'detail': 'A 2-bedroom house with a yard and a garage.',
+                 'impact': "You choose your desk and can put it anywhere in the classroom (your teacher can veto the spot). "
+                           "You can choose any chair that isn't already taken by an adult, and you can have as many chairs at "
+                           "your desk as you want.",
+                 'weekly': '288.46', 'bedrooms': 2, 'kwh_factor': '1.80', 'roommate': False},
             ],
         },
     },
@@ -193,13 +193,13 @@ BILL_PRODUCTS_V2 = [
         'slug': 'groceries',
         'name': 'Groceries',
         'category': 'food',
-        'is_base': False,
+        'is_base': True,
         'formula_kind': 'groceries',
         'sort_order': 50,
         'options_json': {
             'code': 'MSM',
             'payee': 'Main Street Market',
-            'note': 'Optional. Your weekly grocery receipt, based on USDA food plans for one adult living alone.',
+            'note': 'Your weekly grocery receipt, based on USDA food plans for one adult living alone.',
             'params': {
                 'categories': [
                     ['Produce', '0.22'], ['Meat, fish, and eggs', '0.24'], ['Dairy', '0.14'],
@@ -207,8 +207,6 @@ BILL_PRODUCTS_V2 = [
                 ],
             },
             'options': [
-                {'id': 'none', 'label': 'No groceries budget', 'detail': 'You skip your weekly grocery bill.',
-                 'impact': 'No snacks of any kind in class.', 'weekly': '0.00'},
                 {'id': 'thrifty', 'label': 'Thrifty', 'detail': 'Store brands, cooking at home.',
                  'impact': 'No snacks in class.', 'weekly': '80.00'},
                 {'id': 'moderate', 'label': 'Moderate', 'detail': 'Some name brands and convenience foods.',
@@ -315,15 +313,9 @@ BILL_PRODUCTS_V2 = [
             'options': [
                 {'id': 'none', 'label': 'No car', 'detail': 'Walk, bike, or get rides.',
                  'impact': 'No extra break in class.', 'loan_weekly': '0.00', 'upkeep_weekly': '0.00', 'gallons_week': '0'},
-                {'id': 'older', 'label': 'Older car, paid off', 'detail': 'No loan, but more repairs.',
-                 'impact': 'You can take an extra 5-minute break in class each day.',
-                 'loan_weekly': '0.00', 'upkeep_weekly': '35.00', 'gallons_week': '11.5'},
-                {'id': 'used', 'label': 'Used car with a loan', 'detail': 'About a {car_price} car over 5 years.', 'car_price': '15000.00',
+                {'id': 'car', 'label': 'Car', 'detail': 'About a {car_price} car over 5 years.', 'car_price': '15000.00',
                  'impact': 'You can take an extra 5-minute break in class each day.',
                  'loan_weekly': '75.23', 'upkeep_weekly': '25.00', 'gallons_week': '10.5'},
-                {'id': 'newer', 'label': 'Newer car with a loan', 'detail': 'About a {car_price} car over 6 years.', 'car_price': '25000.00',
-                 'impact': 'You can take an extra 5-minute break in class each day.',
-                 'loan_weekly': '125.08', 'upkeep_weekly': '15.00', 'gallons_week': '9.5'},
             ],
         },
     },
@@ -388,7 +380,7 @@ PLAN_KEYS = {
 }
 
 LEGACY_HOUSING = {'apt_1br': 'apt_1br', 'apt_2br': 'apt_2br', 'house': 'house', 'homeless': 'studio'}
-LEGACY_VEHICLE = {'none': 'none', 'beater': 'older', 'average': 'used', 'sports': 'newer'}
+LEGACY_VEHICLE = {'none': 'none', 'beater': 'car', 'average': 'car', 'sports': 'car'}
 LEGACY_HEALTH = {'none': 'bronze', '6000': 'bronze', '1200': 'silver', '0': 'gold'}
 
 DEFAULT_SETTINGS = {
@@ -597,13 +589,11 @@ def student_loan_spec(catalog, card_color):
 
 
 def selected_slugs(plan, catalog, card_color):
-    slugs = ['rent', 'electric', 'renters', 'health', 'savings']
+    slugs = ['rent', 'electric', 'renters', 'groceries', 'health', 'savings']
     if student_loan_spec(catalog, card_color):
         slugs.append('student_loan')
     if plan.get('internet') and plan['internet'] != 'none':
         slugs.append('internet')
-    if plan.get('groceries') and plan['groceries'] != 'none':
-        slugs.append('groceries')
     if plan.get('cell') and plan['cell'] != 'none':
         slugs.append('cell')
     if plan.get('vehicle') and plan['vehicle'] != 'none':
