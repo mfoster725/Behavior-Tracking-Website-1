@@ -8791,14 +8791,38 @@ def summary():
             school_years.add(school_year)
         return sorted(school_years)
     
-    def compute_attendance_summary(records):
-        """Compute attendance breakdown and percent of days present for a set of records."""
+    def _attendance_calendar_range_for_records(records):
+        """School-year bounds to reconcile attendance records against the real
+        calendar, or (None, None, None) when that isn't safe to assume — e.g.
+        no calendar is configured, or the records predate the configured
+        school year (an all-time view spanning older years, whose calendars
+        aren't tracked here)."""
+        year_start, year_end = get_configured_school_year_bounds()
+        if not year_start or not year_end:
+            return None, None, None
+        if any(r.date < year_start for r in records):
+            return None, None, None
+        range_end = min(date.today(), year_end)
+        if range_end < year_start:
+            return None, None, None
+        return year_start, range_end, get_non_school_date_set()
+
+    def compute_attendance_summary(records, range_start=None, range_end=None, non_school_dates=None):
+        """Compute attendance breakdown and percent of days present for a set of records.
+
+        When range_start/range_end are given, school days in that range with no
+        logged record are counted separately as 'unlogged' instead of silently
+        vanishing from both the present/absent tallies and the day total.
+        """
         summary = {
             'present': 0,
             'excused': 0,
             'unexcused': 0,
+            'unlogged': 0,
             'present_pct': 0.0,
+            'total_school_days': 0,
         }
+        logged_dates = set()
         total = 0
         for r in records:
             status = r.attendance_status or ('present' if r.present else 'unexcused')
@@ -8806,6 +8830,13 @@ def summary():
                 continue
             summary[status] += 1
             total += 1
+            logged_dates.add(r.date)
+        if range_start and range_end:
+            school_days = list_school_days(range_start, range_end, non_school_dates=non_school_dates)
+            summary['unlogged'] = sum(1 for d in school_days if d not in logged_dates)
+            summary['total_school_days'] = len(school_days)
+        else:
+            summary['total_school_days'] = total
         if total > 0:
             summary['present_pct'] = round((summary['present'] / total) * 100, 1)
         return summary
@@ -10984,7 +11015,10 @@ def summary():
             stats = _merge_30day_behavior_and_star_stats(stats_behavior, stats_star)
         else:
             stats = summary_stats_fn(metric_records)
-        attendance_summary = compute_attendance_summary(attendance_records)
+        cal_start = cal_end = cal_non_school_dates = None
+        if student_id and period == 'current_year':
+            cal_start, cal_end, cal_non_school_dates = _attendance_calendar_range_for_records(attendance_records)
+        attendance_summary = compute_attendance_summary(attendance_records, cal_start, cal_end, cal_non_school_dates)
         attendance_by_day = compute_attendance_by_day_of_week(attendance_records)
         result = {
             'timeframe': period,
@@ -11447,7 +11481,10 @@ def summary():
         records = all_records
         stats = summary_stats_fn(records)
         attendance_records_all = list(all_records_raw)
-        attendance_summary_all = compute_attendance_summary(attendance_records_all)
+        cal_start = cal_end = cal_non_school_dates = None
+        if student_id:
+            cal_start, cal_end, cal_non_school_dates = _attendance_calendar_range_for_records(attendance_records_all)
+        attendance_summary_all = compute_attendance_summary(attendance_records_all, cal_start, cal_end, cal_non_school_dates)
         attendance_by_day_all = compute_attendance_by_day_of_week(attendance_records_all)
         overview_trends_all = build_overview_trends_from_prior_window(
             stats,

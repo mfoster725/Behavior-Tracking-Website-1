@@ -34444,7 +34444,13 @@ function attachOverviewCardInteractions(container, data) {
             ? attendance.present_pct
             : 0;
         const roundedPresentPct = Math.ceil(Number(presentPct) || 0);
-        const totalDays = data.total_days || 0;
+        // Prefer the attendance-reconciled day total (present + excused + unexcused
+        // + unlogged, checked against the real school calendar) over data.total_days,
+        // which counts only non-excused behavior records and can undercount here.
+        const totalDays = typeof attendance.total_school_days === 'number'
+            ? attendance.total_school_days
+            : (data.total_days || 0);
+        const unloggedDays = Number(attendance.unlogged || 0);
 
         const byDay = data.attendance_by_day_of_week || {};
         const dayEntries = Object.entries(byDay);
@@ -34556,6 +34562,11 @@ function attachOverviewCardInteractions(container, data) {
                         <span class="overview-metrics-label"><strong>Total expected days:</strong></span>
                         <span class="overview-metrics-value">${totalDays}</span>
                     </div>
+                    ${unloggedDays > 0 ? `
+                    <div class="overview-metrics-row">
+                        <span class="overview-metrics-label"><strong>Unlogged days:</strong></span>
+                        <span class="overview-metrics-value">${unloggedDays}</span>
+                    </div>` : ''}
                     <div class="overview-metrics-row">
                         <span class="overview-metrics-label"><strong>Most absences:</strong></span>
                         <span class="overview-metrics-value">${mostAbsentText}</span>
@@ -34671,6 +34682,11 @@ function attachOverviewCardInteractions(container, data) {
         const donutLabels = ['Present', 'Excused', 'Unexcused'];
         const donutValues = [attendancePresent, attendanceExcused, attendanceUnexcused];
         const donutColors = ['#16A34A', '#F59E0B', '#FB6F5A'];
+        if (unloggedDays > 0) {
+            donutLabels.push('Unlogged');
+            donutValues.push(unloggedDays);
+            donutColors.push('#94A3B8');
+        }
         const hasDonutData = donutValues.some((value) => value > 0);
         const dayOfWeekDeltas = data.overview_trends?.day_of_week_absence_deltas || {};
         const normalizedDayOfWeekDeltas = Object.entries(dayOfWeekDeltas).reduce((acc, [label, value]) => {
