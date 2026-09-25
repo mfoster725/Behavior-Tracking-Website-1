@@ -46,6 +46,9 @@ VIDEOS = {
     'marketplace-managing': ('narration-12-marketplace-managing.md', 'marketplace-managing.mp4'),
     'users-accounts': ('narration-13-users-accounts.md', 'users-accounts.mp4'),
     'users-student-plans': ('narration-14-users-student-plans.md', 'users-student-plans.mp4'),
+    'admin-accounts-billing': ('narration-15-admin-accounts-billing.md', 'admin-accounts-billing.mp4'),
+    'admin-importing-data': ('narration-16-admin-importing-data.md', 'admin-importing-data.mp4'),
+    'admin-calendar-economy': ('narration-17-admin-calendar-economy.md', 'admin-calendar-economy.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

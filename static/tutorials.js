@@ -105,22 +105,22 @@ const TUTORIAL_VIDEOS = {
     'admin-accounts-billing': {
         title: 'Admin: Accounts & Billing',
         description: 'Managing your subscription/billing and creating new staff or admin accounts.',
-        duration: '',
-        videoFile: '', // TODO: 'admin-accounts-billing.mp4' once recorded
+        duration: '0:33',
+        videoFile: 'admin-accounts-billing.mp4',
         youtubeId: ''
     },
     'admin-importing-data': {
         title: 'Admin: Importing Data',
         description: 'Bulk CSV import of staff/outside staff/students, and syncing with a Google Sheet.',
-        duration: '',
-        videoFile: '', // TODO: 'admin-importing-data.mp4' once recorded
+        duration: '0:48',
+        videoFile: 'admin-importing-data.mp4',
         youtubeId: ''
     },
     'admin-calendar-economy': {
         title: 'Admin: Calendar & Economy Settings',
         description: 'Setting up the school calendar (quarters, holidays) and the market economy (cost of living, bill prices, late fees).',
-        duration: '',
-        videoFile: '', // TODO: 'admin-calendar-economy.mp4' once recorded
+        duration: '0:47',
+        videoFile: 'admin-calendar-economy.mp4',
         youtubeId: ''
     }
 };
