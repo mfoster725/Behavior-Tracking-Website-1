@@ -19,7 +19,7 @@ if sys.platform == 'win32':
 
     _platform.machine = _platform_machine_fast
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, event, func, or_
 from sqlalchemy.orm import selectinload, load_only, joinedload
@@ -441,6 +441,19 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
+TUTORIAL_VIDEOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'docs', 'tutorials')
+
+@app.route('/tutorial-videos/<filename>')
+@staff_required
+def tutorial_video(filename):
+    # Staff/admin-only, same bar as the rest of the app — these clips only ever
+    # show synthetic demo data, never real students.
+    if os.path.basename(filename) != filename or not filename.endswith('.mp4'):
+        return jsonify({'error': 'Not found'}), 404
+    if not os.path.isfile(os.path.join(TUTORIAL_VIDEOS_DIR, filename)):
+        return jsonify({'error': 'Not found'}), 404
+    return send_from_directory(TUTORIAL_VIDEOS_DIR, filename, conditional=True, max_age=86400)
 
 def api_json_errors(f):
     """Ensure uncaught API exceptions return JSON (not Flask HTML error pages)."""

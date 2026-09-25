@@ -9732,26 +9732,55 @@ a.dashboard-compare-toggle {
     font-weight: 600;
 }
 
-/* When the overview column cannot hold three stat panels side by side,
-   stack them. Each panel stays the width of its gauge instead of
-   stretching across the card. */
+/* Narrow overview column: keep the three stat panels side by side,
+   scaled so gauges, labels, and the donut stay inside their panels. */
 @container overview-card (max-width: 540px) {
-    .overview-card--rich .overview-rich-gauges {
-        flex-direction: column;
-        align-items: center;
+    .overview-card--rich .overview-rich-row {
+        gap: 6px;
     }
 
     .overview-card--rich .overview-rich-gauges .overview-beige-panel {
-        flex: 0 0 auto;
-        width: min(100%, 220px);
-        max-width: 220px;
+        padding: 6px 5px;
         min-width: 0;
     }
 
     .overview-card--rich .overview-rich-gauges .overview-panel-kicker {
+        font-size: 0.58rem;
+        letter-spacing: 0.04em;
+        line-height: 1.15;
         text-align: center;
-        white-space: nowrap;
-        overflow-wrap: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .overview-card--rich .overview-gauge-wrap--attendance-donut,
+    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
+        width: min(117px, 100%);
+        max-width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+    }
+
+    .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg {
+        width: 100%;
+    }
+
+    .overview-card--rich .overview-gauge-attendance .overview-gauge-big,
+    .overview-card--rich .overview-gauge-star .overview-gauge-big,
+    .overview-card--rich .overview-gauge-plans .overview-gauge-big {
+        font-size: 1rem;
+    }
+
+    .overview-card--rich .overview-gauge-attendance .overview-gauge-small,
+    .overview-card--rich .overview-gauge-star .overview-gauge-small,
+    .overview-card--rich .overview-gauge-plans .overview-gauge-small,
+    .overview-card--rich .overview-plan-stat-sub {
+        font-size: 0.62rem;
+        line-height: 1.15;
+        text-align: center;
+    }
+
+    .overview-card--rich .overview-plan-stat-body {
+        padding: 2px 0 0;
     }
 
     .overview-card--rich .overview-trends-card {
@@ -9792,19 +9821,6 @@ a.dashboard-compare-toggle {
 @media (max-width: 768px) {
     .overview-rich-row {
         flex-direction: column;
-    }
-
-    /* Stacked stat panels stay gauge-width. A full-width beige bar
-       leaves the chart floating in empty space. */
-    .overview-card--rich .overview-rich-gauges {
-        align-items: center;
-    }
-
-    .overview-card--rich .overview-rich-gauges .overview-beige-panel {
-        flex: 0 0 auto;
-        align-self: center;
-        width: min(100%, 220px);
-        max-width: 220px;
     }
 
     .overview-rich-header {
