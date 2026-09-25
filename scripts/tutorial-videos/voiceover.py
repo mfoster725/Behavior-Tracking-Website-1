@@ -44,6 +44,8 @@ VIDEOS = {
     'marketplace-shopping': ('narration-10-marketplace-shopping.md', 'marketplace-shopping.mp4'),
     'marketplace-fulfilling': ('narration-11-marketplace-fulfilling.md', 'marketplace-fulfilling.mp4'),
     'marketplace-managing': ('narration-12-marketplace-managing.md', 'marketplace-managing.mp4'),
+    'users-accounts': ('narration-13-users-accounts.md', 'users-accounts.mp4'),
+    'users-student-plans': ('narration-14-users-student-plans.md', 'users-student-plans.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

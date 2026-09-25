@@ -18,6 +18,8 @@ One topic per video — these are not chapters of a single longer video.
 | `marketplace-shopping.mp4` | 39s | `narration-10-marketplace-shopping.md` | Marketplace: Shopping & Checkout (student view) — search/filter, add to cart, checkout, My Orders |
 | `marketplace-fulfilling.mp4` | 35s | `narration-11-marketplace-fulfilling.md` | Marketplace: Fulfilling Orders — the purchase-order approval queue, Fulfill / Deny with a reason |
 | `marketplace-managing.mp4` | 51s | `narration-12-marketplace-managing.md` | Marketplace: Managing Items & Analytics — Add item, bulk hide/unhide, purchase analytics |
+| `users-accounts.mp4` | 46s | `narration-13-users-accounts.md` | User Management: Accounts & Roster — searching, Add Student/Staff/Outside Staff/Admin, Share login information |
+| `users-student-plans.mp4` | 38s | `narration-14-users-student-plans.md` | User Management: Student Plans — the row kebab's Add/Edit Plan, If/Then rows, point-card threshold |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with

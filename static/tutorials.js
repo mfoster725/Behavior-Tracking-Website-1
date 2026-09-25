@@ -91,15 +91,15 @@ const TUTORIAL_VIDEOS = {
     'users-accounts': {
         title: 'User Management: Accounts & Roster',
         description: 'Searching students/staff/outside staff/admins, adding accounts, and sharing login information in bulk.',
-        duration: '',
-        videoFile: '', // TODO: 'users-accounts.mp4' once recorded
+        duration: '0:46',
+        videoFile: 'users-accounts.mp4',
         youtubeId: ''
     },
     'users-student-plans': {
         title: 'User Management: Student Plans',
         description: "Adding or editing a student's plan from their row's kebab menu.",
-        duration: '',
-        videoFile: '', // TODO: 'users-student-plans.mp4' once recorded
+        duration: '0:38',
+        videoFile: 'users-student-plans.mp4',
         youtubeId: ''
     },
     'admin-accounts-billing': {
