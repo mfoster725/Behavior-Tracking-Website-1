@@ -1384,6 +1384,54 @@
         body().innerHTML = html;
     }
 
+    // ------------------------------------------------------------------
+    // Hide/unhide bill categories (staff)
+    // ------------------------------------------------------------------
+
+    function billCategoriesModalHtml(products) {
+        var rows = (products || []).map(function (p) {
+            return '<label class="bills2-cat-row"><input type="checkbox" data-cat-toggle="' + p.id + '"' + (p.is_active ? ' checked' : '') + '>' +
+                '<span>' + esc(p.name) + '</span></label>';
+        }).join('');
+        return '<div class="bills2-confirm"><h3 id="bills-modal-title">Hide or unhide bills</h3>' +
+            '<p class="bills2-note" style="margin:0 0 12px">Turn a bill off to remove it from every student\'s plan and bills. ' +
+            'Turn it back on any time.</p>' +
+            '<div class="bills2-cat-list">' + (rows || '<p class="bills2-note">No bill categories found.</p>') + '</div>' +
+            '<p id="bills-cat-msg" class="bills2-note" style="display:none;margin-top:10px"></p>' +
+            '<div class="bills2-coupon-actions"><button type="button" class="bills2-btn" data-close-modal>Cancel</button>' +
+            '<button type="button" class="bills2-btn bills2-btn-primary" data-save-categories>Save</button></div></div>';
+    }
+
+    function openBillCategoriesModal() {
+        openModal('<div class="bills2-empty">Loading...</div>');
+        api('/api/economy/bill-categories').then(function (res) {
+            if (!res.ok) {
+                openModal('<div class="bills2-confirm"><h3 id="bills-modal-title">Hide or unhide bills</h3>' +
+                    '<p>Could not load bill categories.</p></div>');
+                return;
+            }
+            openModal(billCategoriesModalHtml(res.data.products));
+        });
+    }
+
+    function saveBillCategories() {
+        var modal = document.getElementById('bills-modal');
+        if (!modal) return;
+        var products = Array.prototype.map.call(modal.querySelectorAll('[data-cat-toggle]'), function (input) {
+            return { id: Number(input.getAttribute('data-cat-toggle')), is_active: input.checked };
+        });
+        api('/api/economy/bill-categories', { method: 'PUT', body: JSON.stringify({ products: products }) }).then(function (res) {
+            var msg = document.getElementById('bills-cat-msg');
+            if (!res.ok) {
+                if (msg) { msg.style.display = 'block'; msg.style.color = '#b91c1c'; msg.textContent = res.data.error || 'Save failed.'; }
+                return;
+            }
+            closeModal();
+            if (state.showOverview || !state.studentId) loadOverview();
+            else loadEconomy(state.studentId, true);
+        });
+    }
+
     function setupStudentSearch() {
         var input = document.getElementById('bills-student-search-input');
         var dropdown = document.querySelector('.bills-student-autocomplete-dropdown');
@@ -1467,6 +1515,10 @@
                 render();
             });
         }
+        var manageCategoriesBtn = document.getElementById('bills-manage-categories-btn');
+        if (manageCategoriesBtn) {
+            manageCategoriesBtn.addEventListener('click', function () { openBillCategoriesModal(); });
+        }
         var root = document.getElementById('bills-root');
         if (root) {
             root.addEventListener('click', function (ev) {
@@ -1517,6 +1569,7 @@
                 if (confirmBtn) { doSavingsTransfer('to_checking', confirmBtn.getAttribute('data-confirm-savings'), true); }
                 var autoBtn = t.closest('[data-worksheet-auto]');
                 if (autoBtn) { autoFillWorksheet(Number(autoBtn.getAttribute('data-worksheet-auto'))); }
+                if (t.closest('[data-save-categories]')) { saveBillCategories(); return; }
             });
             modal.addEventListener('submit', function (ev) {
                 var payForm = ev.target.closest('[data-pay-bill]');

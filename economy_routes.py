@@ -1409,6 +1409,34 @@ def register_economy_routes(app):
     def get_economy_settings():
         return jsonify(settings_payload())
 
+    def bill_categories_payload():
+        return {
+            'products': [
+                {'id': p.id, 'slug': p.slug, 'name': p.name, 'category': p.category, 'is_active': bool(p.is_active)}
+                for p in all_products()
+            ],
+        }
+
+    @app.route('/api/economy/bill-categories', methods=['GET'])
+    @login_required
+    @m.staff_required
+    def get_bill_categories():
+        """Just the on/off switch per bill category, for staff (not just admins) to manage from Bills."""
+        return jsonify(bill_categories_payload())
+
+    @app.route('/api/economy/bill-categories', methods=['PUT'])
+    @login_required
+    @m.staff_required
+    def update_bill_categories():
+        data = request.get_json(silent=True) or {}
+        for spec in data.get('products') or []:
+            product = m.BillProduct.query.get(spec.get('id')) if spec.get('id') else None
+            if not product or 'is_active' not in spec:
+                continue
+            product.is_active = bool(spec['is_active'])
+        m.db.session.commit()
+        return jsonify(bill_categories_payload())
+
     @app.route('/api/economy/settings', methods=['PUT'])
     @login_required
     @m.admin_required
