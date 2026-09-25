@@ -1394,8 +1394,8 @@
                 '<span>' + esc(p.name) + '</span></label>';
         }).join('');
         return '<div class="bills2-confirm"><h3 id="bills-modal-title">Hide or unhide bills</h3>' +
-            '<p class="bills2-note" style="margin:0 0 12px">Turn a bill off to remove it from every student\'s plan and bills. ' +
-            'Turn it back on any time.</p>' +
+            '<p class="bills2-note" style="margin:0 0 12px">Turn a bill off to remove it from every student\'s plan and future ' +
+            'bills, and to clear anyone\'s already-issued unpaid bill for it right away. Turn it back on any time.</p>' +
             '<div class="bills2-cat-list">' + (rows || '<p class="bills2-note">No bill categories found.</p>') + '</div>' +
             '<p id="bills-cat-msg" class="bills2-note" style="display:none;margin-top:10px"></p>' +
             '<div class="bills2-coupon-actions"><button type="button" class="bills2-btn" data-close-modal>Cancel</button>' +
@@ -1426,9 +1426,21 @@
                 if (msg) { msg.style.display = 'block'; msg.style.color = '#b91c1c'; msg.textContent = res.data.error || 'Save failed.'; }
                 return;
             }
-            closeModal();
-            if (state.showOverview || !state.studentId) loadOverview();
-            else loadEconomy(state.studentId, true);
+            var refresh = function () {
+                if (state.showOverview || !state.studentId) loadOverview();
+                else loadEconomy(state.studentId, true);
+            };
+            var waived = res.data.waived_bills || 0;
+            if (waived > 0 && msg) {
+                msg.style.display = 'block';
+                msg.style.color = '#15803d';
+                msg.textContent = 'Saved. Cleared ' + waived + ' already-issued unpaid bill' + (waived === 1 ? '' : 's') + ' for the bill(s) you turned off.';
+                refresh();
+                setTimeout(closeModal, 1600);
+            } else {
+                refresh();
+                closeModal();
+            }
         });
     }
 

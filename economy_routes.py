@@ -1428,14 +1428,40 @@ def register_economy_routes(app):
     @login_required
     @m.staff_required
     def update_bill_categories():
+        """Toggle is_active for the given bill products.
+
+        Turning one off also clears any already-issued bill for it that's still
+        unpaid, across every student -- otherwise the category would only
+        disappear from next week's bills and the plan page, while this week's
+        bill for it (issued before the toggle) would keep sitting there unpaid,
+        looking like the toggle did nothing.
+        """
         data = request.get_json(silent=True) or {}
+        turned_off = []
         for spec in data.get('products') or []:
             product = m.BillProduct.query.get(spec.get('id')) if spec.get('id') else None
             if not product or 'is_active' not in spec:
                 continue
-            product.is_active = bool(spec['is_active'])
+            new_active = bool(spec['is_active'])
+            if product.is_active and not new_active:
+                turned_off.append(product)
+            product.is_active = new_active
+        waived = 0
+        now = datetime.utcnow()
+        for product in turned_off:
+            bills = m.StudentBill.query.filter(
+                m.StudentBill.bill_product_id == product.id,
+                m.StudentBill.status.in_(OPEN_STATUSES),
+            ).all()
+            for bill in bills:
+                bill.status = 'waived'
+                bill.waived_reason = f'{product.name} turned off by staff'
+                bill.paid_at = now
+                waived += 1
         m.db.session.commit()
-        return jsonify(bill_categories_payload())
+        payload = bill_categories_payload()
+        payload['waived_bills'] = waived
+        return jsonify(payload)
 
     @app.route('/api/economy/settings', methods=['PUT'])
     @login_required
