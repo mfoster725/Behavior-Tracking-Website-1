@@ -39,7 +39,6 @@ async function main() {
       await pause(350);
       await kebab.click();
       await pause(400);
-      await unhighlight();
     }, 800, 3400);
 
     await step('Add/Edit Plan opens their If/Then plan.', async () => {
@@ -59,7 +58,6 @@ async function main() {
       await thenInput.click();
       await thenInput.fill('Check in with the case manager for a reset');
       await highlight(thenInput);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Add a point-card threshold so the system can flag it automatically.', async () => {
@@ -68,7 +66,6 @@ async function main() {
       await pause(350);
       await checkbox.check();
       await pause(500);
-      await unhighlight();
     }, 800, 4200);
 
     await step('Add row starts another If/Then; Save plan keeps everything you’ve written.', async () => {
