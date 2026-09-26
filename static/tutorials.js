@@ -182,8 +182,8 @@ const TUTORIAL_VIDEOS = {
     'marketplace-hiding': {
         title: 'Marketplace: Creating & Hiding Items',
         description: "Adding a new item, and what hiding it from students (by student, card color, grade, or caseload) actually does.",
-        duration: '',
-        videoFile: '', // TODO: 'marketplace-hiding.mp4' once recorded
+        duration: '1:03',
+        videoFile: 'marketplace-hiding.mp4',
         youtubeId: ''
     }
 };

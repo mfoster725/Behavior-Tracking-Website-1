@@ -31,6 +31,7 @@ One topic per video — these are not chapters of a single longer video.
 | `reports-incidents.mp4` | 43s | `narration-23-reports-incidents.md` | Reports: Incidents Drill-Down — Reminders and Resets, each with its own Table view |
 | `reports-level-ups.mp4` | 36s | `narration-24-reports-level-ups.md` | Reports: Level Up's Drill-Down — Yellow→Green and Green→Blue readiness tables |
 | `reports-frenzies.mp4` | 44s | `narration-25-reports-frenzies.md` | Reports: Frenzies Drill-Down — severity breakdown, clicking a severity for time/day detail |
+| `marketplace-hiding.mp4` | 63s | `narration-26-marketplace-hiding.md` | Marketplace: Creating & Hiding Items — Add item, and the per-item hide-from-students rule types |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
