@@ -9570,6 +9570,16 @@ a.dashboard-compare-toggle {
     font-size: 0.82rem;
 }
 
+/* Plan count matches the Attendance / Star numbers beside it. */
+.overview-card--rich .overview-gauge-plans .overview-gauge-big {
+    font-size: 1.28rem;
+    line-height: 1.1;
+}
+
+.overview-card--rich .overview-gauge-plans .overview-gauge-small {
+    font-size: 0.82rem;
+}
+
 .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
     margin-top: 0;
     width: 117px;
@@ -9624,7 +9634,7 @@ a.dashboard-compare-toggle {
 .overview-card--rich .overview-heatmap-legend {
     gap: 4px;
     margin-top: 4px;
-    font-size: 0.54rem;
+    font-size: 0.68rem;
 }
 
 .overview-card--rich .overview-heatmap-legend-bar {
@@ -9632,11 +9642,13 @@ a.dashboard-compare-toggle {
     height: 5px;
 }
 
+/* Legend on the left, donut always on its right. When the panel is tight
+   the donut gives up a little size instead of wrapping under the legend. */
 .overview-card--rich .overview-infractions-body {
     gap: 10px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
 }
 
 .overview-card--rich .overview-rich-bottom {
@@ -9654,8 +9666,7 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-infractions-legend {
-    flex: 1 1 148px;
-    min-width: min(100%, 148px);
+    flex: 1 0 auto;
     font-size: 0.82rem;
     line-height: 1.15;
     gap: 6px;
@@ -9699,8 +9710,10 @@ a.dashboard-compare-toggle {
 
 .overview-card--rich .overview-donut-wrap {
     width: 92px;
-    height: 92px;
-    flex: 0 0 auto;
+    height: auto;
+    aspect-ratio: 1;
+    flex: 0 1 auto;
+    min-width: 76px;
     position: relative;
 }
 
@@ -9732,54 +9745,54 @@ a.dashboard-compare-toggle {
     font-weight: 600;
 }
 
-/* Narrow overview column: keep the three stat panels side by side,
-   scaled so gauges, labels, and the donut stay inside their panels. */
+/* Narrow overview column: keep the three stat panels side by side and
+   shrink only the gauges. Labels and numbers stay the same size as the
+   rest of the card; a long label wraps onto a second line instead. */
 @container overview-card (max-width: 540px) {
     .overview-card--rich .overview-rich-row {
         gap: 6px;
     }
 
     .overview-card--rich .overview-rich-gauges .overview-beige-panel {
+        display: flex;
+        flex-direction: column;
         padding: 6px 5px;
         min-width: 0;
     }
 
     .overview-card--rich .overview-rich-gauges .overview-panel-kicker {
-        font-size: 0.58rem;
-        letter-spacing: 0.04em;
-        line-height: 1.15;
+        line-height: 1.2;
         text-align: center;
+        text-wrap: balance;
         overflow-wrap: anywhere;
     }
 
+    /* Gauges sit at the bottom of their panels, so a label that wraps
+       onto two lines cannot push one gauge lower than its neighbor. */
     .overview-card--rich .overview-gauge-wrap--attendance-donut,
     .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi {
         width: min(117px, 100%);
         max-width: 100%;
         height: auto;
         aspect-ratio: 1;
+        margin-top: auto;
     }
 
     .overview-card--rich .overview-gauge-star .overview-gauge-wrap--multi > .overview-gauge-svg {
         width: 100%;
     }
 
-    .overview-card--rich .overview-gauge-attendance .overview-gauge-big,
-    .overview-card--rich .overview-gauge-star .overview-gauge-big,
-    .overview-card--rich .overview-gauge-plans .overview-gauge-big {
-        font-size: 1rem;
-    }
-
     .overview-card--rich .overview-gauge-attendance .overview-gauge-small,
     .overview-card--rich .overview-gauge-star .overview-gauge-small,
     .overview-card--rich .overview-gauge-plans .overview-gauge-small,
     .overview-card--rich .overview-plan-stat-sub {
-        font-size: 0.62rem;
         line-height: 1.15;
         text-align: center;
+        text-wrap: balance;
     }
 
     .overview-card--rich .overview-plan-stat-body {
+        margin-block: auto;
         padding: 2px 0 0;
     }
 
@@ -9789,22 +9802,89 @@ a.dashboard-compare-toggle {
     }
 }
 
+/* Too narrow for three full-size labels side by side: Attendance and
+   Star share a row and Plan thresholds spans the row below. */
+@container overview-card (max-width: 360px) {
+    .overview-card--rich .overview-rich-gauges {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .overview-card--rich .overview-rich-gauges > .overview-gauge-plans {
+        grid-column: 1 / -1;
+    }
+}
+
+/* Narrowest column: one stat panel per row, and the infractions donut
+   drops under its legend rather than spilling out of the panel. */
+@container overview-card (max-width: 240px) {
+    .overview-card--rich .overview-rich-gauges {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .overview-card--rich .overview-infractions-body {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    /* Trigger Time: drop the indent that lines the text up with the
+       heatmap, and let a long time range wrap instead of running out of
+       the panel. The heading keeps its normal size when that happens. */
+    .overview-card--rich .overview-trigger-panel .overview-trigger-head {
+        padding-right: 0;
+    }
+
+    .overview-card--rich .overview-trigger-row {
+        padding-left: 0;
+    }
+
+    .overview-card--rich .overview-trigger-meta {
+        grid-template-columns: max-content minmax(0, 1fr);
+        column-gap: 8px;
+    }
+
+    .overview-card--rich .overview-trigger-meta-v {
+        white-space: normal;
+    }
+
+    .overview-card--rich .overview-trigger-hero {
+        font-size: min(var(--overview-trigger-hero-size, 1.15rem), 1.15rem);
+    }
+
+    /* Only the first, 12:00, and last times fit above narrow columns. */
+    .overview-card--rich .overview-heatmap-colhead--minor {
+        visibility: hidden;
+    }
+}
+
+/* No room for "Trigger Day:" and "Wednesday" on one line: stack each
+   label above its value. */
+@container overview-card (max-width: 200px) {
+    .overview-card--rich .overview-trigger-meta {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 0;
+    }
+}
+
 .overview-card--rich .overview-incidents-panel .overview-incidents-bars {
-    gap: 14px;
+    gap: 16px;
     min-height: 72px;
     padding-top: 2px;
 }
 
+/* Each column is as wide as its label; the bar itself stays slim. */
 .overview-card--rich .overview-incident-bar-col {
-    max-width: 32px;
+    flex: 0 0 auto;
+    max-width: none;
 }
 
 .overview-card--rich .overview-incident-delta {
-    font-size: 0.52rem;
+    font-size: 0.78rem;
     margin-bottom: 3px;
 }
 
 .overview-card--rich .overview-incident-bar-track {
+    width: 32px;
     height: 48px;
     border-radius: 4px;
 }
@@ -9814,7 +9894,7 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-incident-label {
-    font-size: 0.42rem;
+    font-size: 0.68rem;
     margin-top: 5px;
 }
 

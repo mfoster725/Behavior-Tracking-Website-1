@@ -32945,6 +32945,15 @@ function buildOverviewDashboardCardHtml(data) {
     const rstH = Math.round((resets / incidentMax) * 100);
 
     const timeHeaderLabels = buildOverviewHeatmapColumnLabels(hm.timeSlots, frenzySeverityByTimeByDay, hm.showBusColumns);
+    // A narrow card hides the "minor" labels and keeps the first, 12:00, and
+    // last, so neighboring times don't print on top of each other.
+    const labeledHeaderIdx = timeHeaderLabels.map((t, i) => (t ? i : -1)).filter(i => i >= 0);
+    const firstHeaderIdx = labeledHeaderIdx[0];
+    const lastHeaderIdx = labeledHeaderIdx[labeledHeaderIdx.length - 1];
+    const timeHeaderCells = timeHeaderLabels.map((t, i) => {
+        const minor = t && i !== firstHeaderIdx && i !== lastHeaderIdx && t !== '12:00';
+        return `<div class="overview-heatmap-colhead${minor ? ' overview-heatmap-colhead--minor' : ''}">${t ? escapeHtml(t) : ''}</div>`;
+    }).join('');
     let heatRows = buildOverviewHeatmapRowsHtml(
         frenzySeverityByTimeByDay,
         byTimeByDay,
@@ -33130,7 +33139,7 @@ function buildOverviewDashboardCardHtml(data) {
             <div class="overview-heatmap" style="--overview-heatmap-col-count:${Math.max(1, hm.timeSlots.length)};">
                 <div class="overview-heatmap-grid">
                     <div></div>
-                    ${timeHeaderLabels.map(t => `<div class="overview-heatmap-colhead">${t ? escapeHtml(t) : ''}</div>`).join('')}
+                    ${timeHeaderCells}
                     ${heatRows}
                 </div>
                 <div class="overview-heatmap-legend"><span>Cool</span><span class="overview-heatmap-legend-bar"></span><span>Hot</span></div>
