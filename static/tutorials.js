@@ -147,36 +147,36 @@ const TUTORIAL_VIDEOS = {
     'reports-trigger-time': {
         title: 'Reports: Trigger Time Drill-Down',
         description: 'Clicking into Trigger Time, then a specific time slot, for its own severity and frenzy detail.',
-        duration: '',
-        videoFile: '', // TODO: 'reports-trigger-time.mp4' once recorded
+        duration: '0:43',
+        videoFile: 'reports-trigger-time.mp4',
         youtubeId: ''
     },
     'reports-infractions': {
         title: 'Reports: Infractions Drill-Down',
         description: 'Clicking into Infractions, then a specific type, for when it happens by time of day and day of week.',
-        duration: '',
-        videoFile: '', // TODO: 'reports-infractions.mp4' once recorded
+        duration: '0:40',
+        videoFile: 'reports-infractions.mp4',
         youtubeId: ''
     },
     'reports-incidents': {
         title: 'Reports: Incidents Drill-Down',
         description: 'Clicking into Reminders and Resets for their own graph/table breakdown.',
-        duration: '',
-        videoFile: '', // TODO: 'reports-incidents.mp4' once recorded
+        duration: '0:43',
+        videoFile: 'reports-incidents.mp4',
         youtubeId: ''
     },
     'reports-level-ups': {
         title: "Reports: Level Up's Drill-Down",
         description: 'Clicking into Level Up\'s for the Yellow→Green and Green→Blue readiness tables.',
-        duration: '',
-        videoFile: '', // TODO: 'reports-level-ups.mp4' once recorded
+        duration: '0:36',
+        videoFile: 'reports-level-ups.mp4',
         youtubeId: ''
     },
     'reports-frenzies': {
         title: 'Reports: Frenzies Drill-Down',
         description: 'Clicking into Frenzies, then a severity level, for its time-of-day and day-of-week detail.',
-        duration: '',
-        videoFile: '', // TODO: 'reports-frenzies.mp4' once recorded
+        duration: '0:44',
+        videoFile: 'reports-frenzies.mp4',
         youtubeId: ''
     },
     'marketplace-hiding': {

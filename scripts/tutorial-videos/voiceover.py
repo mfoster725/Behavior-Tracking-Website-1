@@ -52,6 +52,11 @@ VIDEOS = {
     'reports-attendance': ('narration-18-reports-attendance.md', 'reports-attendance.mp4'),
     'reports-star-percent': ('narration-19-reports-star-percent.md', 'reports-star-percent.mp4'),
     'reports-plan-thresholds': ('narration-20-reports-plan-thresholds.md', 'reports-plan-thresholds.mp4'),
+    'reports-trigger-time': ('narration-21-reports-trigger-time.md', 'reports-trigger-time.mp4'),
+    'reports-infractions': ('narration-22-reports-infractions.md', 'reports-infractions.mp4'),
+    'reports-incidents': ('narration-23-reports-incidents.md', 'reports-incidents.mp4'),
+    'reports-level-ups': ('narration-24-reports-level-ups.md', 'reports-level-ups.mp4'),
+    'reports-frenzies': ('narration-25-reports-frenzies.md', 'reports-frenzies.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'
