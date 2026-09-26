@@ -58,6 +58,8 @@ VIDEOS = {
     'reports-level-ups': ('narration-24-reports-level-ups.md', 'reports-level-ups.mp4'),
     'reports-frenzies': ('narration-25-reports-frenzies.md', 'reports-frenzies.mp4'),
     'marketplace-hiding': ('narration-26-marketplace-hiding.md', 'marketplace-hiding.mp4'),
+    'users-accounts-staff': ('narration-27-users-accounts-staff.md', 'users-accounts-staff.mp4'),
+    'users-accounts-outside-staff': ('narration-28-users-accounts-outside-staff.md', 'users-accounts-outside-staff.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

@@ -91,8 +91,22 @@ const TUTORIAL_VIDEOS = {
     'users-accounts': {
         title: 'User Management: Accounts & Roster',
         description: 'Searching students/staff/outside staff/admins, adding accounts, and sharing login information in bulk.',
-        duration: '0:46',
+        duration: '0:48',
         videoFile: 'users-accounts.mp4',
+        youtubeId: ''
+    },
+    'users-accounts-staff': {
+        title: 'User Management: Accounts & Roster (Staff view)',
+        description: 'What a plain staff account sees on this page — Add Student at the top of the list, and the now-required student/parent emails.',
+        duration: '0:37',
+        videoFile: 'users-accounts-staff.mp4',
+        youtubeId: ''
+    },
+    'users-accounts-outside-staff': {
+        title: 'User Management: Accounts & Roster (Outside Staff view)',
+        description: "What an Outside Staff account sees on this page — search and view every table, but no adding or editing accounts.",
+        duration: '0:33',
+        videoFile: 'users-accounts-outside-staff.mp4',
         youtubeId: ''
     },
     'users-student-plans': {
@@ -204,7 +218,7 @@ const VIEW_TUTORIALS = {
     'schedules': ['schedules'],
     'bank-account': ['bank-account-bonuses', 'bank-account-balances'],
     'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding'],
-    'users': ['users-accounts', 'users-student-plans'],
+    'users': ['users-accounts', 'users-accounts-staff', 'users-accounts-outside-staff', 'users-student-plans'],
     'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy']
 };
 

@@ -6035,18 +6035,23 @@ def students():
         lunch_number = (data.get('lunch_number') or '').strip() or None
         if not lunch_number:
             return jsonify({'error': 'Lunch number is required'}), 400
-        parent_emails_raw = data.get('parent_emails')
-        if isinstance(parent_emails_raw, list):
-            parent_emails_stacked = '\n'.join(
-                e.strip() for e in parent_emails_raw if e and str(e).strip()
-            ) or None
-        else:
-            parent_emails_stacked = (parent_emails_raw or '').strip() or None
+
+        student_email = (data.get('email') or '').strip()
+        if not student_email:
+            return jsonify({'error': 'Student email is required'}), 400
+        if '@' not in student_email or ' ' in student_email:
+            return jsonify({'error': 'Please enter a valid student email address'}), 400
+
+        parent_emails_stacked, invalid_parent_email = _normalize_parent_emails(data.get('parent_emails'))
+        if invalid_parent_email:
+            return jsonify({'error': f'Invalid parent/guardian email: {invalid_parent_email}'}), 400
+        if not parent_emails_stacked:
+            return jsonify({'error': 'At least one parent/guardian email is required'}), 400
 
         # Create student record
         student = Student(
             name=data['name'],
-            email=(data.get('email') or '').strip() or None,
+            email=student_email,
             grade=data.get('grade'),
             card_color=card_color,
             lunch_number=lunch_number,
@@ -6079,7 +6084,7 @@ def students():
             username=username,
             role='student',
             student_id=student.id,
-            email=(data.get('email') or '').strip() or None,
+            email=student_email,
         )
         # Prefer standard student password {initials}{lunch} when lunch is available
         db.session.flush()
@@ -17207,8 +17212,13 @@ def manage_users():
         sheet_user_before = sheet_dirty_user_signature(user)
         sheet_student_before = sheet_dirty_student_signature(user.student_id)
 
+        # Set when the editor is allowed to touch a student's own contact info
+        # (admin, or staff editing a student) so we can require it stay filled in.
+        enforce_student_contacts = False
+
         # Permission check and field updates
         if current_user.role == 'admin':
+            enforce_student_contacts = True
             # Admin can update anyone and any field
             if 'name' in data:
                 user.name = data['name']
@@ -17292,6 +17302,7 @@ def manage_users():
                     student.parent_emails = stacked
         
         elif current_user.role == 'staff' and user.role == 'student':
+            enforce_student_contacts = True
             # Staff can update student accounts (limited fields)
             if 'name' in data:
                 user.name = data['name']
@@ -17382,7 +17393,21 @@ def manage_users():
         
         else:
             return jsonify({'error': 'Permission denied'}), 403
-        
+
+        if enforce_student_contacts and user.role == 'student':
+            final_email = (user.email or '').strip()
+            if not final_email:
+                db.session.rollback()
+                return jsonify({'error': 'Student email is required'}), 400
+            if '@' not in final_email or ' ' in final_email:
+                db.session.rollback()
+                return jsonify({'error': 'Please enter a valid student email address'}), 400
+            if user.student_id:
+                student = Student.query.get(user.student_id)
+                if student and not (student.parent_emails or '').strip():
+                    db.session.rollback()
+                    return jsonify({'error': 'At least one parent/guardian email is required'}), 400
+
         # Queue the change for the next Google Sheet push, but only when a value the sheet
         # holds actually moved.
         if sheet_student_before != sheet_dirty_student_signature(user.student_id):

@@ -18,7 +18,7 @@ One topic per video — these are not chapters of a single longer video.
 | `marketplace-shopping.mp4` | 39s | `narration-10-marketplace-shopping.md` | Marketplace: Shopping & Checkout (student view) — search/filter, add to cart, checkout, My Orders |
 | `marketplace-fulfilling.mp4` | 35s | `narration-11-marketplace-fulfilling.md` | Marketplace: Fulfilling Orders — the purchase-order approval queue, Fulfill / Deny with a reason |
 | `marketplace-managing.mp4` | 52s | `narration-12-marketplace-managing.md` | Marketplace: Managing Items & Analytics — Add item, bulk hide/unhide, purchase analytics |
-| `users-accounts.mp4` | 46s | `narration-13-users-accounts.md` | User Management: Accounts & Roster — searching, Add Student/Staff/Outside Staff/Admin, Share login information |
+| `users-accounts.mp4` | 48s | `narration-13-users-accounts.md` | User Management: Accounts & Roster (admin) — searching, Add Student/Staff/Outside Staff/Admin, Share login information, required student/parent emails |
 | `users-student-plans.mp4` | 38s | `narration-14-users-student-plans.md` | User Management: Student Plans — the row kebab's Add/Edit Plan, If/Then rows, point-card threshold |
 | `admin-accounts-billing.mp4` | 33s | `narration-15-admin-accounts-billing.md` | Admin: Accounts & Billing — Plan & Billing, User Statistics, Quick Actions (Create Staff/Admin Account) |
 | `admin-importing-data.mp4` | 48s | `narration-16-admin-importing-data.md` | Admin: Importing Data — CSV import by type, Google Sheet Sync (Check Setup, Pull/Push/Sync) |
@@ -32,6 +32,8 @@ One topic per video — these are not chapters of a single longer video.
 | `reports-level-ups.mp4` | 37s | `narration-24-reports-level-ups.md` | Reports: Level Up's Drill-Down — Yellow→Green and Green→Blue readiness tables |
 | `reports-frenzies.mp4` | 44s | `narration-25-reports-frenzies.md` | Reports: Frenzies Drill-Down — severity breakdown, clicking a severity for time/day detail |
 | `marketplace-hiding.mp4` | 63s | `narration-26-marketplace-hiding.md` | Marketplace: Creating & Hiding Items — Add item, and the per-item hide-from-students rule types |
+| `users-accounts-staff.mp4` | 37s | `narration-27-users-accounts-staff.md` | User Management: Accounts & Roster (plain staff view) — Add Student at the top of the list, required student/parent emails, no admin-only buttons |
+| `users-accounts-outside-staff.mp4` | 33s | `narration-28-users-accounts-outside-staff.md` | User Management: Accounts & Roster (Outside Staff view) — search/view every table, no Add Student or any add/edit action |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
@@ -172,6 +174,11 @@ Logged in as `staff25` (password `test123`) — a plain **staff** account (not a
 has real scheduled students in the seed data, so the grids aren't empty. `staff2`, by
 contrast, has no student assignments in the seed data and its point-card screens are
 empty — don't use it for these recordings.
+
+`27-users-accounts-staff.js` also logs in as `staff25`, and `28-users-accounts-outside-staff.js`
+logs in as `outsidestaff1` (password `test123`) — a seeded **Outside Staff** account
+(`role: staff`, `is_outside_staff: true`) for recording the read-only view of User
+Management that role sees. Both are created by `seed_test_data.py`.
 
 Re-run a script any time the UI changes enough that a video goes stale — each one drives
 real selectors (`#nav-hamburger`, `.nav-btn[data-view="..."]`, etc.) against the live app,

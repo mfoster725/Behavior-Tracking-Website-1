@@ -4714,33 +4714,38 @@ function setupEventListeners() {
             console.warn('save-btn not found');
         }
 
+        const openAddStudentModal = async () => {
+            console.log('Add student button clicked');
+            // Clear all fields
+            document.getElementById('student-name').value = '';
+            const lunchInput = document.getElementById('student-lunch-number');
+            if (lunchInput) lunchInput.value = '';
+            const studentEmailInput = document.getElementById('student-email');
+            if (studentEmailInput) studentEmailInput.value = '';
+            populateParentEmailRows('student-parent-emails-container', '');
+            document.getElementById('student-grade').value = '';
+            document.getElementById('student-card-color').value = 'yellow';
+            document.getElementById('student-username').value = '';
+            document.getElementById('student-password').value = '';
+            document.getElementById('student-password-confirm').value = '';
+            // Set up team member button handlers
+            setupTeamMemberButtons();
+
+            // Initialize team member containers with empty rows
+            populateTeamMemberRows('case-manager-container', [], ['case_manager', 'teacher']);
+            populateTeamMemberRows('practitioner-container', [], ['practitioner']);
+            populateTeamMemberRows('professional-container', [], ['professional']);
+            populateTeamMemberRows('group-leader-container', [], ['group_leader']);
+
+            document.getElementById('student-modal').style.display = 'block';
+        };
         const addStudentBtn = document.getElementById('add-student-btn');
         if (addStudentBtn) {
-            addStudentBtn.addEventListener('click', async () => {
-                console.log('Add student button clicked');
-                // Clear all fields
-                document.getElementById('student-name').value = '';
-                const lunchInput = document.getElementById('student-lunch-number');
-                if (lunchInput) lunchInput.value = '';
-                const studentEmailInput = document.getElementById('student-email');
-                if (studentEmailInput) studentEmailInput.value = '';
-                populateParentEmailRows('student-parent-emails-container', '');
-                document.getElementById('student-grade').value = '';
-                document.getElementById('student-card-color').value = 'yellow';
-                document.getElementById('student-username').value = '';
-                document.getElementById('student-password').value = '';
-                document.getElementById('student-password-confirm').value = '';
-                // Set up team member button handlers
-                setupTeamMemberButtons();
-                
-                // Initialize team member containers with empty rows
-                populateTeamMemberRows('case-manager-container', [], ['case_manager', 'teacher']);
-                populateTeamMemberRows('practitioner-container', [], ['practitioner']);
-                populateTeamMemberRows('professional-container', [], ['professional']);
-                populateTeamMemberRows('group-leader-container', [], ['group_leader']);
-                
-                document.getElementById('student-modal').style.display = 'block';
-            });
+            addStudentBtn.addEventListener('click', openAddStudentModal);
+        }
+        const addStudentBtnTop = document.getElementById('add-student-btn-top');
+        if (addStudentBtnTop) {
+            addStudentBtnTop.addEventListener('click', openAddStudentModal);
         }
 
         // Real-time validation for student initials
@@ -8865,6 +8870,25 @@ async function saveStudent() {
 
     if (!lunchNumber.trim()) {
         alert('Please enter a lunch number');
+        return;
+    }
+
+    if (!email) {
+        alert('Please enter a student email address');
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        alert('Please enter a valid student email address');
+        return;
+    }
+
+    if (parentEmails.length === 0) {
+        alert('Please enter at least one parent/guardian email address');
+        return;
+    }
+    const invalidParentEmail = parentEmails.find(e => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    if (invalidParentEmail) {
+        alert(`"${invalidParentEmail}" is not a valid email address`);
         return;
     }
 
@@ -20066,6 +20090,11 @@ async function editUser(userId, name, username, role, studentId, designation, gr
     const emailInput = document.getElementById('edit-user-email');
     if (emailInput) {
         emailInput.value = (email && email !== 'null') ? email : '';
+        emailInput.required = role === 'student';
+    }
+    const emailLabel = document.querySelector('label[for="edit-user-email"]');
+    if (emailLabel) {
+        emailLabel.textContent = role === 'student' ? 'Email: *' : 'Email:';
     }
     document.getElementById('edit-user-role').value = displayRole;
     document.getElementById('edit-user-original-role').value = role;
@@ -20725,7 +20754,18 @@ async function saveEditUser() {
             return;
         }
     }
-    
+
+    if (systemRole === 'student') {
+        if (!emailValue) {
+            alert('Please enter a student email address');
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+            alert('Please enter a valid student email address');
+            return;
+        }
+    }
+
     // Staff editing themselves: only password and (for paras) case manager links
     const isStaffEditingSelf = isStaff() && !isAdmin() && userId === window.currentUser.id;
     if (isStaffEditingSelf) {
@@ -20830,6 +20870,10 @@ async function saveEditUser() {
     const parentEmailsGroup = document.getElementById('edit-user-parent-emails-group');
     if (systemRole === 'student' && parentEmailsGroup && parentEmailsGroup.style.display !== 'none') {
         const parentEmails = getParentEmails(PARENT_EMAILS_CONTAINER_ID);
+        if (parentEmails.length === 0) {
+            alert('Please enter at least one parent/guardian email address');
+            return;
+        }
         const invalidEmail = parentEmails.find(e => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
         if (invalidEmail) {
             alert(`"${invalidEmail}" is not a valid email address`);

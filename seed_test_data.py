@@ -160,15 +160,23 @@ def main():
     instance_path = os.path.join(root, "instance")
     os.makedirs(instance_path, exist_ok=True)
 
+    # app.py resolves its own SQLALCHEMY_DATABASE_URI from these env vars at
+    # import time, and Flask-SQLAlchemy binds its engine to that value then —
+    # reassigning app.config *after* importing app does not rebind it. So the
+    # env var must be set before `from app import ...` below, not just the
+    # app.config line after it (which is kept only as a harmless belt-and-
+    # suspenders in case a future Flask-SQLAlchemy version binds lazily).
     if args.use_main:
         db_path = os.path.join(instance_path, "behavior_tracking.db")
         print("Using MAIN database:", db_path)
     elif args.db:
         db_path = os.path.abspath(args.db)
         print("Using database:", db_path)
+        os.environ["TEST_DATABASE_URI"] = f"sqlite:///{db_path.replace(os.sep, '/')}"
     else:
         db_path = os.path.join(instance_path, "behavior_tracking_test.db")
         print("Using TEST database:", db_path)
+        os.environ["USE_TEST_DB"] = "1"
 
     from app import app, db, User, Student, DailyRecord, PeriodRecord, Infraction, FrenzyEvent, TeamMember, Schedule
 
@@ -283,6 +291,29 @@ def main():
                 u.role = role
                 u.designation = designation
             staff_users.append(u)
+        db.session.flush()
+
+        # ----- Outside Staff (Users) -----
+        # A single seeded Outside Staff test account, for testing/recording the
+        # Outside-Staff view of pages that differ from plain staff/admin.
+        outside_username = "outsidestaff1"
+        ou = User.query.filter_by(username=outside_username).first()
+        if ou is None:
+            ou = User(
+                name="Outside Staff Member",
+                username=outside_username,
+                password_hash=generate_password_hash("test123"),
+                role="staff",
+                is_outside_staff=True,
+                district="Test District",
+            )
+            db.session.add(ou)
+        else:
+            ou.name = "Outside Staff Member"
+            ou.password_hash = generate_password_hash("test123")
+            ou.role = "staff"
+            ou.is_outside_staff = True
+            ou.district = "Test District"
         db.session.flush()
 
         # ----- Student Users (active students) -----
@@ -546,6 +577,7 @@ def main():
             print("  Set USE_TEST_DB=1 (Windows: set USE_TEST_DB=1) then start the app.")
             print("  Or backup behavior_tracking.db and copy behavior_tracking_test.db to it.")
         print("  Staff logins: staff1, staff2, ... staff40 (password: test123). staff1 is admin.")
+        print("  Outside Staff login: outsidestaff1 (password: test123).")
         print()
 
 

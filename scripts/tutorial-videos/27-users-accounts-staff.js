@@ -11,11 +11,11 @@ async function main() {
   const { initCaptions, cap, pause, step, highlight, unhighlight, mark } = makeHelpers(page);
 
   try {
-    await login(page, 'staff1', 'test123');
+    await login(page, 'staff25', 'test123');
     await page.evaluate(initCaptions);
-    await cap('User Management: Accounts & Roster');
-    mark('User Management: Accounts & Roster');
-    await pause(4400);
+    await cap('User Management: Accounts & Roster — Staff view');
+    mark('User Management: Accounts & Roster — Staff view');
+    await pause(4600);
 
     await step('Open the menu, and select User Management.', async () => {
       await highlight('#nav-hamburger');
@@ -28,17 +28,17 @@ async function main() {
       await unhighlight();
     }, 800, 2200);
 
-    await step('Students, staff, and outside staff each get their own table — search any of them by name or username.', async () => {
+    await step('As a plain staff account, you can search students, staff, and outside staff by name or username.', async () => {
       const search = page.locator('#student-search');
       await highlight(search);
       await search.click();
       await search.fill('Test Student 10');
       await pause(600);
+      await search.fill('');
       await unhighlight();
     }, 800, 4200);
 
     await step('Add Student sits right at the top of the list, so it’s easy to find.', async () => {
-      await page.fill('#student-search', '');
       const addBtnTop = page.locator('#add-student-btn-top');
       await highlight(addBtnTop);
       await pause(350);
@@ -64,21 +64,12 @@ async function main() {
       await unhighlight();
     }, 800, 4800);
 
-    await step('Support team roles — Case Manager, Practitioner, Professional, Group Leader — are set right here too.', async () => {
-      await highlight('#case-manager-container');
-      await pause(300);
+    await step('Staff accounts can view Staff, Outside Staff, and Admin lists, but only an admin can add or edit those accounts.', async () => {
       await page.click('#student-modal .close');
+      await pause(200);
+      await page.locator('#add-student-btn').scrollIntoViewIfNeeded();
+      await highlight('#add-student-btn');
     }, 800, 4200);
-
-    await step('The same pattern adds Staff, Outside Staff, or Admin accounts.', async () => {
-      await highlight(['#add-staff-btn', '#add-outside-staff-btn', '#add-admin-btn']);
-    }, 500, 3800);
-
-    await step('Share login information sends credentials to one or many accounts at once.', async () => {
-      const btn = page.locator('#share-login-bulk-btn');
-      await btn.scrollIntoViewIfNeeded();
-      await highlight(btn);
-    }, 800, 4000);
 
   } finally {
     await pause(500);

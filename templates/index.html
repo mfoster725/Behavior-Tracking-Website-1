@@ -502,6 +502,11 @@
                         </label>
                     </h3>
                     <div class="user-role-section-body" id="user-section-students-body">
+                        {% if user.role in ['staff', 'admin'] and not (user.role == 'staff' and user.is_outside_staff) %}
+                        <div style="margin-bottom: 15px;">
+                            <button id="add-student-btn-top" class="btn-primary">Add Student</button>
+                        </div>
+                        {% endif %}
                         <div class="form-group" style="margin-bottom: 15px;">
                             <input type="text" id="student-search" placeholder="Search students by name, username, or grade..." autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" readonly onfocus="this.removeAttribute('readonly')" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 0.875rem; min-height: 38px;">
                         </div>
@@ -1835,11 +1840,11 @@
                         <small style="color: #666; font-size: 12px;">Required. Used for the default password ({INITIALS}{lunch}) and to match this student in the Google Sheet or CSV import.</small>
                     </div>
                     <div class="form-group">
-                        <label for="student-email">Student Email:</label>
-                        <input type="email" id="student-email" placeholder="student@example.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                        <label for="student-email">Student Email: *</label>
+                        <input type="email" id="student-email" required placeholder="student@example.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div class="form-group">
-                        <label>Parent/Guardian Email(s):</label>
+                        <label>Parent/Guardian Email(s): *</label>
                         <div id="student-parent-emails-container" class="team-member-container"></div>
                         <small style="color: #666;">Use + to add another, &times; to remove. These addresses receive shared login information.</small>
                     </div>
@@ -2103,7 +2108,7 @@
                         <input type="email" id="edit-user-email" placeholder="Enter email address" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div class="form-group" id="edit-user-parent-emails-group" style="display: none;">
-                        <label>Parent/Guardian Email(s):</label>
+                        <label>Parent/Guardian Email(s): *</label>
                         <div id="edit-user-parent-emails-container" class="team-member-container"></div>
                         <small style="color: #666;">Use + to add another, &times; to remove. These addresses receive shared login information.</small>
                     </div>
