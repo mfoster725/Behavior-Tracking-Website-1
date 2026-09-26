@@ -30,8 +30,20 @@
 }
 
 #tutorial-modal .modal-content {
-    max-width: 760px;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    margin: 0;
+    width: 25vw;
+    min-width: 340px;
+    max-width: none;
+    max-height: none;
+    height: auto;
     padding: 1.75rem;
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
 }
 
 .tutorial-modal-header {
@@ -213,6 +225,14 @@
     color: var(--text-secondary);
     font-size: 0.8125rem;
     margin: 0;
+}
+
+@media (max-width: 900px) {
+    #tutorial-modal .modal-content {
+        width: 100vw;
+        min-width: 0;
+        border-radius: 0;
+    }
 }
 
 @media (max-width: 640px) {

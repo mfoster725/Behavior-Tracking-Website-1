@@ -146,8 +146,10 @@ function getCurrentViewName() {
     return activeView.id.replace(/-view$/, '');
 }
 
-function tutorialThumbnailUrl(youtubeId) {
-    return youtubeId ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` : '';
+// A hand-picked mid-video frame for each tutorial key, not the opening view —
+// see static/tutorial-thumbs/README.md for how these were chosen/regenerated.
+function tutorialThumbnailUrl(key) {
+    return `/static/tutorial-thumbs/${key}.jpg`;
 }
 
 function renderTutorialGrid() {
@@ -175,11 +177,11 @@ function renderTutorialGrid() {
     body.innerHTML = `<div class="tutorial-grid">${keys.map(key => {
         const video = TUTORIAL_VIDEOS[key];
         if (!video) return '';
-        const thumbUrl = tutorialThumbnailUrl(video.youtubeId);
+        const thumbUrl = tutorialThumbnailUrl(key);
         return `
             <button type="button" class="tutorial-card" data-tutorial-key="${key}">
                 <div class="tutorial-card-thumb">
-                    ${thumbUrl ? `<img src="${thumbUrl}" alt="" loading="lazy">` : ''}
+                    <img src="${thumbUrl}" alt="" loading="lazy" onerror="this.remove()">
                     <span class="tutorial-play-icon"></span>
                     ${video.duration ? `<span class="tutorial-card-duration">${video.duration}</span>` : ''}
                 </div>
