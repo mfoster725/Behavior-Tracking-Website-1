@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('STAR Percent is their average across Safety, Teamwork, Accountability, and Relationships.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="star_performance"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 3600);
 
     await step('Click any bar for that category’s best and worst time of day and day of week.', async () => {
@@ -70,7 +69,6 @@ async function main() {
       await highlight(closeBtn);
       await pause(350);
       await closeBtn.click();
-      await unhighlight();
     }, 800, 3600);
 
     await step('Click the tile again to close the whole card.', async () => {
@@ -78,7 +76,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 3000);
 
   } finally {

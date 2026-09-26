@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Trigger Time is the single day-and-period combination with the most infractions.', async () => {
@@ -52,7 +52,6 @@ async function main() {
       const tableBtn = page.locator('[data-trigger-times-view="table"]');
       await tableBtn.click();
       await pause(600);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Click any time slot in the table for that slot’s own detail.', async () => {
@@ -61,7 +60,6 @@ async function main() {
       await pause(350);
       await row.click();
       await pause(700);
-      await unhighlight();
     }, 800, 5600);
 
     await step('That opens its own tab — close it when you’re done, then click the tile again to close the whole card.', async () => {
@@ -72,7 +70,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 5200);
 
   } finally {

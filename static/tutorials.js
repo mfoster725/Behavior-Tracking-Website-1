@@ -133,7 +133,7 @@ const TUTORIAL_VIDEOS = {
     'reports-star-percent': {
         title: 'Reports: STAR Percent Drill-Down',
         description: 'Clicking into the STAR Percent tile, then a category bar, for time-of-day and day-of-week detail.',
-        duration: '0:43',
+        duration: '0:42',
         videoFile: 'reports-star-percent.mp4',
         youtubeId: ''
     },
@@ -147,7 +147,7 @@ const TUTORIAL_VIDEOS = {
     'reports-trigger-time': {
         title: 'Reports: Trigger Time Drill-Down',
         description: 'Clicking into Trigger Time, then a specific time slot, for its own severity and frenzy detail.',
-        duration: '0:43',
+        duration: '0:42',
         videoFile: 'reports-trigger-time.mp4',
         youtubeId: ''
     },

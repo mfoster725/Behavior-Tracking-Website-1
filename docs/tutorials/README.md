@@ -24,9 +24,9 @@ One topic per video — these are not chapters of a single longer video.
 | `admin-importing-data.mp4` | 48s | `narration-16-admin-importing-data.md` | Admin: Importing Data — CSV import by type, Google Sheet Sync (Check Setup, Pull/Push/Sync) |
 | `admin-calendar-economy.mp4` | 47s | `narration-17-admin-calendar-economy.md` | Admin: Calendar & Economy Settings — Quarter Date Configuration, Manny's Market economy |
 | `reports-attendance.mp4` | 43s | `narration-18-reports-attendance.md` | Reports: Attendance Drill-Down — clicking the tile, Table view by day, Graph view over time |
-| `reports-star-percent.mp4` | 43s | `narration-19-reports-star-percent.md` | Reports: STAR Percent Drill-Down — clicking a category bar for time-of-day/day-of-week detail |
+| `reports-star-percent.mp4` | 42s | `narration-19-reports-star-percent.md` | Reports: STAR Percent Drill-Down — clicking a category bar for time-of-day/day-of-week detail |
 | `reports-plan-thresholds.mp4` | 36s | `narration-20-reports-plan-thresholds.md` | Reports: Plan Thresholds Drill-Down — by-If and by-student breakdown |
-| `reports-trigger-time.mp4` | 43s | `narration-21-reports-trigger-time.md` | Reports: Trigger Time Drill-Down — Table view, clicking a time slot for severity/purpose detail |
+| `reports-trigger-time.mp4` | 42s | `narration-21-reports-trigger-time.md` | Reports: Trigger Time Drill-Down — Table view, clicking a time slot for severity/purpose detail |
 | `reports-infractions.mp4` | 40s | `narration-22-reports-infractions.md` | Reports: Infractions Drill-Down — Type/Time/Day tabs, clicking a specific infraction |
 | `reports-incidents.mp4` | 43s | `narration-23-reports-incidents.md` | Reports: Incidents Drill-Down — Reminders and Resets, each with its own Table view |
 | `reports-level-ups.mp4` | 36s | `narration-24-reports-level-ups.md` | Reports: Level Up's Drill-Down — Yellow→Green and Green→Blue readiness tables |

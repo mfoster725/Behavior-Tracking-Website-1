@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Plan Thresholds counts how many times an If/Then plan condition was met.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="plan_thresholds"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 6600);
 
     await step('For a group instead of one student, this same card breaks it down by student too.', async () => {
@@ -61,7 +60,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 3000);
 
   } finally {
