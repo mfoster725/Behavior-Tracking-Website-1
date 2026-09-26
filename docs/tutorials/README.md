@@ -35,6 +35,7 @@ One topic per video — these are not chapters of a single longer video.
 | `users-accounts-staff.mp4` | 37s | `narration-27-users-accounts-staff.md` | User Management: Accounts & Roster (plain staff view) — Add Student at the top of the list, required student/parent emails, no admin-only buttons |
 | `users-accounts-outside-staff.mp4` | 33s | `narration-28-users-accounts-outside-staff.md` | User Management: Accounts & Roster (Outside Staff view) — search/view every table, no Add Student or any add/edit action |
 | `notifications.mp4` | 45s | `narration-29-notifications.md` | Notifications: the header bell — unread badge, Mark all read / Show read notifications, and clicking a notification to jump to and flash what it's about |
+| `reports-level-up-action.mp4` | 35s | `narration-30-reports-level-up-action.md` | Reports: Leveling a Student Up — clicking the Level Up button on an eligible student (admin/Case Manager only), the confirm dialog, and the immediate promotion |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
@@ -197,6 +198,19 @@ print the script's own output to see which login it seeded for that run:
 python scripts/tutorial-videos/seed_notifications_demo.py
 node scripts/tutorial-videos/29-notifications.js
 ```
+
+`30-reports-level-up-action.js` logs in as whichever staff account is the real Case Manager
+of a student who's currently eligible to level up (`staff21` as of the current seed — check
+`GET /api/level-ups?period=all_time&managed_by_me=true` while logged in as a candidate
+staff account to confirm who has an `eligible: true` row on *their own* caseload before
+recording; the Level Up button only shows for admins and that student's actual Case
+Manager, and `seed_test_data.py`'s randomized STAR data means who's eligible, and who
+manages them, both shift on a re-seed). Clicking Level Up is a real, one-way promotion
+(card color changes, 30-day window resets) — re-seed before re-recording rather than running
+this script twice against the same DB. It also registers `page.on('dialog', d =>
+d.accept())` before the click, since this action's confirmation is the browser's native
+`window.confirm()`, not the app's usual modal, and that call blocks page script until a
+dialog handler answers it.
 
 Re-run a script any time the UI changes enough that a video goes stale — each one drives
 real selectors (`#nav-hamburger`, `.nav-btn[data-view="..."]`, etc.) against the live app,

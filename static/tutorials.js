@@ -206,6 +206,13 @@ const TUTORIAL_VIDEOS = {
         duration: '0:45',
         videoFile: 'notifications.mp4',
         youtubeId: ''
+    },
+    'reports-level-up-action': {
+        title: 'Reports: Leveling a Student Up',
+        description: 'Clicking the Level Up button on an eligible student — who can see it, the confirmation, and what happens right after.',
+        duration: '0:35',
+        videoFile: 'reports-level-up-action.mp4',
+        youtubeId: ''
     }
 };
 
@@ -219,7 +226,7 @@ const VIEW_TUTORIALS = {
         'reports-navigation', 'report-sections',
         'reports-attendance', 'reports-star-percent', 'reports-plan-thresholds',
         'reports-trigger-time', 'reports-infractions', 'reports-incidents',
-        'reports-level-ups', 'reports-frenzies', 'notifications'
+        'reports-level-ups', 'reports-level-up-action', 'reports-frenzies', 'notifications'
     ],
     'bills': ['bills', 'notifications'],
     'schedules': ['schedules', 'notifications'],
