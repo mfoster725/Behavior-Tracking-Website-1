@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Infractions totals every category — Task, Attention, Social, Safety.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="infractions_card"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 4600);
 
     await step('Click any specific infraction to see when it actually happens.', async () => {
@@ -58,7 +57,6 @@ async function main() {
       await pause(350);
       await label.click();
       await pause(700);
-      await unhighlight();
     }, 800, 5600);
 
     await step('By Time of Day, and by Day of Week — close the tab, then click the tile again to close the card.', async () => {
@@ -69,7 +67,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 5600);
 
   } finally {

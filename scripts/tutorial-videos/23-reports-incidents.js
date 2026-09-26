@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Incidents splits into Reminders and Resets.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const remindersCard = page.locator('.overview-extra-card[data-overview-card="reminders"]');
       await remindersCard.scrollIntoViewIfNeeded();
       await highlight(remindersCard, { pad: 4 });
-      await unhighlight();
     }, 800, 4600);
 
     await step('Table view lists each one by day, instead of just a running total.', async () => {
@@ -58,7 +57,6 @@ async function main() {
       await pause(350);
       await tableBtn.click();
       await pause(600);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Resets get the exact same breakdown — click it for its own card.', async () => {
@@ -78,7 +76,6 @@ async function main() {
       await highlight(bar);
       await pause(350);
       await bar.click();
-      await unhighlight();
     }, 800, 3200);
 
   } finally {

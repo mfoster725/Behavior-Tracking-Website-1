@@ -25,10 +25,10 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 3000);
 
     await step("Level Up's counts how many students are ready to move up a card color.", async () => {
@@ -42,7 +42,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="level_ups"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 6200);
 
     await step('Each row shows their qualifying days, average, and what’s still needed — or that they’re eligible now.', async () => {
@@ -55,6 +54,10 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
+      // Closing this card collapses a lot of vertical space (the caseload-wide
+      // Yellow->Green / Green->Blue tables are tall), which shifts the page's
+      // scroll position enough to strand the fixed-position ring over whatever
+      // now sits where the tile used to be (verified: it lands on INFRACTIONS).
       await unhighlight();
     }, 800, 3000);
 

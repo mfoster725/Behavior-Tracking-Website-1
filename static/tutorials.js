@@ -154,7 +154,7 @@ const TUTORIAL_VIDEOS = {
     'reports-infractions': {
         title: 'Reports: Infractions Drill-Down',
         description: 'Clicking into Infractions, then a specific type, for when it happens by time of day and day of week.',
-        duration: '0:40',
+        duration: '0:41',
         videoFile: 'reports-infractions.mp4',
         youtubeId: ''
     },
@@ -168,7 +168,7 @@ const TUTORIAL_VIDEOS = {
     'reports-level-ups': {
         title: "Reports: Level Up's Drill-Down",
         description: 'Clicking into Level Up\'s for the Yellow→Green and Green→Blue readiness tables.',
-        duration: '0:36',
+        duration: '0:37',
         videoFile: 'reports-level-ups.mp4',
         youtubeId: ''
     },
