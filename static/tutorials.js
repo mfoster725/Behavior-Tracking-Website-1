@@ -199,6 +199,34 @@ const TUTORIAL_VIDEOS = {
         duration: '1:03',
         videoFile: 'marketplace-hiding.mp4',
         youtubeId: ''
+    },
+    'notifications': {
+        title: 'Notifications',
+        description: 'The header bell — unread badge, mark all read, and clicking a notification to jump straight to what it\'s about.',
+        duration: '0:45',
+        videoFile: 'notifications.mp4',
+        youtubeId: ''
+    },
+    'reports-level-up-action': {
+        title: 'Reports: Leveling a Student Up',
+        description: 'Clicking the Level Up button on an eligible student — who can see it, the confirmation, and what happens right after.',
+        duration: '0:35',
+        videoFile: 'reports-level-up-action.mp4',
+        youtubeId: ''
+    },
+    'admin-system-info': {
+        title: 'Admin: System Information',
+        description: "The Admin Panel's last card — who's logged in, which database, and total student count. Read-only.",
+        duration: '0:26',
+        videoFile: 'admin-system-info.mp4',
+        youtubeId: ''
+    },
+    'bills-assistance-forms': {
+        title: 'Bills: Assistance Applications',
+        description: 'Filling out the SNAP/health/housing practice paperwork under Assistance — grading against the student\'s real data, and fixing a wrong answer.',
+        duration: '1:04',
+        videoFile: 'bills-assistance-forms.mp4',
+        youtubeId: ''
     }
 };
 
@@ -206,20 +234,20 @@ const TUTORIAL_VIDEOS = {
 // suffix) to the tutorial(s) relevant to it. Views not listed here simply
 // show the empty state when the help button is opened.
 const VIEW_TUTORIALS = {
-    'period-entry': ['period-entry', 'past-point-cards'],
-    'entry': ['daily-entry', 'past-point-cards'],
+    'period-entry': ['period-entry', 'past-point-cards', 'notifications'],
+    'entry': ['daily-entry', 'past-point-cards', 'notifications'],
     'summary': [
         'reports-navigation', 'report-sections',
         'reports-attendance', 'reports-star-percent', 'reports-plan-thresholds',
         'reports-trigger-time', 'reports-infractions', 'reports-incidents',
-        'reports-level-ups', 'reports-frenzies'
+        'reports-level-ups', 'reports-level-up-action', 'reports-frenzies', 'notifications'
     ],
-    'bills': ['bills'],
-    'schedules': ['schedules'],
-    'bank-account': ['bank-account-bonuses', 'bank-account-balances'],
-    'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding'],
-    'users': ['users-accounts', 'users-accounts-staff', 'users-accounts-outside-staff', 'users-student-plans'],
-    'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy']
+    'bills': ['bills', 'bills-assistance-forms', 'notifications'],
+    'schedules': ['schedules', 'notifications'],
+    'bank-account': ['bank-account-bonuses', 'bank-account-balances', 'notifications'],
+    'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding', 'notifications'],
+    'users': ['users-accounts', 'users-accounts-staff', 'users-accounts-outside-staff', 'users-student-plans', 'notifications'],
+    'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy', 'admin-system-info', 'notifications']
 };
 
 // Friendly page names for search-result badges (view name -> label).

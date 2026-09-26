@@ -60,6 +60,10 @@ VIDEOS = {
     'marketplace-hiding': ('narration-26-marketplace-hiding.md', 'marketplace-hiding.mp4'),
     'users-accounts-staff': ('narration-27-users-accounts-staff.md', 'users-accounts-staff.mp4'),
     'users-accounts-outside-staff': ('narration-28-users-accounts-outside-staff.md', 'users-accounts-outside-staff.mp4'),
+    'notifications': ('narration-29-notifications.md', 'notifications.mp4'),
+    'reports-level-up-action': ('narration-30-reports-level-up-action.md', 'reports-level-up-action.mp4'),
+    'admin-system-info': ('narration-31-admin-system-info.md', 'admin-system-info.mp4'),
+    'bills-assistance-forms': ('narration-32-bills-assistance-forms.md', 'bills-assistance-forms.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

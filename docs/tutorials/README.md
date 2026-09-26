@@ -34,6 +34,10 @@ One topic per video — these are not chapters of a single longer video.
 | `marketplace-hiding.mp4` | 63s | `narration-26-marketplace-hiding.md` | Marketplace: Creating & Hiding Items — Add item, and the per-item hide-from-students rule types |
 | `users-accounts-staff.mp4` | 37s | `narration-27-users-accounts-staff.md` | User Management: Accounts & Roster (plain staff view) — Add Student at the top of the list, required student/parent emails, no admin-only buttons |
 | `users-accounts-outside-staff.mp4` | 33s | `narration-28-users-accounts-outside-staff.md` | User Management: Accounts & Roster (Outside Staff view) — search/view every table, no Add Student or any add/edit action |
+| `notifications.mp4` | 45s | `narration-29-notifications.md` | Notifications: the header bell — unread badge, Mark all read / Show read notifications, and clicking a notification to jump to and flash what it's about |
+| `reports-level-up-action.mp4` | 35s | `narration-30-reports-level-up-action.md` | Reports: Leveling a Student Up — clicking the Level Up button on an eligible student (admin/Case Manager only), the confirm dialog, and the immediate promotion |
+| `admin-system-info.mp4` | 26s | `narration-31-admin-system-info.md` | Admin: System Information — the read-only last card on the Admin Panel (current user, database, total students) |
+| `bills-assistance-forms.mp4` | 64s | `narration-32-bills-assistance-forms.md` | Bills: Assistance Applications — filling out the SNAP/health/housing practice paperwork, grading against the student's real data, fixing a wrong answer, and the approval notice |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
@@ -179,6 +183,56 @@ empty — don't use it for these recordings.
 logs in as `outsidestaff1` (password `test123`) — a seeded **Outside Staff** account
 (`role: staff`, `is_outside_staff: true`) for recording the read-only view of User
 Management that role sees. Both are created by `seed_test_data.py`.
+
+`29-notifications.js` logs in as whichever staff account is the seeded demo student's real
+Case Manager (`staff17` as of the current seed, but this is assigned by `seed_test_data.py`'s
+staff-cycling and can shift on a re-seed — see below) and depends on
+`scripts/tutorial-videos/seed_notifications_demo.py` having been run first: nothing in
+`seed_test_data.py` creates any `Notification` rows, so a freshly seeded DB always shows an
+empty bell. That seed script has a real seeded student submit an actual marketplace
+purchase (through the live checkout route, so it fires the app's own
+`notify_support_team_purchase_order_pending()` for a genuine `purchase_order_pending`
+notification with a working deep link) plus hand-inserts one unread `missing_point_card`
+notification and one already-read notification, all for that student's real Case Manager —
+print the script's own output to see which login it seeded for that run:
+
+```powershell
+python scripts/tutorial-videos/seed_notifications_demo.py
+node scripts/tutorial-videos/29-notifications.js
+```
+
+`32-bills-assistance-forms.js` depends on `scripts/tutorial-videos/seed_bills_demo.py` having
+been run first (Test Student 10 needs bills turned on for the rent/income numbers behind the
+form to be meaningful). It logs in as `staff17` — Test Student 10's actual Case Manager, not
+`staff25` (06-bills.js's login) — because both the Bills class overview and the Reports
+Level Up's tables default to "Only students managed by me" / "Managed by me" checked, scoped
+by real `TeamMember` rows, and `seed_test_data.py`'s randomized staff-cycling can put a given
+demo student on a different login's team on a re-seed; check
+`GET /api/economy/overview?managed_by_me=true` (or just uncheck the box in the UI) to confirm
+who currently manages your demo student before recording. Its hardcoded `CORRECT` answers
+match Test Student 10 the same way — verify them again against
+`GET /api/economy/student/<id>` and the student's real bill rows if you re-seed, since
+grading checks the student's own real records, not a fixed key (see `assistance_forms.py`'s
+module docstring). This script also works around something environmental, not app-related:
+this browser setup marks text inputs near sensitive-looking labels (SSN, date of birth,
+address) `readonly` with custom `data-autofill-hardened` attributes that Playwright's normal
+`.fill()` waits forever on — it sets `.value` directly via `page.evaluate()` and dispatches a
+real `input` event instead, which the app's own `bindApplicationInputs()` listener treats the
+same as a keystroke. Radio/checkbox inputs are unaffected (HTML's `readonly` doesn't apply to
+them) and still use Playwright's normal `.check()`.
+
+`30-reports-level-up-action.js` logs in as whichever staff account is the real Case Manager
+of a student who's currently eligible to level up (`staff21` as of the current seed — check
+`GET /api/level-ups?period=all_time&managed_by_me=true` while logged in as a candidate
+staff account to confirm who has an `eligible: true` row on *their own* caseload before
+recording; the Level Up button only shows for admins and that student's actual Case
+Manager, and `seed_test_data.py`'s randomized STAR data means who's eligible, and who
+manages them, both shift on a re-seed). Clicking Level Up is a real, one-way promotion
+(card color changes, 30-day window resets) — re-seed before re-recording rather than running
+this script twice against the same DB. It also registers `page.on('dialog', d =>
+d.accept())` before the click, since this action's confirmation is the browser's native
+`window.confirm()`, not the app's usual modal, and that call blocks page script until a
+dialog handler answers it.
 
 Re-run a script any time the UI changes enough that a video goes stale — each one drives
 real selectors (`#nav-hamburger`, `.nav-btn[data-view="..."]`, etc.) against the live app,
