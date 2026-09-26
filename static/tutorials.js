@@ -35,14 +35,14 @@ const TUTORIAL_VIDEOS = {
     'report-sections': {
         title: 'Reports: What Each Section Shows',
         description: 'Attendance, STAR Percent, Plan Thresholds, Trigger Time, Infractions, Incidents, Level Ups, Frenzies.',
-        duration: '1:15',
+        duration: '1:19',
         videoFile: 'report-sections.mp4',
         youtubeId: ''
     },
     'bills': {
         title: 'Bills',
         description: 'Class overview, turning bills on for a student, This week / Pay / worksheets, My Plan, Savings, Assistance, History.',
-        duration: '1:25',
+        duration: '1:30',
         videoFile: 'bills.mp4',
         youtubeId: ''
     },

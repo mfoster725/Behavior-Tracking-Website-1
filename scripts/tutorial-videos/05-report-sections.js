@@ -76,9 +76,7 @@ async function main() {
       await highlight('.overview-stat[data-overview-key="frenzies"]', { pad: 4 });
     }, 500, 4600);
 
-    await step('That’s the anatomy of a report — the same sections, scoped to whoever or whatever group you’ve selected.', async () => {
-      await unhighlight();
-    }, 800, 6300);
+    await step('That’s the anatomy of a report — the same sections, scoped to whoever or whatever group you’ve selected.', async () => {}, 800, 6300);
 
   } finally {
     await pause(500);

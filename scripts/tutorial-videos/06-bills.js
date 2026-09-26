@@ -74,28 +74,24 @@ async function main() {
       await highlight('.bills2-tab[data-tab="plan"]');
       await pause(350);
       await page.click('.bills2-tab[data-tab="plan"]');
-      await unhighlight();
     }, 1000, 7900);
 
     await step('Savings tracks their emergency fund, and moves money between checking and savings.', async () => {
       await highlight('.bills2-tab[data-tab="savings"]');
       await pause(350);
       await page.click('.bills2-tab[data-tab="savings"]');
-      await unhighlight();
     }, 800, 4900);
 
     await step('Assistance covers real aid programs — SNAP, Medical Assistance, Housing Choice Voucher — approved off their take-home pay.', async () => {
       await highlight('.bills2-tab[data-tab="assistance"]');
       await pause(350);
       await page.click('.bills2-tab[data-tab="assistance"]');
-      await unhighlight();
     }, 800, 7600);
 
     await step('History holds past weeks, once there’s a week to look back on.', async () => {
       await highlight('.bills2-tab[data-tab="history"]');
       await pause(350);
       await page.click('.bills2-tab[data-tab="history"]');
-      await unhighlight();
     }, 800, 3600);
 
     await step('Grant a PTO day here too, for a paid day off from bills.', async () => {
