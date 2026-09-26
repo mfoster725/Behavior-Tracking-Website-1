@@ -92,11 +92,31 @@ it with a pulsing ring — call it from a step's `fn` before clicking (or on its
 step that's just talking about something) so viewers can see what's being clicked or
 described instead of just watching the UI change underneath them. `06-bills.js` is the
 current example; `unhighlight()` is called automatically at the top of every `step()`, so a
-ring only outlives its own step if the step's `fn` doesn't clear it itself (do that right
-after a click that navigates or opens a modal, so a stale ring doesn't float over the next
-screen). Adding highlight calls lengthens a step's actual recorded duration a bit (mouse
-movement + a short pause before the click) — re-measure the narration script's `~Time`
-column afterward instead of assuming the old timestamps still line up (see below).
+ring only outlives its own step if the step's `fn` doesn't clear it itself.
+
+**Don't call `unhighlight()` at the end of a step's `fn` by reflex.** The ring is meant to
+stay lit for the entire `holdAfter` hold — that's the point, it gives the viewer something
+to look at while the narration plays instead of a dead, static screen. Nearly every recorder
+script used to call `unhighlight()` right after every click regardless of what the click
+did, which cut the ring short and left several seconds of a completely blank, unexplained
+pause before the next step's caption appeared (worse the longer that step's `holdAfter`
+was) — that's the "odd random pauses" bug fixed for `18-reports-attendance.js` (see
+`git show 17574bd`). Only call `unhighlight()` inside `fn` when the click **navigates to a
+different view or opens a modal** and nothing afterward highlights something new in that
+new context — the ring is a fixed-position overlay above everything (z-index 999998), so
+otherwise it keeps glowing at the old element's screen position, stranded over the new
+screen. For an in-place toggle/tab/tile click on the same screen, leave the ring lit and let
+`step()`'s automatic top-of-next-step `unhighlight()` clear it.
+
+Adding highlight calls lengthens a step's actual recorded duration a bit (mouse movement + a
+short pause before the click) — re-measure the narration script's `~Time` column afterward
+instead of assuming the old timestamps still line up (see below).
+
+`scripts/tutorial-videos/add_chapters.py` embeds one chapter marker per `step()` into a
+finished video, using the timestamps that step logged to stdout while recording (capture the
+recorder script's output to a `.log` file first — see its docstring). Chapters are container
+metadata muxed in with `-c copy`, so this doesn't touch the video/audio and can be re-run any
+time after re-recording or re-voicing.
 
 The Reports page's "Trends" chart starts collapsed by default (a real app behavior, not a
 recording artifact) and the layout doesn't reflow to fill the gap it leaves — so
