@@ -9634,7 +9634,7 @@ a.dashboard-compare-toggle {
 .overview-card--rich .overview-heatmap-legend {
     gap: 4px;
     margin-top: 4px;
-    font-size: 0.54rem;
+    font-size: 0.68rem;
 }
 
 .overview-card--rich .overview-heatmap-legend-bar {
@@ -9826,24 +9826,65 @@ a.dashboard-compare-toggle {
         flex-wrap: wrap;
         justify-content: center;
     }
+
+    /* Trigger Time: drop the indent that lines the text up with the
+       heatmap, and let a long time range wrap instead of running out of
+       the panel. The heading keeps its normal size when that happens. */
+    .overview-card--rich .overview-trigger-panel .overview-trigger-head {
+        padding-right: 0;
+    }
+
+    .overview-card--rich .overview-trigger-row {
+        padding-left: 0;
+    }
+
+    .overview-card--rich .overview-trigger-meta {
+        grid-template-columns: max-content minmax(0, 1fr);
+        column-gap: 8px;
+    }
+
+    .overview-card--rich .overview-trigger-meta-v {
+        white-space: normal;
+    }
+
+    .overview-card--rich .overview-trigger-hero {
+        font-size: min(var(--overview-trigger-hero-size, 1.15rem), 1.15rem);
+    }
+
+    /* Only the first, 12:00, and last times fit above narrow columns. */
+    .overview-card--rich .overview-heatmap-colhead--minor {
+        visibility: hidden;
+    }
+}
+
+/* No room for "Trigger Day:" and "Wednesday" on one line: stack each
+   label above its value. */
+@container overview-card (max-width: 200px) {
+    .overview-card--rich .overview-trigger-meta {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 0;
+    }
 }
 
 .overview-card--rich .overview-incidents-panel .overview-incidents-bars {
-    gap: 14px;
+    gap: 16px;
     min-height: 72px;
     padding-top: 2px;
 }
 
+/* Each column is as wide as its label; the bar itself stays slim. */
 .overview-card--rich .overview-incident-bar-col {
-    max-width: 32px;
+    flex: 0 0 auto;
+    max-width: none;
 }
 
 .overview-card--rich .overview-incident-delta {
-    font-size: 0.52rem;
+    font-size: 0.78rem;
     margin-bottom: 3px;
 }
 
 .overview-card--rich .overview-incident-bar-track {
+    width: 32px;
     height: 48px;
     border-radius: 4px;
 }
@@ -9853,7 +9894,7 @@ a.dashboard-compare-toggle {
 }
 
 .overview-card--rich .overview-incident-label {
-    font-size: 0.42rem;
+    font-size: 0.68rem;
     margin-top: 5px;
 }
 
