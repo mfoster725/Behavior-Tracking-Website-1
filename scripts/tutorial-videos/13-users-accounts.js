@@ -34,7 +34,6 @@ async function main() {
       await search.click();
       await search.fill('Test Student 10');
       await pause(600);
-      await unhighlight();
     }, 800, 4200);
 
     await step('Add Student sits right at the top of the list, so it’s easy to find.', async () => {
@@ -61,13 +60,13 @@ async function main() {
       await parentEmailInput.click();
       await parentEmailInput.fill('parent@example.com');
       await highlight(['#student-email', '#student-parent-emails-container']);
-      await unhighlight();
     }, 800, 4800);
 
     await step('Support team roles — Case Manager, Practitioner, Professional, Group Leader — are set right here too.', async () => {
       await highlight('#case-manager-container');
       await pause(300);
       await page.click('#student-modal .close');
+      await unhighlight();
     }, 800, 4200);
 
     await step('The same pattern adds Staff, Outside Staff, or Admin accounts.', async () => {
