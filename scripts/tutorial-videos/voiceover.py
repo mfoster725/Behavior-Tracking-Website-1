@@ -60,6 +60,7 @@ VIDEOS = {
     'marketplace-hiding': ('narration-26-marketplace-hiding.md', 'marketplace-hiding.mp4'),
     'users-accounts-staff': ('narration-27-users-accounts-staff.md', 'users-accounts-staff.mp4'),
     'users-accounts-outside-staff': ('narration-28-users-accounts-outside-staff.md', 'users-accounts-outside-staff.mp4'),
+    'notifications': ('narration-29-notifications.md', 'notifications.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

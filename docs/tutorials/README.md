@@ -34,6 +34,7 @@ One topic per video — these are not chapters of a single longer video.
 | `marketplace-hiding.mp4` | 63s | `narration-26-marketplace-hiding.md` | Marketplace: Creating & Hiding Items — Add item, and the per-item hide-from-students rule types |
 | `users-accounts-staff.mp4` | 37s | `narration-27-users-accounts-staff.md` | User Management: Accounts & Roster (plain staff view) — Add Student at the top of the list, required student/parent emails, no admin-only buttons |
 | `users-accounts-outside-staff.mp4` | 33s | `narration-28-users-accounts-outside-staff.md` | User Management: Accounts & Roster (Outside Staff view) — search/view every table, no Add Student or any add/edit action |
+| `notifications.mp4` | 45s | `narration-29-notifications.md` | Notifications: the header bell — unread badge, Mark all read / Show read notifications, and clicking a notification to jump to and flash what it's about |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with
@@ -179,6 +180,23 @@ empty — don't use it for these recordings.
 logs in as `outsidestaff1` (password `test123`) — a seeded **Outside Staff** account
 (`role: staff`, `is_outside_staff: true`) for recording the read-only view of User
 Management that role sees. Both are created by `seed_test_data.py`.
+
+`29-notifications.js` logs in as whichever staff account is the seeded demo student's real
+Case Manager (`staff17` as of the current seed, but this is assigned by `seed_test_data.py`'s
+staff-cycling and can shift on a re-seed — see below) and depends on
+`scripts/tutorial-videos/seed_notifications_demo.py` having been run first: nothing in
+`seed_test_data.py` creates any `Notification` rows, so a freshly seeded DB always shows an
+empty bell. That seed script has a real seeded student submit an actual marketplace
+purchase (through the live checkout route, so it fires the app's own
+`notify_support_team_purchase_order_pending()` for a genuine `purchase_order_pending`
+notification with a working deep link) plus hand-inserts one unread `missing_point_card`
+notification and one already-read notification, all for that student's real Case Manager —
+print the script's own output to see which login it seeded for that run:
+
+```powershell
+python scripts/tutorial-videos/seed_notifications_demo.py
+node scripts/tutorial-videos/29-notifications.js
+```
 
 Re-run a script any time the UI changes enough that a video goes stale — each one drives
 real selectors (`#nav-hamburger`, `.nav-btn[data-view="..."]`, etc.) against the live app,
