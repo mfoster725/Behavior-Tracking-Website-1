@@ -220,6 +220,13 @@ const TUTORIAL_VIDEOS = {
         duration: '0:26',
         videoFile: 'admin-system-info.mp4',
         youtubeId: ''
+    },
+    'bills-assistance-forms': {
+        title: 'Bills: Assistance Applications',
+        description: 'Filling out the SNAP/health/housing practice paperwork under Assistance — grading against the student\'s real data, and fixing a wrong answer.',
+        duration: '1:04',
+        videoFile: 'bills-assistance-forms.mp4',
+        youtubeId: ''
     }
 };
 
@@ -235,7 +242,7 @@ const VIEW_TUTORIALS = {
         'reports-trigger-time', 'reports-infractions', 'reports-incidents',
         'reports-level-ups', 'reports-level-up-action', 'reports-frenzies', 'notifications'
     ],
-    'bills': ['bills', 'notifications'],
+    'bills': ['bills', 'bills-assistance-forms', 'notifications'],
     'schedules': ['schedules', 'notifications'],
     'bank-account': ['bank-account-bonuses', 'bank-account-balances', 'notifications'],
     'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding', 'notifications'],
