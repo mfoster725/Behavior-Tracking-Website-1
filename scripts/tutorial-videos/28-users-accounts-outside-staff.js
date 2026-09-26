@@ -35,7 +35,6 @@ async function main() {
       await search.fill('Test Student 10');
       await pause(600);
       await search.fill('');
-      await unhighlight();
     }, 800, 4400);
 
     await step('The Staff, Outside Staff, and Admin lists are also here to search — read-only, since only an admin can add or edit accounts.', async () => {

@@ -35,7 +35,6 @@ async function main() {
       await search.fill('Test Student 10');
       await pause(600);
       await search.fill('');
-      await unhighlight();
     }, 800, 4200);
 
     await step('Add Student sits right at the top of the list, so it’s easy to find.', async () => {
@@ -61,7 +60,6 @@ async function main() {
       await parentEmailInput.click();
       await parentEmailInput.fill('parent@example.com');
       await highlight(['#student-email', '#student-parent-emails-container']);
-      await unhighlight();
     }, 800, 4800);
 
     await step('Staff accounts can view Staff, Outside Staff, and Admin lists, but only an admin can add or edit those accounts.', async () => {
