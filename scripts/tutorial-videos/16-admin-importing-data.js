@@ -40,7 +40,6 @@ async function main() {
       await pause(350);
       await select.selectOption('student');
       await pause(600);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Existing accounts are matched and updated — by User Number for staff, Lunch Number for students — instead of duplicated.', async () => {
