@@ -62,6 +62,7 @@ VIDEOS = {
     'users-accounts-outside-staff': ('narration-28-users-accounts-outside-staff.md', 'users-accounts-outside-staff.mp4'),
     'notifications': ('narration-29-notifications.md', 'notifications.mp4'),
     'reports-level-up-action': ('narration-30-reports-level-up-action.md', 'reports-level-up-action.mp4'),
+    'admin-system-info': ('narration-31-admin-system-info.md', 'admin-system-info.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

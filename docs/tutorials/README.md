@@ -36,6 +36,7 @@ One topic per video — these are not chapters of a single longer video.
 | `users-accounts-outside-staff.mp4` | 33s | `narration-28-users-accounts-outside-staff.md` | User Management: Accounts & Roster (Outside Staff view) — search/view every table, no Add Student or any add/edit action |
 | `notifications.mp4` | 45s | `narration-29-notifications.md` | Notifications: the header bell — unread badge, Mark all read / Show read notifications, and clicking a notification to jump to and flash what it's about |
 | `reports-level-up-action.mp4` | 35s | `narration-30-reports-level-up-action.md` | Reports: Leveling a Student Up — clicking the Level Up button on an eligible student (admin/Case Manager only), the confirm dialog, and the immediate promotion |
+| `admin-system-info.mp4` | 26s | `narration-31-admin-system-info.md` | Admin: System Information — the read-only last card on the Admin Panel (current user, database, total students) |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with

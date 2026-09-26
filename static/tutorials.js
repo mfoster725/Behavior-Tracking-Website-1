@@ -213,6 +213,13 @@ const TUTORIAL_VIDEOS = {
         duration: '0:35',
         videoFile: 'reports-level-up-action.mp4',
         youtubeId: ''
+    },
+    'admin-system-info': {
+        title: 'Admin: System Information',
+        description: "The Admin Panel's last card — who's logged in, which database, and total student count. Read-only.",
+        duration: '0:26',
+        videoFile: 'admin-system-info.mp4',
+        youtubeId: ''
     }
 };
 
@@ -233,7 +240,7 @@ const VIEW_TUTORIALS = {
     'bank-account': ['bank-account-bonuses', 'bank-account-balances', 'notifications'],
     'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding', 'notifications'],
     'users': ['users-accounts', 'users-accounts-staff', 'users-accounts-outside-staff', 'users-student-plans', 'notifications'],
-    'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy', 'notifications']
+    'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy', 'admin-system-info', 'notifications']
 };
 
 // Friendly page names for search-result badges (view name -> label).
