@@ -44,7 +44,6 @@ async function main() {
       await pause(400);
       await page.click('#marketplace-search-btn');
       await pause(500);
-      await unhighlight();
     }, 800, 3600);
 
     await step('Add to cart puts it in the cart on the right.', async () => {
@@ -52,7 +51,6 @@ async function main() {
       await highlight(addBtn);
       await pause(350);
       await addBtn.click();
-      await unhighlight();
     }, 800, 3000);
 
     await step('The cart totals everything, and Checkout submits it as a purchase order.', async () => {
@@ -60,6 +58,9 @@ async function main() {
       await pause(500);
       await page.click('#marketplace-checkout-btn');
       await pause(500);
+      // Checkout empties the cart, which shrinks #marketplace-cart-section
+      // and shifts content below it — clear the ring instead of leaving it
+      // sized/positioned for the pre-checkout cart.
       await unhighlight();
     }, 800, 4200);
 

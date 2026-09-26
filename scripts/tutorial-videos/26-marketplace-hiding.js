@@ -49,7 +49,6 @@ async function main() {
       await priceInput.click();
       await priceInput.fill('250');
       await highlight(priceInput);
-      await unhighlight();
     }, 800, 4000);
 
     await step('Save adds it straight to the catalog.', async () => {
@@ -58,12 +57,16 @@ async function main() {
       await pause(350);
       await saveBtn.click();
       await page.waitForSelector('#marketplace-add-item-modal', { state: 'hidden' });
+      // Modal closing reveals the catalog behind it — clear the ring here,
+      // right as the modal goes away, instead of after the search/filter
+      // below (which would otherwise leave a stale ring over the now-closed
+      // modal's old position while the catalog is being filtered).
+      await unhighlight();
       const searchInput = page.locator('#marketplace-search-input');
       await searchInput.click();
       await searchInput.fill('Puzzle Book');
       await page.click('#marketplace-search-btn');
       await page.waitForSelector('.marketplace-item-card:has-text("Puzzle Book")', { state: 'attached', timeout: 15000 });
-      await unhighlight();
     }, 800, 3200);
 
     await step('Hide from students controls exactly who stops seeing an item — not whether it exists at all.', async () => {
@@ -86,7 +89,6 @@ async function main() {
       const colorSelect = page.locator('#marketplace-hide-card-color');
       await highlight(colorSelect);
       await colorSelect.selectOption('yellow');
-      await unhighlight();
     }, 800, 5400);
 
     await step('The other options hide it from one student, a grade band, or your whole caseload instead.', async () => {
