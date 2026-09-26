@@ -64,7 +64,6 @@ async function main() {
       await highlight(menuBtn);
       await pause(350);
       await menuBtn.click();
-      await unhighlight();
     }, 1000, 6800);
 
     await step("Closing this, and saving the period.", async () => {
@@ -74,7 +73,6 @@ async function main() {
       await highlight(saveBtn);
       await pause(350);
       await saveBtn.click();
-      await unhighlight();
     }, 800, 3900);
 
   } finally {

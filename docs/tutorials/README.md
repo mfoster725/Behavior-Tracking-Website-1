@@ -6,8 +6,8 @@ One topic per video — these are not chapters of a single longer video.
 
 | Video | Length | Narration script | Covers |
 |---|---|---|---|
-| `point-card-period-entry.mp4` | 60s | `narration-01-period-entry.md` | Period Entry: scoring one class period across every scheduled student |
-| `point-card-daily-entry.mp4` | 70s | `narration-02-daily-entry.md` | Daily Entry: scoring a student's whole day, all periods at once |
+| `point-card-period-entry.mp4` | 61s | `narration-01-period-entry.md` | Period Entry: scoring one class period across every scheduled student |
+| `point-card-daily-entry.mp4` | 71s | `narration-02-daily-entry.md` | Daily Entry: scoring a student's whole day, all periods at once |
 | `past-point-cards.mp4` | 64s | `narration-03-past-point-cards.md` | Viewing a student's past point cards and printing them (Full Card / Info Insights) |
 | `reports-navigation.mp4` | 92s | `narration-04-reports-navigation.md` | Reports controls: student vs. group, timeframe, Compare / Incentive Tracking show-hide, Insights View, Print |
 | `report-sections.mp4` | 80s | `narration-05-report-sections.md` | What each report tile shows: Attendance, STAR Percent, Plan Thresholds, Trigger Time, Infractions, Incidents, Level Up's, Frenzies |

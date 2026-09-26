@@ -81,7 +81,6 @@ async function main() {
       await highlight(menuBtn);
       await pause(350);
       await menuBtn.click();
-      await unhighlight();
     }, 1000, 5900);
 
     await step('Escape, then Save All Data when you’re done.', async () => {
@@ -91,7 +90,6 @@ async function main() {
       await highlight(saveBtn);
       await pause(350);
       await saveBtn.click();
-      await unhighlight();
     }, 800, 2200);
 
   } finally {

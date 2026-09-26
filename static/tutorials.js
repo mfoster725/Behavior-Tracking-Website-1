@@ -7,14 +7,14 @@ const TUTORIAL_VIDEOS = {
     'period-entry': {
         title: 'Point Card: Period Entry',
         description: 'Scoring one class period across every scheduled student.',
-        duration: '0:53',
+        duration: '1:01',
         videoFile: 'point-card-period-entry.mp4',
         youtubeId: ''
     },
     'daily-entry': {
         title: 'Point Card: Daily Entry',
         description: "Scoring a student's whole day, all periods at once.",
-        duration: '1:02',
+        duration: '1:11',
         videoFile: 'point-card-daily-entry.mp4',
         youtubeId: ''
     },
