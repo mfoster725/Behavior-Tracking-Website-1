@@ -107,7 +107,6 @@ async function main() {
       await highlight(toggle);
       await pause(350);
       await toggle.click();
-      await unhighlight();
     }, 800, 1900);
 
     await step('Incentive Tracking shows a section for building incentive tables over a date range.', async () => {
@@ -122,7 +121,6 @@ async function main() {
       await highlight(toggle);
       await pause(350);
       await toggle.click();
-      await unhighlight();
     }, 800, 2200);
 
     await step('Insights View opens a separate, deeper analytics page for whoever you have selected.', async () => {

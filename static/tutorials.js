@@ -21,14 +21,14 @@ const TUTORIAL_VIDEOS = {
     'past-point-cards': {
         title: 'Past Point Cards',
         description: "Viewing a student's past point cards and printing them (Full Card / Info Insights).",
-        duration: '0:59',
+        duration: '1:04',
         videoFile: 'past-point-cards.mp4',
         youtubeId: ''
     },
     'reports-navigation': {
         title: 'Reports: Navigation',
         description: 'Student vs. group, timeframe, Compare / Incentive Tracking show-hide, Insights View, Print.',
-        duration: '1:24',
+        duration: '1:31',
         videoFile: 'reports-navigation.mp4',
         youtubeId: ''
     },

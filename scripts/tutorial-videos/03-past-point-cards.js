@@ -28,7 +28,6 @@ async function main() {
       await highlight(menuBtn);
       await pause(350);
       await menuBtn.click();
-      await unhighlight();
     }, 1000, 2900);
 
     await step('Then choose "View past point cards."', async () => {
