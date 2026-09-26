@@ -38,7 +38,6 @@ async function main() {
       await pause(350);
       await checkbox.check();
       await pause(500);
-      await unhighlight();
     }, 800, 3600);
 
     await step('Type a count directly into a student’s row — here, a Starbucks run for Test Student 10.', async () => {
@@ -47,7 +46,6 @@ async function main() {
       await highlight(input);
       await input.click();
       await input.fill('1');
-      await unhighlight();
     }, 800, 4000);
 
     await step('Submit Table saves every count you’ve changed at once.', async () => {
@@ -65,7 +63,6 @@ async function main() {
       await pause(350);
       await select.selectOption('star_classroom');
       await pause(500);
-      await unhighlight();
     }, 800, 4400);
 
     await step('Star Classroom awards a whole caseload at once — search for the teacher or case manager.', async () => {
@@ -74,7 +71,6 @@ async function main() {
       await input.click();
       await input.fill('Staff Member 10');
       await pause(500);
-      await unhighlight();
     }, 800, 4200);
 
     await step('Pick them from the list to preview their caseload.', async () => {

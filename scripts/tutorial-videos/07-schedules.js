@@ -37,7 +37,6 @@ async function main() {
       await pause(400);
       await page.selectOption('#teacher-schedule-staff-search', { label: 'Staff Member 10' });
       await pause(500);
-      await unhighlight();
     }, 800, 3400);
 
     await step('And pick a student here to view theirs.', async () => {
@@ -45,7 +44,6 @@ async function main() {
       await pause(400);
       await page.selectOption('#schedule-student-select', { label: 'Test Student 10' });
       await pause(500);
-      await unhighlight();
     }, 800, 3600);
 
     await step('Add Time Period opens a new row — type the time range first.', async () => {
@@ -57,7 +55,6 @@ async function main() {
       await highlight(timeInput);
       await timeInput.click();
       await timeInput.fill('2:45-3:00');
-      await unhighlight();
     }, 800, 3200);
 
     await step('Then use its menu to add the class and staff for that period.', async () => {
@@ -77,7 +74,6 @@ async function main() {
       await pause(400);
       await highlight('.schedule-entry-modal-staff-input');
       await pause(400);
-      await unhighlight();
     }, 800, 4200);
 
     await step('Save adds it to the table — then Save Student Schedule makes it official.', async () => {

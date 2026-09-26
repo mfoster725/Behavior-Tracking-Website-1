@@ -35,7 +35,6 @@ async function main() {
       await pause(350);
       await checkbox.check();
       await pause(500);
-      await unhighlight();
     }, 800, 3600);
 
     await step('Click any student to open their account.', async () => {
