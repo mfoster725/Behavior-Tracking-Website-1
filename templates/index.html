@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=bills-weekly1">
     <link rel="stylesheet" href="{{ url_for('static', filename='bills.css') }}?v=bills-weekly1">
-    <link rel="stylesheet" href="{{ url_for('static', filename='tutorials.css') }}?v=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='tutorials.css') }}?v=2">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="{{ url_for('static', filename='no-autofill.js') }}?v=1"></script>
     <script src="{{ url_for('static', filename='daily-refresh.js') }}?v=date-rollover"></script>
@@ -2947,7 +2947,28 @@
                     <p class="tutorial-modal-subtitle" id="tutorial-modal-subtitle"></p>
                 </div>
             </div>
+            <div class="tutorial-search-row">
+                <input type="text" id="tutorial-search-input" class="tutorial-search-input"
+                       placeholder="Search all tutorial videos..." autocomplete="off">
+            </div>
             <div id="tutorial-modal-body"></div>
+            <div class="tutorial-suggestion-box">
+                <button type="button" id="tutorial-suggestion-toggle" class="tutorial-suggestion-toggle">
+                    Have a suggestion or question about the tutorials?
+                </button>
+                <div id="tutorial-suggestion-panel" class="tutorial-suggestion-panel" hidden>
+                    <div class="tutorial-suggestion-kind">
+                        <label><input type="radio" name="tutorial-suggestion-kind" value="suggestion" checked> Suggestion</label>
+                        <label><input type="radio" name="tutorial-suggestion-kind" value="question"> Question</label>
+                    </div>
+                    <textarea id="tutorial-suggestion-text" class="tutorial-suggestion-text" maxlength="4000"
+                              placeholder="Suggest a new tutorial video, or ask a question about how something works..."></textarea>
+                    <div class="tutorial-suggestion-actions">
+                        <button type="button" id="tutorial-suggestion-submit" class="btn-primary">Send</button>
+                        <span id="tutorial-suggestion-status" class="tutorial-suggestion-status" role="status"></span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     {% endif %}
@@ -2959,7 +2980,7 @@
     <script src="{{ url_for('static', filename='curriculum.js') }}?v=curric8"></script>
     {% endif %}
     {% if user.role in ['staff', 'admin'] %}
-    <script src="{{ url_for('static', filename='tutorials.js') }}?v=1"></script>
+    <script src="{{ url_for('static', filename='tutorials.js') }}?v=2"></script>
     {% endif %}
 </body>
 </html>

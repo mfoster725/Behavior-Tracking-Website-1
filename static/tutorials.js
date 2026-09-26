@@ -122,6 +122,69 @@ const TUTORIAL_VIDEOS = {
         duration: '0:47',
         videoFile: 'admin-calendar-economy.mp4',
         youtubeId: ''
+    },
+    'reports-attendance': {
+        title: 'Reports: Attendance Drill-Down',
+        description: 'Clicking into the Attendance tile — table view by day, graph view over time.',
+        duration: '0:44',
+        videoFile: 'reports-attendance.mp4',
+        youtubeId: ''
+    },
+    'reports-star-percent': {
+        title: 'Reports: STAR Percent Drill-Down',
+        description: 'Clicking into the STAR Percent tile, then a category bar, for time-of-day and day-of-week detail.',
+        duration: '0:43',
+        videoFile: 'reports-star-percent.mp4',
+        youtubeId: ''
+    },
+    'reports-plan-thresholds': {
+        title: 'Reports: Plan Thresholds Drill-Down',
+        description: "Clicking into Plan Thresholds for the by-If and by-student breakdown behind the count.",
+        duration: '0:36',
+        videoFile: 'reports-plan-thresholds.mp4',
+        youtubeId: ''
+    },
+    'reports-trigger-time': {
+        title: 'Reports: Trigger Time Drill-Down',
+        description: 'Clicking into Trigger Time, then a specific time slot, for its own severity and frenzy detail.',
+        duration: '',
+        videoFile: '', // TODO: 'reports-trigger-time.mp4' once recorded
+        youtubeId: ''
+    },
+    'reports-infractions': {
+        title: 'Reports: Infractions Drill-Down',
+        description: 'Clicking into Infractions, then a specific type, for when it happens by time of day and day of week.',
+        duration: '',
+        videoFile: '', // TODO: 'reports-infractions.mp4' once recorded
+        youtubeId: ''
+    },
+    'reports-incidents': {
+        title: 'Reports: Incidents Drill-Down',
+        description: 'Clicking into Reminders and Resets for their own graph/table breakdown.',
+        duration: '',
+        videoFile: '', // TODO: 'reports-incidents.mp4' once recorded
+        youtubeId: ''
+    },
+    'reports-level-ups': {
+        title: "Reports: Level Up's Drill-Down",
+        description: 'Clicking into Level Up\'s for the Yellow→Green and Green→Blue readiness tables.',
+        duration: '',
+        videoFile: '', // TODO: 'reports-level-ups.mp4' once recorded
+        youtubeId: ''
+    },
+    'reports-frenzies': {
+        title: 'Reports: Frenzies Drill-Down',
+        description: 'Clicking into Frenzies, then a severity level, for its time-of-day and day-of-week detail.',
+        duration: '',
+        videoFile: '', // TODO: 'reports-frenzies.mp4' once recorded
+        youtubeId: ''
+    },
+    'marketplace-hiding': {
+        title: 'Marketplace: Creating & Hiding Items',
+        description: "Adding a new item, and what hiding it from students (by student, card color, grade, or caseload) actually does.",
+        duration: '',
+        videoFile: '', // TODO: 'marketplace-hiding.mp4' once recorded
+        youtubeId: ''
     }
 };
 
@@ -131,19 +194,54 @@ const TUTORIAL_VIDEOS = {
 const VIEW_TUTORIALS = {
     'period-entry': ['period-entry', 'past-point-cards'],
     'entry': ['daily-entry', 'past-point-cards'],
-    'summary': ['reports-navigation', 'report-sections'],
+    'summary': [
+        'reports-navigation', 'report-sections',
+        'reports-attendance', 'reports-star-percent', 'reports-plan-thresholds',
+        'reports-trigger-time', 'reports-infractions', 'reports-incidents',
+        'reports-level-ups', 'reports-frenzies'
+    ],
     'bills': ['bills'],
     'schedules': ['schedules'],
     'bank-account': ['bank-account-bonuses', 'bank-account-balances'],
-    'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing'],
+    'marketplace': ['marketplace-shopping', 'marketplace-fulfilling', 'marketplace-managing', 'marketplace-hiding'],
     'users': ['users-accounts', 'users-student-plans'],
     'admin': ['admin-accounts-billing', 'admin-importing-data', 'admin-calendar-economy']
 };
+
+// Friendly page names for search-result badges (view name -> label).
+const VIEW_LABELS = {
+    'period-entry': 'Point Card (Period Entry)',
+    'entry': 'Point Card (Daily Entry)',
+    'summary': 'Reports',
+    'bills': 'Bills',
+    'schedules': 'Schedules',
+    'bank-account': 'Bank Account',
+    'marketplace': 'Marketplace',
+    'users': 'User Management',
+    'admin': 'Admin'
+};
+
+// Reverse index built from VIEW_TUTORIALS: tutorial key -> view name.
+const TUTORIAL_KEY_TO_VIEW = {};
+Object.keys(VIEW_TUTORIALS).forEach(viewName => {
+    VIEW_TUTORIALS[viewName].forEach(key => {
+        TUTORIAL_KEY_TO_VIEW[key] = viewName;
+    });
+});
 
 function getCurrentViewName() {
     const activeView = document.querySelector('.view.active');
     if (!activeView) return null;
     return activeView.id.replace(/-view$/, '');
+}
+
+function searchTutorials(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return Object.keys(TUTORIAL_VIDEOS).filter(key => {
+        const video = TUTORIAL_VIDEOS[key];
+        return video.title.toLowerCase().includes(q) || video.description.toLowerCase().includes(q);
+    });
 }
 
 // A hand-picked mid-video frame for each tutorial key, not the opening view —
@@ -152,15 +250,57 @@ function tutorialThumbnailUrl(key) {
     return `/static/tutorial-thumbs/${key}.jpg`;
 }
 
-function renderTutorialGrid() {
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+}
+
+// Builds one tutorial card. `showBadge` adds a "which page" pill, used in
+// search results where cards may come from views other than the current one.
+function buildTutorialCard(key, { showBadge = false } = {}) {
+    const video = TUTORIAL_VIDEOS[key];
+    if (!video) return '';
+    const thumbUrl = tutorialThumbnailUrl(key);
+    const viewName = TUTORIAL_KEY_TO_VIEW[key];
+    const badge = showBadge && viewName
+        ? `<span class="tutorial-card-badge">${escapeHtml(VIEW_LABELS[viewName] || viewName)}</span>`
+        : '';
+    return `
+        <button type="button" class="tutorial-card" data-tutorial-key="${key}">
+            <div class="tutorial-card-thumb">
+                <img src="${thumbUrl}" alt="" loading="lazy" onerror="this.remove()">
+                <span class="tutorial-play-icon"></span>
+                ${video.duration ? `<span class="tutorial-card-duration">${video.duration}</span>` : ''}
+            </div>
+            <div class="tutorial-card-body">
+                ${badge}
+                <p class="tutorial-card-title">${escapeHtml(video.title)}</p>
+                <p class="tutorial-card-desc">${escapeHtml(video.description)}</p>
+            </div>
+        </button>
+    `;
+}
+
+function wireTutorialCardClicks(body) {
+    body.querySelectorAll('.tutorial-card').forEach(card => {
+        card.addEventListener('click', () => openTutorialByKey(card.dataset.tutorialKey));
+    });
+}
+
+function resetTutorialModalChrome() {
     const modal = document.getElementById('tutorial-modal');
     const backBtn = document.getElementById('tutorial-back-btn');
+    if (modal) modal.classList.remove('tutorial-modal-playing');
+    if (backBtn) backBtn.classList.remove('visible');
+}
+
+function renderTutorialGrid() {
     const subtitle = document.getElementById('tutorial-modal-subtitle');
     const body = document.getElementById('tutorial-modal-body');
     if (!body) return;
 
-    if (modal) modal.classList.remove('tutorial-modal-playing');
-    if (backBtn) backBtn.classList.remove('visible');
+    resetTutorialModalChrome();
 
     const viewName = getCurrentViewName();
     const keys = VIEW_TUTORIALS[viewName] || [];
@@ -176,28 +316,61 @@ function renderTutorialGrid() {
         return;
     }
 
-    body.innerHTML = `<div class="tutorial-grid">${keys.map(key => {
-        const video = TUTORIAL_VIDEOS[key];
-        if (!video) return '';
-        const thumbUrl = tutorialThumbnailUrl(key);
-        return `
-            <button type="button" class="tutorial-card" data-tutorial-key="${key}">
-                <div class="tutorial-card-thumb">
-                    <img src="${thumbUrl}" alt="" loading="lazy" onerror="this.remove()">
-                    <span class="tutorial-play-icon"></span>
-                    ${video.duration ? `<span class="tutorial-card-duration">${video.duration}</span>` : ''}
-                </div>
-                <div class="tutorial-card-body">
-                    <p class="tutorial-card-title">${video.title}</p>
-                    <p class="tutorial-card-desc">${video.description}</p>
-                </div>
-            </button>
-        `;
-    }).join('')}</div>`;
+    body.innerHTML = `<div class="tutorial-grid">${keys.map(key => buildTutorialCard(key)).join('')}</div>`;
+    wireTutorialCardClicks(body);
+}
 
-    body.querySelectorAll('.tutorial-card').forEach(card => {
-        card.addEventListener('click', () => openTutorialPlayer(card.dataset.tutorialKey));
-    });
+// Searches every tutorial (regardless of the current page) by title/description.
+function renderTutorialSearchResults(query) {
+    const subtitle = document.getElementById('tutorial-modal-subtitle');
+    const body = document.getElementById('tutorial-modal-body');
+    if (!body) return;
+
+    resetTutorialModalChrome();
+
+    const keys = searchTutorials(query);
+
+    if (subtitle) {
+        subtitle.textContent = keys.length
+            ? `${keys.length} result${keys.length === 1 ? '' : 's'} for "${query.trim()}"`
+            : `No results for "${query.trim()}"`;
+    }
+
+    if (!keys.length) {
+        body.innerHTML = '<p class="tutorial-empty-state">No tutorial videos match your search.</p>';
+        return;
+    }
+
+    body.innerHTML = `<div class="tutorial-grid">${keys.map(key => buildTutorialCard(key, { showBadge: true })).join('')}</div>`;
+    wireTutorialCardClicks(body);
+}
+
+function getTutorialSearchQuery() {
+    const input = document.getElementById('tutorial-search-input');
+    return input ? input.value : '';
+}
+
+// Re-renders whatever should currently be showing (search results if there's
+// an active query, otherwise the current page's grid). Used after closing a
+// video (back button) and after a search-result navigation completes.
+function renderTutorialListForCurrentState() {
+    const query = getTutorialSearchQuery();
+    if (query.trim()) {
+        renderTutorialSearchResults(query);
+    } else {
+        renderTutorialGrid();
+    }
+}
+
+// Opens a tutorial by key, navigating to its page first if it isn't the one
+// currently active (e.g. a search result found from a different page).
+async function openTutorialByKey(key) {
+    const targetView = TUTORIAL_KEY_TO_VIEW[key];
+    const currentView = getCurrentViewName();
+    if (targetView && targetView !== currentView && typeof window.switchView === 'function') {
+        await window.switchView(targetView);
+    }
+    openTutorialPlayer(key);
 }
 
 function openTutorialPlayer(key) {
@@ -218,12 +391,12 @@ function openTutorialPlayer(key) {
     if (video.videoFile) {
         player = `<div class="tutorial-player-frame-wrap">
                <video src="/tutorial-videos/${encodeURIComponent(video.videoFile)}"
-                      title="${video.title}" controls autoplay playsinline></video>
+                      title="${escapeHtml(video.title)}" controls autoplay playsinline></video>
            </div>`;
     } else if (video.youtubeId) {
         player = `<div class="tutorial-player-frame-wrap">
                <iframe src="https://www.youtube.com/embed/${video.youtubeId}?autoplay=1&rel=0"
-                       title="${video.title}"
+                       title="${escapeHtml(video.title)}"
                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                        allowfullscreen></iframe>
            </div>`;
@@ -234,8 +407,8 @@ function openTutorialPlayer(key) {
     body.innerHTML = `
         <div class="tutorial-player">
             ${player}
-            <p class="tutorial-player-title">${video.title}</p>
-            <p class="tutorial-player-desc">${video.description}</p>
+            <p class="tutorial-player-title">${escapeHtml(video.title)}</p>
+            <p class="tutorial-player-desc">${escapeHtml(video.description)}</p>
         </div>
     `;
 }
@@ -245,15 +418,85 @@ function openTutorialModal() {
     if (!modal) return;
     renderTutorialGrid();
     modal.style.display = 'block';
+    document.body.classList.add('tutorial-modal-open');
 }
 
 function closeTutorialModal() {
     const modal = document.getElementById('tutorial-modal');
     if (!modal) return;
     modal.style.display = 'none';
+    document.body.classList.remove('tutorial-modal-open');
     // Stop playback by clearing the iframe once the modal is hidden.
     const body = document.getElementById('tutorial-modal-body');
     if (body) body.innerHTML = '';
+
+    const searchInput = document.getElementById('tutorial-search-input');
+    if (searchInput) searchInput.value = '';
+
+    resetTutorialSuggestionPanel();
+}
+
+function resetTutorialSuggestionPanel() {
+    const panel = document.getElementById('tutorial-suggestion-panel');
+    const text = document.getElementById('tutorial-suggestion-text');
+    const status = document.getElementById('tutorial-suggestion-status');
+    if (panel) panel.hidden = true;
+    if (text) text.value = '';
+    if (status) {
+        status.textContent = '';
+        status.className = 'tutorial-suggestion-status';
+    }
+}
+
+async function submitTutorialSuggestion() {
+    const text = document.getElementById('tutorial-suggestion-text');
+    const status = document.getElementById('tutorial-suggestion-status');
+    const submitBtn = document.getElementById('tutorial-suggestion-submit');
+    const kindInput = document.querySelector('input[name="tutorial-suggestion-kind"]:checked');
+    const message = text ? text.value.trim() : '';
+
+    if (!message) {
+        if (status) {
+            status.textContent = 'Please enter a message first.';
+            status.className = 'tutorial-suggestion-status tutorial-suggestion-status-error';
+        }
+        return;
+    }
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (status) {
+        status.textContent = 'Sending...';
+        status.className = 'tutorial-suggestion-status';
+    }
+
+    try {
+        const response = await fetch('/api/tutorial-suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                message,
+                kind: kindInput ? kindInput.value : 'suggestion',
+                page_context: getCurrentViewName()
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || 'Something went wrong.');
+        }
+        if (status) {
+            status.textContent = 'Thanks — your note was submitted!';
+            status.className = 'tutorial-suggestion-status tutorial-suggestion-status-success';
+        }
+        if (text) text.value = '';
+    } catch (err) {
+        if (status) {
+            status.textContent = err.message || 'Failed to submit. Please try again.';
+            status.className = 'tutorial-suggestion-status tutorial-suggestion-status-error';
+        }
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -261,13 +504,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('tutorial-modal');
     const closeBtn = document.getElementById('tutorial-modal-close');
     const backBtn = document.getElementById('tutorial-back-btn');
+    const searchInput = document.getElementById('tutorial-search-input');
+    const suggestionToggle = document.getElementById('tutorial-suggestion-toggle');
+    const suggestionPanel = document.getElementById('tutorial-suggestion-panel');
+    const suggestionSubmit = document.getElementById('tutorial-suggestion-submit');
 
     if (helpBtn) helpBtn.addEventListener('click', openTutorialModal);
     if (closeBtn) closeBtn.addEventListener('click', closeTutorialModal);
-    if (backBtn) backBtn.addEventListener('click', renderTutorialGrid);
+    if (backBtn) backBtn.addEventListener('click', renderTutorialListForCurrentState);
     if (modal) {
         modal.addEventListener('click', (event) => {
             if (event.target === modal) closeTutorialModal();
         });
+    }
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            renderTutorialListForCurrentState();
+        });
+    }
+    if (suggestionToggle && suggestionPanel) {
+        suggestionToggle.addEventListener('click', () => {
+            suggestionPanel.hidden = !suggestionPanel.hidden;
+        });
+    }
+    if (suggestionSubmit) {
+        suggestionSubmit.addEventListener('click', submitTutorialSuggestion);
     }
 });

@@ -23,6 +23,9 @@ One topic per video — these are not chapters of a single longer video.
 | `admin-accounts-billing.mp4` | 33s | `narration-15-admin-accounts-billing.md` | Admin: Accounts & Billing — Plan & Billing, User Statistics, Quick Actions (Create Staff/Admin Account) |
 | `admin-importing-data.mp4` | 48s | `narration-16-admin-importing-data.md` | Admin: Importing Data — CSV import by type, Google Sheet Sync (Check Setup, Pull/Push/Sync) |
 | `admin-calendar-economy.mp4` | 47s | `narration-17-admin-calendar-economy.md` | Admin: Calendar & Economy Settings — Quarter Date Configuration, Manny's Market economy |
+| `reports-attendance.mp4` | 44s | `narration-18-reports-attendance.md` | Reports: Attendance Drill-Down — clicking the tile, Table view by day, Graph view over time |
+| `reports-star-percent.mp4` | 43s | `narration-19-reports-star-percent.md` | Reports: STAR Percent Drill-Down — clicking a category bar for time-of-day/day-of-week detail |
+| `reports-plan-thresholds.mp4` | 36s | `narration-20-reports-plan-thresholds.md` | Reports: Plan Thresholds Drill-Down — by-If and by-student breakdown |
 
 Each recorder script (`scripts/tutorial-videos/0N-*.js`) paces its `step()` hold times to
 match how long that step's narration line actually takes to speak (measured with

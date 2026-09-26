@@ -36723,13 +36723,16 @@ function attachOverviewCardInteractions(container, data) {
             }
         } else if (key === 'plan_thresholds') {
             const opened = toggleExtraCard('plan_thresholds', () => {
+                let card;
                 if (window.StudentPlans && typeof window.StudentPlans.buildPlanThresholdsCard === 'function') {
-                    return window.StudentPlans.buildPlanThresholdsCard(data);
+                    card = window.StudentPlans.buildPlanThresholdsCard(data);
+                } else {
+                    card = document.createElement('div');
+                    card.className = 'dashboard-card overview-extra-card';
+                    card.dataset.overviewCard = 'plan_thresholds';
+                    card.innerHTML = '<h3 class="dashboard-card-title">Plan thresholds</h3><p>No data.</p>';
                 }
-                const card = document.createElement('div');
-                card.className = 'dashboard-card overview-extra-card';
-                card.dataset.overviewCard = 'plan_thresholds';
-                card.innerHTML = '<h3 class="dashboard-card-title">Plan thresholds</h3><p>No data.</p>';
+                grid.appendChild(card);
                 return card;
             });
             box.classList.toggle('overview-stat-selected', opened);

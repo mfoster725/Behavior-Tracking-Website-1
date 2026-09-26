@@ -49,6 +49,9 @@ VIDEOS = {
     'admin-accounts-billing': ('narration-15-admin-accounts-billing.md', 'admin-accounts-billing.mp4'),
     'admin-importing-data': ('narration-16-admin-importing-data.md', 'admin-importing-data.mp4'),
     'admin-calendar-economy': ('narration-17-admin-calendar-economy.md', 'admin-calendar-economy.mp4'),
+    'reports-attendance': ('narration-18-reports-attendance.md', 'reports-attendance.mp4'),
+    'reports-star-percent': ('narration-19-reports-star-percent.md', 'reports-star-percent.mp4'),
+    'reports-plan-thresholds': ('narration-20-reports-plan-thresholds.md', 'reports-plan-thresholds.mp4'),
 }
 
 DEFAULT_VOICE = 'en-US-AndrewNeural'

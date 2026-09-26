@@ -29,6 +29,10 @@
     transform: scale(1.06);
 }
 
+body.tutorial-modal-open {
+    overflow: hidden;
+}
+
 #tutorial-modal .modal-content {
     position: fixed;
     top: 0;
@@ -42,6 +46,7 @@
     max-height: none;
     height: auto;
     padding: 1.75rem;
+    overflow-y: auto;
     border-radius: var(--radius-lg) 0 0 var(--radius-lg);
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
     transition: width 0.2s ease;
@@ -91,6 +96,38 @@
 
 .tutorial-back-btn:hover {
     color: var(--accent-hover);
+}
+
+.tutorial-search-row {
+    margin-bottom: 1rem;
+}
+
+.tutorial-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 0.8125rem;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.tutorial-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.tutorial-card-badge {
+    display: inline-block;
+    background: var(--bg-header);
+    color: var(--text-inverse);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 999px;
+    margin-bottom: 0.35rem;
 }
 
 /* Gallery grid — card-based, like a media/artifact gallery */
@@ -230,6 +267,89 @@
     color: var(--text-secondary);
     font-size: 0.8125rem;
     margin: 0;
+}
+
+.tutorial-suggestion-box {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.tutorial-suggestion-toggle {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+}
+
+.tutorial-suggestion-toggle:hover {
+    color: var(--accent-hover);
+}
+
+.tutorial-suggestion-panel {
+    margin-top: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tutorial-suggestion-panel:not([hidden]) {
+    display: flex;
+}
+
+.tutorial-suggestion-kind {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.tutorial-suggestion-kind label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.tutorial-suggestion-text {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 70px;
+    resize: vertical;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 0.8125rem;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.tutorial-suggestion-text:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.tutorial-suggestion-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.tutorial-suggestion-status {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.tutorial-suggestion-status-success {
+    color: var(--success, #2e7d32);
+}
+
+.tutorial-suggestion-status-error {
+    color: var(--danger, #c0392b);
 }
 
 @media (max-width: 900px) {

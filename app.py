@@ -455,6 +455,63 @@ def tutorial_video(filename):
         return jsonify({'error': 'Not found'}), 404
     return send_from_directory(TUTORIAL_VIDEOS_DIR, filename, conditional=True, max_age=86400)
 
+
+TUTORIAL_SUGGESTIONS_NOTIFY_EMAIL = 'manfordf@gmail.com'
+
+
+@app.route('/api/tutorial-suggestions', methods=['POST'])
+@login_required
+@staff_required
+def create_tutorial_suggestion():
+    """Save a tutorial-videos suggestion/question and email a notification."""
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    kind = data.get('kind') if data.get('kind') in ('suggestion', 'question') else 'suggestion'
+    page_context = (data.get('page_context') or '').strip()[:50] or None
+
+    if not message:
+        return jsonify({'error': 'A message is required.'}), 400
+    if len(message) > 4000:
+        return jsonify({'error': 'Message is too long (4000 characters max).'}), 400
+
+    entry = TutorialSuggestion(
+        user_id=current_user.id,
+        kind=kind,
+        message=message,
+        page_context=page_context
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    log_phi_access(
+        action='CREATE',
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        resource_type='tutorial_suggestions',
+        resource_id=entry.id,
+        details=f"Tutorial {kind} submitted (emailed to external address)",
+        ip_address=get_remote_address()
+    )
+
+    subject = f"Tutorial video {kind}: {current_user.username}"
+    body = (
+        f"A new tutorial {kind} was submitted in Behavior Tracking System.\n\n"
+        f"From: {current_user.name or current_user.username} ({current_user.role})\n"
+        f"Page: {page_context or 'n/a'}\n\n"
+        f"Message:\n{message}\n"
+    )
+    sent_ok, err = _send_smtp_email([TUTORIAL_SUGGESTIONS_NOTIFY_EMAIL], subject, body)
+    if not sent_ok:
+        app.logger.warning('Tutorial suggestion email not sent: %s', err)
+
+    return jsonify({
+        'id': entry.id,
+        'message': 'Thanks! Your note was submitted.',
+        'email_sent': sent_ok
+    }), 201
+
+
 def api_json_errors(f):
     """Ensure uncaught API exceptions return JSON (not Flask HTML error pages)."""
     @wraps(f)
@@ -3031,6 +3088,18 @@ class AmendmentRequest(db.Model):
     student = db.relationship('Student', backref='amendment_requests')
     requested_by = db.relationship('User', foreign_keys=[requested_by_user_id], backref='amendment_requests')
     reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id], backref='reviewed_amendment_requests')
+
+# Tutorial video suggestions/questions (from the "?" tutorials modal)
+class TutorialSuggestion(db.Model):
+    __tablename__ = 'tutorial_suggestions'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    kind = db.Column(db.String(20), nullable=False, default='suggestion')  # 'suggestion' or 'question'
+    message = db.Column(db.Text, nullable=False)
+    page_context = db.Column(db.String(50), nullable=True)  # active view name when submitted
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='tutorial_suggestions')
 
 # Rights Notification Tracking
 class RightsNotification(db.Model):
