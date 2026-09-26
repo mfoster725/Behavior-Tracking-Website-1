@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Attendance shows the percent of scored periods marked present.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="days_present"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 3600);
 
     await step('Table view breaks attendance down day by day, instead of one overall percent.', async () => {
@@ -58,7 +57,6 @@ async function main() {
       await pause(350);
       await tableBtn.click();
       await pause(600);
-      await unhighlight();
     }, 800, 5200);
 
     await step('Graph view plots the same days as a trend line over time.', async () => {
@@ -67,7 +65,6 @@ async function main() {
       await pause(350);
       await graphBtn.click();
       await pause(600);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Click the tile again to close it and get back to the full report.', async () => {
@@ -75,7 +72,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 3200);
 
   } finally {

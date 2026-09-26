@@ -126,7 +126,7 @@ const TUTORIAL_VIDEOS = {
     'reports-attendance': {
         title: 'Reports: Attendance Drill-Down',
         description: 'Clicking into the Attendance tile — table view by day, graph view over time.',
-        duration: '0:44',
+        duration: '0:43',
         videoFile: 'reports-attendance.mp4',
         youtubeId: ''
     },
