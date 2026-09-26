@@ -153,11 +153,13 @@ function tutorialThumbnailUrl(key) {
 }
 
 function renderTutorialGrid() {
+    const modal = document.getElementById('tutorial-modal');
     const backBtn = document.getElementById('tutorial-back-btn');
     const subtitle = document.getElementById('tutorial-modal-subtitle');
     const body = document.getElementById('tutorial-modal-body');
     if (!body) return;
 
+    if (modal) modal.classList.remove('tutorial-modal-playing');
     if (backBtn) backBtn.classList.remove('visible');
 
     const viewName = getCurrentViewName();
@@ -202,11 +204,13 @@ function openTutorialPlayer(key) {
     const video = TUTORIAL_VIDEOS[key];
     if (!video) return;
 
+    const modal = document.getElementById('tutorial-modal');
     const backBtn = document.getElementById('tutorial-back-btn');
     const subtitle = document.getElementById('tutorial-modal-subtitle');
     const body = document.getElementById('tutorial-modal-body');
     if (!body) return;
 
+    if (modal) modal.classList.add('tutorial-modal-playing');
     if (backBtn) backBtn.classList.add('visible');
     if (subtitle) subtitle.textContent = video.title;
 
