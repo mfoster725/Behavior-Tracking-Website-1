@@ -84,7 +84,7 @@ const TUTORIAL_VIDEOS = {
     'marketplace-managing': {
         title: 'Marketplace: Managing Items & Analytics',
         description: 'Adding marketplace items, hiding/unhiding in bulk, and reading the purchase-analytics panel.',
-        duration: '0:51',
+        duration: '0:52',
         videoFile: 'marketplace-managing.mp4',
         youtubeId: ''
     },

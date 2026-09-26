@@ -50,7 +50,6 @@ async function main() {
       await priceInput.click();
       await priceInput.fill('300');
       await highlight(priceInput);
-      await unhighlight();
     }, 800, 4000);
 
     await step('Save adds it straight to the catalog.', async () => {
@@ -71,7 +70,6 @@ async function main() {
       await pause(400);
       const hideBtn = page.locator('#marketplace-bulk-hide-btn');
       await highlight(hideBtn);
-      await unhighlight();
     }, 800, 5000);
 
     await step('Purchase analytics shows what’s popular — and what never sells.', async () => {
@@ -81,7 +79,6 @@ async function main() {
       await pause(350);
       await hideCheckbox.uncheck();
       await pause(600);
-      await unhighlight();
     }, 800, 3600);
 
     await step('Most and least purchased, by count.', async () => {
@@ -97,7 +94,6 @@ async function main() {
       await pause(350);
       await select.selectOption({ index: 1 });
       await pause(700);
-      await unhighlight();
     }, 800, 5000);
 
   } finally {
