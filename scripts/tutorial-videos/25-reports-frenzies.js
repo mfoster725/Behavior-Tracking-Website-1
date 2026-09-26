@@ -25,6 +25,7 @@ async function main() {
       await highlight('.nav-btn[data-view="summary"]');
       await pause(350);
       await page.click('.nav-btn[data-view="summary"]');
+      await unhighlight();
       await pause(600);
       const search = page.locator('#summary-student-search');
       await search.click();
@@ -35,7 +36,6 @@ async function main() {
       await pause(500);
       await page.selectOption('#summary-period-dropdown', 'all_time');
       await pause(500);
-      await unhighlight();
     }, 600, 2600);
 
     await step('Frenzies counts every frenzy event recorded in this timeframe.', async () => {
@@ -49,7 +49,6 @@ async function main() {
       const card = page.locator('.overview-extra-card[data-overview-card="frenzies_card"]');
       await card.scrollIntoViewIfNeeded();
       await highlight(card, { pad: 4 });
-      await unhighlight();
     }, 800, 4200);
 
     await step('Click a severity level to see when it happens — by time of day and day of week.', async () => {
@@ -58,7 +57,6 @@ async function main() {
       await pause(350);
       await legendItem.click();
       await pause(700);
-      await unhighlight();
     }, 800, 5600);
 
     await step('Table view lists location and purpose too, not just severity.', async () => {
@@ -67,7 +65,6 @@ async function main() {
       await pause(350);
       await tableBtn.click();
       await pause(600);
-      await unhighlight();
     }, 800, 4600);
 
     await step('Click the tile again to close it.', async () => {
@@ -76,7 +73,6 @@ async function main() {
       await highlight(tile);
       await pause(350);
       await tile.click();
-      await unhighlight();
     }, 800, 3000);
 
   } finally {
